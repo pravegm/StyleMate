@@ -1,143 +1,153 @@
 import Foundation
 import UIKit
-import Vision
 
 class ImageAnalysisService {
     static let shared = ImageAnalysisService()
     private init() {}
     
-    func analyze(image: UIImage) async -> (category: Category?, product: String?, color: String?) {
-        async let color = detectDominantColor(image: image)
-        async let (category, product) = classifyImage(image: image)
-        return (await category, await product, await color)
-    }
+    // Gemini 2.5 Flash API Key
+    private let geminiAPIKey = "AIzaSyAoq8aUGlzCQzeq1pSKqRjThZ-qeaneQO8"
+    private let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key="
     
-    private func detectDominantColor(image: UIImage) async -> String? {
-        guard let cgImage = image.cgImage else { return nil }
-        // 1. Get saliency mask for the main object
-        let mask: CGImage? = await withCheckedContinuation { continuation in
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-            let request = VNGenerateObjectnessBasedSaliencyImageRequest()
-            try? handler.perform([request])
-            if let result = request.results?.first as? VNSaliencyImageObservation {
-                let pixelBuffer = result.pixelBuffer
-                // Convert pixelBuffer to CGImage
-                let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-                let context = CIContext()
-                let maskImage = context.createCGImage(ciImage, from: ciImage.extent)
-                continuation.resume(returning: maskImage)
-            } else {
-                continuation.resume(returning: nil)
-            }
+    func analyze(image: UIImage) async -> (category: Category?, product: String?, color: String?) {
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            print("[Gemini] Failed to get JPEG data from image.")
+            return (nil, nil, nil)
         }
-        // 2. Downscale image for performance
-        let width = 40, height = 40
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let data = context.data else { return nil }
-        let ptr = data.bindMemory(to: UInt8.self, capacity: width * height * 4)
-        // 3. If mask exists, use it to only count foreground pixels
-        var colorCounts: [UInt32: Int] = [:]
-        var totalForeground = 0
-        var maskData: CFData? = nil
-        var maskPtr: UnsafePointer<UInt8>? = nil
-        if let mask = mask {
-            let maskContext = CGContext(
-                data: nil,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: width,
-                space: CGColorSpaceCreateDeviceGray(),
-                bitmapInfo: CGImageAlphaInfo.none.rawValue
-            )
-            maskContext?.draw(mask, in: CGRect(x: 0, y: 0, width: width, height: height))
-            maskData = maskContext?.makeImage()?.dataProvider?.data
-            if let maskData = maskData {
-                maskPtr = CFDataGetBytePtr(maskData)
-            }
+        let base64Image = imageData.base64EncodedString()
+        let prompt = "You are a fashion assistant. Given an image of a clothing item, identify: 1) the category (one of: Tops, Bottoms, OnePieces, Footwear, Accessories, Innerwear & Sleepwear, Ethnic/Occasionwear, Seasonal/Layering), 2) the product type (e.g. T-shirts, Jeans, Dresses, etc.), and 3) the main color (e.g. Black, White, Red, etc.). Respond in JSON: {\"category\":..., \"product\":..., \"color\":...}."
+        let requestBody: [String: Any] = [
+            "contents": [
+                [
+                    "parts": [
+                        ["text": prompt],
+                        ["inlineData": [
+                            "mimeType": "image/jpeg",
+                            "data": base64Image
+                        ]]
+                    ]
+                ]
+            ]
+        ]
+        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+              let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            print("[Gemini] Failed to construct URL or HTTP body.")
+            return (nil, nil, nil)
         }
-        for x in 0..<width {
-            for y in 0..<height {
-                let offset = 4 * (y * width + x)
-                let r = ptr[offset]
-                let g = ptr[offset+1]
-                let b = ptr[offset+2]
-                let rgb = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
-                // If mask exists, only count if mask pixel is "on"
-                if let maskPtr = maskPtr {
-                    let maskVal = maskPtr[y * width + x]
-                    if maskVal < 128 { continue } // skip background
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = httpBody
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse {
+                print("[Gemini] HTTP status: \(httpResponse.statusCode)")
+            }
+            if let rawString = String(data: data, encoding: .utf8) {
+                print("[Gemini] Raw API response: \n\(rawString)")
+            }
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                print("[Gemini] Non-200 response.")
+                return (nil, nil, nil)
+            }
+            // Parse Gemini response
+            if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
+               let text = result.candidates.first?.content.parts.first?.text {
+                print("[Gemini] Extracted text: \n\(text)")
+                if let dict = extractAndParseJSON(from: text) {
+                    print("[Gemini] Extracted JSON: \n\(dict)")
+                    let categoryString = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let productString = (dict["product"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let colorString = (dict["color"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let category = matchCategory(categoryString)
+                    let product = matchProduct(productString)
+                    let color = matchColor(colorString)
+                    print("[Gemini] Final mapped values: category=\(String(describing: category)), product=\(String(describing: product)), color=\(String(describing: color))")
+                    return (category, product, color)
+                } else {
+                    print("[Gemini] Failed to extract JSON from text.")
                 }
-                colorCounts[rgb, default: 0] += 1
-                totalForeground += 1
+            } else {
+                print("[Gemini] Failed to decode GeminiResponse or extract text.")
             }
+        } catch {
+            print("[Gemini] Error during API call or parsing: \(error)")
+            return (nil, nil, nil)
         }
-        if let (rgb, _) = colorCounts.max(by: { $0.value < $1.value }), totalForeground > 0 {
-            let r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF
-            return Self.closestColorName(r: Int(r), g: Int(g), b: Int(b))
+        return (nil, nil, nil)
+    }
+
+    // Extract JSON from markdown/code block or extra text
+    private func extractAndParseJSON(from text: String) -> [String: Any]? {
+        // Try to find the first { ... } block
+        guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}") else { return nil }
+        let jsonString = String(text[start...end])
+        print("[Gemini] JSON substring to parse: \n\(jsonString)")
+        if let data = jsonString.data(using: .utf8),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return dict
         }
         return nil
     }
-    
-    private static func closestColorName(r: Int, g: Int, b: Int) -> String {
-        // Simple mapping for demo; can be expanded
-        let colors: [(name: String, rgb: (Int, Int, Int))] = [
-            ("black", (0,0,0)), ("white", (255,255,255)), ("gray", (128,128,128)),
-            ("red", (220,20,60)), ("green", (34,139,34)), ("blue", (30,144,255)),
-            ("yellow", (255,215,0)), ("orange", (255,140,0)), ("purple", (128,0,128)),
-            ("brown", (139,69,19)), ("beige", (245,245,220)), ("navy", (0,0,128))
-        ]
-        func dist(_ c: (Int,Int,Int)) -> Int {
-            let dr = r - c.0, dg = g - c.1, db = b - c.2
-            return dr*dr + dg*dg + db*db
+
+    // Improved category matching (case-insensitive, partial)
+    private func matchCategory(_ category: String?) -> Category? {
+        guard let category = category else { return nil }
+        // Exact match
+        if let exact = Category.allCases.first(where: { $0.rawValue.caseInsensitiveCompare(category) == .orderedSame }) {
+            return exact
         }
-        return colors.min(by: { dist($0.rgb) < dist($1.rgb) })?.name ?? "unknown"
+        // Partial match
+        let lower = category.lowercased()
+        if let partial = Category.allCases.first(where: { lower.contains($0.rawValue.lowercased().replacingOccurrences(of: "/", with: "").replacingOccurrences(of: " ", with: "")) }) {
+            return partial
+        }
+        return nil
     }
-    
-    private func classifyImage(image: UIImage) async -> (Category?, String?) {
-        guard let ciImage = CIImage(image: image) else { return (nil, nil) }
-        let handler = VNImageRequestHandler(ciImage: ciImage, options: [:])
-        let request = VNClassifyImageRequest()
-        do {
-            try handler.perform([request])
-            guard let results = request.results, !results.isEmpty else { return (nil, nil) }
-            let topLabels = results.prefix(5).map { $0.identifier.lowercased() }
-            // Fuzzy match each label to all products in productTypesByCategory
-            var bestScore = Int.max
-            var bestCategory: Category? = nil
-            var bestProduct: String? = nil
-            for label in topLabels {
-                for (category, products) in productTypesByCategory {
-                    for product in products {
-                        let score = Self.levenshtein(label, product.lowercased())
-                        if score < bestScore {
-                            bestScore = score
-                            bestCategory = category
-                            bestProduct = product
-                        }
-                    }
+
+    // Improved product matching (case-insensitive, partial, fuzzy)
+    private func matchProduct(_ product: String?) -> String? {
+        guard let product = product else { return nil }
+        // Exact match
+        for (_, products) in productTypesByCategory {
+            if let match = products.first(where: { $0.caseInsensitiveCompare(product) == .orderedSame }) {
+                return match
+            }
+        }
+        // Partial match
+        let lower = product.lowercased()
+        for (_, products) in productTypesByCategory {
+            if let match = products.first(where: { lower.contains($0.lowercased()) || $0.lowercased().contains(lower) }) {
+                return match
+            }
+        }
+        // Fuzzy match fallback
+        var bestScore = Int.max
+        var bestProduct: String? = nil
+        for (_, products) in productTypesByCategory {
+            for prod in products {
+                let score = Self.levenshtein(product.lowercased(), prod.lowercased())
+                if score < bestScore {
+                    bestScore = score
+                    bestProduct = prod
                 }
             }
-            // Only accept a match if it's reasonably close
-            if let cat = bestCategory, let prod = bestProduct, bestScore <= 5 {
-                return (cat, prod)
-            }
-            // Fallback: return top label as product
-            return (nil, topLabels.first?.capitalized)
-        } catch {
-            return (nil, nil)
         }
+        return bestScore <= 3 ? bestProduct : nil
     }
-    
+
+    // Improved color matching (accept more names, fallback to Gemini value)
+    private func matchColor(_ color: String?) -> String? {
+        guard let color = color, !color.isEmpty else { return nil }
+        let knownColors = ["black", "white", "gray", "beige", "brown", "navy", "red", "green", "blue", "yellow", "orange", "purple", "pink", "gold", "silver", "cream", "maroon", "olive", "teal", "cyan"]
+        let lower = color.lowercased()
+        if let match = knownColors.first(where: { lower == $0 || lower.contains($0) || $0.contains(lower) }) {
+            return match.capitalized
+        }
+        // Accept Gemini's value as fallback
+        return color.capitalized
+    }
+
     // Levenshtein distance for fuzzy matching
     private static func levenshtein(_ a: String, _ b: String) -> Int {
         let a = Array(a)
@@ -156,4 +166,18 @@ class ImageAnalysisService {
         }
         return dist[a.count][b.count]
     }
+}
+
+// MARK: - Gemini API Response Models
+struct GeminiResponse: Codable {
+    let candidates: [GeminiCandidate]
+}
+struct GeminiCandidate: Codable {
+    let content: GeminiContent
+}
+struct GeminiContent: Codable {
+    let parts: [GeminiPart]
+}
+struct GeminiPart: Codable {
+    let text: String?
 } 
