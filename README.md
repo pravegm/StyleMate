@@ -4,6 +4,10 @@ StyleMate is your AI-powered fashion wardrobe and stylist app for iOS, built wit
 
 ## Features
 
+- **AI-Powered Outfit Suggestions:**
+  - Uses Google Gemini to suggest outfits based on your wardrobe, following real fashion rules, color theory, and item compatibility.
+  - Gemini is prompted to avoid clashing colors, too many patterns, and impractical combinations, ensuring every suggestion is stylish and wearable.
+
 - **Multi-Image Add Flow:**
   - Select multiple images from your gallery at once.
   - All images are analyzed in parallel in the background.
@@ -44,6 +48,20 @@ StyleMate is your AI-powered fashion wardrobe and stylist app for iOS, built wit
 - **Performance Optimizations:**
   - Analysis and cropping are parallelized and happen up front, so saving is instant—even for large batches.
   - The UI is responsive and robust, with no crashes or delays for large image sets.
+
+## New: AI Outfit Shuffle & Celebratory UI
+
+- **Shuffle Feature:**
+  - When you tap "Get Today's Outfit", Gemini suggests a batch of 5 different, fashion-savvy outfits.
+  - Tap **Shuffle** to cycle through the batch—never see the same outfit twice in a row!
+  - When you reach the end, a friendly popup lets you cycle through the batch again.
+
+- **Today's Outfit View:**
+  - Visually exciting, with a colorful gradient background, random celebratory emoji, and a positive, randomized subheading.
+  - Suggested items are shown in a center-aligned, uniform grid—no awkward spacing, always balanced.
+  - Each item is a beautiful card; tap to see a zoomable, full-screen preview.
+  - **Shuffle** and **Love it!** buttons are always fixed at the bottom for easy access.
+  - The entire experience is designed to make users feel happy, confident, and excited about their look!
 
 ## Getting Started
 

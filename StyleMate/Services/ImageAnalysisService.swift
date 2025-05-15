@@ -235,6 +235,81 @@ Return only the JSON array, no extra text.
         }
         return dist[a.count][b.count]
     }
+
+    // Suggest an outfit using Gemini based on the current wardrobe
+    struct SuggestedOutfitItem: Codable {
+        let category: String
+        let product: String
+        let colors: [String]
+        let pattern: String
+        let brand: String?
+    }
+    
+    func suggestOutfitBatch(from wardrobe: [WardrobeItem]) async -> [[SuggestedOutfitItem]]? {
+        // 1. Summarize the wardrobe
+        let wardrobeSummary = wardrobe.enumerated().map { (idx, item) in
+            "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+        }.joined(separator: "\n")
+        
+        // 2. Create the improved prompt for 5 suggestions
+        let prompt = """
+You are an expert fashion stylist. Given the following wardrobe items, suggest 5 different, stylish, harmonious, and practical outfits for today. Each outfit should:
+- Follow established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).
+- Only combine items that make sense together (e.g., one top, one bottom, one pair of footwear, optionally one accessory and one outerwear).
+- Avoid clashing colors, too many patterns, or inappropriate combinations (e.g., no sandals with winter coats, no more than one statement pattern).
+- Prefer color harmony: neutrals go with anything, but bold colors should be paired thoughtfully.
+- Do not repeat the same product type (e.g., two tops).
+- Be distinct from each other (no duplicate combinations).
+- Only use items from the provided list. Do not invent or hallucinate new items.
+- For each item in the outfit, specify: category, product, colors (array), pattern, and brand (optional).
+Return your answer as a JSON array of 5 arrays, where each inner array is an outfit (array of objects with: category, product, colors, pattern, and brand).
+
+Here is the wardrobe:
+\n\(wardrobeSummary)\n
+Return only the JSON array, no extra text.
+"""
+        // 3. Prepare Gemini API request
+        let requestBody: [String: Any] = [
+            "contents": [
+                [
+                    "parts": [
+                        ["text": prompt]
+                    ]
+                ]
+            ],
+            "generationConfig": [
+                "responseMimeType": "application/json"
+            ]
+        ]
+        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+              let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            return nil
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = httpBody
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return nil
+            }
+            if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
+               let text = result.candidates.first?.content.parts.first?.text,
+               let arrData = text.data(using: .utf8) {
+                let decoder = JSONDecoder()
+                if let arr = try? decoder.decode([[SuggestedOutfitItem]].self, from: arrData) {
+                    return arr
+                } else {
+                    return nil
+                }
+            } else {
+                return nil
+            }
+        } catch {
+            return nil
+        }
+    }
 }
 
 // MARK: - Gemini API Response Models
