@@ -96,71 +96,65 @@ struct AddNewItemView: View {
                                 set: { brandInputs.wrappedValue[idx] = $0 }
                             )
                             VStack(alignment: .leading, spacing: 8) {
-                                Section {
-                                    Picker("Category", selection: itemBinding.category) {
-                                        ForEach(Category.allCases) { cat in
-                                            Text(cat.rawValue).tag(cat)
-                                        }
+                                Picker("Category", selection: itemBinding.category) {
+                                    ForEach(Category.allCases) { cat in
+                                        Text(cat.rawValue).tag(cat)
                                     }
-                                    .accessibilityLabel("Category Picker")
-                                    .pickerStyle(.menu)
                                 }
-                                Section {
-                                    Picker("Product", selection: itemBinding.product) {
-                                        ForEach(productOptions(for: itemBinding.category.wrappedValue), id: \.self) { prod in
-                                            Text(prod).tag(prod)
-                                        }
+                                .accessibilityLabel("Category Picker")
+                                .pickerStyle(.menu)
+                                Picker("Product", selection: itemBinding.product) {
+                                    ForEach(productOptions(for: itemBinding.category.wrappedValue), id: \.self) { prod in
+                                        Text(prod).tag(prod)
                                     }
-                                    .accessibilityLabel("Product Picker")
-                                    .pickerStyle(.menu)
                                 }
-                                Section(header: Text("Colors:").font(.subheadline)) {
-                                    ForEach(Array(itemBinding.colors.wrappedValue.enumerated()), id: \.offset) { colorIdx, _ in
-                                        let colorBinding = Binding<String>(
-                                            get: { itemBinding.colors.wrappedValue[colorIdx] },
-                                            set: { itemBinding.colors.wrappedValue[colorIdx] = $0 }
-                                        )
-                                        HStack {
-                                            TextField("Color", text: colorBinding)
-                                                .textContentType(.none)
-                                                .autocapitalization(.none)
-                                                .accessibilityLabel("Color")
-                                            Spacer(minLength: 8)
-                                            if itemBinding.colors.wrappedValue.count > 1 {
-                                                Button(action: {
-                                                    var colors = itemBinding.colors.wrappedValue
-                                                    colors.remove(at: colorIdx)
-                                                    itemBinding.colors.wrappedValue = colors
-                                                }) {
-                                                    Image(systemName: "minus.circle.fill")
-                                                        .foregroundColor(.red)
-                                                        .imageScale(.large)
-                                                }
-                                                .buttonStyle(BorderlessButtonStyle())
+                                .accessibilityLabel("Product Picker")
+                                .pickerStyle(.menu)
+                                Text("Colors:")
+                                    .font(.subheadline)
+                                ForEach(Array(itemBinding.colors.wrappedValue.enumerated()), id: \.offset) { colorIdx, _ in
+                                    let colorBinding = Binding<String>(
+                                        get: { itemBinding.colors.wrappedValue[colorIdx] },
+                                        set: { itemBinding.colors.wrappedValue[colorIdx] = $0 }
+                                    )
+                                    HStack {
+                                        TextField("Color", text: colorBinding)
+                                            .textContentType(.none)
+                                            .autocapitalization(.none)
+                                            .accessibilityLabel("Color")
+                                        Spacer(minLength: 8)
+                                        if itemBinding.colors.wrappedValue.count > 1 {
+                                            Button(action: {
+                                                var colors = itemBinding.colors.wrappedValue
+                                                colors.remove(at: colorIdx)
+                                                itemBinding.colors.wrappedValue = colors
+                                            }) {
+                                                Image(systemName: "minus.circle.fill")
+                                                    .foregroundColor(.red)
+                                                    .imageScale(.large)
                                             }
+                                            .buttonStyle(BorderlessButtonStyle())
                                         }
                                     }
-                                    Button(action: {
-                                        var colors = itemBinding.colors.wrappedValue
-                                        colors.append("")
-                                        itemBinding.colors.wrappedValue = colors
-                                    }) {
-                                        HStack {
-                                            Image(systemName: "plus.circle.fill").foregroundColor(.green)
-                                            Text("Add Color")
-                                        }
-                                    }
-                                    .buttonStyle(BorderlessButtonStyle())
                                 }
-                                Section {
-                                    Picker("Pattern", selection: itemBinding.pattern) {
-                                        ForEach(Pattern.allCases) { pattern in
-                                            Text(pattern.rawValue).tag(pattern)
-                                        }
+                                Button(action: {
+                                    var colors = itemBinding.colors.wrappedValue
+                                    colors.append("")
+                                    itemBinding.colors.wrappedValue = colors
+                                }) {
+                                    HStack {
+                                        Image(systemName: "plus.circle.fill").foregroundColor(.green)
+                                        Text("Add Color")
                                     }
-                                    .pickerStyle(.menu)
-                                    .accessibilityLabel("Pattern picker")
                                 }
+                                .buttonStyle(BorderlessButtonStyle())
+                                Picker("Pattern", selection: itemBinding.pattern) {
+                                    ForEach(Pattern.allCases) { pattern in
+                                        Text(pattern.rawValue).tag(pattern)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .accessibilityLabel("Pattern picker")
                                 TextField("Brand (e.g. Nike)", text: brandBinding)
                                     .textContentType(.none)
                                     .autocapitalization(.none)
@@ -175,8 +169,11 @@ struct AddNewItemView: View {
                                 }
                                 .foregroundColor(.red)
                                 .padding(.top, 2)
+                                .contentShape(Rectangle())
+                                .buttonStyle(PlainButtonStyle())
                             }
                             .padding(.vertical, 8)
+                            .background(Color.clear)
                         }
                     }
                 }

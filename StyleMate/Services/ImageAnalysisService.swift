@@ -25,7 +25,7 @@ class ImageAnalysisService {
         let prompt = """
 You are an expert fashion assistant. Here are the only valid clothing categories: [Tops, Bottoms, OnePieces, Footwear, Accessories, Innerwear & Sleepwear, Ethnic/Occasionwear, Seasonal/Layering].
 For each category, here are the only valid products:
-- Tops: T-shirts, Shirts, Polo shirts, Tank tops, Blouses, Crop tops, Sweaters, Sweatshirts, Hoodies, Jackets, Blazers, Coats, Cardigans, Vests, Kurtas
+- Tops: T-shirts, Shirts, Polo shirts, Tank tops, Blouses, Crop tops, Sweaters, Sweatshirts, Hoodies, Jackets, Blazers, Cardigans, Vests, Kurtas, Shackets
 - Bottoms: Jeans, Trousers, Chinos, Shorts, Skirts, Leggings, Joggers, Track pants, Cargo pants, Dhotis, Salwars
 - OnePieces: Dresses, Jumpsuits, Rompers, Sarees, Gowns, Overalls
 - Footwear: Sneakers, Formal shoes, Loafers, Boots, Sandals, Flip flops, Heels, Flats, Slippers, Mojaris/Juttis
@@ -34,9 +34,10 @@ For each category, here are the only valid products:
 - Ethnic/Occasionwear: Sherwanis, Lehenga cholis, Anarkalis, Nehru jackets, Dupattas, Kurta sets, Blouse (ethnic), Dhoti sets
 - Seasonal/Layering: Raincoats, Windcheaters, Overcoats, Thermal inners, Gloves, Beanies
 Here are the only valid patterns: [Solid, Stripes, Checks, Plaid, Polka Dot, Floral, Animal Print, Camouflage, Geometric, Houndstooth, Paisley, Tie-Dye].
-For each clothing item you detect in the image, select the best matching category, product, and pattern from the above lists, and return them in a JSON array with their main colors. For each item, also return the bounding box as {"x": <left>, "y": <top>, "width": <width>, "height": <height>} where all values are normalized between 0 and 1 relative to the image size. Only use the provided categories, products, and patterns. Do not invent new ones.
 
-IMPORTANT: For each bounding box, return the tightest, most precise box that contains only the visible part of the item, excluding as much background as possible and avoiding other items. The box should fit the item as closely as possible, even if it means the box is small or oddly shaped. Be especially careful for items like pants and shoes—do not include upper body or floor background. The box should be as close as possible to the true outline of the item, not just a rough region.
+IMPORTANT: For each clothing item you detect in the image, you MUST select the category, product, and pattern string **EXACTLY** as provided in the above lists. Do not change the spelling, do not use singular or plural forms that are not in the list, do not use synonyms, and do not invent new words. If you are unsure, pick the closest valid string from the list. Your answer must use the exact string from the list, character for character, including spaces, hyphens, and capitalization.
+
+For each item, also return the bounding box as {\"x\": <left>, \"y\": <top>, \"width\": <width>, \"height\": <height>} where all values are normalized between 0 and 1 relative to the image size. Only use the provided categories, products, and patterns. Do not invent new ones.
 
 Return only the JSON array, no extra text.
 """
@@ -172,34 +173,49 @@ Return only the JSON array, no extra text.
 
     // Improved product matching (case-insensitive, partial, fuzzy, prefer exact/singular/plural)
     private func matchProduct(_ product: String?) -> String? {
-        guard let product = product else { return nil }
-        // Exact match (case-insensitive)
-        for (_, products) in productTypesByCategory {
-            if let match = products.first(where: { $0.caseInsensitiveCompare(product) == .orderedSame }) {
-                return match
-            }
-            // Try singular/plural prefix match (e.g. 'shirt' -> 'Shirts', 'jean' -> 'Jeans')
-            if let match = products.first(where: { $0.lowercased().hasPrefix(product.lowercased()) || product.lowercased().hasPrefix($0.lowercased()) }) {
-                return match
-            }
-        }
-        // Partial match
-        let lower = product.lowercased()
-        for (_, products) in productTypesByCategory {
-            if let match = products.first(where: { lower.contains($0.lowercased()) || $0.lowercased().contains(lower) }) {
-                return match
-            }
-        }
-        // Fuzzy match fallback
-        var bestScore = Int.max
-        var bestProduct: String? = nil
+        guard let product = product, !product.isEmpty else { return nil }
+        let lowerProduct = product.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        // Build a set of all valid products (lowercased, singular/plural forms)
+        var allProducts: [String: String] = [:] // lowercased -> canonical
         for (_, products) in productTypesByCategory {
             for prod in products {
-                let score = Self.levenshtein(product.lowercased(), prod.lowercased())
-                if score < bestScore {
-                    bestScore = score
-                    bestProduct = prod
+                let canonical = prod
+                let lower = prod.lowercased()
+                allProducts[lower] = canonical
+                // Add singular/plural variants
+                if lower.hasSuffix("s") {
+                    let singular = String(lower.dropLast())
+                    allProducts[singular] = canonical
+                } else {
+                    let plural = lower + "s"
+                    allProducts[plural] = canonical
                 }
+            }
+        }
+        // 1. Exact match (case-insensitive, singular/plural)
+        if let match = allProducts[lowerProduct] {
+            return match
+        }
+        // 2. Try capitalized
+        if let match = allProducts[lowerProduct.capitalized] {
+            return match
+        }
+        // 3. Prefix match (e.g. 'overcoat' -> 'Overcoats')
+        if let match = allProducts.first(where: { lowerProduct.hasPrefix($0.key) || $0.key.hasPrefix(lowerProduct) })?.value {
+            return match
+        }
+        // 4. Partial match
+        if let match = allProducts.first(where: { lowerProduct.contains($0.key) || $0.key.contains(lowerProduct) })?.value {
+            return match
+        }
+        // 5. Fuzzy match fallback (Levenshtein)
+        var bestScore = Int.max
+        var bestProduct: String? = nil
+        for (key, canonical) in allProducts {
+            let score = Self.levenshtein(lowerProduct, key)
+            if score < bestScore {
+                bestScore = score
+                bestProduct = canonical
             }
         }
         return bestScore <= 3 ? bestProduct : nil

@@ -1,7 +1,7 @@
 import SwiftUI
 
 // Exhaustive enum for all categories
-enum Category: String, CaseIterable, Identifiable {
+enum Category: String, CaseIterable, Identifiable, Hashable {
     case tops = "Tops"
     case bottoms = "Bottoms"
     case onePieces = "OnePieces"

@@ -73,10 +73,17 @@ StyleMate is your AI-powered fashion wardrobe and stylist app for iOS, built wit
 
 - `Models/` — Data models (Category, Pattern, WardrobeItem, etc.)
 - `ViewModels/` — App state and business logic.
-- `Views/` — All SwiftUI screens and components.
+- `Views/` — All SwiftUI screens and reusable components.
+    - `TodayOutfitSheet.swift` — The celebratory sheet for outfit suggestions (split from HomeView for modularity and performance).
+    - `WardrobeSummaryWidget.swift` — The wardrobe summary widget (split from HomeView for modularity and performance).
+    - (Other files: HomeView, MyWardrobeView, AddNewItemView, etc.)
 - `Services/` — AI integration and persistence logic.
 - `StyleMateTests/` — Unit tests.
 - `StyleMateUITests/` — UI tests.
+
+### Modularization & Performance
+- Large SwiftUI files have been split into smaller, focused components (e.g., TodayOutfitSheet, WardrobeSummaryWidget) for faster builds and easier maintenance.
+- The `Views/` directory now contains both full screens and reusable SwiftUI components.
 
 ## Contributing
 
