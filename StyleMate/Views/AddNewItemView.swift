@@ -23,6 +23,7 @@ struct AddNewItemView: View {
         var product: String
         var colors: [String]
         var pattern: Pattern = .solid
+        var boundingBox: ImageAnalysisService.BoundingBox? = nil
     }
     
     func productOptions(for category: Category) -> [String] {
@@ -179,13 +180,16 @@ struct AddNewItemView: View {
                         return 
                     }
                     for (idx, detected) in detectedItems.wrappedValue.enumerated() {
+                        let cropped: UIImage? = cropImage(img, with: detected.boundingBox)
+                        print("[Save] Saving WardrobeItem for \(detected.product) with croppedImage: \(cropped != nil)")
                         let item = WardrobeItem(
                             category: detected.category,
                             product: detected.product,
                             colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
                             brand: brandInputs.wrappedValue[idx],
                             pattern: detected.pattern,
-                            image: img
+                            image: img,
+                            croppedImage: cropped
                         )
                         wardrobeViewModel.items.append(item)
                     }
@@ -218,9 +222,9 @@ struct AddNewItemView: View {
         isAnalyzing = true
         Task {
             let results = await ImageAnalysisService.shared.analyzeMultiple(image: image)
-            detectedItems.wrappedValue = results.compactMap { cat, prod, colors, pattern in
+            detectedItems.wrappedValue = results.compactMap { cat, prod, colors, pattern, bbox in
                 if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                    return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern)
+                    return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox)
                 } else {
                     return nil
                 }
@@ -228,6 +232,20 @@ struct AddNewItemView: View {
             brandInputs.wrappedValue = Array(repeating: "", count: detectedItems.wrappedValue.count)
             isAnalyzing = false
         }
+    }
+    
+    private func cropImage(_ image: UIImage, with bbox: ImageAnalysisService.BoundingBox?) -> UIImage? {
+        guard let bbox = bbox else { print("[Crop] No bounding box provided."); return nil }
+        let width = image.size.width
+        let height = image.size.height
+        let rect = CGRect(x: bbox.x * width, y: bbox.y * height, width: bbox.width * width, height: bbox.height * height)
+        print("[Crop] Cropping image with rect: \(rect) for bbox: \(bbox)")
+        guard let cgImage = image.cgImage?.cropping(to: rect) else {
+            print("[Crop] Cropping failed for rect: \(rect)")
+            return nil
+        }
+        print("[Crop] Cropping succeeded for rect: \(rect)")
+        return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
 }
 

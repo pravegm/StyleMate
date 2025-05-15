@@ -16,6 +16,7 @@ struct ReviewBatchView: View {
         var product: String
         var colors: [String]
         var pattern: Pattern
+        var boundingBox: ImageAnalysisService.BoundingBox? = nil
     }
     
     var canSave: Bool {
@@ -124,9 +125,9 @@ struct ReviewBatchView: View {
         Task {
             for (idx, image) in images.enumerated() {
                 let results = await ImageAnalysisService.shared.analyzeMultiple(image: image)
-                let items = results.compactMap { cat, prod, colors, pattern in
+                let items = results.compactMap { cat, prod, colors, pattern, bbox in
                     if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                        return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern)
+                        return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox)
                     } else {
                         return nil
                     }
@@ -143,13 +144,16 @@ struct ReviewBatchView: View {
     private func saveAll() {
         for (imgIdx, items) in detectedItems.enumerated() {
             for (itemIdx, detected) in items.enumerated() {
+                let cropped: UIImage? = cropImage(images[imgIdx], with: detected.boundingBox)
+                print("[Save] Saving WardrobeItem for \(detected.product) with croppedImage: \(cropped != nil)")
                 let item = WardrobeItem(
                     category: detected.category,
                     product: detected.product,
                     colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
                     brand: brandInputs[imgIdx][itemIdx],
                     pattern: detected.pattern,
-                    image: images[imgIdx]
+                    image: images[imgIdx],
+                    croppedImage: cropped
                 )
                 wardrobeViewModel.items.append(item)
             }
@@ -176,5 +180,19 @@ struct ReviewBatchView: View {
         case .ethnicOccasionwear: return ["Sherwanis", "Lehenga cholis", "Anarkalis", "Nehru jackets", "Dupattas", "Kurta sets", "Blouse (ethnic)", "Dhoti sets"]
         case .seasonalLayering: return ["Raincoats", "Windcheaters", "Overcoats", "Thermal inners", "Gloves", "Beanies"]
         }
+    }
+    
+    private func cropImage(_ image: UIImage, with bbox: ImageAnalysisService.BoundingBox?) -> UIImage? {
+        guard let bbox = bbox else { print("[Crop] No bounding box provided."); return nil }
+        let width = image.size.width
+        let height = image.size.height
+        let rect = CGRect(x: bbox.x * width, y: bbox.y * height, width: bbox.width * width, height: bbox.height * height)
+        print("[Crop] Cropping image with rect: \(rect) for bbox: \(bbox)")
+        guard let cgImage = image.cgImage?.cropping(to: rect) else {
+            print("[Crop] Cropping failed for rect: \(rect)")
+            return nil
+        }
+        print("[Crop] Cropping succeeded for rect: \(rect)")
+        return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
 } 

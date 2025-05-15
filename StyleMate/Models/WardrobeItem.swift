@@ -26,6 +26,7 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
     let brand: String
     let pattern: Pattern
     let image: UIImage
+    let croppedImage: UIImage?
     
     var displayProduct: String {
         // Naive singularization: remove trailing 's' if present and not in exceptions
@@ -55,7 +56,7 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
         return colors.joined(separator: ", ")
     }
     
-    init(id: UUID = UUID(), category: Category, product: String, colors: [String], brand: String, pattern: Pattern, image: UIImage) {
+    init(id: UUID = UUID(), category: Category, product: String, colors: [String], brand: String, pattern: Pattern, image: UIImage, croppedImage: UIImage? = nil) {
         self.id = id
         self.category = category
         self.product = product
@@ -63,6 +64,7 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
         self.brand = brand
         self.pattern = pattern
         self.image = image
+        self.croppedImage = croppedImage
     }
     
     static func == (lhs: WardrobeItem, rhs: WardrobeItem) -> Bool {

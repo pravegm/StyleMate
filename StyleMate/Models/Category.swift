@@ -71,6 +71,7 @@ struct WardrobeItemCodable: Codable {
     let brand: String
     let pattern: String
     let imageData: Data?
+    let croppedImageData: Data?
     
     init(from item: WardrobeItem) {
         self.id = item.id.uuidString
@@ -80,12 +81,14 @@ struct WardrobeItemCodable: Codable {
         self.brand = item.brand
         self.pattern = item.pattern.rawValue
         self.imageData = item.image.jpegData(compressionQuality: 0.8)
+        self.croppedImageData = item.croppedImage?.jpegData(compressionQuality: 0.8)
     }
     
     func toWardrobeItem() -> WardrobeItem? {
         guard let cat = Category(rawValue: category),
               let pat = Pattern(rawValue: pattern),
               let imgData = imageData, let img = UIImage(data: imgData) else { return nil }
-        return WardrobeItem(id: UUID(uuidString: id) ?? UUID(), category: cat, product: product, colors: colors, brand: brand, pattern: pat, image: img)
+        let croppedImg = croppedImageData != nil ? UIImage(data: croppedImageData!) : nil
+        return WardrobeItem(id: UUID(uuidString: id) ?? UUID(), category: cat, product: product, colors: colors, brand: brand, pattern: pat, image: img, croppedImage: croppedImg)
     }
 } 

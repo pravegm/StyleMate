@@ -10,7 +10,13 @@ class ImageAnalysisService {
     private let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="
     
     // New: Analyze multiple items in an image
-    func analyzeMultiple(image: UIImage) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?)] {
+    struct BoundingBox: Codable {
+        let x: CGFloat
+        let y: CGFloat
+        let width: CGFloat
+        let height: CGFloat
+    }
+    func analyzeMultiple(image: UIImage) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?, boundingBox: BoundingBox?)] {
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
             return []
         }
@@ -28,7 +34,11 @@ For each category, here are the only valid products:
 - Ethnic/Occasionwear: Sherwanis, Lehenga cholis, Anarkalis, Nehru jackets, Dupattas, Kurta sets, Blouse (ethnic), Dhoti sets
 - Seasonal/Layering: Raincoats, Windcheaters, Overcoats, Thermal inners, Gloves, Beanies
 Here are the only valid patterns: [Solid, Stripes, Checks, Plaid, Polka Dot, Floral, Animal Print, Camouflage, Geometric, Houndstooth, Paisley, Tie-Dye].
-For each clothing item you detect in the image, select the best matching category, product, and pattern from the above lists, and return them in a JSON array with their main colors. Only use the provided categories, products, and patterns. Do not invent new ones.
+For each clothing item you detect in the image, select the best matching category, product, and pattern from the above lists, and return them in a JSON array with their main colors. For each item, also return the bounding box as {"x": <left>, "y": <top>, "width": <width>, "height": <height>} where all values are normalized between 0 and 1 relative to the image size. Only use the provided categories, products, and patterns. Do not invent new ones.
+
+IMPORTANT: For each bounding box, return the tightest, most precise box that contains only the visible part of the item, excluding as much background as possible and avoiding other items. The box should fit the item as closely as possible, even if it means the box is small or oddly shaped. Be especially careful for items like pants and shoes—do not include upper body or floor background. The box should be as close as possible to the true outline of the item, not just a rough region.
+
+Return only the JSON array, no extra text.
 """
         let responseSchema: [String: Any] = [
             "type": "array",
@@ -41,10 +51,20 @@ For each clothing item you detect in the image, select the best matching categor
                         "type": "array",
                         "items": ["type": "string"]
                     ],
-                    "pattern": ["type": "string"]
+                    "pattern": ["type": "string"],
+                    "boundingBox": [
+                        "type": "object",
+                        "properties": [
+                            "x": ["type": "number"],
+                            "y": ["type": "number"],
+                            "width": ["type": "number"],
+                            "height": ["type": "number"]
+                        ],
+                        "required": ["x", "y", "width", "height"]
+                    ]
                 ],
-                "required": ["category", "product", "colors", "pattern"],
-                "propertyOrdering": ["category", "product", "colors", "pattern"]
+                "required": ["category", "product", "colors", "pattern", "boundingBox"],
+                "propertyOrdering": ["category", "product", "colors", "pattern", "boundingBox"]
             ]
         ]
         let requestBody: [String: Any] = [
@@ -75,25 +95,46 @@ For each clothing item you detect in the image, select the best matching categor
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                print("[Gemini] HTTP error: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
                 return []
             }
             if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
                let text = result.candidates.first?.content.parts.first?.text,
-               let arrData = text.data(using: .utf8),
-               let arr = try? JSONSerialization.jsonObject(with: arrData) as? [[String: Any]] {
-                return arr.map { dict in
-                    let categoryString = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let productString = (dict["product"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let colorsArray = dict["colors"] as? [String] ?? []
-                    let patternString = (dict["pattern"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let category = Category(rawValue: categoryString ?? "")
-                    let product = productString
-                    let colors = colorsArray.map { matchColor($0) ?? $0 }.filter { !$0.isEmpty }
-                    let pattern = Pattern(rawValue: patternString ?? "")
-                    return (category, product, colors, pattern)
+               let arrData = text.data(using: .utf8) {
+                print("[Gemini] Raw response text: \(text)")
+                if let arr = try? JSONSerialization.jsonObject(with: arrData) as? [[String: Any]] {
+                    let mapped = arr.map { dict in
+                        let categoryString = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let productString = (dict["product"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let colorsArray = dict["colors"] as? [String] ?? []
+                        let patternString = (dict["pattern"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let category = Category(rawValue: categoryString ?? "")
+                        let product = productString
+                        let colors = colorsArray.map { matchColor($0) ?? $0 }.filter { !$0.isEmpty }
+                        let pattern = Pattern(rawValue: patternString ?? "")
+                        var boundingBox: BoundingBox? = nil
+                        if let bboxDict = dict["boundingBox"] as? [String: Any],
+                           let x = bboxDict["x"] as? Double,
+                           let y = bboxDict["y"] as? Double,
+                           let width = bboxDict["width"] as? Double,
+                           let height = bboxDict["height"] as? Double {
+                            boundingBox = BoundingBox(x: CGFloat(x), y: CGFloat(y), width: CGFloat(width), height: CGFloat(height))
+                            print("[Gemini] Parsed bounding box: \(boundingBox!) for product: \(product ?? "nil")")
+                        } else {
+                            print("[Gemini] No bounding box for product: \(product ?? "nil")")
+                        }
+                        return (category, product, colors, pattern, boundingBox)
+                    }
+                    print("[Gemini] Final mapped results: \(mapped)")
+                    return mapped
+                } else {
+                    print("[Gemini] Failed to parse JSON array from response text.")
                 }
+            } else {
+                print("[Gemini] Failed to decode GeminiResponse or extract text.")
             }
         } catch {
+            print("[Gemini] Exception: \(error)")
             return []
         }
         return []

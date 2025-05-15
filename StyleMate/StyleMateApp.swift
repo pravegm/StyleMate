@@ -461,7 +461,7 @@ struct MultiAddNewItemView: View {
         savedStates = Array(repeating: nil, count: images.count)
         analysisStates = Array(repeating: false, count: images.count)
         Task {
-            await withTaskGroup(of: (Int, [(Category?, String?, [String], Pattern?)]).self) { group in
+            await withTaskGroup(of: (Int, [(Category?, String?, [String], Pattern?, ImageAnalysisService.BoundingBox?)]).self) { group in
                 for (idx, image) in images.enumerated() {
                     group.addTask {
                         let results = await ImageAnalysisService.shared.analyzeMultiple(image: image)
@@ -469,9 +469,9 @@ struct MultiAddNewItemView: View {
                     }
                 }
                 for await (idx, results) in group {
-                    let items = results.compactMap { cat, prod, colors, pattern in
+                    let items = results.compactMap { cat, prod, colors, pattern, bbox in
                         if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                            return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern)
+                            return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox)
                         } else {
                             return nil
                         }
@@ -525,13 +525,16 @@ struct MultiAddNewItemView: View {
         // Save only those marked as saved
         for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
             for (itemIdx, detected) in items.enumerated() {
+                let cropped: UIImage? = cropImage(images[imgIdx], with: detected.boundingBox)
+                print("[Save] Saving WardrobeItem for \(detected.product) with croppedImage: \(cropped != nil)")
                 let item = WardrobeItem(
                     category: detected.category,
                     product: detected.product,
                     colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
                     brand: brandInputs[imgIdx][itemIdx],
                     pattern: detected.pattern,
-                    image: images[imgIdx]
+                    image: images[imgIdx],
+                    croppedImage: cropped
                 )
                 wardrobeViewModel.items.append(item)
             }
@@ -542,18 +545,61 @@ struct MultiAddNewItemView: View {
         var result: [WardrobeItem] = []
         for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
             for (itemIdx, detected) in items.enumerated() {
+                let cropped: UIImage? = cropImage(images[imgIdx], with: detected.boundingBox)
+                print("[Save] Saving WardrobeItem for \(detected.product) with croppedImage: \(cropped != nil)")
                 let item = WardrobeItem(
                     category: detected.category,
                     product: detected.product,
                     colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
                     brand: brandInputs[imgIdx][itemIdx],
                     pattern: detected.pattern,
-                    image: images[imgIdx]
+                    image: images[imgIdx],
+                    croppedImage: cropped
                 )
                 result.append(item)
             }
         }
         return result
+    }
+    private func cropImage(_ image: UIImage, with bbox: ImageAnalysisService.BoundingBox?) -> UIImage? {
+        guard let bbox = bbox else { return nil }
+        let width = image.size.width
+        let height = image.size.height
+        let minCropPercent: CGFloat = 0.5 // 50% minimum
+        var rect: CGRect
+        if height >= width { // Portrait or square: retain full width, crop height
+            let cropY = bbox.y * height
+            var cropH = bbox.height * height
+            if cropH < height * minCropPercent {
+                cropH = height * minCropPercent
+                // Center the crop on the bounding box center
+                let centerY = cropY + (bbox.height * height) / 2
+                let newY = max(0, min(centerY - cropH / 2, height - cropH))
+                rect = CGRect(x: 0, y: newY, width: width, height: cropH)
+            } else {
+                rect = CGRect(x: 0, y: cropY, width: width, height: cropH)
+            }
+            rect.origin.y = max(0, rect.origin.y)
+            if rect.maxY > height { rect.size.height = height - rect.origin.y }
+        } else { // Landscape: retain full height, crop width
+            let cropX = bbox.x * width
+            var cropW = bbox.width * width
+            if cropW < width * minCropPercent {
+                cropW = width * minCropPercent
+                // Center the crop on the bounding box center
+                let centerX = cropX + (bbox.width * width) / 2
+                let newX = max(0, min(centerX - cropW / 2, width - cropW))
+                rect = CGRect(x: newX, y: 0, width: cropW, height: height)
+            } else {
+                rect = CGRect(x: cropX, y: 0, width: cropW, height: height)
+            }
+            rect.origin.x = max(0, rect.origin.x)
+            if rect.maxX > width { rect.size.width = width - rect.origin.x }
+        }
+        guard let cgImage = image.cgImage?.cropping(to: rect) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
     private func addAllAndShowSummary() {
         for idx in savedStates.indices where savedStates[idx] == nil && isAnalyzed(idx) {

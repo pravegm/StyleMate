@@ -27,6 +27,11 @@ StyleMate is your AI-powered fashion wardrobe and stylist app for iOS, built wit
 - **Camera & Gallery Support:**
   - Add items via camera or gallery, with a tip for multi-select.
 
+- **Accurate Item Cropping:**
+  - After AI detection, each wardrobe item's image is automatically cropped to show only the detected item (e.g. just the shirt, jeans, or shoes from a group photo).
+  - The cropping uses the detected bounding box, but always ensures a minimum crop size (50% of the image) for clarity and consistency, so even small or imprecise detections are always visible.
+  - This makes browsing your wardrobe visually clear and scalable for all item types.
+
 ## Getting Started
 
 1. Clone the repo and open `StyleMate.xcodeproj` in Xcode.

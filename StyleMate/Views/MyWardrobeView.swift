@@ -186,15 +186,30 @@ struct CategoryDetailView: View {
             } else {
                 ForEach(items) { item in
                     Button {
-                        previewImage = PreviewImage(image: item.image)
+                        previewImage = PreviewImage(image: item.croppedImage ?? item.image)
                     } label: {
                         HStack {
-                            Image(uiImage: item.image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 60, height: 60)
-                                .clipped()
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            if let cropped = item.croppedImage {
+                                Image(uiImage: cropped)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 60, height: 60)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            } else if let original = item.image as UIImage? {
+                                Image(uiImage: original)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 60, height: 60)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            } else {
+                                Rectangle()
+                                    .fill(Color.gray)
+                                    .frame(width: 60, height: 60)
+                                    .overlay(Text("No Image").font(.caption2))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
                             VStack(alignment: .leading) {
                                 Text(item.name)
                                     .font(.headline)
