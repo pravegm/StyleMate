@@ -95,13 +95,11 @@ Return only the JSON array, no extra text.
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                print("[Gemini] HTTP error: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
                 return []
             }
             if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
                let text = result.candidates.first?.content.parts.first?.text,
                let arrData = text.data(using: .utf8) {
-                print("[Gemini] Raw response text: \(text)")
                 if let arr = try? JSONSerialization.jsonObject(with: arrData) as? [[String: Any]] {
                     let mapped = arr.map { dict in
                         let categoryString = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -119,22 +117,17 @@ Return only the JSON array, no extra text.
                            let width = bboxDict["width"] as? Double,
                            let height = bboxDict["height"] as? Double {
                             boundingBox = BoundingBox(x: CGFloat(x), y: CGFloat(y), width: CGFloat(width), height: CGFloat(height))
-                            print("[Gemini] Parsed bounding box: \(boundingBox!) for product: \(product ?? "nil")")
-                        } else {
-                            print("[Gemini] No bounding box for product: \(product ?? "nil")")
                         }
                         return (category, product, colors, pattern, boundingBox)
                     }
-                    print("[Gemini] Final mapped results: \(mapped)")
                     return mapped
                 } else {
-                    print("[Gemini] Failed to parse JSON array from response text.")
+                    return []
                 }
             } else {
-                print("[Gemini] Failed to decode GeminiResponse or extract text.")
+                return []
             }
         } catch {
-            print("[Gemini] Exception: \(error)")
             return []
         }
         return []

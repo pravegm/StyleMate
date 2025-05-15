@@ -239,9 +239,7 @@ struct CategoryDetailView: View {
         .sheet(item: $previewImage) { wrapper in
             VStack {
                 Spacer()
-                Image(uiImage: wrapper.image)
-                    .resizable()
-                    .scaledToFit()
+                ZoomableImage(image: wrapper.image)
                     .padding()
                 Spacer()
                 Button("Close") { previewImage = nil }
@@ -249,6 +247,75 @@ struct CategoryDetailView: View {
                     .padding()
             }
         }
+    }
+}
+
+// ZoomableImage view for pinch-to-zoom support
+struct ZoomableImage: View {
+    let image: UIImage
+    @State private var scale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+    var body: some View {
+        GeometryReader { geometry in
+            let frameSize = geometry.size
+            let imageAspect = image.size.width / image.size.height
+            let frameAspect = frameSize.width / frameSize.height
+            // Calculate the displayed image size (fit)
+            let (displayWidth, displayHeight): (CGFloat, CGFloat) = {
+                if imageAspect > frameAspect {
+                    return (frameSize.width, frameSize.width / imageAspect)
+                } else {
+                    return (frameSize.height * imageAspect, frameSize.height)
+                }
+            }()
+            let maxOffsetX = max(0, (displayWidth * scale - frameSize.width) / 2)
+            let maxOffsetY = max(0, (displayHeight * scale - frameSize.height) / 2)
+            let clampedOffset = CGSize(
+                width: min(max(offset.width, -maxOffsetX), maxOffsetX),
+                height: min(max(offset.height, -maxOffsetY), maxOffsetY)
+            )
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: frameSize.width, height: frameSize.height)
+                .scaleEffect(scale)
+                .offset(scale > 1 ? clampedOffset : .zero)
+                .gesture(
+                    SimultaneousGesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                let newScale = lastScale * value
+                                scale = max(1.0, min(newScale, 5.0))
+                                if scale == 1.0 { offset = .zero; lastOffset = .zero }
+                            }
+                            .onEnded { value in
+                                lastScale = max(1.0, min(lastScale * value, 5.0))
+                                if scale == 1.0 { offset = .zero; lastOffset = .zero }
+                            },
+                        DragGesture()
+                            .onChanged { value in
+                                guard scale > 1 else { return }
+                                let newOffset = CGSize(width: lastOffset.width + value.translation.width, height: lastOffset.height + value.translation.height)
+                                offset = newOffset
+                            }
+                            .onEnded { value in
+                                guard scale > 1 else { offset = .zero; lastOffset = .zero; return }
+                                let maxX = max(0, (displayWidth * scale - frameSize.width) / 2)
+                                let maxY = max(0, (displayHeight * scale - frameSize.height) / 2)
+                                let clamped = CGSize(
+                                    width: min(max(offset.width, -maxX), maxX),
+                                    height: min(max(offset.height, -maxY), maxY)
+                                )
+                                offset = clamped
+                                lastOffset = clamped
+                            }
+                    )
+                )
+                .animation(.easeInOut(duration: 0.2), value: scale)
+        }
+        .clipped()
     }
 }
 

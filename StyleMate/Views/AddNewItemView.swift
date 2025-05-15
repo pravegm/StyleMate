@@ -45,6 +45,23 @@ struct AddNewItemView: View {
         } && pickedImage != nil
     }
     
+    init(
+        showPhotoPicker: Binding<Bool>,
+        showCamera: Binding<Bool>,
+        isPresented: Binding<Bool>,
+        prefilledImage: UIImage? = nil,
+        detectedItemsBinding: Binding<[DetectedItem]>? = nil,
+        brandInputsBinding: Binding<[String]>? = nil
+    ) {
+        _showPhotoPicker = showPhotoPicker
+        _showCamera = showCamera
+        _isPresented = isPresented
+        self.prefilledImage = prefilledImage
+        self.detectedItemsBinding = detectedItemsBinding
+        self.brandInputsBinding = brandInputsBinding
+        _pickedImage = State(initialValue: prefilledImage)
+    }
+    
     var body: some View {
         ZStack {
             Form {
@@ -181,7 +198,6 @@ struct AddNewItemView: View {
                     }
                     for (idx, detected) in detectedItems.wrappedValue.enumerated() {
                         let cropped: UIImage? = cropImage(img, with: detected.boundingBox)
-                        print("[Save] Saving WardrobeItem for \(detected.product) with croppedImage: \(cropped != nil)")
                         let item = WardrobeItem(
                             category: detected.category,
                             product: detected.product,
@@ -203,17 +219,14 @@ struct AddNewItemView: View {
         } message: {
             Text(errorMessage)
         }
-        .onAppear {
-            if pickedImage == nil, let pre = prefilledImage {
-                pickedImage = pre
-                if detectedItems.wrappedValue.isEmpty {
-                    analyzeMultipleImage(pre)
-                }
-            }
-        }
         .onChange(of: pickedImage) { newImage in
             if let img = newImage, detectedItems.wrappedValue.isEmpty {
                 analyzeMultipleImage(img)
+            }
+        }
+        .onChange(of: prefilledImage) { newImage in
+            if let img = newImage {
+                pickedImage = img
             }
         }
     }
@@ -235,16 +248,13 @@ struct AddNewItemView: View {
     }
     
     private func cropImage(_ image: UIImage, with bbox: ImageAnalysisService.BoundingBox?) -> UIImage? {
-        guard let bbox = bbox else { print("[Crop] No bounding box provided."); return nil }
+        guard let bbox = bbox else { return nil }
         let width = image.size.width
         let height = image.size.height
         let rect = CGRect(x: bbox.x * width, y: bbox.y * height, width: bbox.width * width, height: bbox.height * height)
-        print("[Crop] Cropping image with rect: \(rect) for bbox: \(bbox)")
         guard let cgImage = image.cgImage?.cropping(to: rect) else {
-            print("[Crop] Cropping failed for rect: \(rect)")
             return nil
         }
-        print("[Crop] Cropping succeeded for rect: \(rect)")
         return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
 }

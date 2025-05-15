@@ -135,6 +135,13 @@ struct ReviewBatchView: View {
                 await MainActor.run {
                     detectedItems[idx] = items
                     brandInputs[idx] = Array(repeating: "", count: items.count)
+                    // Ensure product is valid for Picker
+                    for itemIdx in detectedItems[idx].indices {
+                        let options = productOptions(for: detectedItems[idx][itemIdx].category)
+                        if !options.contains(detectedItems[idx][itemIdx].product) {
+                            detectedItems[idx][itemIdx].product = options.first ?? ""
+                        }
+                    }
                 }
             }
             isAnalyzing = false
@@ -145,7 +152,6 @@ struct ReviewBatchView: View {
         for (imgIdx, items) in detectedItems.enumerated() {
             for (itemIdx, detected) in items.enumerated() {
                 let cropped: UIImage? = cropImage(images[imgIdx], with: detected.boundingBox)
-                print("[Save] Saving WardrobeItem for \(detected.product) with croppedImage: \(cropped != nil)")
                 let item = WardrobeItem(
                     category: detected.category,
                     product: detected.product,
@@ -183,16 +189,13 @@ struct ReviewBatchView: View {
     }
     
     private func cropImage(_ image: UIImage, with bbox: ImageAnalysisService.BoundingBox?) -> UIImage? {
-        guard let bbox = bbox else { print("[Crop] No bounding box provided."); return nil }
+        guard let bbox = bbox else { return nil }
         let width = image.size.width
         let height = image.size.height
         let rect = CGRect(x: bbox.x * width, y: bbox.y * height, width: bbox.width * width, height: bbox.height * height)
-        print("[Crop] Cropping image with rect: \(rect) for bbox: \(bbox)")
         guard let cgImage = image.cgImage?.cropping(to: rect) else {
-            print("[Crop] Cropping failed for rect: \(rect)")
             return nil
         }
-        print("[Crop] Cropping succeeded for rect: \(rect)")
         return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
-} 
+}

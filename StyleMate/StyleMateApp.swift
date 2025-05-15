@@ -42,14 +42,19 @@ enum AddFlow: Identifiable {
     }
 }
 
+struct CapturedImage: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
 struct RootView: View {
     @EnvironmentObject var authService: AuthService
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
     @State private var lastUserKey: String = ""
     @State private var showAddSheet: Bool = false
     @State private var activeAddFlow: AddFlow?
-    @State private var showForm = false
-    @State private var selectedImage: UIImage? = nil
+    @State private var capturedImage: CapturedImage? = nil
+    @State private var showCameraReview: Bool = false
     @State private var showReviewBatch = false
     @State private var selectedImages: [UIImage] = []
     @State private var showPickerTip = false
@@ -133,8 +138,8 @@ struct RootView: View {
             case .camera:
                 CameraSheet { image in
                     if let image = image {
-                        selectedImage = image
-                        showForm = true
+                        capturedImage = CapturedImage(image: image)
+                        showCameraReview = true
                     }
                     activeAddFlow = nil
                 }
@@ -142,19 +147,10 @@ struct RootView: View {
                 EmptyView()
             }
         }
-        .sheet(isPresented: $showForm) {
-            if let image = selectedImage {
-                NavigationStack {
-                    AddNewItemView(
-                        showPhotoPicker: .constant(false),
-                        showCamera: .constant(false),
-                        isPresented: $showForm,
-                        prefilledImage: image
-                    )
+        .sheet(isPresented: $showCameraReview, onDismiss: { capturedImage = nil }) {
+            if let captured = capturedImage {
+                MultiAddNewItemView(images: [captured.image], isPresented: $showCameraReview)
                     .environmentObject(wardrobeVM)
-                }
-            } else {
-                Text("No image selected.")
             }
         }
         .overlay {
@@ -526,7 +522,6 @@ struct MultiAddNewItemView: View {
         for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
             for (itemIdx, detected) in items.enumerated() {
                 let cropped: UIImage? = cropImage(images[imgIdx], with: detected.boundingBox)
-                print("[Save] Saving WardrobeItem for \(detected.product) with croppedImage: \(cropped != nil)")
                 let item = WardrobeItem(
                     category: detected.category,
                     product: detected.product,
@@ -546,7 +541,6 @@ struct MultiAddNewItemView: View {
         for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
             for (itemIdx, detected) in items.enumerated() {
                 let cropped: UIImage? = cropImage(images[imgIdx], with: detected.boundingBox)
-                print("[Save] Saving WardrobeItem for \(detected.product) with croppedImage: \(cropped != nil)")
                 let item = WardrobeItem(
                     category: detected.category,
                     product: detected.product,
