@@ -78,8 +78,8 @@ class OutfitLogic {
     
     private func isValid(_ outfit: Outfit, reasons: inout [String]) -> Bool {
         let items = [outfit.top, outfit.bottom, outfit.footwear, outfit.accessory, outfit.outerwear].compactMap { $0 }
-        let colors = items.map { $0.color.lowercased() }
-        let nonNeutrals = colors.filter { !neutrals.contains($0) }
+        let allColors = items.flatMap { $0.colors.map { $0.lowercased() } }
+        let nonNeutrals = allColors.filter { !neutrals.contains($0) }
         if Set(nonNeutrals).count > 3 {
             reasons.append("More than 3 non-neutral colors")
             return false
@@ -102,7 +102,7 @@ class OutfitLogic {
                 reasons.append("Complementary pair but more than 2 non-neutrals")
                 return false
             }
-            if !allOthersNeutral(colors, pair: complementaryPair(nonNeutrals)) {
+            if !allOthersNeutral(allColors, pair: complementaryPair(nonNeutrals)) {
                 reasons.append("Non-neutral outside complementary pair")
                 return false
             }

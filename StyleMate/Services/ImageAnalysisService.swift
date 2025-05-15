@@ -7,15 +7,46 @@ class ImageAnalysisService {
     
     // Gemini 2.5 Flash API Key
     private let geminiAPIKey = "AIzaSyAoq8aUGlzCQzeq1pSKqRjThZ-qeaneQO8"
-    private let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key="
+    private let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="
     
-    func analyze(image: UIImage) async -> (category: Category?, product: String?, color: String?) {
+    // New: Analyze multiple items in an image
+    func analyzeMultiple(image: UIImage) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?)] {
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
-            print("[Gemini] Failed to get JPEG data from image.")
-            return (nil, nil, nil)
+            return []
         }
         let base64Image = imageData.base64EncodedString()
-        let prompt = "You are a fashion assistant. Given an image of a clothing item, identify: 1) the category (one of: Tops, Bottoms, OnePieces, Footwear, Accessories, Innerwear & Sleepwear, Ethnic/Occasionwear, Seasonal/Layering), 2) the product type (e.g. T-shirts, Jeans, Dresses, etc.), and 3) the main color (e.g. Black, White, Red, etc.). Respond in JSON: {\"category\":..., \"product\":..., \"color\":...}."
+        // Provide Gemini with the valid categories, products, and patterns, and instruct it to select only from these lists
+        let prompt = """
+You are an expert fashion assistant. Here are the only valid clothing categories: [Tops, Bottoms, OnePieces, Footwear, Accessories, Innerwear & Sleepwear, Ethnic/Occasionwear, Seasonal/Layering].
+For each category, here are the only valid products:
+- Tops: T-shirts, Shirts, Polo shirts, Tank tops, Blouses, Crop tops, Sweaters, Sweatshirts, Hoodies, Jackets, Blazers, Coats, Cardigans, Vests, Kurtas
+- Bottoms: Jeans, Trousers, Chinos, Shorts, Skirts, Leggings, Joggers, Track pants, Cargo pants, Dhotis, Salwars
+- OnePieces: Dresses, Jumpsuits, Rompers, Sarees, Gowns, Overalls
+- Footwear: Sneakers, Formal shoes, Loafers, Boots, Sandals, Flip flops, Heels, Flats, Slippers, Mojaris/Juttis
+- Accessories: Watches, Sunglasses, Spectacles, Belts, Hats, Caps, Scarves, Necklaces, Earrings, Bracelets, Bangles, Rings, Ties, Cufflinks, Backpacks, Handbags, Clutches, Wallets
+- Innerwear & Sleepwear: Undergarments, Bras, Boxers/Briefs, Night suits, Loungewear, Slips, Thermals
+- Ethnic/Occasionwear: Sherwanis, Lehenga cholis, Anarkalis, Nehru jackets, Dupattas, Kurta sets, Blouse (ethnic), Dhoti sets
+- Seasonal/Layering: Raincoats, Windcheaters, Overcoats, Thermal inners, Gloves, Beanies
+Here are the only valid patterns: [Solid, Stripes, Checks, Plaid, Polka Dot, Floral, Animal Print, Camouflage, Geometric, Houndstooth, Paisley, Tie-Dye].
+For each clothing item you detect in the image, select the best matching category, product, and pattern from the above lists, and return them in a JSON array with their main colors. Only use the provided categories, products, and patterns. Do not invent new ones.
+"""
+        let responseSchema: [String: Any] = [
+            "type": "array",
+            "items": [
+                "type": "object",
+                "properties": [
+                    "category": ["type": "string"],
+                    "product": ["type": "string"],
+                    "colors": [
+                        "type": "array",
+                        "items": ["type": "string"]
+                    ],
+                    "pattern": ["type": "string"]
+                ],
+                "required": ["category", "product", "colors", "pattern"],
+                "propertyOrdering": ["category", "product", "colors", "pattern"]
+            ]
+        ]
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -27,12 +58,15 @@ class ImageAnalysisService {
                         ]]
                     ]
                 ]
+            ],
+            "generationConfig": [
+                "responseMimeType": "application/json",
+                "responseSchema": responseSchema
             ]
         ]
         guard let url = URL(string: geminiEndpoint + geminiAPIKey),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
-            print("[Gemini] Failed to construct URL or HTTP body.")
-            return (nil, nil, nil)
+            return []
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -40,77 +74,78 @@ class ImageAnalysisService {
         request.httpBody = httpBody
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse {
-                print("[Gemini] HTTP status: \(httpResponse.statusCode)")
-            }
-            if let rawString = String(data: data, encoding: .utf8) {
-                print("[Gemini] Raw API response: \n\(rawString)")
-            }
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                print("[Gemini] Non-200 response.")
-                return (nil, nil, nil)
+                return []
             }
-            // Parse Gemini response
             if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
-               let text = result.candidates.first?.content.parts.first?.text {
-                print("[Gemini] Extracted text: \n\(text)")
-                if let dict = extractAndParseJSON(from: text) {
-                    print("[Gemini] Extracted JSON: \n\(dict)")
+               let text = result.candidates.first?.content.parts.first?.text,
+               let arrData = text.data(using: .utf8),
+               let arr = try? JSONSerialization.jsonObject(with: arrData) as? [[String: Any]] {
+                return arr.map { dict in
                     let categoryString = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                     let productString = (dict["product"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let colorString = (dict["color"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let category = matchCategory(categoryString)
-                    let product = matchProduct(productString)
-                    let color = matchColor(colorString)
-                    print("[Gemini] Final mapped values: category=\(String(describing: category)), product=\(String(describing: product)), color=\(String(describing: color))")
-                    return (category, product, color)
-                } else {
-                    print("[Gemini] Failed to extract JSON from text.")
+                    let colorsArray = dict["colors"] as? [String] ?? []
+                    let patternString = (dict["pattern"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let category = Category(rawValue: categoryString ?? "")
+                    let product = productString
+                    let colors = colorsArray.map { matchColor($0) ?? $0 }.filter { !$0.isEmpty }
+                    let pattern = Pattern(rawValue: patternString ?? "")
+                    return (category, product, colors, pattern)
                 }
-            } else {
-                print("[Gemini] Failed to decode GeminiResponse or extract text.")
             }
         } catch {
-            print("[Gemini] Error during API call or parsing: \(error)")
-            return (nil, nil, nil)
+            return []
         }
-        return (nil, nil, nil)
+        return []
     }
 
-    // Extract JSON from markdown/code block or extra text
-    private func extractAndParseJSON(from text: String) -> [String: Any]? {
-        // Try to find the first { ... } block
-        guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}") else { return nil }
-        let jsonString = String(text[start...end])
-        print("[Gemini] JSON substring to parse: \n\(jsonString)")
-        if let data = jsonString.data(using: .utf8),
-           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            return dict
-        }
-        return nil
-    }
-
-    // Improved category matching (case-insensitive, partial)
+    // Improved category matching (case-insensitive, partial, with synonyms)
     private func matchCategory(_ category: String?) -> Category? {
-        guard let category = category else { return nil }
-        // Exact match
+        guard let category = category?.lowercased() else { return nil }
+        let mapping: [String: Category] = [
+            "apparel": .tops,
+            "clothing": .tops,
+            "top": .tops,
+            "tops": .tops,
+            "bottom": .bottoms,
+            "bottoms": .bottoms,
+            "footwear": .footwear,
+            "shoes": .footwear,
+            "pants": .bottoms,
+            "jeans": .bottoms,
+            "trousers": .bottoms,
+            "shorts": .bottoms,
+            "outerwear": .seasonalLayering,
+            "jacket": .seasonalLayering,
+            "coat": .seasonalLayering,
+            "dress": .onePieces,
+            "skirt": .bottoms,
+            // add more as needed, always use valid Category cases
+        ]
+        if let mapped = mapping[category] {
+            return mapped
+        }
+        // fallback to existing logic
         if let exact = Category.allCases.first(where: { $0.rawValue.caseInsensitiveCompare(category) == .orderedSame }) {
             return exact
         }
-        // Partial match
-        let lower = category.lowercased()
+        let lower = category.replacingOccurrences(of: "/", with: "").replacingOccurrences(of: " ", with: "")
         if let partial = Category.allCases.first(where: { lower.contains($0.rawValue.lowercased().replacingOccurrences(of: "/", with: "").replacingOccurrences(of: " ", with: "")) }) {
             return partial
         }
         return nil
     }
 
-    // Improved product matching (case-insensitive, partial, fuzzy)
+    // Improved product matching (case-insensitive, partial, fuzzy, prefer exact/singular/plural)
     private func matchProduct(_ product: String?) -> String? {
         guard let product = product else { return nil }
-        // Exact match
+        // Exact match (case-insensitive)
         for (_, products) in productTypesByCategory {
             if let match = products.first(where: { $0.caseInsensitiveCompare(product) == .orderedSame }) {
+                return match
+            }
+            // Try singular/plural prefix match (e.g. 'shirt' -> 'Shirts', 'jean' -> 'Jeans')
+            if let match = products.first(where: { $0.lowercased().hasPrefix(product.lowercased()) || product.lowercased().hasPrefix($0.lowercased()) }) {
                 return match
             }
         }

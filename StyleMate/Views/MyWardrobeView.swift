@@ -5,6 +5,7 @@ struct MyWardrobeView: View {
     private let columns = [GridItem(.adaptive(minimum: 140), spacing: 16)]
     @State private var selectedCategory: Category?
     @State private var showProfile = false
+    @State private var showEmptyConfirmation = false
     
     var body: some View {
         NavigationStack {
@@ -25,11 +26,16 @@ struct MyWardrobeView: View {
             .navigationTitle("My Wardrobe")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showProfile = true }) {
-                        Image(systemName: "person.crop.circle")
-                            .font(.system(size: 26, weight: .regular))
+                    HStack {
+                        Button("Empty Wardrobe") {
+                            showEmptyConfirmation = true
+                        }
+                        Button(action: { showProfile = true }) {
+                            Image(systemName: "person.crop.circle")
+                                .font(.system(size: 26, weight: .regular))
+                        }
+                        .accessibilityLabel("Profile")
                     }
-                    .accessibilityLabel("Profile")
                 }
             }
             .background(
@@ -49,6 +55,14 @@ struct MyWardrobeView: View {
         }
         .sheet(isPresented: $showProfile) {
             ProfileView()
+        }
+        .alert("Are you sure you want to empty your wardrobe?", isPresented: $showEmptyConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Empty", role: .destructive) {
+                wardrobeViewModel.items.removeAll()
+            }
+        } message: {
+            Text("This will remove all items from your wardrobe and cannot be undone.")
         }
     }
 }
@@ -148,6 +162,9 @@ struct CategoryDetailView: View {
                         VStack(alignment: .leading) {
                             Text(item.name)
                                 .font(.headline)
+                            Text(item.pattern.rawValue)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
                         }
                     }
                 }

@@ -113,10 +113,10 @@ struct TodayOutfitSheet: View {
                             .scaledToFit()
                             .frame(width: 64, height: 64)
                             .cornerRadius(10)
-                        Text("\(item.color) \(item.brand) \(item.product)")
+                        Text("\(item.colors.joined(separator: ", ")) \(item.brand) \(item.product)")
                             .font(.body)
                             .foregroundColor(.primary)
-                            .accessibilityLabel("\(item.color) \(item.brand) \(item.product)")
+                            .accessibilityLabel("\(item.colors.joined(separator: ", ")) \(item.brand) \(item.product)")
                         Spacer()
                     }
                     .padding(.horizontal, 16)
