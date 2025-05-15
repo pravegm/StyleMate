@@ -48,9 +48,17 @@ struct RootView: View {
     @State private var lastUserKey: String = ""
     @State private var showAddSheet: Bool = false
     @State private var activeAddFlow: AddFlow?
-    @State private var photoPickerItem: PhotosPickerItem? = nil
     @State private var showForm = false
     @State private var selectedImage: UIImage? = nil
+    @State private var showReviewBatch = false
+    @State private var selectedImages: [UIImage] = []
+    @State private var showPickerTip = false
+    @AppStorage("hasShownPickerTip") private var hasShownPickerTip: Bool = false
+    @State private var pendingAction: (() -> Void)? = nil
+    // PhotosPicker state
+    @State private var galleryItems: [PhotosPickerItem] = []
+    @State private var isLoadingGalleryImages = false
+    @State private var showGalleryPicker = false
     
     var userKey: String {
         if let email = authService.user?.email, !email.isEmpty {
@@ -70,22 +78,55 @@ struct RootView: View {
                 }
             }
         }
-        .sheet(isPresented: $showAddSheet) {
-            AddSourceSheet(photoPickerItem: $photoPickerItem, onCamera: { 
-                activeAddFlow = .camera
-            })
+        // Present PhotosPicker directly from AddSourceSheet
+        .photosPicker(isPresented: $showGalleryPicker, selection: $galleryItems, maxSelectionCount: 0, matching: .images)
+        .onChange(of: galleryItems) { items in
+            if !items.isEmpty {
+                isLoadingGalleryImages = true
+                loadGalleryImages()
+            }
         }
-        .onChange(of: photoPickerItem) { item in
-            guard let item = item else { return }
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self),
-                   let image = UIImage(data: data) {
-                    selectedImage = image
-                    showForm = true
+        .sheet(isPresented: $showAddSheet, onDismiss: {
+            if let action = pendingAction {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    action()
+                    pendingAction = nil
+                }
+            }
+        }) {
+            AddSourceSheet(
+                onSelectFromGallery: {
+                    pendingAction = {
+                        if !hasShownPickerTip {
+                            showPickerTip = true
+                        } else {
+                            showGalleryPicker = true
+                        }
+                    }
+                    showAddSheet = false
+                },
+                onTakePhoto: {
+                    pendingAction = {
+                        activeAddFlow = .camera
+                    }
                     showAddSheet = false
                 }
-                photoPickerItem = nil
+            )
+        }
+        .sheet(isPresented: $showPickerTip, onDismiss: {
+            if showPickerTip == false {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    showGalleryPicker = true
+                }
             }
+        }) {
+            TipSheet(showPickerTip: $showPickerTip, hasShownPickerTip: $hasShownPickerTip, showPhotoPicker: $showGalleryPicker)
+        }
+        .sheet(isPresented: $showReviewBatch, onDismiss: {
+            selectedImages = []
+        }) {
+            MultiAddNewItemView(images: selectedImages, isPresented: $showReviewBatch)
+                .environmentObject(wardrobeVM)
         }
         .sheet(item: $activeAddFlow) { flow in
             switch flow {
@@ -116,7 +157,15 @@ struct RootView: View {
                 Text("No image selected.")
             }
         }
-        .onChange(of: showForm) { newValue in
+        .overlay {
+            if isLoadingGalleryImages {
+                ZStack {
+                    Color.black.opacity(0.2).ignoresSafeArea()
+                    ProgressView("Loading images...")
+                        .padding()
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground)))
+                }
+            }
         }
         .onChange(of: authService.isAuthenticated) { isAuthenticated in
             if isAuthenticated, let email = authService.user?.email {
@@ -134,22 +183,39 @@ struct RootView: View {
             }
         }
     }
+    // Helper for loading images from PhotosPickerItems
+    private func loadGalleryImages() {
+        Task {
+            var images: [UIImage] = []
+            for item in galleryItems {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+                    images.append(image)
+                }
+            }
+            selectedImages = images
+            isLoadingGalleryImages = false
+            galleryItems = []
+            if !images.isEmpty {
+                showReviewBatch = true
+            }
+        }
+    }
 }
 
 struct AddSourceSheet: View {
-    @Binding var photoPickerItem: PhotosPickerItem?
-    var onCamera: () -> Void
-    @Environment(\.dismiss) private var dismiss
+    var onSelectFromGallery: () -> Void
+    var onTakePhoto: () -> Void
     var body: some View {
         VStack(spacing: 24) {
             Text("Add New Item")
                 .font(.title2.bold())
                 .padding(.top, 24)
-            PhotosPicker(selection: $photoPickerItem, matching: .images) {
+            Button(action: onSelectFromGallery) {
                 HStack {
                     Image(systemName: "photo.on.rectangle")
                         .font(.system(size: 28))
-                    Text("Choose from Library")
+                    Text("Choose from Gallery")
                         .font(.headline)
                 }
                 .frame(maxWidth: .infinity)
@@ -157,10 +223,7 @@ struct AddSourceSheet: View {
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(12)
             }
-            Button(action: {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { onCamera() }
-            }) {
+            Button(action: onTakePhoto) {
                 HStack {
                     Image(systemName: "camera")
                         .font(.system(size: 28))
@@ -176,6 +239,33 @@ struct AddSourceSheet: View {
         }
         .padding()
         .presentationDetents([.medium, .large])
+    }
+}
+
+struct TipSheet: View {
+    @Binding var showPickerTip: Bool
+    @Binding var hasShownPickerTip: Bool
+    @Binding var showPhotoPicker: Bool
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Tip")
+                .font(.title2.bold())
+                .padding(.top, 24)
+            Text("Tap multiple images to select them, then tap 'Add' or 'Done' to confirm.")
+                .font(.body)
+                .multilineTextAlignment(.center)
+            Button("Continue") {
+                hasShownPickerTip = true
+                showPhotoPicker = true
+            }
+            .font(.headline)
+            .padding()
+            .background(Color.blue)
+            .foregroundColor(.white)
+            .cornerRadius(12)
+        }
+        .padding()
+        .presentationDetents([.medium])
     }
 }
 
@@ -199,5 +289,329 @@ struct MainTabViewWrapper: View {
     @Binding var activeAddFlow: AddFlow?
     var body: some View {
         MainTabView(showAddSheet: $showAddSheet, activeAddFlow: $activeAddFlow)
+    }
+}
+
+// New: MultiAddNewItemView for reviewing multiple images in AddNewItemView style
+import SwiftUI
+struct MultiAddNewItemView: View {
+    let images: [UIImage]
+    @Binding var isPresented: Bool
+    @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
+    @State private var detectedItems: [[AddNewItemView.DetectedItem]] = []
+    @State private var brandInputs: [[String]] = []
+    @State private var isAnalyzing = true
+    @State private var currentIndex = 0
+    @State private var errorMessage = ""
+    @State private var showError = false
+    @State private var savedStates: [Bool?] = [] // true=saved, false=removed, nil=pending
+    @State private var showToast = false
+    @State private var toastText = ""
+    @State private var showSummary = false
+    @State private var showCancelConfirm = false
+    @State private var analysisStates: [Bool] = [] // true = analyzed, false = analyzing
+    var canFinish: Bool { savedStates.contains(true) }
+    var allReviewed: Bool { savedStates.indices.allSatisfy { idx in savedStates[idx] != nil || !analysisStates.indices.contains(idx) || !analysisStates[idx] } }
+    var canAddAll: Bool {
+        // Only allow Add All for images that are done analyzing and not removed/saved
+        savedStates.indices.contains { idx in savedStates[idx] == nil && analysisStates.indices.contains(idx) && analysisStates[idx] }
+    }
+    var body: some View {
+        NavigationStack {
+            if showSummary {
+                SummaryView(savedItems: savedWardrobeItems()) {
+                    isPresented = false
+                }
+            } else {
+                VStack(spacing: 0) {
+                    if isAnalyzing {
+                        ProgressView("Analyzing images...")
+                            .padding()
+                    } else if !images.isEmpty {
+                        // Navigation controls
+                        HStack(alignment: .center, spacing: 16) {
+                            Button(action: { if currentIndex > 0 { currentIndex -= 1 } }) {
+                                Image(systemName: "chevron.left.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(currentIndex == 0 ? .gray : .blue)
+                            }
+                            .disabled(currentIndex == 0)
+                            Spacer()
+                            Text("Image \(currentIndex + 1) of \(images.count)")
+                                .font(.headline)
+                            Spacer()
+                            Button(action: { if currentIndex < images.count - 1 { currentIndex += 1 } }) {
+                                Image(systemName: "chevron.right.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(currentIndex == images.count - 1 ? .gray : .blue)
+                            }
+                            .disabled(currentIndex == images.count - 1)
+                            Button("Add All") {
+                                addAllAndShowSummary()
+                            }
+                            .disabled(!canAddAll)
+                        }
+                        .padding(.horizontal)
+                        .padding(.top, 12)
+                        // Page indicator dots
+                        HStack(spacing: 8) {
+                            ForEach(0..<images.count, id: \.self) { idx in
+                                let state = savedStates.indices.contains(idx) ? savedStates[idx] : nil
+                                Circle()
+                                    .fill(state == true ? Color.green : (state == false ? Color.red : Color(.systemGray4)))
+                                    .frame(width: 10, height: 10)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        // Image review area
+                        ZStack {
+                            TabView(selection: $currentIndex) {
+                                ForEach(images.indices, id: \.self) { idx in
+                                    ZStack {
+                                        AddNewItemViewInternal(
+                                            image: images[idx],
+                                            detectedItems: $detectedItems[idx],
+                                            brandInputs: $brandInputs[idx],
+                                            hideToolbar: true
+                                        )
+                                        .tag(idx)
+                                        .padding(.vertical)
+                                        // Overlay spinner if not analyzed
+                                        if !analysisStates.indices.contains(idx) || !analysisStates[idx] {
+                                            Color.white.opacity(0.7)
+                                                .cornerRadius(16)
+                                            VStack {
+                                                ProgressView()
+                                                Text("Analyzing...")
+                                                    .font(.subheadline)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            .tabViewStyle(.page(indexDisplayMode: .never))
+                            .indexViewStyle(.page(backgroundDisplayMode: .never))
+                            .frame(maxHeight: .infinity)
+                            if showToast {
+                                VStack {
+                                    Spacer()
+                                    HStack {
+                                        Spacer()
+                                        Label(toastText, systemImage: toastText == "Saved!" ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                            .font(.title2.bold())
+                                            .padding(16)
+                                            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)).shadow(radius: 4))
+                                            .foregroundColor(toastText == "Saved!" ? .green : .red)
+                                        Spacer()
+                                    }
+                                    Spacer()
+                                }
+                                .transition(.opacity)
+                            }
+                        }
+                        // Per-image Save/Remove controls
+                        HStack(spacing: 24) {
+                            Button(role: .destructive) {
+                                markRemovedAndAdvance()
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
+                            .disabled(savedStates[currentIndex] == false || !isAnalyzed(currentIndex))
+                            Button {
+                                saveCurrentAndAdvance()
+                            } label: {
+                                Label("Save", systemImage: "checkmark")
+                            }
+                            .disabled(savedStates[currentIndex] == true || detectedItems[currentIndex].isEmpty || !isAnalyzed(currentIndex))
+                        }
+                        .padding(.vertical, 8)
+                        // Save/Cancel controls
+                        HStack {
+                            Button("Cancel") { showCancelConfirm = true }
+                            Spacer()
+                            Button("Done") {
+                                saveAllAndShowSummary()
+                            }
+                            .disabled(!canFinish)
+                        }
+                        .padding()
+                    }
+                }
+                .navigationTitle("Review Items")
+                .alert("Error", isPresented: $showError) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(errorMessage)
+                }
+                .alert("Are you sure you want to cancel? Unsaved changes will be lost.", isPresented: $showCancelConfirm) {
+                    Button("No", role: .cancel) {}
+                    Button("Yes", role: .destructive) { isPresented = false }
+                }
+                .onAppear {
+                    analyzeAllImagesInParallel()
+                }
+            }
+        }
+    }
+    private func analyzeAllImagesInParallel() {
+        isAnalyzing = true
+        detectedItems = Array(repeating: [], count: images.count)
+        brandInputs = Array(repeating: [], count: images.count)
+        savedStates = Array(repeating: nil, count: images.count)
+        analysisStates = Array(repeating: false, count: images.count)
+        Task {
+            await withTaskGroup(of: (Int, [(Category?, String?, [String], Pattern?)]).self) { group in
+                for (idx, image) in images.enumerated() {
+                    group.addTask {
+                        let results = await ImageAnalysisService.shared.analyzeMultiple(image: image)
+                        return (idx, results)
+                    }
+                }
+                for await (idx, results) in group {
+                    let items = results.compactMap { cat, prod, colors, pattern in
+                        if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
+                            return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern)
+                        } else {
+                            return nil
+                        }
+                    }
+                    await MainActor.run {
+                        detectedItems[idx] = items
+                        brandInputs[idx] = Array(repeating: "", count: items.count)
+                        analysisStates[idx] = true
+                    }
+                }
+            }
+            await MainActor.run {
+                isAnalyzing = false
+            }
+        }
+    }
+    private func isAnalyzed(_ idx: Int) -> Bool {
+        analysisStates.indices.contains(idx) && analysisStates[idx]
+    }
+    private func saveCurrentAndAdvance() {
+        guard isAnalyzed(currentIndex) else { return }
+        savedStates[currentIndex] = true
+        showToastWith(text: "Saved!")
+        advanceToNext()
+    }
+    private func markRemovedAndAdvance() {
+        guard isAnalyzed(currentIndex) else { return }
+        savedStates[currentIndex] = false
+        showToastWith(text: "Removed")
+        advanceToNext()
+    }
+    private func advanceToNext() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            if let next = (currentIndex+1..<savedStates.count).first(where: { savedStates[$0] == nil }) {
+                currentIndex = next
+            } else if let prev = (0..<currentIndex).reversed().first(where: { savedStates[$0] == nil }) {
+                currentIndex = prev
+            } else if allReviewed {
+                saveAllAndShowSummary()
+            }
+        }
+    }
+    private func showToastWith(text: String) {
+        toastText = text
+        withAnimation { showToast = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            withAnimation { showToast = false }
+        }
+    }
+    private func saveAllAndShowSummary() {
+        // Save only those marked as saved
+        for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
+            for (itemIdx, detected) in items.enumerated() {
+                let item = WardrobeItem(
+                    category: detected.category,
+                    product: detected.product,
+                    colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
+                    brand: brandInputs[imgIdx][itemIdx],
+                    pattern: detected.pattern,
+                    image: images[imgIdx]
+                )
+                wardrobeViewModel.items.append(item)
+            }
+        }
+        showSummary = true
+    }
+    private func savedWardrobeItems() -> [WardrobeItem] {
+        var result: [WardrobeItem] = []
+        for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
+            for (itemIdx, detected) in items.enumerated() {
+                let item = WardrobeItem(
+                    category: detected.category,
+                    product: detected.product,
+                    colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
+                    brand: brandInputs[imgIdx][itemIdx],
+                    pattern: detected.pattern,
+                    image: images[imgIdx]
+                )
+                result.append(item)
+            }
+        }
+        return result
+    }
+    private func addAllAndShowSummary() {
+        for idx in savedStates.indices where savedStates[idx] == nil && isAnalyzed(idx) {
+            savedStates[idx] = true
+        }
+        saveAllAndShowSummary()
+    }
+}
+
+// Internal AddNewItemView logic for a single image (reuses your existing UI)
+struct AddNewItemViewInternal: View {
+    let image: UIImage
+    @Binding var detectedItems: [AddNewItemView.DetectedItem]
+    @Binding var brandInputs: [String]
+    var hideToolbar: Bool = false
+    var body: some View {
+        VStack {
+            AddNewItemView(
+                showPhotoPicker: .constant(false),
+                showCamera: .constant(false),
+                isPresented: .constant(true),
+                prefilledImage: image,
+                detectedItemsBinding: $detectedItems,
+                brandInputsBinding: $brandInputs
+            )
+            .toolbar(hideToolbar ? .hidden : .visible, for: .navigationBar)
+        }
+    }
+}
+
+// Simple summary view
+struct SummaryView: View {
+    let savedItems: [WardrobeItem]
+    var onDone: () -> Void
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Added to your wardrobe!")
+                .font(.title2.bold())
+                .padding(.top, 24)
+            ForEach(summaryStrings, id: \.self) { str in
+                Text(str)
+                    .font(.headline)
+            }
+            Spacer()
+            Button("Done") { onDone() }
+                .font(.headline)
+                .padding()
+                .background(Color.accentColor)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+        }
+        .padding()
+    }
+    var summaryStrings: [String] {
+        let grouped = Dictionary(grouping: savedItems, by: { $0.product })
+        return grouped.map { (product, items) in
+            let plural = (items.count > 1 && !product.lowercased().hasSuffix("s")) ? "s" : ""
+            return "\(items.count) \(product)\(plural)"
+        }.sorted()
     }
 }

@@ -7,9 +7,11 @@ struct AddNewItemView: View {
     @Binding var showCamera: Bool
     @Binding var isPresented: Bool
     var prefilledImage: UIImage? = nil
+    var detectedItemsBinding: Binding<[DetectedItem]>?
+    var brandInputsBinding: Binding<[String]>?
     @State private var pickedImage: UIImage?
-    @State private var detectedItems: [DetectedItem] = []
-    @State private var brandInputs: [String] = []
+    @State private var detectedItemsState: [DetectedItem] = []
+    @State private var brandInputsState: [String] = []
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showError = false
     @State private var errorMessage = ""
@@ -27,11 +29,18 @@ struct AddNewItemView: View {
         productTypesByCategory[category] ?? []
     }
     
+    var detectedItems: Binding<[DetectedItem]> {
+        detectedItemsBinding ?? $detectedItemsState
+    }
+    var brandInputs: Binding<[String]> {
+        brandInputsBinding ?? $brandInputsState
+    }
+    
     var canSave: Bool {
-        !detectedItems.isEmpty && detectedItems.indices.allSatisfy { idx in
-            !detectedItems[idx].colors.isEmpty &&
-            !detectedItems[idx].colors[0].trimmingCharacters(in: .whitespaces).isEmpty &&
-            !detectedItems[idx].product.isEmpty
+        !detectedItems.wrappedValue.isEmpty && detectedItems.wrappedValue.indices.allSatisfy { idx in
+            !detectedItems.wrappedValue[idx].colors.isEmpty &&
+            !detectedItems.wrappedValue[idx].colors[0].trimmingCharacters(in: .whitespaces).isEmpty &&
+            !detectedItems.wrappedValue[idx].product.isEmpty
         } && pickedImage != nil
     }
     
@@ -56,12 +65,20 @@ struct AddNewItemView: View {
                     }
                 }
                 
-                if !detectedItems.isEmpty {
+                if !detectedItems.wrappedValue.isEmpty {
                     Section(header: Text("Detected Items")) {
-                        ForEach(detectedItems.indices, id: \.self) { idx in
+                        ForEach(detectedItems.wrappedValue.indices, id: \.self) { idx in
+                            let itemBinding = Binding<DetectedItem>(
+                                get: { detectedItems.wrappedValue[idx] },
+                                set: { detectedItems.wrappedValue[idx] = $0 }
+                            )
+                            let brandBinding = Binding<String>(
+                                get: { brandInputs.wrappedValue[idx] },
+                                set: { brandInputs.wrappedValue[idx] = $0 }
+                            )
                             VStack(alignment: .leading, spacing: 8) {
                                 Section {
-                                    Picker("Category", selection: $detectedItems[idx].category) {
+                                    Picker("Category", selection: itemBinding.category) {
                                         ForEach(Category.allCases) { cat in
                                             Text(cat.rawValue).tag(cat)
                                         }
@@ -70,8 +87,8 @@ struct AddNewItemView: View {
                                     .pickerStyle(.menu)
                                 }
                                 Section {
-                                    Picker("Product", selection: $detectedItems[idx].product) {
-                                        ForEach(productOptions(for: detectedItems[idx].category), id: \.self) { prod in
+                                    Picker("Product", selection: itemBinding.product) {
+                                        ForEach(productOptions(for: itemBinding.category.wrappedValue), id: \.self) { prod in
                                             Text(prod).tag(prod)
                                         }
                                     }
@@ -79,16 +96,22 @@ struct AddNewItemView: View {
                                     .pickerStyle(.menu)
                                 }
                                 Section(header: Text("Colors:").font(.subheadline)) {
-                                    ForEach(Array(detectedItems[idx].colors.enumerated()), id: \.offset) { colorIdx, _ in
+                                    ForEach(Array(itemBinding.colors.wrappedValue.enumerated()), id: \.offset) { colorIdx, _ in
+                                        let colorBinding = Binding<String>(
+                                            get: { itemBinding.colors.wrappedValue[colorIdx] },
+                                            set: { itemBinding.colors.wrappedValue[colorIdx] = $0 }
+                                        )
                                         HStack {
-                                            TextField("Color", text: $detectedItems[idx].colors[colorIdx])
+                                            TextField("Color", text: colorBinding)
                                                 .textContentType(.none)
                                                 .autocapitalization(.none)
                                                 .accessibilityLabel("Color")
                                             Spacer(minLength: 8)
-                                            if detectedItems[idx].colors.count > 1 {
+                                            if itemBinding.colors.wrappedValue.count > 1 {
                                                 Button(action: {
-                                                    detectedItems[idx].colors.remove(at: colorIdx)
+                                                    var colors = itemBinding.colors.wrappedValue
+                                                    colors.remove(at: colorIdx)
+                                                    itemBinding.colors.wrappedValue = colors
                                                 }) {
                                                     Image(systemName: "minus.circle.fill")
                                                         .foregroundColor(.red)
@@ -99,7 +122,9 @@ struct AddNewItemView: View {
                                         }
                                     }
                                     Button(action: {
-                                        detectedItems[idx].colors.append("")
+                                        var colors = itemBinding.colors.wrappedValue
+                                        colors.append("")
+                                        itemBinding.colors.wrappedValue = colors
                                     }) {
                                         HStack {
                                             Image(systemName: "plus.circle.fill").foregroundColor(.green)
@@ -109,7 +134,7 @@ struct AddNewItemView: View {
                                     .buttonStyle(BorderlessButtonStyle())
                                 }
                                 Section {
-                                    Picker("Pattern", selection: $detectedItems[idx].pattern) {
+                                    Picker("Pattern", selection: itemBinding.pattern) {
                                         ForEach(Pattern.allCases) { pattern in
                                             Text(pattern.rawValue).tag(pattern)
                                         }
@@ -117,7 +142,7 @@ struct AddNewItemView: View {
                                     .pickerStyle(.menu)
                                     .accessibilityLabel("Pattern picker")
                                 }
-                                TextField("Brand (e.g. Nike)", text: $brandInputs[idx])
+                                TextField("Brand (e.g. Nike)", text: brandBinding)
                                     .textContentType(.none)
                                     .autocapitalization(.none)
                                     .accessibilityLabel("Brand")
@@ -153,12 +178,12 @@ struct AddNewItemView: View {
                     guard let img = pickedImage else { 
                         return 
                     }
-                    for (idx, detected) in detectedItems.enumerated() {
+                    for (idx, detected) in detectedItems.wrappedValue.enumerated() {
                         let item = WardrobeItem(
                             category: detected.category,
                             product: detected.product,
                             colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
-                            brand: brandInputs[idx],
+                            brand: brandInputs.wrappedValue[idx],
                             pattern: detected.pattern,
                             image: img
                         )
@@ -177,11 +202,13 @@ struct AddNewItemView: View {
         .onAppear {
             if pickedImage == nil, let pre = prefilledImage {
                 pickedImage = pre
-                analyzeMultipleImage(pre)
+                if detectedItems.wrappedValue.isEmpty {
+                    analyzeMultipleImage(pre)
+                }
             }
         }
         .onChange(of: pickedImage) { newImage in
-            if let img = newImage {
+            if let img = newImage, detectedItems.wrappedValue.isEmpty {
                 analyzeMultipleImage(img)
             }
         }
@@ -191,14 +218,14 @@ struct AddNewItemView: View {
         isAnalyzing = true
         Task {
             let results = await ImageAnalysisService.shared.analyzeMultiple(image: image)
-            detectedItems = results.compactMap { cat, prod, colors, pattern in
+            detectedItems.wrappedValue = results.compactMap { cat, prod, colors, pattern in
                 if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
                     return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern)
                 } else {
                     return nil
                 }
             }
-            brandInputs = Array(repeating: "", count: detectedItems.count)
+            brandInputs.wrappedValue = Array(repeating: "", count: detectedItems.wrappedValue.count)
             isAnalyzing = false
         }
     }

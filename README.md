@@ -1,21 +1,37 @@
 # StyleMate
 
-StyleMate is your AI-powered wardrobe and outfit assistant for iOS.
+StyleMate is your AI-powered fashion wardrobe and stylist app for iOS, built with SwiftUI.
 
 ## Features
 
-- **Add Items:** Scan clothing items with AI, or add manually. Supports category, product, multiple colors, pattern, brand, and photo.
-- **Pattern & Color Detection:** Gemini AI detects category, product, all main colors, and pattern from your photos.
-- **My Wardrobe:** Browse, edit, and delete your wardrobe items. See all details in a clean, accessible UI. Instantly empty your wardrobe with a confirmation dialog.
-- **Outfit Suggestions:** Get daily outfit suggestions based on color harmony and pattern rules.
-- **Accessibility:** Fully accessible with VoiceOver and large text support.
-- **Data Persistence:** Your wardrobe is saved locally on your device.
+- **Multi-Image Add Flow:**
+  - Select multiple images from your gallery at once.
+  - All images are analyzed in parallel in the background.
+  - Review each image, edit detected details, and choose to save or remove each item individually.
+  - "Add All" button lets you instantly add all analyzed items without reviewing each one.
+  - Flexible: Save any, all, or none of the batch.
 
-## How to Build
+- **Batch Review & Summary:**
+  - Swipe between images in a modern, card-based UI.
+  - See a summary screen after adding, e.g. "2 Shirts, 1 Jeans added to your wardrobe."
 
-1. Open `StyleMate.xcodeproj` in Xcode 15 or later.
-2. Set your Gemini API key in `ImageAnalysisService.swift` (if not already set).
-3. Build and run on Simulator or a real device (iOS 17+ recommended).
+- **Wardrobe Management:**
+  - Browse your wardrobe by category.
+  - Tap any item to see a full-screen image preview.
+  - Delete items with swipe-to-delete and Edit mode.
+
+- **Modern SwiftUI Architecture:**
+  - Uses NavigationStack, TabView, and best practices for state management.
+  - Accessibility labels and large tap targets for inclusive design.
+
+- **Camera & Gallery Support:**
+  - Add items via camera or gallery, with a tip for multi-select.
+
+## Getting Started
+
+1. Clone the repo and open `StyleMate.xcodeproj` in Xcode.
+2. Build and run on iOS 16+.
+3. Sign up or use as guest to start adding wardrobe items.
 
 ## Project Structure
 
@@ -28,11 +44,11 @@ StyleMate is your AI-powered wardrobe and outfit assistant for iOS.
 
 ## Contributing
 
-Pull requests are welcome! Please open an issue first to discuss any major changes.
+Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
 
 ## License
 
-MIT
+[MIT](LICENSE)
 
 ---
 
