@@ -54,7 +54,6 @@ struct RootView: View {
     @State private var showAddSheet: Bool = false
     @State private var activeAddFlow: AddFlow?
     @State private var capturedImage: CapturedImage? = nil
-    @State private var showCameraReview: Bool = false
     @State private var showReviewBatch = false
     @State private var selectedImages: [UIImage] = []
     @State private var showPickerTip = false
@@ -139,7 +138,6 @@ struct RootView: View {
                 CameraSheet { image in
                     if let image = image {
                         capturedImage = CapturedImage(image: image)
-                        showCameraReview = true
                     }
                     activeAddFlow = nil
                 }
@@ -147,11 +145,15 @@ struct RootView: View {
                 EmptyView()
             }
         }
-        .sheet(isPresented: $showCameraReview, onDismiss: { capturedImage = nil }) {
-            if let captured = capturedImage {
-                MultiAddNewItemView(images: [captured.image], isPresented: $showCameraReview)
-                    .environmentObject(wardrobeVM)
-            }
+        .sheet(item: $capturedImage, onDismiss: { capturedImage = nil }) { captured in
+            MultiAddNewItemView(
+                images: [captured.image],
+                isPresented: Binding(
+                    get: { capturedImage != nil },
+                    set: { newValue in if !newValue { capturedImage = nil } }
+                )
+            )
+            .environmentObject(wardrobeVM)
         }
         .overlay {
             if isLoadingGalleryImages {
@@ -320,50 +322,47 @@ struct MultiAddNewItemView: View {
                 }
             } else {
                 VStack(spacing: 0) {
-                    if isAnalyzing {
-                        ProgressView("Analyzing images...")
-                            .padding()
-                    } else if !images.isEmpty {
-                        // Navigation controls
-                        HStack(alignment: .center, spacing: 16) {
-                            Button(action: { if currentIndex > 0 { currentIndex -= 1 } }) {
-                                Image(systemName: "chevron.left.circle.fill")
-                                    .font(.system(size: 32))
-                                    .foregroundColor(currentIndex == 0 ? .gray : .blue)
-                            }
-                            .disabled(currentIndex == 0)
-                            Spacer()
-                            Text("Image \(currentIndex + 1) of \(images.count)")
-                                .font(.headline)
-                            Spacer()
-                            Button(action: { if currentIndex < images.count - 1 { currentIndex += 1 } }) {
-                                Image(systemName: "chevron.right.circle.fill")
-                                    .font(.system(size: 32))
-                                    .foregroundColor(currentIndex == images.count - 1 ? .gray : .blue)
-                            }
-                            .disabled(currentIndex == images.count - 1)
-                            Button("Add All") {
-                                addAllAndShowSummary()
-                            }
-                            .disabled(!canAddAll)
+                    // Navigation controls
+                    HStack(alignment: .center, spacing: 16) {
+                        Button(action: { if currentIndex > 0 { currentIndex -= 1 } }) {
+                            Image(systemName: "chevron.left.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundColor(currentIndex == 0 ? .gray : .blue)
                         }
-                        .padding(.horizontal)
-                        .padding(.top, 12)
-                        // Page indicator dots
-                        HStack(spacing: 8) {
-                            ForEach(0..<images.count, id: \.self) { idx in
-                                let state = savedStates.indices.contains(idx) ? savedStates[idx] : nil
-                                Circle()
-                                    .fill(state == true ? Color.green : (state == false ? Color.red : Color(.systemGray4)))
-                                    .frame(width: 10, height: 10)
-                            }
+                        .disabled(currentIndex == 0)
+                        Spacer()
+                        Text("Image \(currentIndex + 1) of \(images.count)")
+                            .font(.headline)
+                        Spacer()
+                        Button(action: { if currentIndex < images.count - 1 { currentIndex += 1 } }) {
+                            Image(systemName: "chevron.right.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundColor(currentIndex == images.count - 1 ? .gray : .blue)
                         }
-                        .padding(.vertical, 8)
-                        // Image review area
-                        ZStack {
-                            TabView(selection: $currentIndex) {
-                                ForEach(images.indices, id: \.self) { idx in
-                                    ZStack {
+                        .disabled(currentIndex == images.count - 1)
+                        Button("Add All") {
+                            addAllAndShowSummary()
+                        }
+                        .disabled(!canAddAll)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                    // Page indicator dots
+                    HStack(spacing: 8) {
+                        ForEach(0..<images.count, id: \ .self) { idx in
+                            let state = savedStates.indices.contains(idx) ? savedStates[idx] : nil
+                            Circle()
+                                .fill(state == true ? Color.green : (state == false ? Color.red : Color(.systemGray4)))
+                                .frame(width: 10, height: 10)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    // Image review area
+                    ZStack {
+                        TabView(selection: $currentIndex) {
+                            ForEach(images.indices, id: \ .self) { idx in
+                                ZStack {
+                                    if detectedItems.indices.contains(idx) && brandInputs.indices.contains(idx) {
                                         AddNewItemViewInternal(
                                             image: images[idx],
                                             detectedItems: $detectedItems[idx],
@@ -372,67 +371,81 @@ struct MultiAddNewItemView: View {
                                         )
                                         .tag(idx)
                                         .padding(.vertical)
-                                        // Overlay spinner if not analyzed
-                                        if !analysisStates.indices.contains(idx) || !analysisStates[idx] {
-                                            Color.white.opacity(0.7)
-                                                .cornerRadius(16)
-                                            VStack {
-                                                ProgressView()
-                                                Text("Analyzing...")
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.secondary)
-                                            }
+                                    } else {
+                                        // Show a spinner/placeholder while arrays are not ready
+                                        VStack {
+                                            Spacer()
+                                            ProgressView("Preparing...")
+                                            Spacer()
+                                        }
+                                        .tag(idx)
+                                    }
+                                    // Overlay spinner if not analyzed
+                                    if !analysisStates.indices.contains(idx) || !analysisStates[idx] {
+                                        Color.white.opacity(0.7)
+                                            .cornerRadius(16)
+                                        VStack {
+                                            ProgressView()
+                                            Text("Analyzing...")
+                                                .font(.subheadline)
+                                                .foregroundColor(.secondary)
                                         }
                                     }
                                 }
                             }
-                            .tabViewStyle(.page(indexDisplayMode: .never))
-                            .indexViewStyle(.page(backgroundDisplayMode: .never))
-                            .frame(maxHeight: .infinity)
-                            if showToast {
-                                VStack {
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .indexViewStyle(.page(backgroundDisplayMode: .never))
+                        .frame(maxHeight: .infinity)
+                        if showToast {
+                            VStack {
+                                Spacer()
+                                HStack {
                                     Spacer()
-                                    HStack {
-                                        Spacer()
-                                        Label(toastText, systemImage: toastText == "Saved!" ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                            .font(.title2.bold())
-                                            .padding(16)
-                                            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)).shadow(radius: 4))
-                                            .foregroundColor(toastText == "Saved!" ? .green : .red)
-                                        Spacer()
-                                    }
+                                    Label(toastText, systemImage: toastText == "Saved!" ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                        .font(.title2.bold())
+                                        .padding(16)
+                                        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)).shadow(radius: 4))
+                                        .foregroundColor(toastText == "Saved!" ? .green : .red)
                                     Spacer()
                                 }
-                                .transition(.opacity)
+                                Spacer()
                             }
+                            .transition(.opacity)
                         }
-                        // Per-image Save/Remove controls
-                        HStack(spacing: 24) {
-                            Button(role: .destructive) {
-                                markRemovedAndAdvance()
-                            } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                            .disabled(savedStates[currentIndex] == false || !isAnalyzed(currentIndex))
-                            Button {
-                                saveCurrentAndAdvance()
-                            } label: {
-                                Label("Save", systemImage: "checkmark")
-                            }
-                            .disabled(savedStates[currentIndex] == true || detectedItems[currentIndex].isEmpty || !isAnalyzed(currentIndex))
-                        }
-                        .padding(.vertical, 8)
-                        // Save/Cancel controls
-                        HStack {
-                            Button("Cancel") { showCancelConfirm = true }
-                            Spacer()
-                            Button("Done") {
-                                saveAllAndShowSummary()
-                            }
-                            .disabled(!canFinish)
-                        }
-                        .padding()
                     }
+                    // Per-image Save/Remove controls
+                    HStack(spacing: 24) {
+                        Button(role: .destructive) {
+                            markRemovedAndAdvance()
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                        .disabled(
+                            !(savedStates.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
+                            savedStates[currentIndex] == false || !isAnalyzed(currentIndex)
+                        )
+                        Button {
+                            saveCurrentAndAdvance()
+                        } label: {
+                            Label("Save", systemImage: "checkmark")
+                        }
+                        .disabled(
+                            !(savedStates.indices.contains(currentIndex) && detectedItems.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
+                            savedStates[currentIndex] == true || detectedItems[currentIndex].isEmpty || !isAnalyzed(currentIndex)
+                        )
+                    }
+                    .padding(.vertical, 8)
+                    // Save/Cancel controls
+                    HStack {
+                        Button("Cancel") { showCancelConfirm = true }
+                        Spacer()
+                        Button("Done") {
+                            saveAllAndShowSummary()
+                        }
+                        .disabled(!canFinish)
+                    }
+                    .padding()
                 }
                 .navigationTitle("Review Items")
                 .alert("Error", isPresented: $showError) {
@@ -467,7 +480,8 @@ struct MultiAddNewItemView: View {
                 for await (idx, results) in group {
                     let items = results.compactMap { cat, prod, colors, pattern, bbox in
                         if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                            return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox)
+                            let cropped = cropImage(images[idx], with: bbox)
+                            return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
                         } else {
                             return nil
                         }
@@ -518,18 +532,18 @@ struct MultiAddNewItemView: View {
         }
     }
     private func saveAllAndShowSummary() {
-        // Save only those marked as saved
         for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
             for (itemIdx, detected) in items.enumerated() {
-                let cropped: UIImage? = cropImage(images[imgIdx], with: detected.boundingBox)
+                let imagePath = WardrobeImageFileHelper.saveImage(images[imgIdx]) ?? ""
+                let croppedImagePath = detected.croppedImage != nil ? WardrobeImageFileHelper.saveImage(detected.croppedImage!) : nil
                 let item = WardrobeItem(
                     category: detected.category,
                     product: detected.product,
                     colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
                     brand: brandInputs[imgIdx][itemIdx],
                     pattern: detected.pattern,
-                    image: images[imgIdx],
-                    croppedImage: cropped
+                    imagePath: imagePath,
+                    croppedImagePath: croppedImagePath
                 )
                 wardrobeViewModel.items.append(item)
             }
@@ -540,15 +554,16 @@ struct MultiAddNewItemView: View {
         var result: [WardrobeItem] = []
         for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
             for (itemIdx, detected) in items.enumerated() {
-                let cropped: UIImage? = cropImage(images[imgIdx], with: detected.boundingBox)
+                let imagePath = WardrobeImageFileHelper.saveImage(images[imgIdx]) ?? ""
+                let croppedImagePath = detected.croppedImage != nil ? WardrobeImageFileHelper.saveImage(detected.croppedImage!) : nil
                 let item = WardrobeItem(
                     category: detected.category,
                     product: detected.product,
                     colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
                     brand: brandInputs[imgIdx][itemIdx],
                     pattern: detected.pattern,
-                    image: images[imgIdx],
-                    croppedImage: cropped
+                    imagePath: imagePath,
+                    croppedImagePath: croppedImagePath
                 )
                 result.append(item)
             }
@@ -621,37 +636,5 @@ struct AddNewItemViewInternal: View {
             )
             .toolbar(hideToolbar ? .hidden : .visible, for: .navigationBar)
         }
-    }
-}
-
-// Simple summary view
-struct SummaryView: View {
-    let savedItems: [WardrobeItem]
-    var onDone: () -> Void
-    var body: some View {
-        VStack(spacing: 24) {
-            Text("Added to your wardrobe!")
-                .font(.title2.bold())
-                .padding(.top, 24)
-            ForEach(summaryStrings, id: \.self) { str in
-                Text(str)
-                    .font(.headline)
-            }
-            Spacer()
-            Button("Done") { onDone() }
-                .font(.headline)
-                .padding()
-                .background(Color.accentColor)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-        }
-        .padding()
-    }
-    var summaryStrings: [String] {
-        let grouped = Dictionary(grouping: savedItems, by: { $0.product })
-        return grouped.map { (product, items) in
-            let plural = (items.count > 1 && !product.lowercased().hasSuffix("s")) ? "s" : ""
-            return "\(items.count) \(product)\(plural)"
-        }.sorted()
     }
 }

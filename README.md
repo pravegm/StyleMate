@@ -16,12 +16,14 @@ StyleMate is your AI-powered fashion wardrobe and stylist app for iOS, built wit
 
 - **Batch Review & Summary:**
   - Swipe between images in a modern, card-based UI.
-  - See a summary screen after adding, e.g. "2 Shirts, 1 Jeans added to your wardrobe."
+  - See a **celebratory summary screen** after adding, with confetti and a colorful background—making adding to your wardrobe feel joyful!
+  - Works for both single and multi-image add, from camera or gallery.
 
 - **Wardrobe Management:**
   - Browse your wardrobe by category.
   - Tap any item to see a full-screen image preview.
   - Delete items with swipe-to-delete and Edit mode.
+  - **Empty Wardrobe** deletes all items and their images from storage.
 
 - **Modern SwiftUI Architecture:**
   - Uses NavigationStack, TabView, and best practices for state management.
@@ -33,7 +35,15 @@ StyleMate is your AI-powered fashion wardrobe and stylist app for iOS, built wit
 - **Accurate Item Cropping:**
   - After AI detection, each wardrobe item's image is automatically cropped to show only the detected item (e.g. just the shirt, jeans, or shoes from a group photo).
   - The cropping uses the detected bounding box, but always ensures a minimum crop size (50% of the image) for clarity and consistency, so even small or imprecise detections are always visible.
-  - This makes browsing your wardrobe visually clear and scalable for all item types.
+  - Cropping is performed during analysis for maximum efficiency.
+
+- **Efficient Image Storage:**
+  - All images and cropped images are stored in the app's file system (`wardrobe_images` folder), not in UserDefaults.
+  - Deleting items or emptying the wardrobe also deletes their images from storage.
+
+- **Performance Optimizations:**
+  - Analysis and cropping are parallelized and happen up front, so saving is instant—even for large batches.
+  - The UI is responsive and robust, with no crashes or delays for large image sets.
 
 ## Getting Started
 
@@ -59,7 +69,5 @@ Pull requests are welcome! For major changes, please open an issue first to disc
 [MIT](LICENSE)
 
 ---
-
-**Note:** Images are stored in UserDefaults for demo purposes. For production, use the file system or Core Data for large data.
 
 **StyleMate** — Your AI-powered, privacy-first fashion assistant for iOS. 

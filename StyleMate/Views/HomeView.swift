@@ -72,17 +72,7 @@ struct HomeView: View {
             .alert("No valid outfit found", isPresented: $homeVM.showNoOutfitAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
-                if !homeVM.debugReasons.isEmpty {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(homeVM.debugReasons.prefix(10), id: \.self) { reason in
-                                Text(reason).font(.caption2).foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                } else {
-                    Text("Try adding more items or adjusting colors/patterns.")
-                }
+                Text("Try adding more items or adjusting colors/patterns.")
             }
             .overlay {
                 if homeVM.isLoading {
@@ -108,11 +98,19 @@ struct TodayOutfitSheet: View {
                     .padding(.top, 8)
                 ForEach(outfitItems, id: \.id) { item in
                     HStack(spacing: 16) {
-                        Image(uiImage: item.image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 64, height: 64)
-                            .cornerRadius(10)
+                        if let uiImage = item.image {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 64, height: 64)
+                                .cornerRadius(10)
+                        } else {
+                            Rectangle()
+                                .fill(Color.gray)
+                                .frame(width: 64, height: 64)
+                                .cornerRadius(10)
+                                .overlay(Text("No Image").font(.caption2))
+                        }
                         Text("\(item.colors.joined(separator: ", ")) \(item.brand) \(item.product)")
                             .font(.body)
                             .foregroundColor(.primary)

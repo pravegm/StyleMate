@@ -71,12 +71,16 @@ struct MyWardrobeView: View {
         .sheet(isPresented: $showReviewBatch, onDismiss: {
             selectedImages = []
         }) {
-            ReviewBatchView(images: selectedImages)
+            MultiAddNewItemView(images: selectedImages, isPresented: $showReviewBatch)
                 .environmentObject(wardrobeViewModel)
         }
         .alert("Are you sure you want to empty your wardrobe?", isPresented: $showEmptyConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Empty", role: .destructive) {
+                for item in wardrobeViewModel.items {
+                    WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+                    WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+                }
                 wardrobeViewModel.items.removeAll()
             }
         } message: {
@@ -186,7 +190,9 @@ struct CategoryDetailView: View {
             } else {
                 ForEach(items) { item in
                     Button {
-                        previewImage = PreviewImage(image: item.croppedImage ?? item.image)
+                        if let previewImg = item.croppedImage ?? item.image {
+                            previewImage = PreviewImage(image: previewImg)
+                        }
                     } label: {
                         HStack {
                             if let cropped = item.croppedImage {
@@ -196,7 +202,7 @@ struct CategoryDetailView: View {
                                     .frame(width: 60, height: 60)
                                     .clipped()
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                            } else if let original = item.image as UIImage? {
+                            } else if let original = item.image {
                                 Image(uiImage: original)
                                     .resizable()
                                     .scaledToFill()
@@ -223,6 +229,8 @@ struct CategoryDetailView: View {
                 .onDelete { indexSet in
                     let itemsToDelete = indexSet.map { items[$0] }
                     for item in itemsToDelete {
+                        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+                        WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
                         if let idx = wardrobeViewModel.items.firstIndex(of: item) {
                             wardrobeViewModel.items.remove(at: idx)
                         }

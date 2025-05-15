@@ -24,6 +24,7 @@ struct AddNewItemView: View {
         var colors: [String]
         var pattern: Pattern = .solid
         var boundingBox: ImageAnalysisService.BoundingBox? = nil
+        var croppedImage: UIImage? = nil
     }
     
     func productOptions(for category: Category) -> [String] {
@@ -207,15 +208,16 @@ struct AddNewItemView: View {
                         return 
                     }
                     for (idx, detected) in detectedItems.wrappedValue.enumerated() {
-                        let cropped: UIImage? = cropImage(img, with: detected.boundingBox)
+                        let imagePath = WardrobeImageFileHelper.saveImage(img) ?? ""
+                        let croppedImagePath = detected.croppedImage != nil ? WardrobeImageFileHelper.saveImage(detected.croppedImage!) : nil
                         let item = WardrobeItem(
                             category: detected.category,
                             product: detected.product,
                             colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
                             brand: brandInputs.wrappedValue[idx],
                             pattern: detected.pattern,
-                            image: img,
-                            croppedImage: cropped
+                            imagePath: imagePath,
+                            croppedImagePath: croppedImagePath
                         )
                         wardrobeViewModel.items.append(item)
                     }
@@ -247,7 +249,8 @@ struct AddNewItemView: View {
             let results = await ImageAnalysisService.shared.analyzeMultiple(image: image)
             detectedItems.wrappedValue = results.compactMap { cat, prod, colors, pattern, bbox in
                 if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                    return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox)
+                    let cropped = cropImage(image, with: bbox)
+                    return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
                 } else {
                     return nil
                 }

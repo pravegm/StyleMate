@@ -36,8 +36,7 @@ class OutfitLogic {
         self.items = items
     }
     
-    func generateNextOutfit(debugReasons: inout [String]) -> Outfit? {
-        debugReasons.removeAll()
+    func generateNextOutfit() -> Outfit? {
         let tops = items.filter { $0.category == .tops }
         let bottoms = items.filter { $0.category == .bottoms }
         let footwears = items.filter { $0.category == .footwear }
@@ -64,11 +63,8 @@ class OutfitLogic {
         // Filter by fashion rules
         var validCombos: [Outfit] = []
         for combo in newCombos {
-            var reasons: [String] = []
-            if isValid(combo, reasons: &reasons) {
+            if isValid(combo) {
                 validCombos.append(combo)
-            } else {
-                debugReasons.append("\(comboDescription(combo)): \(reasons.joined(separator: ", "))")
             }
         }
         guard let outfit = validCombos.shuffled().first else { return nil }
@@ -76,45 +72,38 @@ class OutfitLogic {
         return outfit
     }
     
-    private func isValid(_ outfit: Outfit, reasons: inout [String]) -> Bool {
+    private func isValid(_ outfit: Outfit) -> Bool {
         let items = [outfit.top, outfit.bottom, outfit.footwear, outfit.accessory, outfit.outerwear].compactMap { $0 }
         let allColors = items.flatMap { $0.colors.map { $0.lowercased() } }
         let nonNeutrals = allColors.filter { !neutrals.contains($0) }
         if Set(nonNeutrals).count > 3 {
-            reasons.append("More than 3 non-neutral colors")
             return false
         }
         // Pattern rule
         if items.filter({ $0.isPatterned }).count > 1 {
-            reasons.append("More than 1 patterned item")
             return false
         }
         // Only one statement piece (complementary or pattern)
         let statementCount = (hasComplementaryPair(nonNeutrals) ? 1 : 0) + (items.filter { $0.isPatterned }.count > 0 ? 1 : 0)
         if statementCount > 1 {
-            reasons.append("More than 1 statement piece")
             return false
         }
         // Color harmony
         if hasComplementaryPair(nonNeutrals) {
             // Only one complementary pair, all others must be neutral
             if nonNeutrals.count != 2 {
-                reasons.append("Complementary pair but more than 2 non-neutrals")
                 return false
             }
             if !allOthersNeutral(allColors, pair: complementaryPair(nonNeutrals)) {
-                reasons.append("Non-neutral outside complementary pair")
                 return false
             }
         } else if isAnalogous(nonNeutrals) || isMonochromatic(nonNeutrals) {
             // OK
         } else if isTriadic(nonNeutrals) {
             if nonNeutrals.count > 3 {
-                reasons.append("Triadic but more than 3 non-neutrals")
                 return false
             }
         } else if nonNeutrals.count > 1 {
-            reasons.append("Clashing non-neutrals")
             return false // Clashing
         }
         return true
