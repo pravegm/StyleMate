@@ -78,6 +78,16 @@ struct ReviewBatchView: View {
                                             }
                                         }
                                         TextField("Brand (e.g. Nike)", text: $brandInputs[idx][itemIdx])
+                                        Button(action: {
+                                            removeItem(at: itemIdx, forImage: idx)
+                                        }) {
+                                            HStack {
+                                                Image(systemName: "trash").foregroundColor(.red)
+                                                Text("Remove Item")
+                                            }
+                                        }
+                                        .foregroundColor(.red)
+                                        .padding(.top, 2)
                                     }
                                     .padding(.vertical, 6)
                                 }
@@ -172,6 +182,12 @@ struct ReviewBatchView: View {
         brandInputs.remove(at: idx)
         // Remove image from parent view (handled by parent)
         // For now, just ignore removed images in saveAll
+    }
+    
+    private func removeItem(at itemIdx: Int, forImage imageIdx: Int) {
+        guard detectedItems.indices.contains(imageIdx), detectedItems[imageIdx].indices.contains(itemIdx) else { return }
+        detectedItems[imageIdx].remove(at: itemIdx)
+        brandInputs[imageIdx].remove(at: itemIdx)
     }
     
     private func productOptions(for category: Category) -> [String] {

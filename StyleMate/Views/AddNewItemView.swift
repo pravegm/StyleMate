@@ -164,6 +164,16 @@ struct AddNewItemView: View {
                                     .textContentType(.none)
                                     .autocapitalization(.none)
                                     .accessibilityLabel("Brand")
+                                Button(action: {
+                                    removeDetectedItem(at: idx)
+                                }) {
+                                    HStack {
+                                        Image(systemName: "trash").foregroundColor(.red)
+                                        Text("Remove Item")
+                                    }
+                                }
+                                .foregroundColor(.red)
+                                .padding(.top, 2)
                             }
                             .padding(.vertical, 8)
                         }
@@ -256,6 +266,14 @@ struct AddNewItemView: View {
             return nil
         }
         return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+    }
+    
+    private func removeDetectedItem(at idx: Int) {
+        guard detectedItems.wrappedValue.indices.contains(idx) else { return }
+        detectedItems.wrappedValue.remove(at: idx)
+        if brandInputs.wrappedValue.indices.contains(idx) {
+            brandInputs.wrappedValue.remove(at: idx)
+        }
     }
 }
 

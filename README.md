@@ -11,6 +11,9 @@ StyleMate is your AI-powered fashion wardrobe and stylist app for iOS, built wit
   - "Add All" button lets you instantly add all analyzed items without reviewing each one.
   - Flexible: Save any, all, or none of the batch.
 
+- **Remove Individual Detected Items:**
+  - While reviewing detected items (in both single and batch add flows), you can remove any specific item you don't want to add to your wardrobe, before saving.
+
 - **Batch Review & Summary:**
   - Swipe between images in a modern, card-based UI.
   - See a summary screen after adding, e.g. "2 Shirts, 1 Jeans added to your wardrobe."
