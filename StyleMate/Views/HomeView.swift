@@ -20,10 +20,32 @@ struct HomeView: View {
     @State private var animateButton = false
     @State private var loadingProgress: Double = 0.0
     @State private var loadingTimer: Timer? = nil
+    let styleQuotes = [
+        "Style is a way to say who you are without having to speak. – Rachel Zoe",
+        "Fashion is the armor to survive the reality of everyday life. – Bill Cunningham",
+        "Good clothes open all doors.",
+        "Dress how you want to be addressed.",
+        "Style is a reflection of your attitude and personality.",
+        "Clothes mean nothing until someone lives in them. – Marc Jacobs",
+        "Fashion is about something that comes from within you. – Ralph Lauren",
+        "The joy of dressing is an art. – John Galliano",
+        "You can have anything you want in life if you dress for it. – Edith Head",
+        "Style is knowing who you are, what you want to say, and not giving a damn. – Orson Welles",
+        "People will stare. Make it worth their while. – Harry Winston",
+        "Fashion is instant language. – Miuccia Prada",
+        "Life isn't perfect but your outfit can be.",
+        "Elegance is not standing out, but being remembered. – Giorgio Armani",
+        "When in doubt, overdress."
+    ]
+    @State private var selectedQuote: String = ""
+    let emojiList = ["🧥", "👗", "👚", "👖", "👠", "🧢", "🧣", "👒", "👞", "👟", "🥿", "👔", "🩳", "🩱", "👜", "🎩"]
+    @State private var emojiIndex: Int = 0
+    let emojiTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    @State private var emojiCycling: Bool = false
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottom) {
                 // Elegant gradient background
                 LinearGradient(
                     colors: [Color.pink.opacity(0.13), Color.blue.opacity(0.13), Color.yellow.opacity(0.13)],
@@ -75,9 +97,21 @@ struct HomeView: View {
                                     Text("Your AI Fashion Stylist")
                                         .font(.title3)
                                         .foregroundStyle(.secondary)
-                                    // Energetic subheading with fade/slide and gradient
-                                    MagicalSubheading(text: selectedSubheading)
-                                        .padding(.top, 2)
+                                    // Add the quote here
+                                    HStack {
+                                        Image(systemName: "quote.opening")
+                                            .font(.title3)
+                                            .foregroundColor(.accentColor)
+                                        Text(selectedQuote)
+                                            .font(.body.italic())
+                                            .foregroundColor(.primary)
+                                            .multilineTextAlignment(.center)
+                                        Image(systemName: "quote.closing")
+                                            .font(.title3)
+                                            .foregroundColor(.accentColor)
+                                    }
+                                    .padding(.top, 4)
+                                    .padding(.horizontal, 8)
                                 }
                                 .padding(.horizontal, 18)
                                 .padding(.vertical, 10)
@@ -118,22 +152,14 @@ struct HomeView: View {
                         .disabled(homeVM.isLoading)
                     }
                     .padding(.top, 8)
+                    .padding(.bottom, 60) // Add space for quote at bottom
                 }
                 // Loading overlay
                 if homeVM.isLoading {
-                    OutfitLoadingOverlay(progress: loadingProgress)
+                    OutfitLoadingOverlay(progress: loadingProgress, emoji: emojiList[emojiIndex])
                 }
             }
             .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showProfile = true }) {
-                        Image(systemName: "person.crop.circle")
-                            .font(.system(size: 26, weight: .regular))
-                    }
-                    .accessibilityLabel("Profile")
-                }
-            }
             .sheet(isPresented: $showProfile) {
                 ProfileView()
             }
@@ -152,13 +178,14 @@ struct HomeView: View {
                 // Randomize emoji and subheading on appear
                 selectedEmoji = emojis.randomElement() ?? "✨"
                 selectedSubheading = subheadings.randomElement() ?? "Ready to style your day?"
+                selectedQuote = styleQuotes.shuffled().first ?? "Style is a way to say who you are without having to speak."
             }
             .onChange(of: homeVM.isLoading) { isLoading in
                 if isLoading {
+                    emojiCycling = true
                     loadingProgress = 0.0
                     loadingTimer?.invalidate()
                     loadingTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
-                        // Fill to 90% over about 3.5s
                         if loadingProgress < 0.9 {
                             loadingProgress += 0.005
                         } else {
@@ -167,14 +194,20 @@ struct HomeView: View {
                         }
                     }
                 } else {
+                    emojiCycling = false
+                    emojiIndex = 0
                     loadingTimer?.invalidate()
                     withAnimation(.linear(duration: 0.2)) {
                         loadingProgress = 1.0
                     }
-                    // Optionally, reset progress after a short delay
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         loadingProgress = 0.0
                     }
+                }
+            }
+            .onReceive(emojiTimer) { _ in
+                if emojiCycling {
+                    emojiIndex = (emojiIndex + 1) % emojiList.count
                 }
             }
         }
@@ -184,6 +217,7 @@ struct HomeView: View {
 // Custom animated progress overlay for outfit loading
 struct OutfitLoadingOverlay: View {
     let progress: Double
+    let emoji: String
     @State private var animate = false
     let loadingMessages = [
         "Getting your outfit from StyleMate AI...",
@@ -193,7 +227,6 @@ struct OutfitLoadingOverlay: View {
         "Styling your day with AI magic..."
     ]
     @State private var selectedMessage: String = "Getting your outfit from StyleMate AI..."
-    let emoji = "🧥"
     var body: some View {
         ZStack {
             Color.black.opacity(0.22).ignoresSafeArea()

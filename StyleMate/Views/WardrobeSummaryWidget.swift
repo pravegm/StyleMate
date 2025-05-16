@@ -29,7 +29,7 @@ struct WardrobeSummaryWidget: View {
                 HStack(spacing: 8) {
                     Text("Your Wardrobe at a Glance")
                         .font(.headline)
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(.primary)
                     Text("✨")
                         .font(.title2)
                 }

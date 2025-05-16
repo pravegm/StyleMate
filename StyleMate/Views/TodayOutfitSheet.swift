@@ -43,6 +43,7 @@ struct TodayOutfitSheet: View {
     }
     
     var body: some View {
+        let horizontalPadding: CGFloat = 20
         ZStack {
             LinearGradient(
                 colors: [Color.pink.opacity(0.18), Color.blue.opacity(0.18), Color.yellow.opacity(0.18)],
@@ -51,35 +52,33 @@ struct TodayOutfitSheet: View {
             )
             .ignoresSafeArea()
             VStack(spacing: 0) {
-                VStack(spacing: 24) {
-                    // Big celebratory emoji/icon
-                    Text(selectedEmoji)
-                        .font(.system(size: 70))
-                        .scaleEffect(1.2)
-                        .shadow(radius: 10)
-                        .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 10) {
                     // Energetic heading
                     Text("Your Look for Today!")
                         .font(.largeTitle.bold())
                         .foregroundColor(.accentColor)
-                        .multilineTextAlignment(.center)
+                        .padding(.top, 24)
                         .transition(.scale)
                     Text(selectedSubheading)
-                        .font(.title3)
-                        .foregroundColor(.secondary)
-                    // Outfit items as tiles in a grid
-                    ScrollView {
-                        let minTileWidth: CGFloat = 180
-                        let spacing: CGFloat = 16
-                        let totalWidth = UIScreen.main.bounds.width - 16 // account for padding
-                        let columnsCount = max(1, Int((totalWidth + spacing) / (minTileWidth + spacing)))
-                        let columns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: columnsCount)
-                        let items = outfitItems
-                        let rows = gridRows(items: items, columnsCount: columnsCount)
-                        LazyVGrid(columns: columns, alignment: .center, spacing: spacing) {
-                            ForEach(0..<(rows.count - (rows.last?.count ?? 0 < columnsCount ? 1 : 0)), id: \ .self) { rowIdx in
-                                let row = rows[rowIdx]
-                                ForEach(row, id: \ .id) { item in
+                        .font(.body)
+                        .foregroundColor(.secondary.opacity(0.85))
+                        .padding(.bottom, 18)
+                }
+                .padding(.horizontal, horizontalPadding)
+                // Outfit items as tiles in a grid
+                ScrollView {
+                    let minTileWidth: CGFloat = 180
+                    let spacing: CGFloat = 16
+                    let totalWidth = UIScreen.main.bounds.width - 2 * horizontalPadding
+                    let columnsCount = max(1, Int((totalWidth + spacing) / (minTileWidth + spacing)))
+                    let columns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: columnsCount)
+                    let items = outfitItems
+                    let rows = gridRows(items: items, columnsCount: columnsCount)
+                    LazyVGrid(columns: columns, alignment: .center, spacing: spacing) {
+                        ForEach(0..<(rows.count - (rows.last?.count ?? 0 < columnsCount ? 1 : 0)), id: \ .self) { rowIdx in
+                            let row = rows[rowIdx]
+                            ForEach(row, id: \ .id) { item in
+                                VStack(spacing: 0) {
                                     Button(action: {
                                         if let img = item.croppedImage ?? item.image {
                                             previewImage = PreviewImage(image: img)
@@ -91,13 +90,13 @@ struct TodayOutfitSheet: View {
                                                     .resizable()
                                                     .scaledToFit()
                                                     .frame(height: 90)
-                                                    .cornerRadius(14)
-                                                    .shadow(color: Color.accentColor.opacity(0.18), radius: 6, x: 0, y: 4)
+                                                    .cornerRadius(18)
+                                                    .shadow(color: Color.accentColor.opacity(0.18), radius: 8, x: 0, y: 6)
                                             } else {
                                                 Rectangle()
                                                     .fill(Color.gray)
                                                     .frame(height: 90)
-                                                    .cornerRadius(14)
+                                                    .cornerRadius(18)
                                                     .overlay(Text("No Image").font(.caption2))
                                             }
                                             VStack(alignment: .center, spacing: 2) {
@@ -117,69 +116,72 @@ struct TodayOutfitSheet: View {
                                                 }
                                             }
                                         }
-                                        .padding()
-                                        .frame(width: minTileWidth)
-                                        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground).opacity(0.95)))
-                                        .shadow(color: Color.accentColor.opacity(0.08), radius: 6, x: 0, y: 4)
                                     }
+                                    .padding(.bottom, 4)
                                 }
+                                .padding()
+                                .frame(width: minTileWidth)
+                                .background(RoundedRectangle(cornerRadius: 22).fill(Color(.systemBackground).opacity(0.97)))
+                                .shadow(color: Color.accentColor.opacity(0.10), radius: 10, x: 0, y: 6)
                             }
-                        }
-                        // Render the last row (if incomplete) as a centered HStack
-                        if let lastRow = rows.last, lastRow.count < columnsCount {
-                            HStack(spacing: spacing) {
-                                Spacer(minLength: 0)
-                                ForEach(lastRow, id: \ .id) { item in
-                                    Button(action: {
-                                        if let img = item.croppedImage ?? item.image {
-                                            previewImage = PreviewImage(image: img)
-                                        }
-                                    }) {
-                                        VStack(spacing: 10) {
-                                            if let uiImage = item.croppedImage ?? item.image {
-                                                Image(uiImage: uiImage)
-                                                    .resizable()
-                                                    .scaledToFit()
-                                                    .frame(height: 90)
-                                                    .cornerRadius(14)
-                                                    .shadow(color: Color.accentColor.opacity(0.18), radius: 6, x: 0, y: 4)
-                                            } else {
-                                                Rectangle()
-                                                    .fill(Color.gray)
-                                                    .frame(height: 90)
-                                                    .cornerRadius(14)
-                                                    .overlay(Text("No Image").font(.caption2))
-                                            }
-                                            VStack(alignment: .center, spacing: 2) {
-                                                Text(item.product)
-                                                    .font(.headline)
-                                                    .foregroundColor(.primary)
-                                                Text(item.colors.joined(separator: ", "))
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.accentColor)
-                                                Text(item.pattern.rawValue)
-                                                    .font(.footnote)
-                                                    .foregroundColor(.secondary)
-                                                if !item.brand.isEmpty {
-                                                    Text(item.brand)
-                                                        .font(.caption)
-                                                        .foregroundColor(.secondary)
-                                                }
-                                            }
-                                        }
-                                        .padding()
-                                        .frame(width: minTileWidth)
-                                        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground).opacity(0.95)))
-                                        .shadow(color: Color.accentColor.opacity(0.08), radius: 6, x: 0, y: 4)
-                                    }
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 8)
                         }
                     }
+                    // Render the last row (if incomplete) as a centered HStack
+                    if let lastRow = rows.last, lastRow.count < columnsCount {
+                        HStack(spacing: spacing) {
+                            Spacer(minLength: 0)
+                            ForEach(lastRow, id: \ .id) { item in
+                                Button(action: {
+                                    if let img = item.croppedImage ?? item.image {
+                                        previewImage = PreviewImage(image: img)
+                                    }
+                                }) {
+                                    VStack(spacing: 10) {
+                                        if let uiImage = item.croppedImage ?? item.image {
+                                            Image(uiImage: uiImage)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(height: 90)
+                                                .cornerRadius(18)
+                                                .shadow(color: Color.accentColor.opacity(0.18), radius: 8, x: 0, y: 6)
+                                        } else {
+                                            Rectangle()
+                                                .fill(Color.gray)
+                                                .frame(height: 90)
+                                                .cornerRadius(18)
+                                                .overlay(Text("No Image").font(.caption2))
+                                        }
+                                        VStack(alignment: .center, spacing: 2) {
+                                            Text(item.product)
+                                                .font(.headline)
+                                                .foregroundColor(.primary)
+                                            Text(item.colors.joined(separator: ", "))
+                                                .font(.subheadline)
+                                                .foregroundColor(.accentColor)
+                                            Text(item.pattern.rawValue)
+                                                .font(.footnote)
+                                                .foregroundColor(.secondary)
+                                            if !item.brand.isEmpty {
+                                                Text(item.brand)
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                    }
+                                    .padding()
+                                    .frame(width: minTileWidth)
+                                    .background(RoundedRectangle(cornerRadius: 22).fill(Color(.systemBackground).opacity(0.97)))
+                                    .shadow(color: Color.accentColor.opacity(0.10), radius: 10, x: 0, y: 6)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 0)
+                        .padding(.bottom, 12)
+                    }
                 }
+                .padding(.horizontal, horizontalPadding)
+                .padding(.top, 4)
                 Spacer(minLength: 0)
                 // Fixed bottom buttons
                 HStack(spacing: 16) {

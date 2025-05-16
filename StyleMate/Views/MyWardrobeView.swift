@@ -16,102 +16,72 @@ struct MyWardrobeView: View {
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(Category.allCases) { category in
-                        let count = wardrobeViewModel.items.filter { $0.category == category }.count
-                        Button {
-                            selectedCategory = category
-                        } label: {
-                            CategoryTile(category: category, count: count)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center) {
+                    Text("My Wardrobe")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                        .padding(.leading, 20)
+                    Spacer()
+                }
+                .padding(.top, 16)
+                .padding(.bottom, 8)
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 16) {
+                        ForEach(Category.allCases) { category in
+                            let count = wardrobeViewModel.items.filter { $0.category == category }.count
+                            Button {
+                                selectedCategory = category
+                            } label: {
+                                CategoryTile(category: category, count: count)
+                            }
+                            .accessibilityLabel("\(category.rawValue) category tile")
                         }
-                        .accessibilityLabel("\(category.rawValue) category tile")
+                    }
+                    .padding()
+                }
+            }
+            .sheet(isPresented: $showProfile) {
+                ProfileView()
+            }
+            .sheet(isPresented: $showPhotoPicker, onDismiss: {
+                if !selectedImages.isEmpty {
+                    showReviewBatch = true
+                }
+            }) {
+                PhotoPicker(images: $selectedImages, selectionLimit: 0)
+            }
+            .sheet(isPresented: $showReviewBatch, onDismiss: {
+                selectedImages = []
+            }) {
+                MultiAddNewItemView(images: selectedImages, isPresented: $showReviewBatch)
+                    .environmentObject(wardrobeViewModel)
+            }
+            .alert("Tip", isPresented: $showPickerTip) {
+                Button("Continue") {
+                    hasShownPickerTip = true
+                    showPhotoPicker = true
+                }
+            } message: {
+                Text("Tap multiple images to select them, then tap 'Add' or 'Done' to confirm.")
+            }
+            .sheet(isPresented: Binding(
+                get: { showEditSheet && editingItem != nil },
+                set: { newValue in
+                    if !newValue {
+                        showEditSheet = false
+                        editingItem = nil
                     }
                 }
-                .padding()
-            }
-            .navigationTitle("My Wardrobe")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack {
-                        Button("Empty Wardrobe") {
-                            showEmptyConfirmation = true
+            )) {
+                if let editingItem = editingItem {
+                    EditWardrobeItemView(item: editingItem) { updatedItem in
+                        if let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == updatedItem.id }) {
+                            wardrobeViewModel.items[idx] = updatedItem
                         }
-                        Button(action: { showProfile = true }) {
-                            Image(systemName: "person.crop.circle")
-                                .font(.system(size: 26, weight: .regular))
-                        }
-                        .accessibilityLabel("Profile")
+                        self.showEditSheet = false
+                        self.editingItem = nil
                     }
-                }
-            }
-            .background(
-                NavigationLink(
-                    destination: Group {
-                        if let selected = selectedCategory {
-                            CategoryDetailView(category: selected)
-                        }
-                    },
-                    isActive: Binding(
-                        get: { selectedCategory != nil },
-                        set: { if !$0 { selectedCategory = nil } }
-                    )
-                ) { EmptyView() }
-                .hidden()
-            )
-        }
-        .sheet(isPresented: $showProfile) {
-            ProfileView()
-        }
-        .sheet(isPresented: $showPhotoPicker, onDismiss: {
-            if !selectedImages.isEmpty {
-                showReviewBatch = true
-            }
-        }) {
-            PhotoPicker(images: $selectedImages, selectionLimit: 0)
-        }
-        .sheet(isPresented: $showReviewBatch, onDismiss: {
-            selectedImages = []
-        }) {
-            MultiAddNewItemView(images: selectedImages, isPresented: $showReviewBatch)
-                .environmentObject(wardrobeViewModel)
-        }
-        .alert("Are you sure you want to empty your wardrobe?", isPresented: $showEmptyConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Empty", role: .destructive) {
-                for item in wardrobeViewModel.items {
-                    WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-                    WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
-                }
-                wardrobeViewModel.items.removeAll()
-            }
-        } message: {
-            Text("This will remove all items from your wardrobe and cannot be undone.")
-        }
-        .alert("Tip", isPresented: $showPickerTip) {
-            Button("Continue") {
-                hasShownPickerTip = true
-                showPhotoPicker = true
-            }
-        } message: {
-            Text("Tap multiple images to select them, then tap 'Add' or 'Done' to confirm.")
-        }
-        .sheet(isPresented: Binding(
-            get: { showEditSheet && editingItem != nil },
-            set: { newValue in
-                if !newValue {
-                    showEditSheet = false
-                    editingItem = nil
-                }
-            }
-        )) {
-            if let editingItem = editingItem {
-                EditWardrobeItemView(item: editingItem) { updatedItem in
-                    if let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == updatedItem.id }) {
-                        wardrobeViewModel.items[idx] = updatedItem
-                    }
-                    self.showEditSheet = false
-                    self.editingItem = nil
                 }
             }
         }
@@ -177,8 +147,9 @@ struct CategoryTile: View {
                 .foregroundColor(.primary)
                 .multilineTextAlignment(.center)
             Text("\(count) item\(count == 1 ? "" : "s")")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+                .font(.body)
+                .foregroundColor(.primary)
+                .accessibilityLabel("\(count) \(category.rawValue) items")
         }
         .frame(maxWidth: .infinity)
         .padding(10)
@@ -224,6 +195,16 @@ struct CategoryDetailView: View {
                         HStack {
                             Text(group.product)
                                 .font(.headline)
+                            ZStack {
+                                Circle()
+                                    .fill(Color.accentColor)
+                                    .frame(width: 22, height: 22)
+                                Text("\(group.items.count)")
+                                    .font(.body.bold())
+                                    .foregroundColor(.white)
+                                    .accessibilityLabel("\(group.items.count) items")
+                            }
+                            .accessibilityLabel("\(group.items.count) items")
                             Spacer()
                             Button(action: {
                                 if expandedProducts.contains(group.product) {
@@ -458,6 +439,14 @@ struct ZoomableImage: View {
                 .animation(.easeInOut(duration: 0.2), value: scale)
         }
         .clipped()
+    }
+}
+
+// PreferenceKey for scroll offset
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

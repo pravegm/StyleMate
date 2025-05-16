@@ -2,7 +2,10 @@ import SwiftUI
 
 struct ProfileView: View {
     @EnvironmentObject private var authService: AuthService
+    @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @State private var showingSignOutAlert = false
+    @State private var showingOptionsMenu = false
+    @State private var showEmptyConfirmation = false
     
     var body: some View {
         NavigationStack {
@@ -54,6 +57,21 @@ struct ProfileView: View {
                 }
             }
             .navigationTitle("Profile")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button(role: .destructive) {
+                            showEmptyConfirmation = true
+                        } label: {
+                            Label("Empty My Wardrobe", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal")
+                            .imageScale(.large)
+                            .accessibilityLabel("Options Menu")
+                    }
+                }
+            }
             .alert("Sign Out", isPresented: $showingSignOutAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Sign Out", role: .destructive) {
@@ -66,6 +84,18 @@ struct ProfileView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
+            .alert("Are you sure you want to empty your wardrobe?", isPresented: $showEmptyConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Empty", role: .destructive) {
+                    for item in wardrobeViewModel.items {
+                        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+                        WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+                    }
+                    wardrobeViewModel.items.removeAll()
+                }
+            } message: {
+                Text("This will remove all items from your wardrobe and cannot be undone.")
+            }
         }
     }
 }
@@ -73,4 +103,5 @@ struct ProfileView: View {
 #Preview {
     ProfileView()
         .environmentObject(AuthService())
+        .environmentObject(WardrobeViewModel())
 } 
