@@ -8,100 +8,153 @@ struct LoginView: View {
     @State private var password: String = ""
     @State private var name: String = ""
     @State private var isSignUp = false
+    @State private var appear = false
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                // App Logo and Title
-                VStack(spacing: 16) {
-                    Image(systemName: "tshirt.fill")
-                        .font(.system(size: 80))
-                        .foregroundColor(.blue)
-                    
-                    Text("StyleMate")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                    
-                    Text("Your AI Fashion Stylist")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 60)
+            ZStack {
+                // Magical gradient background
+                LinearGradient(
+                    colors: [Color.pink.opacity(0.18), Color.blue.opacity(0.18), Color.yellow.opacity(0.18)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
                 
-                Spacer()
-                
-                // User Info Fields
-                VStack(spacing: 12) {
-                    TextField("Email", text: $email)
-                        .textContentType(.emailAddress)
-                        .keyboardType(.emailAddress)
-                        .autocapitalization(.none)
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(8)
-                    SecureField("Password", text: $password)
-                        .textContentType(.password)
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(8)
-                    if isSignUp {
-                        TextField("Name", text: $name)
-                            .textContentType(.name)
+                VStack(spacing: 28) {
+                    Spacer(minLength: 24)
+                    // Logo and magical intro
+                    VStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.accentColor.opacity(0.18))
+                                .frame(width: 100, height: 100)
+                                .blur(radius: 16)
+                            Image(systemName: "tshirt.fill")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 64, height: 64)
+                                .foregroundColor(.accentColor)
+                                .shadow(color: Color.accentColor.opacity(0.18), radius: 8, x: 0, y: 4)
+                            // Subtle sparkles
+                            MagicalSparkles()
+                        }
+                        Text("StyleMate")
+                            .font(.system(size: 38, weight: .bold, design: .rounded))
+                            .foregroundColor(.primary)
+                        Text("Step into your AI-powered wardrobe")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                        Text("Unlock daily style inspiration, powered by AI magic.")
+                            .font(.headline)
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Color.accentColor, Color.pink.opacity(0.85), Color.blue.opacity(0.85)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 2)
+                    }
+                    .padding(.top, 36)
+                    .opacity(appear ? 1 : 0)
+                    .offset(y: appear ? 0 : 24)
+                    .animation(.easeOut(duration: 1.1), value: appear)
+                    
+                    Spacer(minLength: 8)
+                    // Card for input fields
+                    VStack(spacing: 16) {
+                        if isSignUp {
+                            TextField("Name", text: $name)
+                                .textContentType(.name)
+                                .padding()
+                                .background(Color(.secondarySystemBackground))
+                                .cornerRadius(10)
+                        }
+                        TextField("Email", text: $email)
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .autocapitalization(.none)
                             .padding()
                             .background(Color(.secondarySystemBackground))
-                            .cornerRadius(8)
+                            .cornerRadius(10)
+                        SecureField("Password", text: $password)
+                            .textContentType(.password)
+                            .padding()
+                            .background(Color(.secondarySystemBackground))
+                            .cornerRadius(10)
                     }
-                }
-                .padding(.horizontal, 20)
-                
-                // Sign In/Up Buttons
-                VStack(spacing: 16) {
-                    Button(isSignUp ? "Sign Up" : "Sign In") {
-                        Task {
-                            if isSignUp {
-                                let result = await authService.signUpWithEmail(email: email, password: password, name: name)
-                                if let error = result {
-                                    errorMessage = error
-                                    showError = true
-                                }
-                            } else {
-                                let result = await authService.signInWithEmail(email: email, password: password)
-                                if let error = result {
-                                    errorMessage = error
-                                    showError = true
+                    .padding(20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(Color(.systemBackground).opacity(0.96))
+                            .shadow(color: Color.accentColor.opacity(0.08), radius: 8, x: 0, y: 4)
+                    )
+                    .padding(.horizontal, 24)
+                    .opacity(appear ? 1 : 0)
+                    .offset(y: appear ? 0 : 24)
+                    .animation(.easeOut(duration: 1.2).delay(0.2), value: appear)
+                    
+                    // Sign In/Up Buttons
+                    VStack(spacing: 16) {
+                        Button(isSignUp ? "Create Your Style Account" : "Enter the Style Portal") {
+                            Task {
+                                if isSignUp {
+                                    let result = await authService.signUpWithEmail(email: email, password: password, name: name)
+                                    if let error = result {
+                                        errorMessage = error
+                                        showError = true
+                                    }
+                                } else {
+                                    let result = await authService.signInWithEmail(email: email, password: password)
+                                    if let error = result {
+                                        errorMessage = error
+                                        showError = true
+                                    }
                                 }
                             }
                         }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                    
-                    Button(isSignUp ? "Already have an account? Sign In" : "Don't have an account? Sign Up") {
-                        isSignUp.toggle()
-                    }
-                    .font(.footnote)
-                }
-                .padding(.horizontal, 20)
-                
-                Spacer()
-                
-                // Terms and Privacy
-                VStack(spacing: 8) {
-                    Text("By continuing, you agree to our")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(height: 50)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            LinearGradient(colors: [Color.accentColor, Color.pink.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .shadow(color: Color.accentColor.opacity(0.13), radius: 8, x: 0, y: 4)
+                        .accessibilityLabel(isSignUp ? "Sign up for StyleMate" : "Sign in to StyleMate")
+                        Button(isSignUp ? "Already have an account? Sign In" : "Don't have an account? Sign Up") {
+                            withAnimation { isSignUp.toggle() }
+                        }
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    
-                    HStack(spacing: 4) {
-                        Link("Terms of Service", destination: URL(string: "https://your-terms-url.com")!)
-                        Text("and")
-                        Link("Privacy Policy", destination: URL(string: "https://your-privacy-url.com")!)
+                        .foregroundColor(.accentColor)
                     }
-                    .font(.footnote)
+                    .padding(.horizontal, 24)
+                    .opacity(appear ? 1 : 0)
+                    .offset(y: appear ? 0 : 24)
+                    .animation(.easeOut(duration: 1.2).delay(0.3), value: appear)
+                    
+                    Spacer()
+                    // Terms and Privacy
+                    VStack(spacing: 8) {
+                        Text("By continuing, you agree to our")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Link("Terms of Service", destination: URL(string: "https://your-terms-url.com")!)
+                            Text("and")
+                            Link("Privacy Policy", destination: URL(string: "https://your-privacy-url.com")!)
+                        }
+                        .font(.footnote)
+                    }
+                    .padding(.bottom, 20)
+                    .opacity(appear ? 1 : 0)
+                    .offset(y: appear ? 0 : 12)
+                    .animation(.easeOut(duration: 1.2).delay(0.4), value: appear)
                 }
-                .padding(.bottom, 20)
+                .onAppear { appear = true }
             }
             .alert("Error", isPresented: $showError) {
                 Button("OK", role: .cancel) {}
