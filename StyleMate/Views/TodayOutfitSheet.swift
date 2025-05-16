@@ -5,6 +5,7 @@ struct TodayOutfitSheet: View {
     @Binding var isPresented: Bool
     @State private var previewImage: PreviewImage? = nil
     @EnvironmentObject var homeVM: HomeViewModel
+    @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @State private var animate = false
     let emojis = ["🎉", "✨", "🥳", "🎊", "💫", "👗", "🕺", "💃", "🧥", "👚", "👖", "👠", "👒", "🧢", "🧣", "🧤"]
     let burstCount = 18
@@ -52,6 +53,12 @@ struct TodayOutfitSheet: View {
             )
             .ignoresSafeArea()
             VStack(spacing: 0) {
+                // Drag indicator
+                Capsule()
+                    .fill(Color.secondary.opacity(0.25))
+                    .frame(width: 44, height: 5)
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
                 VStack(alignment: .leading, spacing: 10) {
                     // Energetic heading
                     Text("Your Look for Today!")
@@ -118,6 +125,26 @@ struct TodayOutfitSheet: View {
                                         }
                                     }
                                     .padding(.bottom, 4)
+                                    // Per-item shuffle button
+                                    Button(action: {
+                                        if let category = Category.allCases.first(where: { $0 == item.category }) {
+                                            homeVM.shuffleItemInOutfit(category: category, wardrobe: wardrobeViewModel.items)
+                                        }
+                                    }) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "arrow.triangle.2.circlepath")
+                                                .font(.subheadline)
+                                            Text("Shuffle")
+                                                .font(.caption)
+                                        }
+                                        .padding(.vertical, 4)
+                                        .padding(.horizontal, 10)
+                                        .background(Color.accentColor.opacity(0.13))
+                                        .foregroundColor(.accentColor)
+                                        .clipShape(Capsule())
+                                    }
+                                    .padding(.top, 2)
+                                    .disabled(homeVM.isLoading)
                                 }
                                 .padding()
                                 .frame(width: minTileWidth)
@@ -173,6 +200,26 @@ struct TodayOutfitSheet: View {
                                     .background(RoundedRectangle(cornerRadius: 22).fill(Color(.systemBackground).opacity(0.97)))
                                     .shadow(color: Color.accentColor.opacity(0.10), radius: 10, x: 0, y: 6)
                                 }
+                                // Per-item shuffle button for last row
+                                Button(action: {
+                                    if let category = Category.allCases.first(where: { $0 == item.category }) {
+                                        homeVM.shuffleItemInOutfit(category: category, wardrobe: wardrobeViewModel.items)
+                                    }
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.triangle.2.circlepath")
+                                            .font(.subheadline)
+                                        Text("Shuffle")
+                                            .font(.caption)
+                                    }
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 10)
+                                    .background(Color.accentColor.opacity(0.13))
+                                    .foregroundColor(.accentColor)
+                                    .clipShape(Capsule())
+                                }
+                                .padding(.top, 2)
+                                .disabled(homeVM.isLoading)
                             }
                             Spacer(minLength: 0)
                         }
@@ -243,6 +290,14 @@ struct TodayOutfitSheet: View {
                 }
             }
             .allowsHitTesting(false)
+            // Loading overlay
+            if homeVM.isLoading {
+                Color.black.opacity(0.18).ignoresSafeArea()
+                ProgressView("Shuffling...")
+                    .progressViewStyle(CircularProgressViewStyle(tint: .accentColor))
+                    .padding(32)
+                    .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+            }
         }
         .sheet(item: $previewImage) { wrapper in
             VStack {
@@ -259,6 +314,11 @@ struct TodayOutfitSheet: View {
             Button("OK") { homeVM.resetShufflePopup() }
         } message: {
             Text("You have seen all the current outfit suggestions. Tap OK to cycle through them again.")
+        }
+        .alert("Too Many Requests", isPresented: $homeVM.showRateLimitAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("You're shuffling too fast! Please wait a moment and try again.")
         }
     }
     var outfitItems: [WardrobeItem] {

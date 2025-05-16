@@ -167,6 +167,7 @@ struct HomeView: View {
                 if let outfit = homeVM.todayOutfit {
                     TodayOutfitSheet(outfit: outfit, isPresented: $homeVM.showOutfitSheet)
                         .environmentObject(homeVM)
+                        .environmentObject(wardrobeViewModel)
                 }
             }
             .alert("No valid outfit found", isPresented: $homeVM.showNoOutfitAlert) {
