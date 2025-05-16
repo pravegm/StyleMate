@@ -1,10 +1,35 @@
 # StyleMate
 
-StyleMate is your AI-powered fashion wardrobe and stylist app for iOS, built with SwiftUI.
+StyleMate is your AI-powered wardrobe and outfit manager. Effortlessly organize, review, and style your clothing collection.
 
 ## Features
 
-- **AI-Powered Outfit Suggestions:**
+- **Add New Items:** Add clothing items to your wardrobe with category, product, color, pattern, brand, and image.
+- **Edit Items:** Swipe left on any item in a category to reveal Edit and Delete actions. Edit lets you change the category, product, color(s), pattern, and brand for any item (the image remains unchanged).
+- **Delete Items:** Swipe left and tap Delete, or use multi-select delete (see below).
+- **Category Organization:** Items are grouped by category (e.g., Tops, Bottoms, Footwear, etc.).
+- **Product Grouping & Sections:** Within each category, items are further grouped by product (e.g., Shirts, Sweaters, Jeans). Each product group appears as a collapsible/expandable section. All sections are expanded by default when you open a category. Tap the section header to collapse or expand.
+- **Multi-Select Delete:** Tap the Edit button in the top right of a category detail view to enter multi-select mode. Checkboxes appear next to each item. Select multiple items, then tap the red Delete button to remove them all at once. A Cancel button lets you exit edit mode without deleting. While in edit mode, swipe actions and item preview are disabled for clarity.
+- **Image Preview:** Tap an item to preview its image in full screen (when not in edit mode).
+- **Profile & Settings:** Access your profile and app settings from the main wardrobe view.
+
+## Usage
+
+1. **Add Items:** Use the add button to add new clothing items to your wardrobe.
+2. **Browse by Category:** Tap a category tile to see all items in that category, grouped by product.
+3. **Edit or Delete:** Swipe left on an item to edit or delete it. Or tap Edit to select and delete multiple items.
+4. **Collapse/Expand Sections:** Tap a product section header to collapse or expand that group.
+5. **Multi-Select Delete:** In edit mode, select items with checkboxes and tap Delete to remove them.
+
+## Requirements
+- iOS 16+
+- Xcode 14+
+
+---
+
+For more details, see the in-app help or contact the developer.
+
+## AI-Powered Outfit Suggestions:
   - Uses Google Gemini to suggest outfits based on your wardrobe, following real fashion rules, color theory, and item compatibility.
   - Gemini is strictly prompted to use only the exact product, category, and pattern strings from your provided lists—no synonyms, no singular/plural variants, no typos.
   - Robust product detection and canonicalization: all detected product names are mapped to the exact, canonical product in your wardrobe list, handling singular/plural/case/typos. Picker selection is always valid and never defaults to an unrelated product.

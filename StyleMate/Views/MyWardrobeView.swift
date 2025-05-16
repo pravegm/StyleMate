@@ -11,6 +11,8 @@ struct MyWardrobeView: View {
     @State private var showReviewBatch = false
     @State private var showPickerTip = false
     @AppStorage("hasShownPickerTip") private var hasShownPickerTip: Bool = false
+    @State private var editingItem: WardrobeItem? = nil
+    @State private var showEditSheet = false
     
     var body: some View {
         NavigationStack {
@@ -93,6 +95,25 @@ struct MyWardrobeView: View {
             }
         } message: {
             Text("Tap multiple images to select them, then tap 'Add' or 'Done' to confirm.")
+        }
+        .sheet(isPresented: Binding(
+            get: { showEditSheet && editingItem != nil },
+            set: { newValue in
+                if !newValue {
+                    showEditSheet = false
+                    editingItem = nil
+                }
+            }
+        )) {
+            if let editingItem = editingItem {
+                EditWardrobeItemView(item: editingItem) { updatedItem in
+                    if let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == updatedItem.id }) {
+                        wardrobeViewModel.items[idx] = updatedItem
+                    }
+                    self.showEditSheet = false
+                    self.editingItem = nil
+                }
+            }
         }
     }
 }
@@ -182,66 +203,171 @@ struct CategoryDetailView: View {
         wardrobeViewModel.items.filter { $0.category == category }
     }
     @State private var previewImage: PreviewImage? = nil
+    @State private var editingItem: WardrobeItem? = nil
+    @State private var expandedProducts: Set<String> = []
+    @State private var editMode: Bool = false
+    @State private var selectedItems: Set<UUID> = []
+
+    var groupedItems: [(product: String, items: [WardrobeItem])] {
+        let groups = Dictionary(grouping: items, by: { $0.product })
+        return groups.keys.sorted().map { key in (product: key, items: groups[key] ?? []) }
+    }
+
     var body: some View {
         List {
             if items.isEmpty {
                 Text("No items in this category.")
                     .foregroundColor(.secondary)
             } else {
-                ForEach(items) { item in
-                    Button {
-                        if let previewImg = item.croppedImage ?? item.image {
-                            previewImage = PreviewImage(image: previewImg)
-                        }
-                    } label: {
+                ForEach(groupedItems, id: \.product) { group in
+                    Section(header:
                         HStack {
-                            if let cropped = item.croppedImage {
-                                Image(uiImage: cropped)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 60, height: 60)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                            } else if let original = item.image {
-                                Image(uiImage: original)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 60, height: 60)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                            } else {
-                                Rectangle()
-                                    .fill(Color.gray)
-                                    .frame(width: 60, height: 60)
-                                    .overlay(Text("No Image").font(.caption2))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            Text(group.product)
+                                .font(.headline)
+                            Spacer()
+                            Button(action: {
+                                if expandedProducts.contains(group.product) {
+                                    expandedProducts.remove(group.product)
+                                } else {
+                                    expandedProducts.insert(group.product)
+                                }
+                            }) {
+                                Image(systemName: expandedProducts.contains(group.product) ? "chevron.down" : "chevron.right")
+                                    .foregroundColor(.accentColor)
                             }
-                            VStack(alignment: .leading) {
-                                Text(item.name)
-                                    .font(.headline)
-                                Text(item.pattern.rawValue)
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
+                            .buttonStyle(BorderlessButtonStyle())
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if expandedProducts.contains(group.product) {
+                                expandedProducts.remove(group.product)
+                            } else {
+                                expandedProducts.insert(group.product)
                             }
                         }
-                    }
-                }
-                .onDelete { indexSet in
-                    let itemsToDelete = indexSet.map { items[$0] }
-                    for item in itemsToDelete {
-                        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-                        WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
-                        if let idx = wardrobeViewModel.items.firstIndex(of: item) {
-                            wardrobeViewModel.items.remove(at: idx)
+                    ) {
+                        if expandedProducts.contains(group.product) {
+                            ForEach(group.items) { item in
+                                HStack {
+                                    if editMode {
+                                        Button(action: {
+                                            if selectedItems.contains(item.id) {
+                                                selectedItems.remove(item.id)
+                                            } else {
+                                                selectedItems.insert(item.id)
+                                            }
+                                        }) {
+                                            Image(systemName: selectedItems.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                                                .foregroundColor(selectedItems.contains(item.id) ? .accentColor : .secondary)
+                                                .imageScale(.large)
+                                        }
+                                        .buttonStyle(BorderlessButtonStyle())
+                                    }
+                                    Button {
+                                        if !editMode, let previewImg = item.croppedImage ?? item.image {
+                                            previewImage = PreviewImage(image: previewImg)
+                                        }
+                                    } label: {
+                                        HStack {
+                                            if let cropped = item.croppedImage {
+                                                Image(uiImage: cropped)
+                                                    .resizable()
+                                                    .scaledToFill()
+                                                    .frame(width: 60, height: 60)
+                                                    .clipped()
+                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            } else if let original = item.image {
+                                                Image(uiImage: original)
+                                                    .resizable()
+                                                    .scaledToFill()
+                                                    .frame(width: 60, height: 60)
+                                                    .clipped()
+                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            } else {
+                                                Rectangle()
+                                                    .fill(Color.gray)
+                                                    .frame(width: 60, height: 60)
+                                                    .overlay(Text("No Image").font(.caption2))
+                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            }
+                                            VStack(alignment: .leading) {
+                                                Text(item.name)
+                                                    .font(.headline)
+                                                Text(item.pattern.rawValue)
+                                                    .font(.subheadline)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                    }
+                                    .disabled(editMode) // Disable preview in edit mode
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                        if !editMode {
+                                            Button(role: .destructive) {
+                                                if let idx = wardrobeViewModel.items.firstIndex(of: item) {
+                                                    WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+                                                    WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+                                                    wardrobeViewModel.items.remove(at: idx)
+                                                }
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                            .tint(.red)
+                                            Button {
+                                                editingItem = item
+                                            } label: {
+                                                Label("Edit", systemImage: "pencil")
+                                            }
+                                            .tint(.blue)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+        .onAppear {
+            expandedProducts = Set(groupedItems.map { $0.product })
+        }
         .navigationTitle(category.rawValue)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                EditButton()
+                if editMode {
+                    Button(action: {
+                        // Delete selected items
+                        let toDelete = selectedItems
+                        for id in toDelete {
+                            if let item = wardrobeViewModel.items.first(where: { $0.id == id }) {
+                                WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+                                WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+                                if let idx = wardrobeViewModel.items.firstIndex(of: item) {
+                                    wardrobeViewModel.items.remove(at: idx)
+                                }
+                            }
+                        }
+                        selectedItems.removeAll()
+                        editMode = false
+                    }) {
+                        Label("Delete", systemImage: "trash")
+                            .foregroundColor(.red)
+                    }
+                } else {
+                    Button(action: {
+                        editMode = true
+                        selectedItems.removeAll()
+                    }) {
+                        Text("Edit")
+                    }
+                }
+            }
+            if editMode {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        editMode = false
+                        selectedItems.removeAll()
+                    }
+                }
             }
         }
         .sheet(item: $previewImage) { wrapper in
@@ -253,6 +379,14 @@ struct CategoryDetailView: View {
                 Button("Close") { previewImage = nil }
                     .font(.headline)
                     .padding()
+            }
+        }
+        .sheet(item: $editingItem) { item in
+            EditWardrobeItemView(item: item) { updatedItem in
+                if let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == updatedItem.id }) {
+                    wardrobeViewModel.items[idx] = updatedItem
+                }
+                editingItem = nil
             }
         }
     }
