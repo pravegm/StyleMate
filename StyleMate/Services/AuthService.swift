@@ -2,7 +2,7 @@ import Foundation
 
 @MainActor
 class AuthService: ObservableObject {
-    @Published var user: User?
+    @Published var user: User?  
     @Published var isAuthenticated = false
     
     static private let usersKey = "users"

@@ -326,6 +326,121 @@ Return only the JSON array, no extra text.
             return nil
         }
     }
+
+    enum PartialShuffleResult {
+        case success(ImageAnalysisService.SuggestedOutfitItem)
+        case rateLimited
+        case failure
+    }
+
+    func suggestPartialShuffleWithResult(currentOutfit: Outfit, categoryToShuffle: Category, availableItems: [WardrobeItem]) async -> PartialShuffleResult {
+        let outfitSummary = (
+            [("Tops", currentOutfit.top),
+             ("Bottoms", currentOutfit.bottom),
+             ("Footwear", currentOutfit.footwear)]
+            + [
+                currentOutfit.accessory.map { ("Accessories", $0) },
+                currentOutfit.outerwear.map { ("Seasonal/Layering", $0) }
+            ].compactMap { $0 }
+        ).map { (cat, item) in
+            "Category: \(cat), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+        }.joined(separator: "\n")
+        let availableSummary = availableItems.enumerated().map { (idx, item) in
+            "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+        }.joined(separator: "\n")
+        let prompt = """
+You are an expert fashion stylist. Given the following information, suggest a new item for a specific category to improve today's outfit, while keeping all other items unchanged.\n\n**Current Outfit:**\n\(outfitSummary)\n\n**Category to Shuffle:** \(categoryToShuffle.rawValue)\n\n**Available Items in This Category:**\n\(availableSummary)\n\n**Instructions:**\n- Suggest a new item for the category \"\(categoryToShuffle.rawValue)\" from the available items in that category.\n- The new item must be different from the current one in the outfit.\n- The new item must harmonize with the rest of the outfit, following established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).\n- Only combine items that make sense together (e.g., seasonally appropriate, no clashing colors, no more than one statement pattern, no sandals with winter coats, etc.).\n- Prefer color harmony: neutrals go with anything, but bold colors should be paired thoughtfully.\n- Avoid inappropriate combinations (e.g., no sandals with winter coats, no more than one statement pattern).\n- Do not repeat the same product type (e.g., two tops).\n- Only use items from the provided list. Do not invent or hallucinate new items.\n- Do not change any other items in the outfit.\n- If you cannot find a perfect match, return the closest possible match from the available items. You must always return a result.\n- Return your answer as a JSON object with the following fields: category, product, colors (array), pattern, brand.\n- Return only the JSON object, no extra text.\n"
+"""
+        let requestBody: [String: Any] = [
+            "contents": [
+                [
+                    "parts": [
+                        ["text": prompt]
+                    ]
+                ]
+            ],
+            "generationConfig": [
+                "responseMimeType": "application/json"
+            ]
+        ]
+        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+              let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            print("[Gemini] Invalid URL or request body for partial shuffle.")
+            return .failure
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = httpBody
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 429 {
+                    print("[Gemini] HTTP error: 429 (rate limit)")
+                    return .rateLimited
+                }
+                if httpResponse.statusCode != 200 {
+                    print("[Gemini] HTTP error: \(httpResponse.statusCode)")
+                    return .failure
+                }
+            }
+            if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
+               let text = result.candidates.first?.content.parts.first?.text,
+               let objData = text.data(using: .utf8) {
+                let decoder = JSONDecoder()
+                if let item = try? decoder.decode(SuggestedOutfitItem.self, from: objData) {
+                    return .success(item)
+                } else {
+                    print("[Gemini] Could not decode SuggestedOutfitItem from Gemini response. Raw text: \(text)")
+                }
+            } else {
+                print("[Gemini] Could not parse Gemini response for partial shuffle.")
+            }
+        } catch {
+            print("[Gemini] Exception during Gemini partial shuffle request: \(error)")
+        }
+        // Fallback: return the first available item that is not the current one
+        let currentItem: WardrobeItem? = {
+            switch categoryToShuffle {
+            case .tops: return currentOutfit.top
+            case .bottoms: return currentOutfit.bottom
+            case .footwear: return currentOutfit.footwear
+            case .accessories: return currentOutfit.accessory
+            case .seasonalLayering, .onePieces: return currentOutfit.outerwear
+            default: return nil
+            }
+        }()
+        if let fallback = availableItems.first(where: { $0.id != currentItem?.id }) {
+            // Convert to SuggestedOutfitItem
+            return .success(SuggestedOutfitItem(
+                category: fallback.category.rawValue,
+                product: fallback.product,
+                colors: fallback.colors,
+                pattern: fallback.pattern.rawValue,
+                brand: fallback.brand
+            ))
+        }
+        // As a last resort, return the current item (should never happen if availableItems.count > 1)
+        if let currentItem = currentItem {
+            return .success(SuggestedOutfitItem(
+                category: currentItem.category.rawValue,
+                product: currentItem.product,
+                colors: currentItem.colors,
+                pattern: currentItem.pattern.rawValue,
+                brand: currentItem.brand
+            ))
+        }
+        return .failure
+    }
+
+    // For backward compatibility
+    func suggestPartialShuffle(currentOutfit: Outfit, categoryToShuffle: Category, availableItems: [WardrobeItem]) async -> SuggestedOutfitItem? {
+        let result = await suggestPartialShuffleWithResult(currentOutfit: currentOutfit, categoryToShuffle: categoryToShuffle, availableItems: availableItems)
+        if case let .success(item) = result {
+            return item
+        }
+        return nil
+    }
 }
 
 // MARK: - Gemini API Response Models

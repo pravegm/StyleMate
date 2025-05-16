@@ -8,6 +8,7 @@ class HomeViewModel: ObservableObject {
     @Published var showOutfitSheet = false
     @Published var showNoOutfitAlert = false
     @Published var showNoMoreSuggestions = false
+    @Published var showRateLimitAlert = false
     private var outfitBatch: [Outfit] = []
     private var batchIndex: Int = 0
     
@@ -70,5 +71,53 @@ class HomeViewModel: ObservableObject {
 
     func resetShufflePopup() {
         showNoMoreSuggestions = false
+    }
+
+    // Shuffle a single item in the current outfit for a given category
+    func shuffleItemInOutfit(category: Category, wardrobe: [WardrobeItem]) {
+        guard let currentOutfit = todayOutfit else { return }
+        Task {
+            isLoading = true
+            defer { isLoading = false }
+            // Get all items in the category
+            let availableItems = wardrobe.filter { $0.category == category }
+            // If only one item, nothing to shuffle
+            guard availableItems.count > 1 else { return }
+            // Call Gemini for a new suggestion
+            let result = await ImageAnalysisService.shared.suggestPartialShuffleWithResult(currentOutfit: currentOutfit, categoryToShuffle: category, availableItems: availableItems)
+            switch result {
+            case .success(let newItem):
+                // Find the matching WardrobeItem in the wardrobe
+                let matched = availableItems.first(where: { item in
+                    item.product.caseInsensitiveCompare(newItem.product) == .orderedSame &&
+                    Set(item.colors.map { $0.lowercased() }) == Set(newItem.colors.map { $0.lowercased() }) &&
+                    item.pattern.rawValue.caseInsensitiveCompare(newItem.pattern) == .orderedSame &&
+                    (newItem.brand == nil || item.brand.caseInsensitiveCompare(newItem.brand ?? "") == .orderedSame || item.brand.isEmpty)
+                })
+                guard let replacement = matched else { return }
+                // Build new outfit
+                let updatedOutfit: Outfit
+                switch category {
+                case .tops:
+                    updatedOutfit = Outfit(top: replacement, bottom: currentOutfit.bottom, footwear: currentOutfit.footwear, accessory: currentOutfit.accessory, outerwear: currentOutfit.outerwear)
+                case .bottoms:
+                    updatedOutfit = Outfit(top: currentOutfit.top, bottom: replacement, footwear: currentOutfit.footwear, accessory: currentOutfit.accessory, outerwear: currentOutfit.outerwear)
+                case .footwear:
+                    updatedOutfit = Outfit(top: currentOutfit.top, bottom: currentOutfit.bottom, footwear: replacement, accessory: currentOutfit.accessory, outerwear: currentOutfit.outerwear)
+                case .accessories:
+                    updatedOutfit = Outfit(top: currentOutfit.top, bottom: currentOutfit.bottom, footwear: currentOutfit.footwear, accessory: replacement, outerwear: currentOutfit.outerwear)
+                case .seasonalLayering, .onePieces:
+                    updatedOutfit = Outfit(top: currentOutfit.top, bottom: currentOutfit.bottom, footwear: currentOutfit.footwear, accessory: currentOutfit.accessory, outerwear: replacement)
+                default:
+                    // For categories not in the outfit, do nothing
+                    return
+                }
+                todayOutfit = updatedOutfit
+            case .rateLimited:
+                showRateLimitAlert = true
+            case .failure:
+                break
+            }
+        }
     }
 } 

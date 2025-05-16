@@ -21,7 +21,15 @@ All magical effects are implemented in a clean, modular way in `HomeView.swift`:
 
 ## Features
 
-- **Add New Items:** Add clothing items to your wardrobe with category, product, color, pattern, brand, and image.
+- **Add New Items:** Add clothing items to your wardrobe by selecting or capturing images.
+- **Detected items are now grouped by category** (e.g., Tops, Accessories, etc.)
+- **Each category group is shown in a visually distinct, collapsible card**
+- **Expand/collapse each category group** by tapping the chevron next to the category name
+- **Each detected item is shown in a card** with editable fields (category, product, colors, pattern, and brand)
+- **Individual Shuffle Button:** Each detected item card includes a shuffle button, allowing you to independently shuffle suggestions for that item (e.g., try different tops or accessories without changing the rest of the outfit)
+- **Remove Item** button removes a specific detected item; **Remove Fit** removes the entire image/fit
+- **Brand field placeholder** is now: `Type brand name (e.g., Nike)`
+- These improvements apply to **both single and multi-image add flows**
 - **Edit Items:** Swipe left on any item in a category to reveal Edit and Delete actions. Edit lets you change the category, product, color(s), pattern, and brand for any item (the image remains unchanged).
 - **Delete Items:** Swipe left and tap Delete, or use multi-select delete (see below).
 - **Category Organization:** Items are grouped by category (e.g., Tops, Bottoms, Footwear, etc.).
@@ -107,6 +115,7 @@ For more details, see the in-app help or contact the developer.
   - Visually exciting, with a colorful gradient background, random celebratory emoji, and a positive, randomized subheading.
   - Suggested items are shown in a center-aligned, uniform grid—no awkward spacing, always balanced.
   - Each item is a beautiful card; tap to see a zoomable, full-screen preview.
+  - **Individual Shuffle:** Each item card includes a shuffle button, so you can try different options for just that item without changing the rest of your look.
   - **Shuffle** and **Love it!** buttons are always fixed at the bottom for easy access.
   - The entire experience is designed to make users feel happy, confident, and excited about their look!
 

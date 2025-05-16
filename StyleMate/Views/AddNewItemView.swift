@@ -16,6 +16,7 @@ struct AddNewItemView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var isAnalyzing = false
+    @State private var expandedCategoryStates: [Category: Bool] = [:]
     
     struct DetectedItem: Identifiable {
         let id = UUID()
@@ -30,7 +31,7 @@ struct AddNewItemView: View {
     func productOptions(for category: Category) -> [String] {
         productTypesByCategory[category] ?? []
     }
-    
+
     var detectedItems: Binding<[DetectedItem]> {
         detectedItemsBinding ?? $detectedItemsState
     }
@@ -85,95 +86,55 @@ struct AddNewItemView: View {
                 }
                 
                 if !detectedItems.wrappedValue.isEmpty {
-                    Section(header: Text("Detected Items")) {
-                        ForEach(detectedItems.wrappedValue.indices, id: \.self) { idx in
-                            let itemBinding = Binding<DetectedItem>(
-                                get: { detectedItems.wrappedValue[idx] },
-                                set: { detectedItems.wrappedValue[idx] = $0 }
-                            )
-                            let brandBinding = Binding<String>(
-                                get: { brandInputs.wrappedValue[idx] },
-                                set: { brandInputs.wrappedValue[idx] = $0 }
-                            )
-                            VStack(alignment: .leading, spacing: 8) {
-                                Picker("Category", selection: itemBinding.category) {
-                                    ForEach(Category.allCases) { cat in
-                                        Text(cat.rawValue).tag(cat)
+                    Section(header:
+                        Text("Detected Items")
+                            .font(.title2.bold())
+                            .foregroundColor(.accentColor)
+                            .padding(.vertical, 4)
+                    ) {
+                        let grouped = Dictionary(grouping: detectedItems.wrappedValue.indices, by: { detectedItems.wrappedValue[$0].category })
+                        ForEach(Array(grouped.keys).sorted { $0.rawValue < $1.rawValue }, id: \.self) { category in
+                            let indices = grouped[category] ?? []
+                            VStack(alignment: .leading, spacing: 0) {
+                                HStack {
+                                    Text(category.rawValue)
+                                        .font(.headline)
+                                        .foregroundColor(.accentColor)
+                                    Spacer()
+                                    Button(action: { withAnimation { expandedCategoryStates[category] = !(expandedCategoryStates[category] ?? true) } }) {
+                                        Image(systemName: (expandedCategoryStates[category] ?? true) ? "chevron.down" : "chevron.right")
+                                            .foregroundColor(.accentColor)
+                                            .imageScale(.medium)
                                     }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .padding(.trailing, 4)
                                 }
-                                .accessibilityLabel("Category Picker")
-                                .pickerStyle(.menu)
-                                Picker("Product", selection: itemBinding.product) {
-                                    ForEach(productOptions(for: itemBinding.category.wrappedValue), id: \.self) { prod in
-                                        Text(prod).tag(prod)
-                                    }
-                                }
-                                .accessibilityLabel("Product Picker")
-                                .pickerStyle(.menu)
-                                Text("Colors:")
-                                    .font(.subheadline)
-                                ForEach(Array(itemBinding.colors.wrappedValue.enumerated()), id: \.offset) { colorIdx, _ in
-                                    let colorBinding = Binding<String>(
-                                        get: { itemBinding.colors.wrappedValue[colorIdx] },
-                                        set: { itemBinding.colors.wrappedValue[colorIdx] = $0 }
-                                    )
-                                    HStack {
-                                        TextField("Color", text: colorBinding)
-                                            .textContentType(.none)
-                                            .autocapitalization(.none)
-                                            .accessibilityLabel("Color")
-                                        Spacer(minLength: 8)
-                                        if itemBinding.colors.wrappedValue.count > 1 {
-                                            Button(action: {
-                                                var colors = itemBinding.colors.wrappedValue
-                                                colors.remove(at: colorIdx)
-                                                itemBinding.colors.wrappedValue = colors
-                                            }) {
-                                                Image(systemName: "minus.circle.fill")
-                                                    .foregroundColor(.red)
-                                                    .imageScale(.large)
-                                            }
-                                            .buttonStyle(BorderlessButtonStyle())
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 12)
+                                if expandedCategoryStates[category] ?? true {
+                                    VStack(spacing: 0) {
+                                        ForEach(indices, id: \.self) { idx in
+                                            DetectedItemCard(
+                                                item: Binding(get: { detectedItems.wrappedValue[idx] }, set: { detectedItems.wrappedValue[idx] = $0 }),
+                                                brand: Binding(get: { brandInputs.wrappedValue[idx] }, set: { brandInputs.wrappedValue[idx] = $0 }),
+                                                onRemove: { removeDetectedItem(at: idx) }
+                                            )
                                         }
                                     }
+                                    .padding(.bottom, 8)
                                 }
-                                Button(action: {
-                                    var colors = itemBinding.colors.wrappedValue
-                                    colors.append("")
-                                    itemBinding.colors.wrappedValue = colors
-                                }) {
-                                    HStack {
-                                        Image(systemName: "plus.circle.fill").foregroundColor(.green)
-                                        Text("Add Color")
-                                    }
-                                }
-                                .buttonStyle(BorderlessButtonStyle())
-                                Picker("Pattern", selection: itemBinding.pattern) {
-                                    ForEach(Pattern.allCases) { pattern in
-                                        Text(pattern.rawValue).tag(pattern)
-                                    }
-                                }
-                                .pickerStyle(.menu)
-                                .accessibilityLabel("Pattern picker")
-                                TextField("Brand (e.g. Nike)", text: brandBinding)
-                                    .textContentType(.none)
-                                    .autocapitalization(.none)
-                                    .accessibilityLabel("Brand")
-                                Button(action: {
-                                    removeDetectedItem(at: idx)
-                                }) {
-                                    HStack {
-                                        Image(systemName: "trash").foregroundColor(.red)
-                                        Text("Remove Item")
-                                    }
-                                }
-                                .foregroundColor(.red)
-                                .padding(.top, 2)
-                                .contentShape(Rectangle())
-                                .buttonStyle(PlainButtonStyle())
                             }
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.systemBackground))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.accentColor.opacity(0.25), lineWidth: 2)
+                                    )
+                                    .shadow(color: Color.accentColor.opacity(0.18), radius: 12, x: 0, y: 8)
+                            )
                             .padding(.vertical, 8)
-                            .background(Color.clear)
+                            .padding(.horizontal, 4)
                         }
                     }
                 }
@@ -195,7 +156,7 @@ struct AddNewItemView: View {
                 }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
+                Button("Save Fit") {
                     if !canSave {
                         errorMessage = "All fields are required."
                         showError = true

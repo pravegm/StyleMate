@@ -419,7 +419,7 @@ struct MultiAddNewItemView: View {
                         Button(role: .destructive) {
                             markRemovedAndAdvance()
                         } label: {
-                            Label("Remove", systemImage: "trash")
+                            Label("Remove Fit", systemImage: "trash")
                         }
                         .disabled(
                             !(savedStates.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
@@ -428,7 +428,7 @@ struct MultiAddNewItemView: View {
                         Button {
                             saveCurrentAndAdvance()
                         } label: {
-                            Label("Save", systemImage: "checkmark")
+                            Label("Save Fit", systemImage: "checkmark")
                         }
                         .disabled(
                             !(savedStates.indices.contains(currentIndex) && detectedItems.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
