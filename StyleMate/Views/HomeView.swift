@@ -122,7 +122,139 @@ struct HomeView: View {
                         // Wardrobe Summary Widget with improved background and subtle shadow
                         WardrobeSummaryWidget(items: wardrobeViewModel.items)
                             .padding(.horizontal, 24)
-                        // Suggest Outfit Button with gradient and animation
+                        // Outfit Suggestion Card
+                        VStack(spacing: 0) {
+                            // Card Header
+                            VStack(spacing: 6) {
+                                Text("Let's decide what you should wear today!")
+                                    .font(.title2.bold())
+                                    .foregroundColor(.accentColor)
+                                    .multilineTextAlignment(.center)
+                                Text("What type of occasion or vibe are you dressing for?")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .padding(.top, 20)
+                            .padding(.horizontal, 20)
+                            // Chips in 3+3+1 grid
+                            VStack(spacing: 14) {
+                                HStack(spacing: 12) {
+                                    ForEach(OutfitType.allCases.prefix(3)) { type in
+                                        Button(action: {
+                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                                homeVM.selectedOutfitType = type
+                                                homeVM.customOutfitDescription = nil
+                                            }
+                                        }) {
+                                            HStack(spacing: 5) {
+                                                Image(systemName: type.icon)
+                                                    .font(.footnote)
+                                                Text(type.rawValue)
+                                                    .font(.footnote)
+                                                    .lineLimit(1)
+                                            }
+                                            .frame(minWidth: 0, maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.gray.opacity(0.13))
+                                            .foregroundColor(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? .white : .primary)
+                                            .cornerRadius(14)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 14)
+                                                    .stroke(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.clear, lineWidth: 1.2)
+                                            )
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                }
+                                HStack(spacing: 12) {
+                                    ForEach(OutfitType.allCases.dropFirst(3).prefix(3)) { type in
+                                        Button(action: {
+                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                                homeVM.selectedOutfitType = type
+                                                homeVM.customOutfitDescription = nil
+                                            }
+                                        }) {
+                                            HStack(spacing: 5) {
+                                                Image(systemName: type.icon)
+                                                    .font(.footnote)
+                                                Text(type.rawValue)
+                                                    .font(.footnote)
+                                                    .lineLimit(1)
+                                            }
+                                            .frame(minWidth: 0, maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.gray.opacity(0.13))
+                                            .foregroundColor(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? .white : .primary)
+                                            .cornerRadius(14)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 14)
+                                                    .stroke(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.clear, lineWidth: 1.2)
+                                            )
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                }
+                                HStack(spacing: 12) {
+                                    Spacer(minLength: 0)
+                                    Button(action: {
+                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                            if homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil {
+                                                homeVM.selectedOutfitType = .everyday
+                                                homeVM.customOutfitDescription = nil
+                                            } else {
+                                                homeVM.selectedOutfitType = nil
+                                                if homeVM.customOutfitDescription == nil {
+                                                    homeVM.customOutfitDescription = ""
+                                                }
+                                            }
+                                        }
+                                    }) {
+                                        HStack(spacing: 5) {
+                                            Image(systemName: "ellipsis.bubble")
+                                                .font(.footnote)
+                                            Text(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? "Describe your event or outfit need" : "Other")
+                                                .font(.footnote)
+                                                .lineLimit(1)
+                                        }
+                                        .frame(minWidth: 0, maxWidth: .infinity)
+                                        .padding(.vertical, 10)
+                                        .background(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? Color.accentColor : Color.gray.opacity(0.13))
+                                        .foregroundColor(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? .white : .primary)
+                                        .cornerRadius(14)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 14)
+                                                .stroke(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? Color.accentColor : Color.clear, lineWidth: 1.2)
+                                        )
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    Spacer(minLength: 0)
+                                }
+                                // Show the text field below the button when 'Other' is selected, with no extra label
+                                if homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil {
+                                    VStack(spacing: 6) {
+                                        TextField("e.g. Outdoor wedding in summer evening", text: Binding(
+                                            get: { homeVM.customOutfitDescription ?? "" },
+                                            set: { homeVM.customOutfitDescription = $0 }
+                                        ))
+                                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                                        .frame(maxWidth: 340)
+                                        .padding(.top, 8)
+                                        .padding(.bottom, 2)
+                                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                                        if !homeVM.isCustomDescriptionValid {
+                                            Text("Please describe your event or outfit need.")
+                                                .font(.caption)
+                                                .foregroundColor(.red)
+                                                .multilineTextAlignment(.center)
+                                                .padding(.top, 2)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.top, 18)
+                            // Suggest Outfit Button
                         Button(action: {
                             withAnimation(.easeInOut(duration: 0.18)) {
                                 animateButton = true
@@ -147,9 +279,19 @@ struct HomeView: View {
                             .scaleEffect(animateButton ? 1.06 : 1.0)
                             .shadow(color: Color.accentColor.opacity(0.13), radius: 8, x: 0, y: 4)
                         }
-                        .padding(.horizontal)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 18)
+                            .padding(.bottom, 20)
                         .accessibilityLabel("Suggest an outfit")
-                        .disabled(homeVM.isLoading)
+                        .disabled(homeVM.isLoading || (homeVM.selectedOutfitType == nil && !homeVM.isCustomDescriptionValid))
+                        }
+                        .background(
+                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                .fill(Color(.systemBackground))
+                                .shadow(color: Color.accentColor.opacity(0.10), radius: 12, x: 0, y: 6)
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
                     }
                     .padding(.top, 8)
                     .padding(.bottom, 60) // Add space for quote at bottom

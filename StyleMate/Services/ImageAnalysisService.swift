@@ -270,13 +270,21 @@ Return only the JSON array, no extra text.
         let brand: String?
     }
     
-    func suggestOutfitBatch(from wardrobe: [WardrobeItem]) async -> [[SuggestedOutfitItem]]? {
+    func suggestOutfitBatch(from wardrobe: [WardrobeItem], outfitType: OutfitType? = nil, customDescription: String? = nil) async -> [[SuggestedOutfitItem]]? {
         // 1. Summarize the wardrobe
         let wardrobeSummary = wardrobe.enumerated().map { (idx, item) in
             "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
         }.joined(separator: "\n")
         
         // 2. Create the improved prompt for 5 suggestions
+        let typeInstruction: String
+        if let custom = customDescription, !custom.isEmpty {
+            typeInstruction = "The user described their event or outfit as: \"\(custom)\". Please tailor your suggestions for this context."
+        } else if let outfitType = outfitType {
+            typeInstruction = "The user wants an outfit for: \(outfitType.rawValue). Please tailor your suggestions for this context."
+        } else {
+            typeInstruction = "The user wants an everyday casual outfit."
+        }
         let prompt = """
 You are an expert fashion stylist. Given the following wardrobe items, suggest 5 different, stylish, harmonious, and practical outfits for today. Each outfit should:
 - Follow established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).
@@ -287,6 +295,7 @@ You are an expert fashion stylist. Given the following wardrobe items, suggest 5
 - Be distinct from each other (no duplicate combinations).
 - Only use items from the provided list. Do not invent or hallucinate new items.
 - For each item in the outfit, specify: category, product, colors (array), pattern, and brand (optional).
+\(typeInstruction)
 Return your answer as a JSON array of 5 arrays, where each inner array is an outfit (array of objects with: category, product, colors, pattern, and brand).
 
 Here is the wardrobe:

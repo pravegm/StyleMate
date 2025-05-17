@@ -9,14 +9,28 @@ class HomeViewModel: ObservableObject {
     @Published var showNoOutfitAlert = false
     @Published var showNoMoreSuggestions = false
     @Published var showRateLimitAlert = false
+    @Published var selectedOutfitType: OutfitType? = .everyday
+    @Published var customOutfitDescription: String? = nil
     private var outfitBatch: [Outfit] = []
     private var batchIndex: Int = 0
+    
+    var isCustomDescriptionValid: Bool {
+        guard let desc = customOutfitDescription else { return false }
+        let trimmed = desc.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Split into words with at least one letter or digit
+        let words = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { word in
+            word.range(of: "[A-Za-z0-9]", options: .regularExpression) != nil
+        }
+        return words.count >= 2
+    }
     
     func suggestTodayOutfit(from items: [WardrobeItem]) {
         Task {
             isLoading = true
             defer { isLoading = false }
-            guard let suggestions = await ImageAnalysisService.shared.suggestOutfitBatch(from: items), !suggestions.isEmpty else {
+            let typeToUse = selectedOutfitType
+            let customDescription = customOutfitDescription
+            guard let suggestions = await ImageAnalysisService.shared.suggestOutfitBatch(from: items, outfitType: typeToUse, customDescription: customDescription), !suggestions.isEmpty else {
                 todayOutfit = nil
                 showNoOutfitAlert = true
                 outfitBatch = []
