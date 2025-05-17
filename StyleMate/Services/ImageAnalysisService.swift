@@ -29,13 +29,22 @@ For each category, here are the only valid products:
 - Bottoms: Jeans, Trousers, Chinos, Shorts, Skirts, Leggings, Joggers, Track pants, Cargo pants, Dhotis, Salwars
 - OnePieces: Dresses, Jumpsuits, Rompers, Sarees, Gowns, Overalls
 - Footwear: Sneakers, Formal shoes, Loafers, Boots, Sandals, Flip flops, Heels, Flats, Slippers, Mojaris/Juttis
-- Accessories: Watches, Sunglasses, Spectacles, Belts, Hats, Caps, Scarves, Necklaces, Earrings, Bracelets, Bangles, Rings, Ties, Cufflinks, Backpacks, Handbags, Clutches, Wallets
+- Accessories: Watches, Sunglasses, Spectacles, Belts, Hats, Caps, Scarves, Necklaces, Earrings, Bracelets, Bangles, Rings, Ties, Bowties, Cufflinks, Backpacks, Handbags, Clutches, Wallets
 - Innerwear & Sleepwear: Undergarments, Bras, Boxers/Briefs, Night suits, Loungewear, Slips, Thermals
 - Ethnic/Occasionwear: Sherwanis, Lehenga cholis, Anarkalis, Nehru jackets, Dupattas, Kurta sets, Blouse (ethnic), Dhoti sets
 - Seasonal/Layering: Raincoats, Windcheaters, Overcoats, Thermal inners, Gloves, Beanies
 Here are the only valid patterns: [Solid, Stripes, Checks, Plaid, Polka Dot, Floral, Animal Print, Camouflage, Geometric, Houndstooth, Paisley, Tie-Dye].
 
-IMPORTANT: For each clothing item you detect in the image, you MUST select the category, product, and pattern string **EXACTLY** as provided in the above lists. Do not change the spelling, do not use singular or plural forms that are not in the list, do not use synonyms, and do not invent new words. If you are unsure, pick the closest valid string from the list. Your answer must use the exact string from the list, character for character, including spaces, hyphens, and capitalization.
+IMPORTANT: For each clothing item you detect in the image, you MUST select the category, product, and pattern string **EXACTLY** as provided in the above lists.
+- Do not change the spelling, do not use singular or plural forms that are not in the list, do not use synonyms, and do not invent new words.
+- Your answer must use the exact string from the list, character for character, including spaces, hyphens, and capitalization.
+- If you do not use the exact string, your answer will be rejected.
+
+Examples:
+- If the valid product is \"T-shirts\", you must return \"T-shirts\" (not \"Tshirt\", \"Tee shirt\", or \"t-shirts\").
+- If the valid pattern is \"Polka Dot\", you must return \"Polka Dot\" (not \"polka dot\", \"Polka Dots\", or \"dots\").
+
+If you are unsure, copy and paste the string from the list above.
 
 For each item, also return the bounding box as {\"x\": <left>, \"y\": <top>, \"width\": <width>, \"height\": <height>} where all values are normalized between 0 and 1 relative to the image size. Only use the provided categories, products, and patterns. Do not invent new ones.
 

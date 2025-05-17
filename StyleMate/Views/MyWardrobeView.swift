@@ -84,6 +84,10 @@ struct MyWardrobeView: View {
                     }
                 }
             }
+            .navigationDestination(item: $selectedCategory) { category in
+                CategoryDetailView(category: category)
+                    .environmentObject(wardrobeViewModel)
+            }
         }
     }
 }
@@ -185,120 +189,135 @@ struct CategoryDetailView: View {
     }
 
     var body: some View {
-        List {
+        Group {
             if items.isEmpty {
-                Text("No items in this category.")
-                    .foregroundColor(.secondary)
+                VStack(spacing: 16) {
+                    Text(emptyStateEmoji(for: category))
+                        .font(.system(size: 48))
+                        .padding(.bottom, 2)
+                    Text("No \(category.rawValue) yet!")
+                        .font(.title3.bold())
+                        .foregroundColor(.accentColor)
+                    Text("Start building your wardrobe by adding your first \(category.rawValue.lowercased()) item.\nTap the + button to get started!")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 60)
+                .background(Color.clear)
             } else {
-                ForEach(groupedItems, id: \.product) { group in
-                    Section(header:
-                        HStack {
-                            Text(group.product)
-                                .font(.headline)
-                            ZStack {
-                                Circle()
-                                    .fill(Color.accentColor)
-                                    .frame(width: 22, height: 22)
-                                Text("\(group.items.count)")
-                                    .font(.body.bold())
-                                    .foregroundColor(.white)
-                                    .accessibilityLabel("\(group.items.count) items")
+                List {
+                    ForEach(groupedItems, id: \.product) { group in
+                        Section(header:
+                            HStack {
+                                Text(group.product)
+                                    .font(.headline)
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.accentColor)
+                                        .frame(width: 22, height: 22)
+                                    Text("\(group.items.count)")
+                                        .font(.body.bold())
+                                        .foregroundColor(.white)
+                                        .accessibilityLabel("\(group.items.count) items")
+                                }
+                                .accessibilityLabel("\(group.items.count) items")
+                                Spacer()
+                                Button(action: {
+                                    if expandedProducts.contains(group.product) {
+                                        expandedProducts.remove(group.product)
+                                    } else {
+                                        expandedProducts.insert(group.product)
+                                    }
+                                }) {
+                                    Image(systemName: expandedProducts.contains(group.product) ? "chevron.down" : "chevron.right")
+                                        .foregroundColor(.accentColor)
+                                }
+                                .buttonStyle(BorderlessButtonStyle())
                             }
-                            .accessibilityLabel("\(group.items.count) items")
-                            Spacer()
-                            Button(action: {
+                            .contentShape(Rectangle())
+                            .onTapGesture {
                                 if expandedProducts.contains(group.product) {
                                     expandedProducts.remove(group.product)
                                 } else {
                                     expandedProducts.insert(group.product)
                                 }
-                            }) {
-                                Image(systemName: expandedProducts.contains(group.product) ? "chevron.down" : "chevron.right")
-                                    .foregroundColor(.accentColor)
                             }
-                            .buttonStyle(BorderlessButtonStyle())
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture {
+                        ) {
                             if expandedProducts.contains(group.product) {
-                                expandedProducts.remove(group.product)
-                            } else {
-                                expandedProducts.insert(group.product)
-                            }
-                        }
-                    ) {
-                        if expandedProducts.contains(group.product) {
-                            ForEach(group.items) { item in
-                                HStack {
-                                    if editMode {
-                                        Button(action: {
-                                            if selectedItems.contains(item.id) {
-                                                selectedItems.remove(item.id)
-                                            } else {
-                                                selectedItems.insert(item.id)
-                                            }
-                                        }) {
-                                            Image(systemName: selectedItems.contains(item.id) ? "checkmark.circle.fill" : "circle")
-                                                .foregroundColor(selectedItems.contains(item.id) ? .accentColor : .secondary)
-                                                .imageScale(.large)
-                                        }
-                                        .buttonStyle(BorderlessButtonStyle())
-                                    }
-                                    Button {
-                                        if !editMode, let previewImg = item.croppedImage ?? item.image {
-                                            previewImage = PreviewImage(image: previewImg)
-                                        }
-                                    } label: {
-                                        HStack {
-                                            if let cropped = item.croppedImage {
-                                                Image(uiImage: cropped)
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 60, height: 60)
-                                                    .clipped()
-                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                            } else if let original = item.image {
-                                                Image(uiImage: original)
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 60, height: 60)
-                                                    .clipped()
-                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                            } else {
-                                                Rectangle()
-                                                    .fill(Color.gray)
-                                                    .frame(width: 60, height: 60)
-                                                    .overlay(Text("No Image").font(.caption2))
-                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                            }
-                                            VStack(alignment: .leading) {
-                                                Text(item.name)
-                                                    .font(.headline)
-                                                Text(item.pattern.rawValue)
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        }
-                                    }
-                                    .disabled(editMode) // Disable preview in edit mode
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                        if !editMode {
-                                            Button(role: .destructive) {
-                                                if let idx = wardrobeViewModel.items.firstIndex(of: item) {
-                                                    WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-                                                    WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
-                                                    wardrobeViewModel.items.remove(at: idx)
+                                ForEach(group.items) { item in
+                                    HStack {
+                                        if editMode {
+                                            Button(action: {
+                                                if selectedItems.contains(item.id) {
+                                                    selectedItems.remove(item.id)
+                                                } else {
+                                                    selectedItems.insert(item.id)
                                                 }
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
+                                            }) {
+                                                Image(systemName: selectedItems.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                                                    .foregroundColor(selectedItems.contains(item.id) ? .accentColor : .secondary)
+                                                    .imageScale(.large)
                                             }
-                                            .tint(.red)
-                                            Button {
-                                                editingItem = item
-                                            } label: {
-                                                Label("Edit", systemImage: "pencil")
+                                            .buttonStyle(BorderlessButtonStyle())
+                                        }
+                                        Button {
+                                            if !editMode, let previewImg = item.croppedImage ?? item.image {
+                                                previewImage = PreviewImage(image: previewImg)
                                             }
-                                            .tint(.blue)
+                                        } label: {
+                                            HStack {
+                                                if let cropped = item.croppedImage {
+                                                    Image(uiImage: cropped)
+                                                        .resizable()
+                                                        .scaledToFill()
+                                                        .frame(width: 60, height: 60)
+                                                        .clipped()
+                                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                } else if let original = item.image {
+                                                    Image(uiImage: original)
+                                                        .resizable()
+                                                        .scaledToFill()
+                                                        .frame(width: 60, height: 60)
+                                                        .clipped()
+                                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                } else {
+                                                    Rectangle()
+                                                        .fill(Color.gray)
+                                                        .frame(width: 60, height: 60)
+                                                        .overlay(Text("No Image").font(.caption2))
+                                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                }
+                                                VStack(alignment: .leading) {
+                                                    Text(item.name)
+                                                        .font(.headline)
+                                                    Text(item.pattern.rawValue)
+                                                        .font(.subheadline)
+                                                        .foregroundColor(.secondary)
+                                                }
+                                            }
+                                        }
+                                        .disabled(editMode) // Disable preview in edit mode
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                            if !editMode {
+                                                Button(role: .destructive) {
+                                                    if let idx = wardrobeViewModel.items.firstIndex(of: item) {
+                                                        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+                                                        WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+                                                        wardrobeViewModel.items.remove(at: idx)
+                                                    }
+                                                } label: {
+                                                    Label("Delete", systemImage: "trash")
+                                                }
+                                                .tint(.red)
+                                                Button {
+                                                    editingItem = item
+                                                } label: {
+                                                    Label("Edit", systemImage: "pencil")
+                                                }
+                                                .tint(.blue)
+                                            }
                                         }
                                     }
                                 }
@@ -369,6 +388,19 @@ struct CategoryDetailView: View {
                 }
                 editingItem = nil
             }
+        }
+    }
+
+    private func emptyStateEmoji(for category: Category) -> String {
+        switch category {
+        case .tops: return "👚"
+        case .bottoms: return "👖"
+        case .onePieces: return "👗"
+        case .footwear: return "👟"
+        case .accessories: return "🕶️"
+        case .innerwearSleepwear: return "🩲"
+        case .ethnicOccasionwear: return "🥻"
+        case .seasonalLayering: return "🧥"
         }
     }
 }

@@ -9,6 +9,29 @@ struct LoginView: View {
     @State private var name: String = ""
     @State private var isSignUp = false
     @State private var appear = false
+    @State private var selectedQuote: String = ""
+    
+    let aiQuotes = [
+        "Unlock daily style inspiration, powered by AI magic.",
+        "Your next outfit is just an algorithm away.",
+        "Style meets intelligence—welcome to your AI wardrobe.",
+        "Fashion, reimagined by artificial intelligence.",
+        "Let AI curate your closet, one look at a time.",
+        "Smarter style starts here—with AI.",
+        "AI: Your new personal stylist.",
+        "Discover the future of fashion with AI.",
+        "Dress smart. Dress AI.",
+        "Where technology meets trend.",
+        "AI-powered looks for every day.",
+        "Let algorithms inspire your attire.",
+        "Your wardrobe, upgraded by AI.",
+        "From code to couture—AI styles you.",
+        "Step into tomorrow's fashion, today.",
+        "AI knows what looks good on you.",
+        "Personalized fashion, powered by AI.",
+        "Let AI help you find your signature style.",
+        "The smartest way to dress is here."
+    ]
     
     var body: some View {
         NavigationStack {
@@ -42,10 +65,7 @@ struct LoginView: View {
                         Text("StyleMate")
                             .font(.system(size: 38, weight: .bold, design: .rounded))
                             .foregroundColor(.primary)
-                        Text("Step into your AI-powered wardrobe")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                        Text("Unlock daily style inspiration, powered by AI magic.")
+                        Text(selectedQuote)
                             .font(.headline)
                             .foregroundStyle(
                                 LinearGradient(
@@ -66,24 +86,42 @@ struct LoginView: View {
                     // Card for input fields
                     VStack(spacing: 16) {
                         if isSignUp {
-                            TextField("Name", text: $name)
-                                .textContentType(.name)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Name")
+                                    .font(.headline)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.primary)
+                                TextField("Enter your name here", text: $name)
+                                    .textContentType(.name)
+                                    .padding()
+                                    .background(Color(.secondarySystemBackground))
+                                    .cornerRadius(10)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Email")
+                                .font(.headline)
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                            TextField("Enter your email here", text: $email)
+                                .textContentType(.emailAddress)
+                                .keyboardType(.emailAddress)
+                                .autocapitalization(.none)
                                 .padding()
                                 .background(Color(.secondarySystemBackground))
                                 .cornerRadius(10)
                         }
-                        TextField("Email", text: $email)
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
-                            .autocapitalization(.none)
-                            .padding()
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(10)
-                        SecureField("Password", text: $password)
-                            .textContentType(.password)
-                            .padding()
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(10)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Password")
+                                .font(.headline)
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                            SecureField("Enter your password here", text: $password)
+                                .textContentType(.password)
+                                .padding()
+                                .background(Color(.secondarySystemBackground))
+                                .cornerRadius(10)
+                        }
                     }
                     .padding(20)
                     .background(
@@ -98,7 +136,7 @@ struct LoginView: View {
                     
                     // Sign In/Up Buttons
                     VStack(spacing: 16) {
-                        Button(isSignUp ? "Create Your Style Account" : "Enter the Style Portal") {
+                        Button(isSignUp ? "Create Your Style Account" : "Sign in to the Style Portal") {
                             Task {
                                 if isSignUp {
                                     let result = await authService.signUpWithEmail(email: email, password: password, name: name)
@@ -154,7 +192,10 @@ struct LoginView: View {
                     .offset(y: appear ? 0 : 12)
                     .animation(.easeOut(duration: 1.2).delay(0.4), value: appear)
                 }
-                .onAppear { appear = true }
+                .onAppear {
+                    appear = true
+                    selectedQuote = aiQuotes.shuffled().first ?? aiQuotes[0]
+                }
             }
             .alert("Error", isPresented: $showError) {
                 Button("OK", role: .cancel) {}
