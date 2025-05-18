@@ -21,15 +21,24 @@ All magical effects are implemented in a clean, modular way in `HomeView.swift`:
 
 ## Features
 
+- **Comprehensive Clothing Classification:**
+  - **Categories:**
+    - Tops (T-Shirts, Shirts, Blouses, Tank Tops, Tube Tops, Camisoles, Crop Tops, Off-Shoulder Tops, Bodysuits, Graphic Tees, Mesh Tops, Turtlenecks, Polo T-Shirts)
+    - Bottoms (Jeans, Trousers, Leggings, Joggers, Cargo Pants, Shorts, Skirts, Skorts, Palazzo Pants)
+    - Mid-Layers (Hoodies, Sweatshirts, Sweaters, Cardigans, Pullovers, Fleece Jackets, Vests, Shrugs, Gilets)
+    - Outerwear (Jackets, Coats, Puffer Jackets, Trench Coats, Blazers, Overcoats, Raincoats)
+    - One-Pieces (Dresses, Jumpsuits, Rompers, Playsuits, Dungarees, Overalls)
+    - Footwear (Sneakers, Boots, Heels, Flats, Sandals, Slippers, Loafers, Formal shoes)
+    - Accessories (Hats, Scarves, Gloves, Belts, Handbags, Jewelry, Watches, Sunglasses, Hair Accessories, Ties, Bowties)
+    - Innerwear (Bras, Underwear, Boxers, Thongs, Socks, Thermal Wear, Shapewear, Lingerie)
+    - Activewear (Sports Bras, Active Leggings, Athletic Tops, Track Pants, Athletic Shorts, Active Jackets, Compression Wear, Swimwear, Tennis Dresses)
+    - Ethnic Wear (Kurta, Kurti, Sherwani, Nehru Jacket, Dupatta, Saree, Blouse (saree), Lehenga, Choli, Salwar, Patiala Pants, Anarkali, Angrakha, Dhoti, Lungis, Mundu, Jodhpuri Suit)
+
 - **Add New Items:** Add clothing items to your wardrobe by selecting or capturing images.
-- **Detected items are now grouped by category** (e.g., Tops, Accessories, etc.)
-- **Each category group is shown in a visually distinct, collapsible card**
-- **Expand/collapse each category group** by tapping the chevron next to the category name
-- **Each detected item is shown in a card** with editable fields (category, product, colors, pattern, and brand)
-- **Individual Shuffle Button:** Each detected item card includes a shuffle button, allowing you to independently shuffle suggestions for that item (e.g., try different tops or accessories without changing the rest of the outfit)
-- **Remove Item** button removes a specific detected item; **Remove Fit** removes the entire image/fit
-- **Brand field placeholder** is now: `Type brand name (e.g., Nike)`
-- These improvements apply to **both single and multi-image add flows**
+- **Automatic detection of clothing category, product, color, and pattern using Gemini AI**
+- **Robust error handling for Gemini API failures**
+- **Automatic retries with exponential backoff for rate limiting (HTTP 429)**
+- **User-friendly error messages for persistent failures (e.g., if Gemini cannot analyze an image after 3 attempts)**
 - **Edit Items:** Swipe left on any item in a category to reveal Edit and Delete actions. Edit lets you change the category, product, color(s), pattern, and brand for any item (the image remains unchanged).
 - **Delete Items:** Swipe left and tap Delete, or use multi-select delete (see below).
 - **Category Organization:** Items are grouped by category (e.g., Tops, Bottoms, Footwear, etc.).
@@ -45,6 +54,9 @@ All magical effects are implemented in a clean, modular way in `HomeView.swift`:
 3. **Edit or Delete:** Swipe left on an item to edit or delete it. Or tap Edit to select and delete multiple items.
 4. **Collapse/Expand Sections:** Tap a product section header to collapse or expand that group.
 5. **Multi-Select Delete:** In edit mode, select items with checkboxes and tap Delete to remove them.
+6. **Automatic detection of clothing category, product, color, and pattern using Gemini AI**
+7. **Automatic retries with exponential backoff for rate limiting (HTTP 429)**
+8. **User-friendly error messages for persistent failures (e.g., if Gemini cannot analyze an image after 3 attempts)**
 
 ## Requirements
 - iOS 16+
@@ -100,24 +112,6 @@ For more details, see the in-app help or contact the developer.
 - **Performance Optimizations:**
   - Analysis and cropping are parallelized and happen up front, so saving is instant—even for large batches.
   - The UI is responsive and robust, with no crashes or delays for large image sets.
-
-- **Up-to-date Product List:**
-  - 'Coats' has been removed from Tops. 'Overcoats' remain in Seasonal/Layering. 'Shackets' have been added to Tops.
-
-## New: AI Outfit Shuffle & Celebratory UI
-
-- **Shuffle Feature:**
-  - When you tap "Get Today's Outfit", Gemini suggests a batch of 5 different, fashion-savvy outfits.
-  - Tap **Shuffle** to cycle through the batch—never see the same outfit twice in a row!
-  - When you reach the end, a friendly popup lets you cycle through the batch again.
-
-- **Today's Outfit View:**
-  - Visually exciting, with a colorful gradient background, random celebratory emoji, and a positive, randomized subheading.
-  - Suggested items are shown in a center-aligned, uniform grid—no awkward spacing, always balanced.
-  - Each item is a beautiful card; tap to see a zoomable, full-screen preview.
-  - **Individual Shuffle:** Each item card includes a shuffle button, so you can try different options for just that item without changing the rest of your look.
-  - **Shuffle** and **Love it!** buttons are always fixed at the bottom for easy access.
-  - The entire experience is designed to make users feel happy, confident, and excited about their look!
 
 ## Getting Started
 

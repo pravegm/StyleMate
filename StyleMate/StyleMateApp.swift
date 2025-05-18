@@ -473,7 +473,7 @@ struct MultiAddNewItemView: View {
             await withTaskGroup(of: (Int, [(Category?, String?, [String], Pattern?, ImageAnalysisService.BoundingBox?)]).self) { group in
                 for (idx, image) in images.enumerated() {
                     group.addTask {
-                        let results = await ImageAnalysisService.shared.analyzeMultiple(image: image)
+                        let results = await ImageAnalysisService.shared.analyzeMultiple(image: image, imageIndex: idx)
                         return (idx, results)
                     }
                 }
@@ -485,6 +485,9 @@ struct MultiAddNewItemView: View {
                         } else {
                             return nil
                         }
+                    }
+                    if items.isEmpty && !results.isEmpty {
+                        print("[DEBUG] Gemini raw results for image #\(idx): \(results)")
                     }
                     await MainActor.run {
                         detectedItems[idx] = items

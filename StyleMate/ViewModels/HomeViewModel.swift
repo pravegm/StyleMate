@@ -54,7 +54,7 @@ class HomeViewModel: ObservableObject {
                 let bottom = matchedItems.first(where: { $0.category == .bottoms })
                 let footwear = matchedItems.first(where: { $0.category == .footwear })
                 let accessory = matchedItems.first(where: { $0.category == .accessories })
-                let outerwear = matchedItems.first(where: { $0.category == .seasonalLayering || $0.category == .onePieces })
+                let outerwear = matchedItems.first(where: { $0.category == .outerwear || $0.category == .midLayers || $0.category == .onePieces })
                 if let top = top, let bottom = bottom, let footwear = footwear {
                     return Outfit(top: top, bottom: bottom, footwear: footwear, accessory: accessory, outerwear: outerwear)
                 } else {
@@ -120,7 +120,7 @@ class HomeViewModel: ObservableObject {
                     updatedOutfit = Outfit(top: currentOutfit.top, bottom: currentOutfit.bottom, footwear: replacement, accessory: currentOutfit.accessory, outerwear: currentOutfit.outerwear)
                 case .accessories:
                     updatedOutfit = Outfit(top: currentOutfit.top, bottom: currentOutfit.bottom, footwear: currentOutfit.footwear, accessory: replacement, outerwear: currentOutfit.outerwear)
-                case .seasonalLayering, .onePieces:
+                case .outerwear, .midLayers, .onePieces:
                     updatedOutfit = Outfit(top: currentOutfit.top, bottom: currentOutfit.bottom, footwear: currentOutfit.footwear, accessory: currentOutfit.accessory, outerwear: replacement)
                 default:
                     // For categories not in the outfit, do nothing

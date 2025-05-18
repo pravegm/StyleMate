@@ -4,9 +4,9 @@ import Foundation
 import UIKit
 
 struct Outfit: Equatable, Hashable {
-    let top: WardrobeItem
-    let bottom: WardrobeItem
-    let footwear: WardrobeItem
+    let top: WardrobeItem?
+    let bottom: WardrobeItem?
+    let footwear: WardrobeItem?
     let accessory: WardrobeItem?
     let outerwear: WardrobeItem?
 }

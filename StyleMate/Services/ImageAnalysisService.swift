@@ -16,33 +16,43 @@ class ImageAnalysisService {
         let width: CGFloat
         let height: CGFloat
     }
-    func analyzeMultiple(image: UIImage) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?, boundingBox: BoundingBox?)] {
+    func analyzeMultiple(image: UIImage, imageIndex: Int? = nil, retryCount: Int = 0) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?, boundingBox: BoundingBox?)] {
+        if let idx = imageIndex {
+            print("[Gemini] Starting analysis for image #\(idx), attempt #\(retryCount+1)")
+        } else {
+            print("[Gemini] Starting analysis for image (no index), attempt #\(retryCount+1)")
+        }
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            print("[Gemini] Failed to get JPEG data for image")
             return []
         }
         let base64Image = imageData.base64EncodedString()
         // Provide Gemini with the valid categories, products, and patterns, and instruct it to select only from these lists
         let prompt = """
-You are an expert fashion assistant. Here are the only valid clothing categories: [Tops, Bottoms, OnePieces, Footwear, Accessories, Innerwear & Sleepwear, Ethnic/Occasionwear, Seasonal/Layering].
+You are an expert fashion assistant. Here are the only valid clothing categories: [Tops, Bottoms, Mid-Layers, Outerwear, One-Pieces, Footwear, Accessories, Innerwear, Activewear, Ethnic Wear].
 For each category, here are the only valid products:
-- Tops: T-shirts, Shirts, Polo shirts, Tank tops, Blouses, Crop tops, Sweaters, Sweatshirts, Hoodies, Jackets, Blazers, Cardigans, Vests, Kurtas, Shackets
-- Bottoms: Jeans, Trousers, Chinos, Shorts, Skirts, Leggings, Joggers, Track pants, Cargo pants, Dhotis, Salwars
-- OnePieces: Dresses, Jumpsuits, Rompers, Sarees, Gowns, Overalls
-- Footwear: Sneakers, Formal shoes, Loafers, Boots, Sandals, Flip flops, Heels, Flats, Slippers, Mojaris/Juttis
-- Accessories: Watches, Sunglasses, Spectacles, Belts, Hats, Caps, Scarves, Necklaces, Earrings, Bracelets, Bangles, Rings, Ties, Bowties, Cufflinks, Backpacks, Handbags, Clutches, Wallets
-- Innerwear & Sleepwear: Undergarments, Bras, Boxers/Briefs, Night suits, Loungewear, Slips, Thermals
-- Ethnic/Occasionwear: Sherwanis, Lehenga cholis, Anarkalis, Nehru jackets, Dupattas, Kurta sets, Blouse (ethnic), Dhoti sets
-- Seasonal/Layering: Raincoats, Windcheaters, Overcoats, Thermal inners, Gloves, Beanies
+- Tops: T-Shirts, Shirts, Blouses, Tank Tops, Tube Tops, Camisoles, Crop Tops, Off-Shoulder Tops, Bodysuits, Graphic Tees, Mesh Tops, Turtlenecks
+- Bottoms: Jeans, Trousers, Leggings, Joggers, Cargo Pants, Shorts, Skirts, Skorts, Palazzo Pants
+- Mid-Layers: Hoodies, Sweatshirts, Sweaters, Cardigans, Pullovers, Fleece Jackets, Vests, Shrugs, Gilets
+- Outerwear: Jackets, Coats, Puffer Jackets, Trench Coats, Blazers, Overcoats, Raincoats
+- One-Pieces: Dresses, Jumpsuits, Rompers, Playsuits, Dungarees, Overalls
+- Footwear: Sneakers, Boots, Heels, Flats, Sandals, Slippers, Loafers, Formal shoes
+- Accessories: Hats, Scarves, Gloves, Belts, Handbags, Jewelry, Watches, Sunglasses, Hair Accessories, Ties, Bowties
+- Innerwear: Bras, Underwear, Boxers, Thongs, Socks, Thermal Wear, Shapewear, Lingerie
+- Activewear: Sports Bras, Active Leggings, Athletic Tops, Track Pants, Athletic Shorts, Active Jackets, Compression Wear, Swimwear, Tennis Dresses
+- Ethnic Wear: Kurta, Kurti, Sherwani, Nehru Jacket, Dupatta, Saree, Blouse (saree), Lehenga, Choli, Salwar, Patiala Pants, Anarkali, Angrakha, Dhoti, Lungis, Mundu, Jodhpuri Suit
 Here are the only valid patterns: [Solid, Stripes, Checks, Plaid, Polka Dot, Floral, Animal Print, Camouflage, Geometric, Houndstooth, Paisley, Tie-Dye].
 
 IMPORTANT: For each clothing item you detect in the image, you MUST select the category, product, and pattern string **EXACTLY** as provided in the above lists.
 - Do not change the spelling, do not use singular or plural forms that are not in the list, do not use synonyms, and do not invent new words.
 - Your answer must use the exact string from the list, character for character, including spaces, hyphens, and capitalization.
 - If you do not use the exact string, your answer will be rejected.
+- **For each detected item, you MUST return at least one color in the colors array. The colors array must NEVER be empty. If you are unsure, make your best guess, but do not leave it empty.**
 
 Examples:
 - If the valid product is \"T-shirts\", you must return \"T-shirts\" (not \"Tshirt\", \"Tee shirt\", or \"t-shirts\").
 - If the valid pattern is \"Polka Dot\", you must return \"Polka Dot\" (not \"polka dot\", \"Polka Dots\", or \"dots\").
+- If you detect a black t-shirt, you must return colors: [\"Black\"] (not [] or [\"\"]).
 
 If you are unsure, copy and paste the string from the list above.
 
@@ -96,6 +106,7 @@ Return only the JSON array, no extra text.
         ]
         guard let url = URL(string: geminiEndpoint + geminiAPIKey),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            print("[Gemini] Invalid URL or request body")
             return []
         }
         var request = URLRequest(url: url)
@@ -104,6 +115,24 @@ Return only the JSON array, no extra text.
         request.httpBody = httpBody
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode != 200 {
+                    if httpResponse.statusCode == 429 {
+                        let delay: UInt64 = retryCount == 0 ? 2_000_000_000 : 4_000_000_000
+                        if retryCount < 2 {
+                            try? await Task.sleep(nanoseconds: delay)
+                            return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+                        } else {
+                            return []
+                        }
+                    } else if retryCount < 2 {
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+                    } else {
+                        return []
+                    }
+                }
+            }
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                 return []
             }
@@ -130,6 +159,13 @@ Return only the JSON array, no extra text.
                         }
                         return (category, product, colors, pattern, boundingBox)
                     }
+                    let hasEmpty = mapped.contains { $0.0 == nil || $0.1 == nil || $0.2.isEmpty || $0.3 == nil }
+                    if hasEmpty && retryCount < 2 {
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+                    } else if hasEmpty {
+                        return []
+                    }
                     return mapped
                 } else {
                     return []
@@ -138,33 +174,40 @@ Return only the JSON array, no extra text.
                 return []
             }
         } catch {
-            return []
+            if retryCount < 2 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+            } else {
+                return []
+            }
         }
-        return []
     }
 
     // Improved category matching (case-insensitive, partial, with synonyms)
     private func matchCategory(_ category: String?) -> Category? {
         guard let category = category?.lowercased() else { return nil }
         let mapping: [String: Category] = [
-            "apparel": .tops,
-            "clothing": .tops,
             "top": .tops,
             "tops": .tops,
             "bottom": .bottoms,
             "bottoms": .bottoms,
+            "mid-layer": .midLayers,
+            "midlayers": .midLayers,
+            "midlayer": .midLayers,
+            "mid layers": .midLayers,
+            "outerwear": .outerwear,
+            "outer": .outerwear,
+            "one-piece": .onePieces,
+            "onepieces": .onePieces,
+            "one piece": .onePieces,
             "footwear": .footwear,
             "shoes": .footwear,
-            "pants": .bottoms,
-            "jeans": .bottoms,
-            "trousers": .bottoms,
-            "shorts": .bottoms,
-            "outerwear": .seasonalLayering,
-            "jacket": .seasonalLayering,
-            "coat": .seasonalLayering,
-            "dress": .onePieces,
-            "skirt": .bottoms,
-            // add more as needed, always use valid Category cases
+            "accessory": .accessories,
+            "accessories": .accessories,
+            "innerwear": .innerwear,
+            "activewear": .activewear,
+            "ethnicwear": .ethnicWear,
+            "ethnic wear": .ethnicWear
         ]
         if let mapped = mapping[category] {
             return mapped
@@ -358,11 +401,14 @@ Return only the JSON array, no extra text.
              ("Footwear", currentOutfit.footwear)]
             + [
                 currentOutfit.accessory.map { ("Accessories", $0) },
-                currentOutfit.outerwear.map { ("Seasonal/Layering", $0) }
+                currentOutfit.outerwear.map { ("Outerwear", $0) }
             ].compactMap { $0 }
-        ).map { (cat, item) in
-            "Category: \(cat), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
-        }.joined(separator: "\n")
+        )
+        .compactMap { (cat, item) in
+            guard let item = item else { return nil }
+            return "Category: \(cat), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+        }
+        .joined(separator: "\n")
         let availableSummary = availableItems.enumerated().map { (idx, item) in
             "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
         }.joined(separator: "\n")
@@ -383,7 +429,6 @@ You are an expert fashion stylist. Given the following information, suggest a ne
         ]
         guard let url = URL(string: geminiEndpoint + geminiAPIKey),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
-            print("[Gemini] Invalid URL or request body for partial shuffle.")
             return .failure
         }
         var request = URLRequest(url: url)
@@ -394,11 +439,9 @@ You are an expert fashion stylist. Given the following information, suggest a ne
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 429 {
-                    print("[Gemini] HTTP error: 429 (rate limit)")
                     return .rateLimited
                 }
                 if httpResponse.statusCode != 200 {
-                    print("[Gemini] HTTP error: \(httpResponse.statusCode)")
                     return .failure
                 }
             }
@@ -408,38 +451,32 @@ You are an expert fashion stylist. Given the following information, suggest a ne
                 let decoder = JSONDecoder()
                 if let item = try? decoder.decode(SuggestedOutfitItem.self, from: objData) {
                     return .success(item)
-                } else {
-                    print("[Gemini] Could not decode SuggestedOutfitItem from Gemini response. Raw text: \(text)")
                 }
-            } else {
-                print("[Gemini] Could not parse Gemini response for partial shuffle.")
             }
         } catch {
-            print("[Gemini] Exception during Gemini partial shuffle request: \(error)")
+            // No print, just fail
         }
         // Fallback: return the first available item that is not the current one
-        let currentItem: WardrobeItem? = {
+        let currentItem = {
             switch categoryToShuffle {
             case .tops: return currentOutfit.top
             case .bottoms: return currentOutfit.bottom
             case .footwear: return currentOutfit.footwear
             case .accessories: return currentOutfit.accessory
-            case .seasonalLayering, .onePieces: return currentOutfit.outerwear
+            case .outerwear, .midLayers, .onePieces: return currentOutfit.outerwear
             default: return nil
             }
         }()
-        if let fallback = availableItems.first(where: { $0.id != currentItem?.id }) {
-            // Convert to SuggestedOutfitItem
-            return .success(SuggestedOutfitItem(
-                category: fallback.category.rawValue,
-                product: fallback.product,
-                colors: fallback.colors,
-                pattern: fallback.pattern.rawValue,
-                brand: fallback.brand
-            ))
-        }
-        // As a last resort, return the current item (should never happen if availableItems.count > 1)
         if let currentItem = currentItem {
+            if let fallback = availableItems.first(where: { $0.id != currentItem.id }) {
+                return .success(SuggestedOutfitItem(
+                    category: fallback.category.rawValue,
+                    product: fallback.product,
+                    colors: fallback.colors,
+                    pattern: fallback.pattern.rawValue,
+                    brand: fallback.brand
+                ))
+            }
             return .success(SuggestedOutfitItem(
                 category: currentItem.category.rawValue,
                 product: currentItem.product,

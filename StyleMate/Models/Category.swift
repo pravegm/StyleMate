@@ -4,12 +4,14 @@ import SwiftUI
 enum Category: String, CaseIterable, Identifiable, Hashable {
     case tops = "Tops"
     case bottoms = "Bottoms"
-    case onePieces = "OnePieces"
+    case midLayers = "Mid-Layers"
+    case outerwear = "Outerwear"
+    case onePieces = "One-Pieces"
     case footwear = "Footwear"
     case accessories = "Accessories"
-    case innerwearSleepwear = "Innerwear & Sleepwear"
-    case ethnicOccasionwear = "Ethnic/Occasionwear"
-    case seasonalLayering = "Seasonal/Layering"
+    case innerwear = "Innerwear"
+    case activewear = "Activewear"
+    case ethnicWear = "Ethnic Wear"
     
     var id: String { self.rawValue }
 }

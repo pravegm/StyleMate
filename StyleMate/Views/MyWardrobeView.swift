@@ -98,36 +98,42 @@ extension Category {
         switch self {
         case .tops: return "tshirt"
         case .bottoms: return "figure.walk"
+        case .midLayers: return "wind"
+        case .outerwear: return "cloud.rain"
         case .onePieces: return "figure.dress.line.vertical.figure"
         case .footwear: return "shoeprints.fill"
         case .accessories: return "suitcase"
-        case .innerwearSleepwear: return "bed.double"
-        case .ethnicOccasionwear: return "sparkles"
-        case .seasonalLayering: return "cloud.sun.rain"
+        case .innerwear: return "bed.double"
+        case .activewear: return "figure.run"
+        case .ethnicWear: return "sparkles"
         }
     }
     var tileColor: Color {
         switch self {
         case .tops: return Color.blue.opacity(0.15)
         case .bottoms: return Color.green.opacity(0.15)
+        case .midLayers: return Color.cyan.opacity(0.15)
+        case .outerwear: return Color.gray.opacity(0.15)
         case .onePieces: return Color.purple.opacity(0.15)
         case .footwear: return Color.orange.opacity(0.15)
         case .accessories: return Color.pink.opacity(0.15)
-        case .innerwearSleepwear: return Color.indigo.opacity(0.15)
-        case .ethnicOccasionwear: return Color.yellow.opacity(0.15)
-        case .seasonalLayering: return Color.teal.opacity(0.15)
+        case .innerwear: return Color.indigo.opacity(0.15)
+        case .activewear: return Color.mint.opacity(0.15)
+        case .ethnicWear: return Color.yellow.opacity(0.15)
         }
     }
     var iconColor: Color {
         switch self {
         case .tops: return .blue
         case .bottoms: return .green
+        case .midLayers: return .cyan
+        case .outerwear: return .gray
         case .onePieces: return .purple
         case .footwear: return .orange
         case .accessories: return .pink
-        case .innerwearSleepwear: return .indigo
-        case .ethnicOccasionwear: return .yellow
-        case .seasonalLayering: return .teal
+        case .innerwear: return .indigo
+        case .activewear: return .mint
+        case .ethnicWear: return .yellow
         }
     }
 }
@@ -398,9 +404,11 @@ struct CategoryDetailView: View {
         case .onePieces: return "👗"
         case .footwear: return "👟"
         case .accessories: return "🕶️"
-        case .innerwearSleepwear: return "🩲"
-        case .ethnicOccasionwear: return "🥻"
-        case .seasonalLayering: return "🧥"
+        case .innerwear: return "🩲"
+        case .ethnicWear: return "🥻"
+        case .midLayers: return "🌬️"
+        case .outerwear: return "🌧️"
+        case .activewear: return "🏃"
         }
     }
 }
