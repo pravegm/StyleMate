@@ -9,6 +9,9 @@ struct ProfileView: View {
     @State private var showStyleSheet = false
     @State private var tempSelectedStyles: [OutfitType] = []
     @State private var showStyleError = false
+    @State private var editGender: String = ""
+    @State private var editAge: String = ""
+    let genderOptions = ["Male", "Female", "Other", "Prefer not to say"]
     
     private let maxStyles = 6
     private let allStyles = OutfitType.allCases
@@ -24,6 +27,30 @@ struct ProfileView: View {
                         
                         Text(user.email)
                             .foregroundStyle(.secondary)
+                        Picker("Gender", selection: $editGender) {
+                            ForEach(genderOptions, id: \.self) { option in
+                                Text(option).tag(option)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        .onAppear { editGender = user.gender ?? "" }
+                        .onChange(of: editGender) { newGender in
+                            if var user = authService.user {
+                                user.gender = newGender.isEmpty ? nil : newGender
+                                authService.user = user
+                                authService.saveCurrentUser()
+                            }
+                        }
+                        TextField("Age", text: $editAge)
+                            .keyboardType(.numberPad)
+                            .onAppear { editAge = user.age != nil ? String(user.age!) : "" }
+                            .onChange(of: editAge) { newAge in
+                                if var user = authService.user {
+                                    user.age = Int(newAge)
+                                    authService.user = user
+                                    authService.saveCurrentUser()
+                                }
+                            }
                     }
                     
                     Section("Preferences") {

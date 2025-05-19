@@ -10,6 +10,9 @@ struct LoginView: View {
     @State private var isSignUp = false
     @State private var appear = false
     @State private var selectedQuote: String = ""
+    @State private var gender: String = ""
+    @State private var age: String = ""
+    let genderOptions = ["Male", "Female", "Other", "Prefer not to say"]
     
     let aiQuotes = [
         "Unlock daily style inspiration, powered by AI magic.",
@@ -97,6 +100,45 @@ struct LoginView: View {
                                     .background(Color(.secondarySystemBackground))
                                     .cornerRadius(10)
                             }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Gender")
+                                    .font(.headline)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.primary)
+                                Menu {
+                                    ForEach(genderOptions, id: \.self) { option in
+                                        Button(option) { gender = option }
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(gender.isEmpty ? "Select your gender" : gender)
+                                            .foregroundColor(gender.isEmpty ? .gray : .primary)
+                                        Spacer()
+                                        Image(systemName: "chevron.down")
+                                            .foregroundColor(.gray)
+                                    }
+                                    .padding()
+                                    .background(Color(.secondarySystemBackground))
+                                    .cornerRadius(10)
+                                }
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Age")
+                                    .font(.headline)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.primary)
+                                TextField("Enter your age", text: $age)
+                                    .keyboardType(.numberPad)
+                                    .padding()
+                                    .background(Color(.secondarySystemBackground))
+                                    .cornerRadius(10)
+                                    .onChange(of: age) { newValue in
+                                        let filtered = newValue.filter { $0.isNumber }
+                                        if filtered != newValue {
+                                            age = filtered
+                                        }
+                                    }
+                            }
                         }
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Email")
@@ -139,7 +181,8 @@ struct LoginView: View {
                         Button(isSignUp ? "Create Your Style Account" : "Sign in to the Style Portal") {
                             Task {
                                 if isSignUp {
-                                    let result = await authService.signUpWithEmail(email: email, password: password, name: name)
+                                    let ageInt = Int(age)
+                                    let result = await authService.signUpWithEmail(email: email, password: password, name: name, gender: gender, age: ageInt)
                                     if let error = result {
                                         errorMessage = error
                                         showError = true
@@ -197,6 +240,11 @@ struct LoginView: View {
                     selectedQuote = aiQuotes.shuffled().first ?? aiQuotes[0]
                 }
             }
+            .gesture(
+                TapGesture().onEnded { _ in
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            )
             .alert("Error", isPresented: $showError) {
                 Button("OK", role: .cancel) {}
             } message: {

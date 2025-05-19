@@ -20,7 +20,7 @@ struct SummaryView: View {
             VStack(spacing: 32) {
                 // Big celebratory emoji/icon
                 Text("🎉")
-                    .font(.system(size: 80))
+                    .font(.system(size: 48))
                     .scaleEffect(1.2)
                     .shadow(radius: 10)
 
@@ -32,12 +32,37 @@ struct SummaryView: View {
                     .transition(.scale)
 
                 // Summary of items
-                ForEach(summaryStrings, id: \.self) { str in
-                    Text(str)
-                        .font(.title2)
-                        .foregroundColor(.primary)
-                        .padding(.vertical, 2)
+                VStack(alignment: .center, spacing: 8) {
+                    HStack {
+                        Text("Items Added")
+                            .font(.title.bold())
+                            .foregroundColor(.accentColor)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .foregroundColor(.accentColor)
+                            .font(.title2)
+                    }
+                    .padding(.bottom, 2)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(summaryStrings, id: \.self) { str in
+                                Text(str)
+                                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                                    .foregroundColor(.primary)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                Divider()
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                    }
+                    .frame(maxHeight: 400)
+                    Text("Scroll to see all items")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
                 }
+                .frame(maxHeight: .infinity)
 
                 Spacer()
 

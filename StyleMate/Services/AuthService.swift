@@ -60,7 +60,7 @@ class AuthService: ObservableObject {
     }
     
     // Email/password sign up
-    func signUpWithEmail(email: String, password: String, name: String) async -> String? {
+    func signUpWithEmail(email: String, password: String, name: String, gender: String, age: Int?) async -> String? {
         guard !email.isEmpty, !password.isEmpty, !name.isEmpty else {
             return "All fields are required."
         }
@@ -75,7 +75,9 @@ class AuthService: ObservableObject {
                 .everyday, .formal, .date, .sports, .party, .business
             ],
             notificationsEnabled: true,
-            dateCreated: Date()
+            dateCreated: Date(),
+            gender: gender.isEmpty ? nil : gender,
+            age: age
         )
         self.user = newUser
         self.isAuthenticated = true

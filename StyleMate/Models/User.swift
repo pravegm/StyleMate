@@ -7,4 +7,6 @@ struct User: Identifiable, Codable {
     var preferredStyles: [OutfitType]
     var notificationsEnabled: Bool
     var dateCreated: Date
+    var gender: String? // New field: "Male", "Female", "Other", etc.
+    var age: Int? // New field: optional Int
 } 
