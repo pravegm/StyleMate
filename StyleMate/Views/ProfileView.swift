@@ -6,6 +6,12 @@ struct ProfileView: View {
     @State private var showingSignOutAlert = false
     @State private var showingOptionsMenu = false
     @State private var showEmptyConfirmation = false
+    @State private var showStyleSheet = false
+    @State private var tempSelectedStyles: [OutfitType] = []
+    @State private var showStyleError = false
+    
+    private let maxStyles = 6
+    private let allStyles = OutfitType.allCases
     
     var body: some View {
         NavigationStack {
@@ -21,17 +27,29 @@ struct ProfileView: View {
                     }
                     
                     Section("Preferences") {
-                        Picker("Preferred Style", selection: .constant(user.preferredStyle)) {
-                            Text("Casual").tag("Casual")
-                            Text("Formal").tag("Formal")
-                            Text("Business").tag("Business")
-                            Text("Sporty").tag("Sporty")
-                            Text("Bohemian").tag("Bohemian")
+                        VStack(alignment: .leading, spacing: 0) {
+                            Button(action: {
+                                if let user = authService.user {
+                                    tempSelectedStyles = user.preferredStyles
+                                    showStyleSheet = true
+                                }
+                            }) {
+                                HStack {
+                                    Text("Your Style Preferences")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .foregroundColor(.gray)
+                                }
+                                .padding(.vertical, 12)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            Divider()
+                            Toggle("Enable Notifications", isOn: .constant(user.notificationsEnabled))
+                                .disabled(true)
+                                .padding(.vertical, 8)
                         }
-                        .disabled(true)
-                        
-                        Toggle("Enable Notifications", isOn: .constant(user.notificationsEnabled))
-                            .disabled(true)
                     }
                 }
                 
@@ -97,6 +115,130 @@ struct ProfileView: View {
                 Text("This will remove all items from your wardrobe and cannot be undone.")
             }
             .padding(.bottom, 120)
+            .sheet(isPresented: $showStyleSheet) {
+                StylePreferencesSheet(
+                    selectedStyles: $tempSelectedStyles,
+                    showStyleError: $showStyleError,
+                    onApply: {
+                        if tempSelectedStyles.count == maxStyles {
+                            if var user = authService.user {
+                                user.preferredStyles = tempSelectedStyles
+                                authService.user = user
+                                authService.saveCurrentUser()
+                                showStyleSheet = false
+                            }
+                        } else {
+                            showStyleError = true
+                        }
+                    },
+                    onCancel: {
+                        showStyleSheet = false
+                        showStyleError = false
+                    }
+                )
+                .environmentObject(authService)
+            }
+        }
+    }
+}
+
+struct StylePreferencesSheet: View {
+    @Binding var selectedStyles: [OutfitType]
+    @Binding var showStyleError: Bool
+    var onApply: () -> Void
+    var onCancel: () -> Void
+    @EnvironmentObject var authService: AuthService
+    private let maxStyles = 6
+    private let allStyles = OutfitType.allCases
+    private let columns = [GridItem(.flexible(minimum: 0, maximum: .infinity)), GridItem(.flexible(minimum: 0, maximum: .infinity))]
+    private let cellHeight: CGFloat = 56
+    var isChanged: Bool {
+        guard let user = authService.user else { return false }
+        return Set(selectedStyles) != Set(user.preferredStyles)
+    }
+    var body: some View {
+        NavigationView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Edit Style Preferences")
+                    .font(.title2.bold())
+                    .padding(.top, 24)
+                    .padding(.bottom, 8)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Choose exactly 6 preferred styles")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                LazyVGrid(columns: columns, spacing: 16) {
+                    ForEach(0..<10) { idx in
+                        let style = allStyles[idx]
+                        Button(action: {
+                            if selectedStyles.contains(style) {
+                                selectedStyles.removeAll { $0 == style }
+                            } else if selectedStyles.count < maxStyles {
+                                selectedStyles.append(style)
+                            } else {
+                                showStyleError = true
+                            }
+                        }) {
+                            HStack(spacing: 12) {
+                                Image(systemName: selectedStyles.contains(style) ? "checkmark.square.fill" : "square")
+                                    .foregroundColor(selectedStyles.contains(style) ? .accentColor : .gray)
+                                    .font(.title3)
+                                Image(systemName: style.icon)
+                                    .foregroundColor(.primary)
+                                    .font(.title3)
+                                Text(style.rawValue)
+                                    .foregroundColor(.primary)
+                                    .font(.body)
+                                    .multilineTextAlignment(.leading)
+                                Spacer()
+                            }
+                            .padding(.leading, 12)
+                            .frame(maxWidth: .infinity, minHeight: cellHeight, maxHeight: cellHeight, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(selectedStyles.contains(style) ? Color.accentColor.opacity(0.13) : Color(.systemGray6))
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
+                if showStyleError {
+                    Text("Please select exactly 6 styles.")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .padding(.top, 4)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                Spacer()
+                VStack(spacing: 12) {
+                    Button(action: {
+                        if selectedStyles.count == maxStyles && isChanged {
+                            onApply()
+                        } else {
+                            showStyleError = true
+                        }
+                    }) {
+                        Text("Save My Style Preferences")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(isChanged && selectedStyles.count == maxStyles ? Color.accentColor : Color.gray.opacity(0.4))
+                            .cornerRadius(12)
+                    }
+                    .disabled(!isChanged || selectedStyles.count != maxStyles)
+                    Button("Cancel") { onCancel() }
+                        .styleMateSecondaryButton()
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 24)
+            }
+            .padding(.horizontal, 16)
+            .background(Color(.systemBackground))
         }
     }
 }

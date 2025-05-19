@@ -7,17 +7,24 @@ class AuthService: ObservableObject {
     
     static private let usersKey = "users"
     static private let currentUserKey = "currentUserEmail"
+    static private let currentUserObjectKey = "currentUserObject"
     static var users: [String: (password: String, name: String)] = loadUsers()
     
     init() {
-        if let email = UserDefaults.standard.string(forKey: Self.currentUserKey),
-           let (password, name) = AuthService.users[email] {
-            // Restore user session
+        if let userData = UserDefaults.standard.data(forKey: Self.currentUserObjectKey),
+           let decodedUser = try? JSONDecoder().decode(User.self, from: userData) {
+            self.user = decodedUser
+            self.isAuthenticated = true
+        } else if let email = UserDefaults.standard.string(forKey: Self.currentUserKey),
+                  let (password, name) = AuthService.users[email] {
+            // Restore user session (legacy)
             let restoredUser = User(
                 id: email,
                 email: email,
                 name: name,
-                preferredStyle: "Casual",
+                preferredStyles: [
+                    .everyday, .formal, .date, .sports, .party, .business
+                ],
                 notificationsEnabled: true,
                 dateCreated: Date() // You may want to persist this too
             )
@@ -46,6 +53,12 @@ class AuthService: ObservableObject {
         UserDefaults.standard.set(dict, forKey: usersKey)
     }
     
+    func saveCurrentUser() {
+        if let user = self.user, let data = try? JSONEncoder().encode(user) {
+            UserDefaults.standard.set(data, forKey: Self.currentUserObjectKey)
+        }
+    }
+    
     // Email/password sign up
     func signUpWithEmail(email: String, password: String, name: String) async -> String? {
         guard !email.isEmpty, !password.isEmpty, !name.isEmpty else {
@@ -58,13 +71,16 @@ class AuthService: ObservableObject {
             id: email,
             email: email,
             name: name,
-            preferredStyle: "Casual",
+            preferredStyles: [
+                .everyday, .formal, .date, .sports, .party, .business
+            ],
             notificationsEnabled: true,
             dateCreated: Date()
         )
         self.user = newUser
         self.isAuthenticated = true
         UserDefaults.standard.set(email, forKey: Self.currentUserKey)
+        saveCurrentUser()
         return nil
     }
     
@@ -83,13 +99,16 @@ class AuthService: ObservableObject {
             id: email,
             email: email,
             name: name,
-            preferredStyle: "Casual",
+            preferredStyles: [
+                .everyday, .formal, .date, .sports, .party, .business
+            ],
             notificationsEnabled: true,
             dateCreated: Date()
         )
         self.user = newUser
         self.isAuthenticated = true
         UserDefaults.standard.set(email, forKey: Self.currentUserKey)
+        saveCurrentUser()
         return nil
     }
     
@@ -97,6 +116,7 @@ class AuthService: ObservableObject {
         self.user = nil
         self.isAuthenticated = false
         UserDefaults.standard.removeObject(forKey: Self.currentUserKey)
+        UserDefaults.standard.removeObject(forKey: Self.currentUserObjectKey)
         // Do not clear users for persistence
     }
     

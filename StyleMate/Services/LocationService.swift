@@ -22,7 +22,6 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         if let clError = error as? CLError {
             locationError = clError
         }
-        print("Location error: \(error.localizedDescription)")
     }
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorizationStatus = manager.authorizationStatus

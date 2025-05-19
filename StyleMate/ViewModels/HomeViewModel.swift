@@ -64,7 +64,15 @@ class HomeViewModel: ObservableObject {
             let typeToUse = selectedOutfitType
             let customDescription = customOutfitDescription
             let weather = self.weather // Pass weather to Gemini
-            guard let suggestions = await ImageAnalysisService.shared.suggestOutfitBatch(from: items, outfitType: typeToUse, customDescription: customDescription, weather: weather), !suggestions.isEmpty else {
+            let user = AuthService().user // TODO: Use the correct instance if available
+            if let user = user, let type = typeToUse, !user.preferredStyles.contains(type) {
+                todayOutfit = nil
+                showNoOutfitAlert = true
+                outfitBatch = []
+                batchIndex = 0
+                return
+            }
+            guard let suggestions = await ImageAnalysisService.shared.suggestOutfitBatch(from: items, outfitType: typeToUse, customDescription: customDescription, weather: weather, user: user), !suggestions.isEmpty else {
                 todayOutfit = nil
                 showNoOutfitAlert = true
                 outfitBatch = []
@@ -75,21 +83,26 @@ class HomeViewModel: ObservableObject {
             let batch: [Outfit] = suggestions.compactMap { suggestion in
                 // Try to match Gemini's suggestions to actual WardrobeItem objects
                 func match(_ suggestion: ImageAnalysisService.SuggestedOutfitItem) -> WardrobeItem? {
-                    return items.first(where: { item in
-                        item.category.rawValue.caseInsensitiveCompare(suggestion.category) == .orderedSame &&
-                        item.product.caseInsensitiveCompare(suggestion.product) == .orderedSame &&
-                        Set(item.colors.map { $0.lowercased() }) == Set(suggestion.colors.map { $0.lowercased() }) &&
-                        item.pattern.rawValue.caseInsensitiveCompare(suggestion.pattern) == .orderedSame &&
-                        (suggestion.brand == nil || item.brand.caseInsensitiveCompare(suggestion.brand ?? "") == .orderedSame || item.brand.isEmpty)
-                    })
+                    for item in items {
+                        let categoryMatch = ImageAnalysisService.shared.matchCategory(suggestion.category) == item.category
+                        let productMatch = ImageAnalysisService.shared.matchProduct(suggestion.product)?.caseInsensitiveCompare(item.product) == .orderedSame
+                        let colorMatch = Set(item.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }) == Set(suggestion.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) })
+                        let patternMatch = item.pattern.rawValue.caseInsensitiveCompare(suggestion.pattern) == .orderedSame
+                        let brandMatch = (suggestion.brand == nil || item.brand.caseInsensitiveCompare(suggestion.brand ?? "") == .orderedSame || item.brand.isEmpty)
+                        if categoryMatch && productMatch && colorMatch && patternMatch && brandMatch {
+                            return item
+                        }
+                    }
+                    return nil
                 }
                 let matchedItems = suggestion.compactMap { match($0) }
-                let top = matchedItems.first(where: { $0.category == .tops })
+                // Remove the requirement for top, bottom, and footwear. Use whatever Gemini returns.
+                let top = matchedItems.first(where: { $0.category == .tops || $0.category == .ethnicWear || $0.category == .onePieces })
                 let bottom = matchedItems.first(where: { $0.category == .bottoms })
                 let footwear = matchedItems.first(where: { $0.category == .footwear })
                 let accessory = matchedItems.first(where: { $0.category == .accessories })
                 let outerwear = matchedItems.first(where: { $0.category == .outerwear || $0.category == .midLayers || $0.category == .onePieces })
-                if let top = top, let bottom = bottom, let footwear = footwear {
+                if !matchedItems.isEmpty {
                     return Outfit(top: top, bottom: bottom, footwear: footwear, accessory: accessory, outerwear: outerwear)
                 } else {
                     return nil

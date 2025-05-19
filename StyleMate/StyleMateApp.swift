@@ -527,7 +527,7 @@ struct MultiAddNewItemView: View {
                         }.map { $0.element }
                     }
                     if items.isEmpty && !results.isEmpty {
-                        print("[DEBUG] Gemini raw results for image #\(idx): \(results)")
+//                         print("[DEBUG] Gemini raw results for image #\(idx): \(results)")
                     }
                     await MainActor.run {
                         detectedItems[idx] = items

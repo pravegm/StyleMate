@@ -148,6 +148,15 @@ This feature ensures you always know which images need your attention and which 
 - The user can choose to proceed (outfit will be suggested without weather context) or cancel.
 - This ensures the user is always informed and in control, and that outfit suggestions are as logical as possible given the available data.
 
+## Style Preference Feature
+
+- **Personalized Style Preferences:**
+  - Users can select their preferred fashion styles (e.g., Everyday Casual, Formal Wear, Date Night, Sports / Active, Party, Business Casual, Loungewear, Vacation, Ethnic Wear, Streetwear) from a list in their profile.
+  - You can edit your style preferences at any time by tapping 'Edit Style Preferences' in your profile.
+  - The app uses your selected styles to tailor outfit suggestions, ensuring recommendations match your taste and lifestyle.
+  - Gemini AI will prioritize your preferred styles when generating daily outfit suggestions, but you can also request outfits for any specific style from the home screen.
+  - All style preference logic is privacy-first and stored locally on your device.
+
 ## Getting Started
 
 1. Clone the repo and open `StyleMate.xcodeproj` in Xcode.

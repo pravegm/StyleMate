@@ -18,12 +18,12 @@ class ImageAnalysisService {
     }
     func analyzeMultiple(image: UIImage, imageIndex: Int? = nil, retryCount: Int = 0) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?, boundingBox: BoundingBox?)] {
         if let idx = imageIndex {
-            print("[Gemini] Starting analysis for image #\(idx), attempt #\(retryCount+1)")
+            //             print("[Gemini] Starting analysis for image #\(idx), attempt #\(retryCount+1)")
         } else {
-            print("[Gemini] Starting analysis for image (no index), attempt #\(retryCount+1)")
+            //             print("[Gemini] Starting analysis for image (no index), attempt #\(retryCount+1)")
         }
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
-            print("[Gemini] Failed to get JPEG data for image")
+            //             print("[Gemini] Failed to get JPEG data for image")
             return []
         }
         let base64Image = imageData.base64EncodedString()
@@ -106,7 +106,7 @@ Return only the JSON array, no extra text.
         ]
         guard let url = URL(string: geminiEndpoint + geminiAPIKey),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
-            print("[Gemini] Invalid URL or request body")
+            //             print("[Gemini] Invalid URL or request body")
             return []
         }
         var request = URLRequest(url: url)
@@ -188,7 +188,7 @@ Return only the JSON array, no extra text.
     }
 
     // Improved category matching (case-insensitive, partial, with synonyms)
-    private func matchCategory(_ category: String?) -> Category? {
+    func matchCategory(_ category: String?) -> Category? {
         guard let category = category?.lowercased() else { return nil }
         let mapping: [String: Category] = [
             "top": .tops,
@@ -228,7 +228,7 @@ Return only the JSON array, no extra text.
     }
 
     // Improved product matching (case-insensitive, partial, fuzzy, prefer exact/singular/plural)
-    private func matchProduct(_ product: String?) -> String? {
+    func matchProduct(_ product: String?) -> String? {
         guard let product = product, !product.isEmpty else { return nil }
         let lowerProduct = product.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         // Build a set of all valid products (lowercased, singular/plural forms)
@@ -317,7 +317,7 @@ Return only the JSON array, no extra text.
         let brand: String?
     }
     
-    func suggestOutfitBatch(from wardrobe: [WardrobeItem], outfitType: OutfitType? = nil, customDescription: String? = nil, weather: Weather? = nil) async -> [[SuggestedOutfitItem]]? {
+    func suggestOutfitBatch(from wardrobe: [WardrobeItem], outfitType: OutfitType? = nil, customDescription: String? = nil, weather: Weather? = nil, user: User? = nil) async -> [[SuggestedOutfitItem]]? {
         // 1. Summarize the wardrobe
         let wardrobeSummary = wardrobe.enumerated().map { (idx, item) in
             "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
@@ -329,6 +329,9 @@ Return only the JSON array, no extra text.
             typeInstruction = "The user described their event or outfit as: \"\(custom)\". Please tailor your suggestions for this context."
         } else if let outfitType = outfitType {
             typeInstruction = "The user wants an outfit for: \(outfitType.rawValue). Please tailor your suggestions for this context."
+        } else if let user = user {
+            let styles = user.preferredStyles.map { $0.rawValue }.joined(separator: ", ")
+            typeInstruction = "The user prefers these styles: \(styles). Suggest outfits that fit one of these styles."
         } else {
             typeInstruction = "The user wants an everyday casual outfit."
         }
@@ -368,6 +371,8 @@ Here is the wardrobe:
 \n\(wardrobeSummary)\n
 Return only the JSON array, no extra text.
 """
+        // DEBUG: Print the prompt being sent
+        //         print("\n--- GEMINI OUTFIT SUGGESTION PROMPT ---\n\(prompt)\n--- END PROMPT ---\n")
         // 3. Prepare Gemini API request
         let requestBody: [String: Any] = [
             "contents": [
@@ -397,6 +402,8 @@ Return only the JSON array, no extra text.
             if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
                let text = result.candidates.first?.content.parts.first?.text,
                let arrData = text.data(using: .utf8) {
+                // DEBUG: Print the raw Gemini response
+                //         print("\n--- GEMINI RAW RESPONSE ---\n\(text)\n--- END RESPONSE ---\n")
                 let decoder = JSONDecoder()
                 if let arr = try? decoder.decode([[SuggestedOutfitItem]].self, from: arrData) {
                     return arr

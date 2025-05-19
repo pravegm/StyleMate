@@ -4,6 +4,7 @@ import CoreLocation
 struct HomeView: View {
     @StateObject private var homeVM = HomeViewModel()
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
+    @EnvironmentObject var authService: AuthService
     @State private var showProfile = false
     // Add for celebratory emoji and subheading
     let emojis = ["✨", "🕺", "💃", "👗", "🎉", "🌟", "🧥", "👚", "🧢", "🧣", "🧤", "👠", "👒"]
@@ -255,11 +256,15 @@ struct HomeView: View {
     private struct OutfitTypeSelector: View {
         @Binding var selectedOutfitType: OutfitType?
         @Binding var customOutfitDescription: String?
-        let columns = Array(repeating: GridItem(.flexible()), count: 6)
+        @EnvironmentObject var authService: AuthService
+        let columns = Array(repeating: GridItem(.flexible()), count: 3)
+        var preferredStyles: [OutfitType] {
+            authService.user?.preferredStyles ?? Array(OutfitType.allCases.prefix(6))
+        }
         var body: some View {
             VStack(spacing: 18) {
                 LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(Array(OutfitType.allCases.prefix(6)), id: \ .self) { type in
+                    ForEach(preferredStyles, id: \ .self) { type in
                         Button(action: {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                                 selectedOutfitType = type
@@ -294,7 +299,7 @@ struct HomeView: View {
                     Button(action: {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                             if selectedOutfitType == nil && customOutfitDescription != nil {
-                                selectedOutfitType = .everyday
+                                selectedOutfitType = preferredStyles.first
                                 customOutfitDescription = nil
                             } else {
                                 selectedOutfitType = nil
