@@ -63,7 +63,8 @@ class HomeViewModel: ObservableObject {
             defer { isLoading = false }
             let typeToUse = selectedOutfitType
             let customDescription = customOutfitDescription
-            guard let suggestions = await ImageAnalysisService.shared.suggestOutfitBatch(from: items, outfitType: typeToUse, customDescription: customDescription), !suggestions.isEmpty else {
+            let weather = self.weather // Pass weather to Gemini
+            guard let suggestions = await ImageAnalysisService.shared.suggestOutfitBatch(from: items, outfitType: typeToUse, customDescription: customDescription, weather: weather), !suggestions.isEmpty else {
                 todayOutfit = nil
                 showNoOutfitAlert = true
                 outfitBatch = []

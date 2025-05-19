@@ -317,7 +317,7 @@ Return only the JSON array, no extra text.
         let brand: String?
     }
     
-    func suggestOutfitBatch(from wardrobe: [WardrobeItem], outfitType: OutfitType? = nil, customDescription: String? = nil) async -> [[SuggestedOutfitItem]]? {
+    func suggestOutfitBatch(from wardrobe: [WardrobeItem], outfitType: OutfitType? = nil, customDescription: String? = nil, weather: Weather? = nil) async -> [[SuggestedOutfitItem]]? {
         // 1. Summarize the wardrobe
         let wardrobeSummary = wardrobe.enumerated().map { (idx, item) in
             "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
@@ -332,6 +332,24 @@ Return only the JSON array, no extra text.
         } else {
             typeInstruction = "The user wants an everyday casual outfit."
         }
+        // Add weather context if available
+        let weatherInstruction: String
+        if let weather = weather {
+            let temp = Int(weather.temperature2m)
+            let desc = WeatherService.weatherDescription(for: weather.weathercode)
+            let city = weather.city ?? "their location"
+            let seasonHint: String
+            switch temp {
+            case ..<5: seasonHint = "It is very cold (winter-like). Suggest warm, layered, insulated outfits. Avoid summer wear." // <5°C
+            case 5..<15: seasonHint = "It is cool (spring/fall-like). Suggest light jackets, sweaters, or layers. Avoid heavy winter or summer-only outfits."
+            case 15..<25: seasonHint = "It is mild and pleasant. Suggest comfortable, breathable outfits. Avoid heavy winter clothing."
+            case 25...: seasonHint = "It is hot (summer-like). Suggest light, breathable, sun-protective outfits. Avoid heavy or warm clothing."
+            default: seasonHint = ""
+            }
+            weatherInstruction = "The current weather in \(city) is: \(desc), temperature: \(temp)°C. \(seasonHint)"
+        } else {
+            weatherInstruction = "No weather information is available. Suggest outfits suitable for a typical day."
+        }
         let prompt = """
 You are an expert fashion stylist. Given the following wardrobe items, suggest 5 different, stylish, harmonious, and practical outfits for today. Each outfit should:
 - Follow established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).
@@ -343,6 +361,7 @@ You are an expert fashion stylist. Given the following wardrobe items, suggest 5
 - Only use items from the provided list. Do not invent or hallucinate new items.
 - For each item in the outfit, specify: category, product, colors (array), pattern, and brand (optional).
 \(typeInstruction)
+\(weatherInstruction)
 Return your answer as a JSON array of 5 arrays, where each inner array is an outfit (array of objects with: category, product, colors, pattern, and brand).
 
 Here is the wardrobe:

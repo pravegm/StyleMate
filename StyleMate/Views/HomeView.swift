@@ -45,6 +45,7 @@ struct HomeView: View {
     @State private var emojiCycling: Bool = false
     @State private var selectedCategory: Category? = nil
     @State private var selectedProduct: String? = nil
+    @State private var showWeatherWarning = false
     
     var body: some View {
         NavigationStack {
@@ -111,7 +112,14 @@ struct HomeView: View {
                                     withAnimation(.easeInOut(duration: 0.18)) {
                                         animateButton = true
                                     }
-                                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items)
+                                    // Weather logic: if weather is loading, show warning first
+                                    if homeVM.isWeatherLoading {
+                                        showWeatherWarning = true
+                                    } else if homeVM.weather == nil || homeVM.weatherError != nil {
+                                        showWeatherWarning = true
+                                    } else {
+                                        homeVM.suggestTodayOutfit(from: wardrobeViewModel.items)
+                                    }
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                         animateButton = false
                                     }
@@ -180,6 +188,18 @@ struct HomeView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("Try adding more items or adjusting colors/patterns.")
+            }
+            .alert("Weather unavailable", isPresented: $showWeatherWarning) {
+                Button("Yes", role: .destructive) {
+                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items)
+                }
+                Button("No", role: .cancel) {}
+            } message: {
+                if homeVM.isWeatherLoading {
+                    Text("Weather is still loading. Outfit suggestions may not be seasonally appropriate. Continue?")
+                } else {
+                    Text("Weather information could not be retrieved. Outfit suggestions may not be seasonally appropriate. Would you like to continue?")
+                }
             }
             .onAppear {
                 // Randomize emoji and subheading on appear

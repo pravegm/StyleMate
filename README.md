@@ -138,6 +138,16 @@ When adding multiple images to your wardrobe, you will see a row of dots at the 
 
 This feature ensures you always know which images need your attention and which have already been reviewed or require action.
 
+## Weather-Aware Outfit Suggestions
+
+- The app uses real-time weather data from Open-Meteo to help Gemini suggest seasonally/logically appropriate outfits (e.g., no coats in summer, no shorts in winter).
+- If weather data is available, it is included as context for the AI stylist.
+- If weather is still loading or unavailable, the "Get Today's Outfit" button remains enabled, but when pressed, the user is shown a warning popup:
+  - If weather is still loading: "Weather is still loading. Outfit suggestions may not be seasonally appropriate. Continue?"
+  - If weather is unavailable: "Weather information could not be retrieved. Outfit suggestions may not be seasonally appropriate. Would you like to continue?"
+- The user can choose to proceed (outfit will be suggested without weather context) or cancel.
+- This ensures the user is always informed and in control, and that outfit suggestions are as logical as possible given the available data.
+
 ## Getting Started
 
 1. Clone the repo and open `StyleMate.xcodeproj` in Xcode.
