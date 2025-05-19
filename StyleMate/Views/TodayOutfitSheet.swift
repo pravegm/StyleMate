@@ -80,84 +80,9 @@ struct TodayOutfitSheet: View {
                     let columnsCount = max(1, Int((totalWidth + spacing) / (minTileWidth + spacing)))
                     let columns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: columnsCount)
                     let items = outfitItems
-                    let rows = gridRows(items: items, columnsCount: columnsCount)
                     LazyVGrid(columns: columns, alignment: .center, spacing: spacing) {
-                        ForEach(0..<(rows.count - (rows.last?.count ?? 0 < columnsCount ? 1 : 0)), id: \ .self) { rowIdx in
-                            let row = rows[rowIdx]
-                            ForEach(row, id: \ .id) { item in
-                                VStack(spacing: 0) {
-                                    Button(action: {
-                                        if let img = item.croppedImage ?? item.image {
-                                            previewImage = PreviewImage(image: img)
-                                        }
-                                    }) {
-                                        VStack(spacing: 10) {
-                                            if let uiImage = item.croppedImage ?? item.image {
-                                                Image(uiImage: uiImage)
-                                                    .resizable()
-                                                    .scaledToFit()
-                                                    .frame(height: 90)
-                                                    .cornerRadius(18)
-                                                    .shadow(color: Color.accentColor.opacity(0.18), radius: 8, x: 0, y: 6)
-                                            } else {
-                                                Rectangle()
-                                                    .fill(Color.gray)
-                                                    .frame(height: 90)
-                                                    .cornerRadius(18)
-                                                    .overlay(Text("No Image").font(.caption2))
-                                            }
-                                            VStack(alignment: .center, spacing: 2) {
-                                                Text(item.product)
-                                                    .font(.headline)
-                                                    .foregroundColor(.primary)
-                                                Text(item.colors.joined(separator: ", "))
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.accentColor)
-                                                Text(item.pattern.rawValue)
-                                                    .font(.footnote)
-                                                    .foregroundColor(.secondary)
-                                                if !item.brand.isEmpty {
-                                                    Text(item.brand)
-                                                        .font(.caption)
-                                                        .foregroundColor(.secondary)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .padding(.bottom, 4)
-                                    // Per-item shuffle button
-                                    Button(action: {
-                                        if let category = Category.allCases.first(where: { $0 == item.category }) {
-                                            homeVM.shuffleItemInOutfit(category: category, wardrobe: wardrobeViewModel.items)
-                                        }
-                                    }) {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "arrow.triangle.2.circlepath")
-                                                .font(.subheadline)
-                                            Text("Shuffle")
-                                                .font(.caption)
-                                        }
-                                        .padding(.vertical, 4)
-                                        .padding(.horizontal, 10)
-                                        .background(Color.accentColor.opacity(0.13))
-                                        .foregroundColor(.accentColor)
-                                        .clipShape(Capsule())
-                                    }
-                                    .padding(.top, 2)
-                                    .disabled(homeVM.isLoading)
-                                }
-                                .padding()
-                                .frame(width: minTileWidth)
-                                .background(RoundedRectangle(cornerRadius: 22).fill(Color(.systemBackground).opacity(0.97)))
-                                .shadow(color: Color.accentColor.opacity(0.10), radius: 10, x: 0, y: 6)
-                            }
-                        }
-                    }
-                    // Render the last row (if incomplete) as a centered HStack
-                    if let lastRow = rows.last, lastRow.count < columnsCount {
-                        HStack(spacing: spacing) {
-                            Spacer(minLength: 0)
-                            ForEach(lastRow, id: \ .id) { item in
+                        ForEach(items, id: \ .id) { item in
+                            VStack(spacing: 0) {
                                 Button(action: {
                                     if let img = item.croppedImage ?? item.image {
                                         previewImage = PreviewImage(image: img)
@@ -178,29 +103,24 @@ struct TodayOutfitSheet: View {
                                                 .cornerRadius(18)
                                                 .overlay(Text("No Image").font(.caption2))
                                         }
-                                        VStack(alignment: .center, spacing: 2) {
-                                            Text(item.product)
-                                                .font(.headline)
-                                                .foregroundColor(.primary)
-                                            Text(item.colors.joined(separator: ", "))
-                                                .font(.subheadline)
-                                                .foregroundColor(.accentColor)
-                                            Text(item.pattern.rawValue)
-                                                .font(.footnote)
+                                        Text(item.product)
+                                            .font(.headline)
+                                            .foregroundColor(.primary)
+                                        Text(item.colors.joined(separator: ", "))
+                                            .font(.subheadline)
+                                            .foregroundColor(.accentColor)
+                                        Text(item.pattern.rawValue)
+                                            .font(.footnote)
+                                            .foregroundColor(.secondary)
+                                        if !item.brand.isEmpty {
+                                            Text(item.brand)
+                                                .font(.caption)
                                                 .foregroundColor(.secondary)
-                                            if !item.brand.isEmpty {
-                                                Text(item.brand)
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                            }
                                         }
                                     }
-                                    .padding()
-                                    .frame(width: minTileWidth)
-                                    .background(RoundedRectangle(cornerRadius: 22).fill(Color(.systemBackground).opacity(0.97)))
-                                    .shadow(color: Color.accentColor.opacity(0.10), radius: 10, x: 0, y: 6)
                                 }
-                                // Per-item shuffle button for last row
+                                .padding(.bottom, 4)
+                                // Per-item shuffle button
                                 Button(action: {
                                     if let category = Category.allCases.first(where: { $0 == item.category }) {
                                         homeVM.shuffleItemInOutfit(category: category, wardrobe: wardrobeViewModel.items)
@@ -221,10 +141,11 @@ struct TodayOutfitSheet: View {
                                 .padding(.top, 2)
                                 .disabled(homeVM.isLoading)
                             }
-                            Spacer(minLength: 0)
+                            .padding()
+                            .frame(width: minTileWidth)
+                            .background(RoundedRectangle(cornerRadius: 22).fill(Color(.systemBackground).opacity(0.97)))
+                            .shadow(color: Color.accentColor.opacity(0.10), radius: 10, x: 0, y: 6)
                         }
-                        .padding(.horizontal, 0)
-                        .padding(.bottom, 12)
                     }
                 }
                 .padding(.horizontal, horizontalPadding)

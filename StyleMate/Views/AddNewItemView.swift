@@ -17,6 +17,11 @@ struct AddNewItemView: View {
     @State private var errorMessage = ""
     @State private var isAnalyzing = false
     @State private var expandedCategoryStates: [Category: Bool] = [:]
+    @State private var _duplicateAcknowledged: [Bool] = []
+    var duplicateAcknowledgedBinding: Binding<[Bool]>? = nil
+    var duplicateAcknowledged: Binding<[Bool]> {
+        duplicateAcknowledgedBinding ?? $_duplicateAcknowledged
+    }
     
     struct DetectedItem: Identifiable {
         let id = UUID()
@@ -54,7 +59,8 @@ struct AddNewItemView: View {
         isPresented: Binding<Bool>,
         prefilledImage: UIImage? = nil,
         detectedItemsBinding: Binding<[DetectedItem]>? = nil,
-        brandInputsBinding: Binding<[String]>? = nil
+        brandInputsBinding: Binding<[String]>? = nil,
+        duplicateAcknowledgedBinding: Binding<[Bool]>? = nil
     ) {
         _showPhotoPicker = showPhotoPicker
         _showCamera = showCamera
@@ -62,6 +68,7 @@ struct AddNewItemView: View {
         self.prefilledImage = prefilledImage
         self.detectedItemsBinding = detectedItemsBinding
         self.brandInputsBinding = brandInputsBinding
+        self.duplicateAcknowledgedBinding = duplicateAcknowledgedBinding
         _pickedImage = State(initialValue: prefilledImage)
     }
     
@@ -115,11 +122,38 @@ struct AddNewItemView: View {
                                 if expandedCategoryStates[category] ?? true {
                                     VStack(spacing: 0) {
                                         ForEach(indices, id: \.self) { idx in
-                                            DetectedItemCard(
-                                                item: Binding(get: { detectedItems.wrappedValue[idx] }, set: { detectedItems.wrappedValue[idx] = $0 }),
-                                                brand: Binding(get: { brandInputs.wrappedValue[idx] }, set: { brandInputs.wrappedValue[idx] = $0 }),
-                                                onRemove: { removeDetectedItem(at: idx) }
-                                            )
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                DetectedItemCard(
+                                                    item: Binding(get: { detectedItems.wrappedValue[idx] }, set: { detectedItems.wrappedValue[idx] = $0 }),
+                                                    brand: Binding(get: { brandInputs.wrappedValue[idx] }, set: { brandInputs.wrappedValue[idx] = $0 }),
+                                                    onRemove: { removeDetectedItem(at: idx) }
+                                                )
+                                                if isDuplicateItem(detectedItems.wrappedValue[idx]) {
+                                                    HStack(alignment: .center, spacing: 8) {
+                                                        Image(systemName: "exclamationmark.triangle.fill")
+                                                            .foregroundColor(.orange)
+                                                        Text("This might already be in your wardrobe.")
+                                                            .font(.footnote)
+                                                            .foregroundColor(.orange)
+                                                        Spacer()
+                                                        if !duplicateAcknowledged.wrappedValue.indices.contains(idx) || !duplicateAcknowledged.wrappedValue[idx] {
+                                                            Button("OK") {
+                                                                if duplicateAcknowledged.wrappedValue.indices.contains(idx) {
+                                                                    duplicateAcknowledged.wrappedValue[idx] = true
+                                                                }
+                                                            }
+                                                            .font(.footnote.bold())
+                                                            .padding(.horizontal, 8)
+                                                            .padding(.vertical, 2)
+                                                            .background(Color.orange.opacity(0.15))
+                                                            .cornerRadius(6)
+                                                        } else {
+                                                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                                                        }
+                                                    }
+                                                    .padding(.vertical, 2)
+                                                }
+                                            }
                                         }
                                     }
                                     .padding(.bottom, 8)
@@ -186,7 +220,7 @@ struct AddNewItemView: View {
                     }
                     isPresented = false
                 }
-                .disabled(!canSave)
+                .disabled(!canSave || !allDuplicatesAcknowledged())
             }
         }
         .alert("Error", isPresented: $showError) {
@@ -210,7 +244,7 @@ struct AddNewItemView: View {
         isAnalyzing = true
         Task {
             let results = await ImageAnalysisService.shared.analyzeMultiple(image: image)
-            detectedItems.wrappedValue = results.compactMap { cat, prod, colors, pattern, bbox in
+            var items = results.compactMap { cat, prod, colors, pattern, bbox in
                 if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
                     let cropped = cropImage(image, with: bbox)
                     return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
@@ -218,7 +252,17 @@ struct AddNewItemView: View {
                     return nil
                 }
             }
+            // Filter duplicate footwear: if 2+ footwear, keep only one
+            let footwearIndices = items.indices.filter { items[$0].category == .footwear }
+            if footwearIndices.count > 1 {
+                // Keep only the first footwear, remove the rest
+                items = items.enumerated().filter { idx, item in
+                    item.category != .footwear || idx == footwearIndices.first
+                }.map { $0.element }
+            }
+            detectedItems.wrappedValue = items
             brandInputs.wrappedValue = Array(repeating: "", count: detectedItems.wrappedValue.count)
+            duplicateAcknowledged.wrappedValue = Array(repeating: false, count: items.count)
             isAnalyzing = false
         }
     }
@@ -246,6 +290,27 @@ struct AddNewItemView: View {
         detectedItems.wrappedValue.allSatisfy { item in
             productTypesByCategory[item.category]?.contains(item.product) ?? false
         }
+    }
+    
+    private func isDuplicateItem(_ item: DetectedItem) -> Bool {
+        let idx = detectedItems.wrappedValue.firstIndex(where: { $0.id == item.id }) ?? 0
+        let brand = brandInputs.wrappedValue.indices.contains(idx) ? brandInputs.wrappedValue[idx] : ""
+        return wardrobeViewModel.items.contains { wardrobeItem in
+            wardrobeItem.category == item.category &&
+            wardrobeItem.product.caseInsensitiveCompare(item.product) == .orderedSame &&
+            wardrobeItem.pattern == item.pattern &&
+            wardrobeItem.brand.caseInsensitiveCompare(brand) == .orderedSame &&
+            Set(wardrobeItem.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }) == Set(item.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) })
+        }
+    }
+    
+    private func allDuplicatesAcknowledged() -> Bool {
+        for (idx, detected) in detectedItems.wrappedValue.enumerated() {
+            if isDuplicateItem(detected) && (!duplicateAcknowledged.wrappedValue.indices.contains(idx) || !duplicateAcknowledged.wrappedValue[idx]) {
+                return false
+            }
+        }
+        return true
     }
 }
 

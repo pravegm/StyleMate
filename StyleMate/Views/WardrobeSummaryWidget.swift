@@ -13,6 +13,7 @@ struct ProductSummary: Hashable {
 
 struct WardrobeSummaryWidget: View {
     let items: [WardrobeItem]
+    var onSummaryTap: ((Category, String) -> Void)? = nil
     var productCounts: [ProductSummary] {
         let grouped = Dictionary(grouping: items, by: { ProductCategoryKey(product: $0.product, category: $0.category) })
         return grouped.map { (key, value) in
@@ -45,30 +46,35 @@ struct WardrobeSummaryWidget: View {
                         ForEach(productCounts, id: \.self) { summary in
                             let icon = summary.category.iconName
                             let color = summary.category.iconColor
-                            HStack(spacing: 8) {
-                                ZStack {
-                                    Circle()
-                                        .fill(color.opacity(0.13))
-                                        .frame(width: 32, height: 32)
-                                    Image(systemName: icon)
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundColor(color)
+                            Button(action: {
+                                onSummaryTap?(summary.category, summary.product)
+                            }) {
+                                HStack(spacing: 8) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(color.opacity(0.13))
+                                            .frame(width: 32, height: 32)
+                                        Image(systemName: icon)
+                                            .font(.system(size: 18, weight: .semibold))
+                                            .foregroundColor(color)
+                                    }
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        Text("\(summary.count) \(summary.product)")
+                                            .font(.subheadline.bold())
+                                            .foregroundColor(color)
+                                    }
                                 }
-                                VStack(alignment: .leading, spacing: 0) {
-                                    Text("\(summary.count) \(summary.product)")
-                                        .font(.subheadline.bold())
-                                        .foregroundColor(color)
-                                }
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 14)
+                                .background(
+                                    BlurView(style: .systemMaterial)
+                                        .clipShape(Capsule())
+                                        .opacity(0.85)
+                                )
+                                .clipShape(Capsule())
+                                .shadow(color: color.opacity(0.08), radius: 4, x: 0, y: 2)
                             }
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 14)
-                            .background(
-                                BlurView(style: .systemMaterial)
-                                    .clipShape(Capsule())
-                                    .opacity(0.85)
-                            )
-                            .clipShape(Capsule())
-                            .shadow(color: color.opacity(0.08), radius: 4, x: 0, y: 2)
+                            .buttonStyle(PlainButtonStyle())
                         }
                     }
                     .padding(.vertical, 2)

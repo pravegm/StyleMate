@@ -98,10 +98,10 @@ extension Category {
     var iconName: String {
         switch self {
         case .tops: return "tshirt"
-        case .bottoms: return "figure.walk"
+        case .bottoms: return "figure.stand"
         case .midLayers: return "wind"
         case .outerwear: return "cloud.rain"
-        case .onePieces: return "figure.dress.line.vertical.figure"
+        case .onePieces: return "figure.dance"
         case .footwear: return "shoeprints.fill"
         case .accessories: return "suitcase"
         case .innerwear: return "bed.double"
@@ -180,6 +180,7 @@ struct PreviewImage: Identifiable {
 
 struct CategoryDetailView: View {
     let category: Category
+    var initialProduct: String? = nil
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     var items: [WardrobeItem] {
         wardrobeViewModel.items.filter { $0.category == category }
@@ -189,6 +190,7 @@ struct CategoryDetailView: View {
     @State private var expandedProducts: Set<String> = []
     @State private var editMode: Bool = false
     @State private var selectedItems: Set<UUID> = []
+    @State private var hasAutoExpanded: Bool = false
 
     // Helper to normalize product names (lowercase, singularize)
     private func normalizedProduct(_ product: String) -> String {
@@ -350,7 +352,17 @@ struct CategoryDetailView: View {
             }
         }
         .onAppear {
-            expandedProducts = Set(groupedItems.map { $0.product })
+            if let initial = initialProduct, !hasAutoExpanded {
+                // Try to expand the matching product group
+                if let match = groupedItems.first(where: { $0.product.localizedCaseInsensitiveCompare(initial) == .orderedSame }) {
+                    expandedProducts.insert(match.product)
+                } else if let match = groupedItems.first(where: { normalizedProduct($0.product) == normalizedProduct(initial) }) {
+                    expandedProducts.insert(match.product)
+                }
+                hasAutoExpanded = true
+            } else {
+                expandedProducts = [] // All collapsed by default
+            }
         }
         .navigationTitle(category.rawValue)
         .toolbar {

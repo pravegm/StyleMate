@@ -113,6 +113,11 @@ For more details, see the in-app help or contact the developer.
   - Analysis and cropping are parallelized and happen up front, so saving is instant—even for large batches.
   - The UI is responsive and robust, with no crashes or delays for large image sets.
 
+## Duplicate Detection & Footwear Handling
+
+- **Footwear Deduplication:** When adding items from images (single or batch), if multiple footwear items are detected in a single image, only one will be kept and shown to the user. This ensures that pairs of shoes are not added as separate items.
+- **Wardrobe Duplicate Warning:** If an item being added matches an existing item in your wardrobe (same category, product, pattern, brand, and colors), a warning will appear next to that item. You must acknowledge this warning before you can save or add the item(s) to your wardrobe.
+
 ## Getting Started
 
 1. Clone the repo and open `StyleMate.xcodeproj` in Xcode.

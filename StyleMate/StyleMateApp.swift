@@ -83,7 +83,7 @@ struct RootView: View {
             }
         }
         // Present PhotosPicker directly from AddSourceSheet
-        .photosPicker(isPresented: $showGalleryPicker, selection: $galleryItems, maxSelectionCount: 0, matching: .images)
+        .photosPicker(isPresented: $showGalleryPicker, selection: $galleryItems, maxSelectionCount: 15, matching: .images)
         .onChange(of: galleryItems) { items in
             if !items.isEmpty {
                 isLoadingGalleryImages = true
@@ -221,6 +221,21 @@ struct AddSourceSheet: View {
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(12)
             }
+            // Styled warning directly below the Gallery button
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                    .font(.system(size: 18))
+                Text("For best results, only pick images with only you in the picture. Avoid images with multiple people, as this can give unexpected results.")
+                    .font(.footnote)
+                    .foregroundColor(.orange)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.12))
+            .cornerRadius(8)
+            .padding(.top, 4)
+            .padding(.bottom, 16) // More space before next button
             Button(action: onTakePhoto) {
                 HStack {
                     Image(systemName: "camera")
@@ -308,11 +323,13 @@ struct MultiAddNewItemView: View {
     @State private var showSummary = false
     @State private var showCancelConfirm = false
     @State private var analysisStates: [Bool] = [] // true = analyzed, false = analyzing
+    // New: duplicate acknowledged state per image
+    @State private var duplicateAcknowledged: [[Bool]] = []
     var canFinish: Bool { savedStates.contains(true) }
     var allReviewed: Bool { savedStates.indices.allSatisfy { idx in savedStates[idx] != nil || !analysisStates.indices.contains(idx) || !analysisStates[idx] } }
     var canAddAll: Bool {
-        // Only allow Add All for images that are done analyzing and not removed/saved
-        savedStates.indices.contains { idx in savedStates[idx] == nil && analysisStates.indices.contains(idx) && analysisStates[idx] }
+        // Only allow Add All for images that are done analyzing and not removed/saved and all duplicates acknowledged
+        savedStates.indices.contains { idx in savedStates[idx] == nil && analysisStates.indices.contains(idx) && analysisStates[idx] && allDuplicatesAcknowledged(for: idx) }
     }
     var body: some View {
         NavigationStack {
@@ -362,12 +379,13 @@ struct MultiAddNewItemView: View {
                         TabView(selection: $currentIndex) {
                             ForEach(images.indices, id: \ .self) { idx in
                                 ZStack {
-                                    if detectedItems.indices.contains(idx) && brandInputs.indices.contains(idx) {
+                                    if detectedItems.indices.contains(idx) && brandInputs.indices.contains(idx) && duplicateAcknowledged.indices.contains(idx) {
                                         AddNewItemViewInternal(
                                             image: images[idx],
                                             detectedItems: $detectedItems[idx],
                                             brandInputs: $brandInputs[idx],
-                                            hideToolbar: true
+                                            hideToolbar: true,
+                                            duplicateAcknowledged: $duplicateAcknowledged[idx]
                                         )
                                         .tag(idx)
                                         .padding(.vertical)
@@ -432,7 +450,7 @@ struct MultiAddNewItemView: View {
                         }
                         .disabled(
                             !(savedStates.indices.contains(currentIndex) && detectedItems.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
-                            savedStates[currentIndex] == true || detectedItems[currentIndex].isEmpty || !isAnalyzed(currentIndex)
+                            savedStates[currentIndex] == true || detectedItems[currentIndex].isEmpty || !isAnalyzed(currentIndex) || !allDuplicatesAcknowledged(for: currentIndex)
                         )
                     }
                     .padding(.vertical, 8)
@@ -469,6 +487,7 @@ struct MultiAddNewItemView: View {
         brandInputs = Array(repeating: [], count: images.count)
         savedStates = Array(repeating: nil, count: images.count)
         analysisStates = Array(repeating: false, count: images.count)
+        duplicateAcknowledged = Array(repeating: [], count: images.count)
         Task {
             await withTaskGroup(of: (Int, [(Category?, String?, [String], Pattern?, ImageAnalysisService.BoundingBox?)]).self) { group in
                 for (idx, image) in images.enumerated() {
@@ -478,13 +497,20 @@ struct MultiAddNewItemView: View {
                     }
                 }
                 for await (idx, results) in group {
-                    let items = results.compactMap { cat, prod, colors, pattern, bbox in
+                    var items = results.compactMap { cat, prod, colors, pattern, bbox in
                         if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
                             let cropped = cropImage(images[idx], with: bbox)
                             return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
                         } else {
                             return nil
                         }
+                    }
+                    // Filter duplicate footwear: if 2+ footwear, keep only one
+                    let footwearIndices = items.indices.filter { items[$0].category == .footwear }
+                    if footwearIndices.count > 1 {
+                        items = items.enumerated().filter { idx2, item in
+                            item.category != .footwear || idx2 == footwearIndices.first
+                        }.map { $0.element }
                     }
                     if items.isEmpty && !results.isEmpty {
                         print("[DEBUG] Gemini raw results for image #\(idx): \(results)")
@@ -493,6 +519,7 @@ struct MultiAddNewItemView: View {
                         detectedItems[idx] = items
                         brandInputs[idx] = Array(repeating: "", count: items.count)
                         analysisStates[idx] = true
+                        duplicateAcknowledged[idx] = Array(repeating: false, count: items.count)
                     }
                 }
             }
@@ -614,10 +641,31 @@ struct MultiAddNewItemView: View {
         return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
     private func addAllAndShowSummary() {
-        for idx in savedStates.indices where savedStates[idx] == nil && isAnalyzed(idx) {
+        for idx in savedStates.indices where savedStates[idx] == nil && isAnalyzed(idx) && allDuplicatesAcknowledged(for: idx) {
             savedStates[idx] = true
         }
         saveAllAndShowSummary()
+    }
+    // Helper to check if all duplicates are acknowledged for a given image
+    private func allDuplicatesAcknowledged(for imageIdx: Int) -> Bool {
+        guard detectedItems.indices.contains(imageIdx), duplicateAcknowledged.indices.contains(imageIdx) else { return true }
+        for (idx, detected) in detectedItems[imageIdx].enumerated() {
+            if isDuplicateItem(detected, imageIdx: imageIdx, itemIdx: idx) && (!duplicateAcknowledged[imageIdx].indices.contains(idx) || !duplicateAcknowledged[imageIdx][idx]) {
+                return false
+            }
+        }
+        return true
+    }
+    // Helper to check for duplicate for a given image/item
+    private func isDuplicateItem(_ item: AddNewItemView.DetectedItem, imageIdx: Int, itemIdx: Int) -> Bool {
+        let brand = brandInputs[imageIdx].indices.contains(itemIdx) ? brandInputs[imageIdx][itemIdx] : ""
+        return wardrobeViewModel.items.contains { wardrobeItem in
+            wardrobeItem.category == item.category &&
+            wardrobeItem.product.caseInsensitiveCompare(item.product) == .orderedSame &&
+            wardrobeItem.pattern == item.pattern &&
+            wardrobeItem.brand.caseInsensitiveCompare(brand) == .orderedSame &&
+            Set(wardrobeItem.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }) == Set(item.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) })
+        }
     }
 }
 
@@ -627,6 +675,7 @@ struct AddNewItemViewInternal: View {
     @Binding var detectedItems: [AddNewItemView.DetectedItem]
     @Binding var brandInputs: [String]
     var hideToolbar: Bool = false
+    @Binding var duplicateAcknowledged: [Bool]
     var body: some View {
         VStack {
             AddNewItemView(
@@ -635,7 +684,8 @@ struct AddNewItemViewInternal: View {
                 isPresented: .constant(true),
                 prefilledImage: image,
                 detectedItemsBinding: $detectedItems,
-                brandInputsBinding: $brandInputs
+                brandInputsBinding: $brandInputs,
+                duplicateAcknowledgedBinding: $duplicateAcknowledged
             )
             .toolbar(hideToolbar ? .hidden : .visible, for: .navigationBar)
         }
