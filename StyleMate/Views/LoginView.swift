@@ -166,7 +166,7 @@ struct LoginView: View {
                         Button(isSignUp ? "Already have an account? Sign In" : "Don't have an account? Sign Up") {
                             withAnimation { isSignUp.toggle() }
                         }
-                        .font(.footnote)
+                        .font(.title3)
                         .foregroundColor(.accentColor)
                     }
                     .padding(.horizontal, 24)

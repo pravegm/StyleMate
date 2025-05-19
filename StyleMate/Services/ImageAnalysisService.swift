@@ -140,13 +140,13 @@ Return only the JSON array, no extra text.
                let text = result.candidates.first?.content.parts.first?.text,
                let arrData = text.data(using: .utf8) {
                 if let arr = try? JSONSerialization.jsonObject(with: arrData) as? [[String: Any]] {
-                    let mapped = arr.map { dict in
+                    let mapped = arr.compactMap { dict in
                         let categoryString = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                         let productString = (dict["product"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                         let colorsArray = dict["colors"] as? [String] ?? []
                         let patternString = (dict["pattern"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                         let category = Category(rawValue: categoryString ?? "")
-                        let product = productString
+                        let product = matchProduct(productString)
                         let colors = colorsArray.map { matchColor($0) ?? $0 }.filter { !$0.isEmpty }
                         let pattern = Pattern(rawValue: patternString ?? "")
                         var boundingBox: BoundingBox? = nil
@@ -157,7 +157,11 @@ Return only the JSON array, no extra text.
                            let height = bboxDict["height"] as? Double {
                             boundingBox = BoundingBox(x: CGFloat(x), y: CGFloat(y), width: CGFloat(width), height: CGFloat(height))
                         }
-                        return (category, product, colors, pattern, boundingBox)
+                        if let product = product {
+                            return (category, product, colors, pattern, boundingBox)
+                        } else {
+                            return nil
+                        }
                     }
                     let hasEmpty = mapped.contains { $0.0 == nil || $0.1 == nil || $0.2.isEmpty || $0.3 == nil }
                     if hasEmpty && retryCount < 2 {

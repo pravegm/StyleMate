@@ -96,6 +96,7 @@ struct ProfileView: View {
             } message: {
                 Text("This will remove all items from your wardrobe and cannot be undone.")
             }
+            .padding(.bottom, 120)
         }
     }
 }

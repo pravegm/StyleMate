@@ -39,6 +39,7 @@ struct MyWardrobeView: View {
                         }
                     }
                     .padding()
+                    .padding(.bottom, 120)
                 }
             }
             .sheet(isPresented: $showProfile) {
@@ -189,9 +190,24 @@ struct CategoryDetailView: View {
     @State private var editMode: Bool = false
     @State private var selectedItems: Set<UUID> = []
 
+    // Helper to normalize product names (lowercase, singularize)
+    private func normalizedProduct(_ product: String) -> String {
+        let lower = product.lowercased().trimmingCharacters(in: .whitespaces)
+        if lower.hasSuffix("s") && lower.count > 1 {
+            return String(lower.dropLast())
+        }
+        return lower
+    }
     var groupedItems: [(product: String, items: [WardrobeItem])] {
-        let groups = Dictionary(grouping: items, by: { $0.product })
-        return groups.keys.sorted().map { key in (product: key, items: groups[key] ?? []) }
+        let groups = Dictionary(grouping: items, by: { normalizedProduct($0.product) })
+        // For display, pick the most common form (or the first) for the group header
+        return groups.map { (normKey, items) in
+            let display = items.map { $0.product }
+                .reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
+                .max(by: { $0.value < $1.value })?.key ?? items.first?.product ?? normKey.capitalized
+            return (product: display, items: items)
+        }
+        .sorted { $0.product.localizedCaseInsensitiveCompare($1.product) == .orderedAscending }
     }
 
     var body: some View {

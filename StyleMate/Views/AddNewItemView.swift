@@ -43,7 +43,8 @@ struct AddNewItemView: View {
         !detectedItems.wrappedValue.isEmpty && detectedItems.wrappedValue.indices.allSatisfy { idx in
             !detectedItems.wrappedValue[idx].colors.isEmpty &&
             !detectedItems.wrappedValue[idx].colors[0].trimmingCharacters(in: .whitespaces).isEmpty &&
-            !detectedItems.wrappedValue[idx].product.isEmpty
+            !detectedItems.wrappedValue[idx].product.isEmpty &&
+            (productTypesByCategory[detectedItems.wrappedValue[idx].category]?.contains(detectedItems.wrappedValue[idx].product) ?? false)
         } && pickedImage != nil
     }
     
@@ -158,7 +159,11 @@ struct AddNewItemView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save Fit") {
                     if !canSave {
-                        errorMessage = "All fields are required."
+                        if !allProductsValid() {
+                            errorMessage = "Please select a valid product for each item."
+                        } else {
+                            errorMessage = "All fields are required."
+                        }
                         showError = true
                         return
                     }
@@ -234,6 +239,12 @@ struct AddNewItemView: View {
         detectedItems.wrappedValue.remove(at: idx)
         if brandInputs.wrappedValue.indices.contains(idx) {
             brandInputs.wrappedValue.remove(at: idx)
+        }
+    }
+    
+    private func allProductsValid() -> Bool {
+        detectedItems.wrappedValue.allSatisfy { item in
+            productTypesByCategory[item.category]?.contains(item.product) ?? false
         }
     }
 }

@@ -54,247 +54,208 @@ struct HomeView: View {
                 )
                 .ignoresSafeArea()
                 ScrollView {
-                    VStack(spacing: 28) {
-                        // Logo/tagline area (emoji removed)
-                        VStack(spacing: 0) {
-                            ZStack {
-                                // Animated magical gradient border
-                                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                    .stroke(
-                                        LinearGradient(
-                                            gradient: Gradient(colors: [Color.pink.opacity(0.7), Color.blue.opacity(0.7), Color.yellow.opacity(0.7), Color.pink.opacity(0.7)]),
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 3.5
-                                    )
-                                    .blur(radius: 1.5)
-                                    .opacity(0.85)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                            .fill(Color(.systemBackground).opacity(0.85))
-                                            .shadow(color: Color.accentColor.opacity(0.08), radius: 8, x: 0, y: 4)
-                                    )
-                                // Sparkles (animated)
-                                MagicalSparkles()
-                                VStack(spacing: 8) {
-                                    ZStack {
-                                        // Soft glow behind icon
-                                        Circle()
-                                            .fill(Color.accentColor.opacity(0.18))
-                                            .frame(width: 80, height: 80)
-                                            .blur(radius: 12)
-                                        Image(systemName: "tshirt.fill")
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 56, height: 56)
-                                            .foregroundColor(.accentColor)
-                                            .padding(.top, 10)
-                                    }
-                                    Text("StyleMate")
-                                        .font(.system(size: 36, weight: .bold, design: .rounded))
-                                        .foregroundColor(.primary)
-                                    Text("Your AI Fashion Stylist")
+                    VStack(spacing: 20) {
+                        // StyleMate Card
+                        HomeCard {
+                            VStack(spacing: 8) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.accentColor.opacity(0.18))
+                                        .frame(width: 80, height: 80)
+                                        .blur(radius: 12)
+                                    Image(systemName: "tshirt.fill")
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 56, height: 56)
+                                        .foregroundColor(.accentColor)
+                                        .padding(.top, 10)
+                                    MagicalSparkles()
+                                }
+                                Text("StyleMate")
+                                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                                    .foregroundColor(.primary)
+                                Text("Your AI Fashion Stylist")
+                                    .font(.title3)
+                                    .foregroundStyle(.secondary)
+                                HStack {
+                                    Image(systemName: "quote.opening")
                                         .font(.title3)
-                                        .foregroundStyle(.secondary)
-                                    // Add the quote here
-                                    HStack {
-                                        Image(systemName: "quote.opening")
-                                            .font(.title3)
-                                            .foregroundColor(.accentColor)
-                                        Text(selectedQuote)
-                                            .font(.body.italic())
-                                            .foregroundColor(.primary)
-                                            .multilineTextAlignment(.center)
-                                        Image(systemName: "quote.closing")
-                                            .font(.title3)
-                                            .foregroundColor(.accentColor)
-                                    }
-                                    .padding(.top, 4)
-                                    .padding(.horizontal, 8)
+                                        .foregroundColor(.accentColor)
+                                    Text(selectedQuote)
+                                        .font(.body.italic())
+                                        .foregroundColor(.primary)
+                                        .multilineTextAlignment(.center)
+                                    Image(systemName: "quote.closing")
+                                        .font(.title3)
+                                        .foregroundColor(.accentColor)
                                 }
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 10)
+                                .padding(.top, 4)
+                                .padding(.horizontal, 8)
                             }
-                            .padding(.horizontal, 24)
-                            .padding(.top, 20) // add a bit more top padding since emoji is gone
                         }
-                        // Wardrobe Summary Widget with improved background and subtle shadow
-                        WardrobeSummaryWidget(items: wardrobeViewModel.items)
-                            .padding(.horizontal, 24)
                         // Outfit Suggestion Card
-                        VStack(spacing: 0) {
-                            // Card Header
-                            VStack(spacing: 6) {
-                                Text("Let's decide what you should wear today!")
-                                    .font(.title2.bold())
-                                    .foregroundColor(.accentColor)
-                                    .multilineTextAlignment(.center)
-                                Text("What type of occasion or vibe are you dressing for?")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                    .multilineTextAlignment(.center)
-                            }
-                            .padding(.top, 20)
-                            .padding(.horizontal, 20)
-                            // Chips in 3+3+1 grid
-                            VStack(spacing: 14) {
-                                HStack(spacing: 12) {
-                                    ForEach(OutfitType.allCases.prefix(3)) { type in
+                        HomeCard {
+                            VStack(spacing: 16) {
+                                VStack(spacing: 6) {
+                                    Text("Let's decide what you should wear today!")
+                                        .font(.title2.bold())
+                                        .foregroundColor(.accentColor)
+                                        .multilineTextAlignment(.center)
+                                    Text("What type of occasion or vibe are you dressing for?")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.center)
+                                }
+                                VStack(spacing: 14) {
+                                    HStack(spacing: 12) {
+                                        ForEach(OutfitType.allCases.prefix(3)) { type in
+                                            Button(action: {
+                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                                    homeVM.selectedOutfitType = type
+                                                    homeVM.customOutfitDescription = nil
+                                                }
+                                            }) {
+                                                HStack(spacing: 5) {
+                                                    Image(systemName: type.icon)
+                                                        .font(.footnote)
+                                                    Text(type.rawValue)
+                                                        .font(.footnote)
+                                                        .lineLimit(1)
+                                                }
+                                                .frame(minWidth: 0, maxWidth: .infinity)
+                                                .padding(.vertical, 10)
+                                                .background(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.gray.opacity(0.13))
+                                                .foregroundColor(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? .white : .primary)
+                                                .cornerRadius(14)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 14)
+                                                        .stroke(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.clear, lineWidth: 1.2)
+                                                )
+                                            }
+                                            .buttonStyle(PlainButtonStyle())
+                                        }
+                                    }
+                                    HStack(spacing: 12) {
+                                        ForEach(OutfitType.allCases.dropFirst(3).prefix(3)) { type in
+                                            Button(action: {
+                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                                    homeVM.selectedOutfitType = type
+                                                    homeVM.customOutfitDescription = nil
+                                                }
+                                            }) {
+                                                HStack(spacing: 5) {
+                                                    Image(systemName: type.icon)
+                                                        .font(.footnote)
+                                                    Text(type.rawValue)
+                                                        .font(.footnote)
+                                                        .lineLimit(1)
+                                                }
+                                                .frame(minWidth: 0, maxWidth: .infinity)
+                                                .padding(.vertical, 10)
+                                                .background(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.gray.opacity(0.13))
+                                                .foregroundColor(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? .white : .primary)
+                                                .cornerRadius(14)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 14)
+                                                        .stroke(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.clear, lineWidth: 1.2)
+                                                )
+                                            }
+                                            .buttonStyle(PlainButtonStyle())
+                                        }
+                                    }
+                                    HStack(spacing: 12) {
+                                        Spacer(minLength: 0)
                                         Button(action: {
                                             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                                homeVM.selectedOutfitType = type
-                                                homeVM.customOutfitDescription = nil
-                                            }
-                                        }) {
-                                            HStack(spacing: 5) {
-                                                Image(systemName: type.icon)
-                                                    .font(.footnote)
-                                                Text(type.rawValue)
-                                                    .font(.footnote)
-                                                    .lineLimit(1)
-                                            }
-                                            .frame(minWidth: 0, maxWidth: .infinity)
-                                            .padding(.vertical, 10)
-                                            .background(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.gray.opacity(0.13))
-                                            .foregroundColor(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? .white : .primary)
-                                            .cornerRadius(14)
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 14)
-                                                    .stroke(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.clear, lineWidth: 1.2)
-                                            )
-                                        }
-                                        .buttonStyle(PlainButtonStyle())
-                                    }
-                                }
-                                HStack(spacing: 12) {
-                                    ForEach(OutfitType.allCases.dropFirst(3).prefix(3)) { type in
-                                        Button(action: {
-                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                                homeVM.selectedOutfitType = type
-                                                homeVM.customOutfitDescription = nil
-                                            }
-                                        }) {
-                                            HStack(spacing: 5) {
-                                                Image(systemName: type.icon)
-                                                    .font(.footnote)
-                                                Text(type.rawValue)
-                                                    .font(.footnote)
-                                                    .lineLimit(1)
-                                            }
-                                            .frame(minWidth: 0, maxWidth: .infinity)
-                                            .padding(.vertical, 10)
-                                            .background(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.gray.opacity(0.13))
-                                            .foregroundColor(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? .white : .primary)
-                                            .cornerRadius(14)
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 14)
-                                                    .stroke(homeVM.selectedOutfitType == type && homeVM.customOutfitDescription == nil ? Color.accentColor : Color.clear, lineWidth: 1.2)
-                                            )
-                                        }
-                                        .buttonStyle(PlainButtonStyle())
-                                    }
-                                }
-                                HStack(spacing: 12) {
-                                    Spacer(minLength: 0)
-                                    Button(action: {
-                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                            if homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil {
-                                                homeVM.selectedOutfitType = .everyday
-                                                homeVM.customOutfitDescription = nil
-                                            } else {
-                                                homeVM.selectedOutfitType = nil
-                                                if homeVM.customOutfitDescription == nil {
-                                                    homeVM.customOutfitDescription = ""
+                                                if homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil {
+                                                    homeVM.selectedOutfitType = .everyday
+                                                    homeVM.customOutfitDescription = nil
+                                                } else {
+                                                    homeVM.selectedOutfitType = nil
+                                                    if homeVM.customOutfitDescription == nil {
+                                                        homeVM.customOutfitDescription = ""
+                                                    }
                                                 }
                                             }
+                                        }) {
+                                            HStack(spacing: 5) {
+                                                Image(systemName: "ellipsis.bubble")
+                                                    .font(.footnote)
+                                                Text(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? "Describe your event or outfit need" : "Other")
+                                                    .font(.footnote)
+                                                    .lineLimit(1)
+                                            }
+                                            .frame(minWidth: 0, maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? Color.accentColor : Color.gray.opacity(0.13))
+                                            .foregroundColor(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? .white : .primary)
+                                            .cornerRadius(14)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 14)
+                                                    .stroke(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? Color.accentColor : Color.clear, lineWidth: 1.2)
+                                            )
                                         }
-                                    }) {
-                                        HStack(spacing: 5) {
-                                            Image(systemName: "ellipsis.bubble")
-                                                .font(.footnote)
-                                            Text(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? "Describe your event or outfit need" : "Other")
-                                                .font(.footnote)
-                                                .lineLimit(1)
-                                        }
-                                        .frame(minWidth: 0, maxWidth: .infinity)
-                                        .padding(.vertical, 10)
-                                        .background(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? Color.accentColor : Color.gray.opacity(0.13))
-                                        .foregroundColor(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? .white : .primary)
-                                        .cornerRadius(14)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 14)
-                                                .stroke(homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil ? Color.accentColor : Color.clear, lineWidth: 1.2)
-                                        )
+                                        .buttonStyle(PlainButtonStyle())
+                                        Spacer(minLength: 0)
                                     }
-                                    .buttonStyle(PlainButtonStyle())
-                                    Spacer(minLength: 0)
-                                }
-                                // Show the text field below the button when 'Other' is selected, with no extra label
-                                if homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil {
-                                    VStack(spacing: 6) {
-                                        TextField("e.g. Outdoor wedding in summer evening", text: Binding(
-                                            get: { homeVM.customOutfitDescription ?? "" },
-                                            set: { homeVM.customOutfitDescription = $0 }
-                                        ))
-                                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                                        .frame(maxWidth: 340)
-                                        .padding(.top, 8)
-                                        .padding(.bottom, 2)
-                                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                                        if !homeVM.isCustomDescriptionValid {
-                                            Text("Please describe your event or outfit need.")
-                                                .font(.caption)
-                                                .foregroundColor(.red)
-                                                .multilineTextAlignment(.center)
-                                                .padding(.top, 2)
+                                    // Show the text field below the button when 'Other' is selected, with no extra label
+                                    if homeVM.selectedOutfitType == nil && homeVM.customOutfitDescription != nil {
+                                        VStack(spacing: 6) {
+                                            TextField("e.g. Outdoor wedding in summer evening", text: Binding(
+                                                get: { homeVM.customOutfitDescription ?? "" },
+                                                set: { homeVM.customOutfitDescription = $0 }
+                                            ))
+                                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                                            .frame(maxWidth: 340)
+                                            .padding(.top, 8)
+                                            .padding(.bottom, 2)
+                                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                                            if !homeVM.isCustomDescriptionValid {
+                                                Text("Please describe your event or outfit need.")
+                                                    .font(.caption)
+                                                    .foregroundColor(.red)
+                                                    .multilineTextAlignment(.center)
+                                                    .padding(.top, 2)
+                                            }
                                         }
                                     }
                                 }
+                                Button(action: {
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        animateButton = true
+                                    }
+                                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items)
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                        animateButton = false
+                                    }
+                                }) {
+                                    HStack {
+                                        Image(systemName: "wand.and.stars")
+                                        Text("Get Today's Outfit")
+                                    }
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(
+                                        LinearGradient(colors: [Color.accentColor, Color.pink.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                                    .scaleEffect(animateButton ? 1.06 : 1.0)
+                                    .shadow(color: Color.accentColor.opacity(0.13), radius: 8, x: 0, y: 4)
+                                }
+                                .padding(.top, 8)
+                                .accessibilityLabel("Suggest an outfit")
+                                .disabled(homeVM.isLoading || (homeVM.selectedOutfitType == nil && !homeVM.isCustomDescriptionValid))
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.top, 18)
-                            // Suggest Outfit Button
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                animateButton = true
-                            }
-                            homeVM.suggestTodayOutfit(from: wardrobeViewModel.items)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                animateButton = false
-                            }
-                        }) {
-                            HStack {
-                                Image(systemName: "wand.and.stars")
-                                Text("Get Today's Outfit")
-                            }
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(
-                                LinearGradient(colors: [Color.accentColor, Color.pink.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                            .scaleEffect(animateButton ? 1.06 : 1.0)
-                            .shadow(color: Color.accentColor.opacity(0.13), radius: 8, x: 0, y: 4)
                         }
-                            .padding(.horizontal, 20)
-                            .padding(.top, 18)
-                            .padding(.bottom, 20)
-                        .accessibilityLabel("Suggest an outfit")
-                        .disabled(homeVM.isLoading || (homeVM.selectedOutfitType == nil && !homeVM.isCustomDescriptionValid))
+                        // Wardrobe Summary Card
+                        HomeCard {
+                            WardrobeSummaryWidget(items: wardrobeViewModel.items)
                         }
-                        .background(
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                .fill(Color(.systemBackground))
-                                .shadow(color: Color.accentColor.opacity(0.10), radius: 12, x: 0, y: 6)
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
                     }
-                    .padding(.top, 8)
-                    .padding(.bottom, 60) // Add space for quote at bottom
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 120)
                 }
                 // Loading overlay
                 if homeVM.isLoading {
