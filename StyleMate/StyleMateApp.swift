@@ -367,10 +367,28 @@ struct MultiAddNewItemView: View {
                     // Page indicator dots
                     HStack(spacing: 8) {
                         ForEach(0..<images.count, id: \ .self) { idx in
-                            let state = savedStates.indices.contains(idx) ? savedStates[idx] : nil
+                            let isSaved = savedStates.indices.contains(idx) && savedStates[idx] == true
+                            let isRejected = savedStates.indices.contains(idx) && savedStates[idx] == false
+                            // Show yellow if there is at least one duplicate item not acknowledged (use same logic as allDuplicatesAcknowledged)
+                            let hasUnacknowledgedWarning: Bool = {
+                                guard detectedItems.indices.contains(idx), duplicateAcknowledged.indices.contains(idx) else { return false }
+                                for (itemIdx, detected) in detectedItems[idx].enumerated() {
+                                    if isDuplicateItem(detected, imageIdx: idx, itemIdx: itemIdx) && (!duplicateAcknowledged[idx].indices.contains(itemIdx) || !duplicateAcknowledged[idx][itemIdx]) {
+                                        return true
+                                    }
+                                }
+                                return false
+                            }()
+                            let isCurrent = idx == currentIndex
+                            let color: Color = isSaved ? .green : (isRejected ? .red : (hasUnacknowledgedWarning ? .yellow : Color(.systemGray4)))
                             Circle()
-                                .fill(state == true ? Color.green : (state == false ? Color.red : Color(.systemGray4)))
-                                .frame(width: 10, height: 10)
+                                .fill(color)
+                                .frame(width: isCurrent ? 16 : 10, height: isCurrent ? 16 : 10)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.accentColor.opacity(isCurrent ? 0.5 : 0), lineWidth: isCurrent ? 2 : 0)
+                                )
+                                .animation(.easeInOut(duration: 0.18), value: isCurrent)
                         }
                     }
                     .padding(.vertical, 8)

@@ -118,6 +118,18 @@ For more details, see the in-app help or contact the developer.
 - **Footwear Deduplication:** When adding items from images (single or batch), if multiple footwear items are detected in a single image, only one will be kept and shown to the user. This ensures that pairs of shoes are not added as separate items.
 - **Wardrobe Duplicate Warning:** If an item being added matches an existing item in your wardrobe (same category, product, pattern, brand, and colors), a warning will appear next to that item. You must acknowledge this warning before you can save or add the item(s) to your wardrobe.
 
+## Multi-Image Add Flow Dot Indicators
+
+When adding multiple images to your wardrobe, you will see a row of dots at the top of the review screen. These dots help you track the review status of each image:
+
+- **Green dot:** The fit for this image has been saved.
+- **Red dot:** The fit for this image has been rejected.
+- **Yellow dot:** There is at least one item in this image that may be a duplicate of something already in your wardrobe. Review the warning(s) and acknowledge them to proceed.
+- **Grey dot:** The image is pending review, or all duplicate warnings have been acknowledged but the image has not yet been saved or rejected.
+- The dot for the currently viewed image is larger and outlined, so you always know which image you are reviewing.
+
+This feature ensures you always know which images need your attention and which have already been reviewed or require action.
+
 ## Getting Started
 
 1. Clone the repo and open `StyleMate.xcodeproj` in Xcode.
