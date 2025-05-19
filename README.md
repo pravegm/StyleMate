@@ -10,6 +10,14 @@ The StyleMate box at the top of the home screen now features:
 - **Soft Glow:** The shirt icon is highlighted with a soft, animated glow.
 - **Animated Subheading:** The subheading fades and slides in with a beautiful gradient color.
 
+### 🌤️ Live Weather Card
+
+- **Current Weather:** See today's weather for your location, including temperature, weather icon, and a short description.
+- **City Name:** The card displays your current city using reverse geocoding.
+- **Celsius/Fahrenheit Toggle:** Instantly switch between °C and °F with a modern, responsive toggle.
+- **Location Permissions:** The app requests location access only as needed, and provides clear prompts if permission is denied.
+- **Modern 4-Column Layout:** Weather icon, temperature, description, and unit toggle are neatly arranged for a compact, visually balanced look.
+
 All magical effects are implemented in a clean, modular way in `HomeView.swift`:
 - `MagicalGradientBorder` for the animated border
 - `MagicalSparkles` for the sparkles

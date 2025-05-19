@@ -191,7 +191,7 @@ struct AddNewItemView: View {
                 }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save Fit") {
+                Button("Save Items") {
                     if !canSave {
                         if !allProductsValid() {
                             errorMessage = "Please select a valid product for each item."

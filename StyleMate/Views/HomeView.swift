@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 struct HomeView: View {
     @StateObject private var homeVM = HomeViewModel()
@@ -135,6 +136,19 @@ struct HomeView: View {
                                 .disabled(homeVM.isLoading || (homeVM.selectedOutfitType == nil && !homeVM.isCustomDescriptionValid))
                             }
                         }
+                        // Weather Card
+                        WeatherCard(
+                            weather: homeVM.weather,
+                            isLoading: homeVM.isWeatherLoading,
+                            error: homeVM.weatherError,
+                            locationStatus: homeVM.locationStatus,
+                            onRequest: { homeVM.requestWeatherForCurrentLocation() },
+                            city: homeVM.lastCity,
+                            temperatureC: homeVM.lastCelsius,
+                            temperatureF: homeVM.lastFahrenheit,
+                            displayFahrenheit: homeVM.displayFahrenheit,
+                            onToggleUnit: { homeVM.toggleTemperatureUnit() }
+                        )
                         // Wardrobe Summary Card
                         HomeCard {
                             WardrobeSummaryWidget(items: wardrobeViewModel.items, onSummaryTap: { category, product in
@@ -172,6 +186,9 @@ struct HomeView: View {
                 selectedEmoji = emojis.randomElement() ?? "✨"
                 selectedSubheading = subheadings.randomElement() ?? "Ready to style your day?"
                 selectedQuote = styleQuotes.shuffled().first ?? "Style is a way to say who you are without having to speak."
+                if homeVM.weather == nil && !homeVM.isWeatherLoading {
+                    homeVM.requestWeatherForCurrentLocation()
+                }
             }
             .onChange(of: homeVM.isLoading) { isLoading in
                 if isLoading {

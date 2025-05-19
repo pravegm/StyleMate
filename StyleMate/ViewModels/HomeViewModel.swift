@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CoreLocation
 
 @MainActor
 class HomeViewModel: ObservableObject {
@@ -11,8 +12,20 @@ class HomeViewModel: ObservableObject {
     @Published var showRateLimitAlert = false
     @Published var selectedOutfitType: OutfitType? = .everyday
     @Published var customOutfitDescription: String? = nil
+    @Published var weather: Weather?
+    @Published var weatherError: String?
+    @Published var isWeatherLoading: Bool = false
+    @Published var location: CLLocation?
+    @Published var locationStatus: CLAuthorizationStatus = .notDetermined
+    @Published var useFahrenheit: Bool = false
+    @Published var lastCity: String? = nil
+    @Published var displayFahrenheit: Bool = false
+    @Published var lastCelsius: Double? = nil
+    @Published var lastFahrenheit: Double? = nil
     private var outfitBatch: [Outfit] = []
     private var batchIndex: Int = 0
+    private var locationService = LocationService.shared
+    private var cancellables = Set<AnyCancellable>()
     
     var isCustomDescriptionValid: Bool {
         guard let desc = customOutfitDescription else { return false }
@@ -22,6 +35,26 @@ class HomeViewModel: ObservableObject {
             word.range(of: "[A-Za-z0-9]", options: .regularExpression) != nil
         }
         return words.count >= 2
+    }
+    
+    init() {
+        locationService.$location
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] loc in
+                guard let self = self, let loc = loc else { return }
+                self.fetchWeather(for: loc)
+            }
+            .store(in: &cancellables)
+
+        locationService.$locationError
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] error in
+                if let error = error {
+                    self?.weatherError = "Unable to get location: \(error.localizedDescription)"
+                    self?.isWeatherLoading = false
+                }
+            }
+            .store(in: &cancellables)
     }
     
     func suggestTodayOutfit(from items: [WardrobeItem]) {
@@ -131,6 +164,36 @@ class HomeViewModel: ObservableObject {
                 showRateLimitAlert = true
             case .failure:
                 break
+            }
+        }
+    }
+
+    func requestWeatherForCurrentLocation() {
+        isWeatherLoading = true
+        weatherError = nil
+        locationService.requestLocation()
+    }
+
+    func toggleTemperatureUnit() {
+        displayFahrenheit.toggle()
+    }
+
+    private func fetchWeather(for loc: CLLocation) {
+        Task {
+            do {
+                let weather = try await WeatherService.shared.fetchWeather(latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude, useFahrenheit: false)
+                await MainActor.run {
+                    self.weather = weather
+                    self.isWeatherLoading = false
+                    self.lastCity = weather.city
+                    self.lastCelsius = weather.temperature2m
+                    self.lastFahrenheit = (weather.temperature2m * 9.0 / 5.0) + 32.0
+                }
+            } catch {
+                await MainActor.run {
+                    self.weatherError = "Failed to fetch weather."
+                    self.isWeatherLoading = false
+                }
             }
         }
     }

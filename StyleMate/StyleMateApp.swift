@@ -455,7 +455,7 @@ struct MultiAddNewItemView: View {
                         Button(role: .destructive) {
                             markRemovedAndAdvance()
                         } label: {
-                            Label("Remove Fit", systemImage: "trash")
+                            Label("Remove Items", systemImage: "trash")
                         }
                         .disabled(
                             !(savedStates.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
@@ -464,7 +464,7 @@ struct MultiAddNewItemView: View {
                         Button {
                             saveCurrentAndAdvance()
                         } label: {
-                            Label("Save Fit", systemImage: "checkmark")
+                            Label("Save Items", systemImage: "checkmark")
                         }
                         .disabled(
                             !(savedStates.indices.contains(currentIndex) && detectedItems.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
@@ -476,10 +476,6 @@ struct MultiAddNewItemView: View {
                     HStack {
                         Button("Cancel") { showCancelConfirm = true }
                         Spacer()
-                        Button("Done") {
-                            saveAllAndShowSummary()
-                        }
-                        .disabled(!canFinish)
                     }
                     .padding()
                 }
