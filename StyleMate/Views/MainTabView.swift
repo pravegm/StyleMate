@@ -75,20 +75,6 @@ struct CustomTabBar: View {
     }
 }
 
-struct MyOutfitsView: View {
-    var body: some View {
-        VStack {
-            Spacer()
-            Text("My Outfits")
-                .font(.largeTitle.bold())
-                .foregroundColor(.accentColor)
-            Text("This page will show your outfits soon.")
-                .foregroundColor(.secondary)
-            Spacer()
-        }
-    }
-}
-
 #Preview {
     MainTabView(showAddSheet: .constant(false), activeAddFlow: .constant(nil))
 } 
