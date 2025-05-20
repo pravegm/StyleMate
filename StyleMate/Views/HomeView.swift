@@ -282,7 +282,7 @@ struct HomeView: View {
                                         .foregroundColor(selectedOutfitType == type && customOutfitDescription == nil ? .white : .primary)
                                 }
                                 Text(type.rawValue)
-                                    .font(.caption)
+                                    .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(.primary)
                                     .multilineTextAlignment(.center)
                                     .lineLimit(2)

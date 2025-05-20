@@ -9,8 +9,6 @@ struct MyWardrobeView: View {
     @State private var showPhotoPicker = false
     @State private var selectedImages: [UIImage] = []
     @State private var showReviewBatch = false
-    @State private var showPickerTip = false
-    @AppStorage("hasShownPickerTip") private var hasShownPickerTip: Bool = false
     @State private var editingItem: WardrobeItem? = nil
     @State private var showEditSheet = false
     
@@ -57,14 +55,6 @@ struct MyWardrobeView: View {
             }) {
                 MultiAddNewItemView(images: selectedImages, isPresented: $showReviewBatch)
                     .environmentObject(wardrobeViewModel)
-            }
-            .alert("Tip", isPresented: $showPickerTip) {
-                Button("Continue") {
-                    hasShownPickerTip = true
-                    showPhotoPicker = true
-                }
-            } message: {
-                Text("Tap multiple images to select them, then tap 'Add' or 'Done' to confirm.")
             }
             .sheet(isPresented: Binding(
                 get: { showEditSheet && editingItem != nil },
