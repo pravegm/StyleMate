@@ -1,2 +1,21 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23788" systemVersion="24E263" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithSwiftData="YES" userDefinedModelVersionIdentifier=""/>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23788" systemVersion="24E263" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithSwiftData="YES" userDefinedModelVersionIdentifier="">
+    <entity name="DatedOutfit" representedClassName="DatedOutfit" syncable="YES" codeGenerationType="class">
+        <attribute name="date" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="notes" optional="YES" attributeType="String"/>
+        <attribute name="source" attributeType="String"/>
+        <relationship name="items" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="OutfitItem" inverseName="datedOutfit" inverseEntity="OutfitItem"/>
+    </entity>
+    <entity name="OutfitItem" representedClassName="OutfitItem" syncable="YES" codeGenerationType="class">
+        <attribute name="brand" attributeType="String"/>
+        <attribute name="category" attributeType="String"/>
+        <attribute name="colors" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromData"/>
+        <attribute name="croppedImagePath" optional="YES" attributeType="String"/>
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="imagePath" attributeType="String"/>
+        <attribute name="pattern" attributeType="String"/>
+        <attribute name="product" attributeType="String"/>
+        <relationship name="datedOutfit" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="DatedOutfit" inverseName="items" inverseEntity="DatedOutfit"/>
+    </entity>
+</model>

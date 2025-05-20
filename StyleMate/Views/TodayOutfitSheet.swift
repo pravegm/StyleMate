@@ -243,6 +243,6 @@ struct TodayOutfitSheet: View {
         }
     }
     var outfitItems: [WardrobeItem] {
-        [outfit.top, outfit.bottom, outfit.footwear, outfit.accessory, outfit.outerwear].compactMap { $0 }
+        outfit.items
     }
 } 

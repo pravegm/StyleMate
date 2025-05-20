@@ -97,16 +97,8 @@ class HomeViewModel: ObservableObject {
                 }
                 let matchedItems = suggestion.compactMap { match($0) }
                 // Remove the requirement for top, bottom, and footwear. Use whatever Gemini returns.
-                let top = matchedItems.first(where: { $0.category == .tops || $0.category == .ethnicWear || $0.category == .onePieces })
-                let bottom = matchedItems.first(where: { $0.category == .bottoms })
-                let footwear = matchedItems.first(where: { $0.category == .footwear })
-                let accessory = matchedItems.first(where: { $0.category == .accessories })
-                let outerwear = matchedItems.first(where: { $0.category == .outerwear || $0.category == .midLayers || $0.category == .onePieces })
-                if !matchedItems.isEmpty {
-                    return Outfit(top: top, bottom: bottom, footwear: footwear, accessory: accessory, outerwear: outerwear)
-                } else {
-                    return nil
-                }
+                let items = matchedItems // Use all matched items as the outfit
+                return Outfit(items: items)
             }
             outfitBatch = batch
             batchIndex = 0
@@ -157,22 +149,17 @@ class HomeViewModel: ObservableObject {
                 })
                 guard let replacement = matched else { return }
                 // Build new outfit
-                let updatedOutfit: Outfit
-                switch category {
-                case .tops:
-                    updatedOutfit = Outfit(top: replacement, bottom: currentOutfit.bottom, footwear: currentOutfit.footwear, accessory: currentOutfit.accessory, outerwear: currentOutfit.outerwear)
-                case .bottoms:
-                    updatedOutfit = Outfit(top: currentOutfit.top, bottom: replacement, footwear: currentOutfit.footwear, accessory: currentOutfit.accessory, outerwear: currentOutfit.outerwear)
-                case .footwear:
-                    updatedOutfit = Outfit(top: currentOutfit.top, bottom: currentOutfit.bottom, footwear: replacement, accessory: currentOutfit.accessory, outerwear: currentOutfit.outerwear)
-                case .accessories:
-                    updatedOutfit = Outfit(top: currentOutfit.top, bottom: currentOutfit.bottom, footwear: currentOutfit.footwear, accessory: replacement, outerwear: currentOutfit.outerwear)
-                case .outerwear, .midLayers, .onePieces:
-                    updatedOutfit = Outfit(top: currentOutfit.top, bottom: currentOutfit.bottom, footwear: currentOutfit.footwear, accessory: currentOutfit.accessory, outerwear: replacement)
-                default:
-                    // For categories not in the outfit, do nothing
-                    return
+                let updatedItems = currentOutfit.items.map { item in
+                    item.category == category ? replacement : item
                 }
+                // If the category was not present, add the replacement
+                let finalItems: [WardrobeItem]
+                if updatedItems.contains(where: { $0.id == replacement.id }) {
+                    finalItems = updatedItems
+                } else {
+                    finalItems = updatedItems + [replacement]
+                }
+                let updatedOutfit = Outfit(items: finalItems)
                 todayOutfit = updatedOutfit
             case .rateLimited:
                 showRateLimitAlert = true

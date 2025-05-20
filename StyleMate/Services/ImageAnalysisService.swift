@@ -356,10 +356,9 @@ Return only the JSON array, no extra text.
         let prompt = """
 You are an expert fashion stylist. Given the following wardrobe items, suggest 5 different, stylish, harmonious, and practical outfits for today. Each outfit should:
 - Follow established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).
-- Only combine items that make sense together (e.g., one top, one bottom, one pair of footwear, optionally one accessory and one outerwear).
+- Only combine items that make sense together (e.g., appropriate layering, no duplicate product types unless it makes sense, etc.).
 - Avoid clashing colors, too many patterns, or inappropriate combinations (e.g., no sandals with winter coats, no more than one statement pattern).
 - Prefer color harmony: neutrals go with anything, but bold colors should be paired thoughtfully.
-- Do not repeat the same product type (e.g., two tops).
 - Be distinct from each other (no duplicate combinations).
 - Only use items from the provided list. Do not invent or hallucinate new items.
 - For each item in the outfit, specify: category, product, colors (array), pattern, and brand (optional).
@@ -425,20 +424,9 @@ Return only the JSON array, no extra text.
     }
 
     func suggestPartialShuffleWithResult(currentOutfit: Outfit, categoryToShuffle: Category, availableItems: [WardrobeItem]) async -> PartialShuffleResult {
-        let outfitSummary = (
-            [("Tops", currentOutfit.top),
-             ("Bottoms", currentOutfit.bottom),
-             ("Footwear", currentOutfit.footwear)]
-            + [
-                currentOutfit.accessory.map { ("Accessories", $0) },
-                currentOutfit.outerwear.map { ("Outerwear", $0) }
-            ].compactMap { $0 }
-        )
-        .compactMap { (cat, item) in
-            guard let item = item else { return nil }
-            return "Category: \(cat), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
-        }
-        .joined(separator: "\n")
+        let outfitSummary = currentOutfit.items.map { item in
+            "Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+        }.joined(separator: "\n")
         let availableSummary = availableItems.enumerated().map { (idx, item) in
             "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
         }.joined(separator: "\n")
@@ -487,16 +475,7 @@ You are an expert fashion stylist. Given the following information, suggest a ne
             // No print, just fail
         }
         // Fallback: return the first available item that is not the current one
-        let currentItem = {
-            switch categoryToShuffle {
-            case .tops: return currentOutfit.top
-            case .bottoms: return currentOutfit.bottom
-            case .footwear: return currentOutfit.footwear
-            case .accessories: return currentOutfit.accessory
-            case .outerwear, .midLayers, .onePieces: return currentOutfit.outerwear
-            default: return nil
-            }
-        }()
+        let currentItem = currentOutfit.items.first { $0.category == categoryToShuffle }
         if let currentItem = currentItem {
             if let fallback = availableItems.first(where: { $0.id != currentItem.id }) {
                 return .success(SuggestedOutfitItem(

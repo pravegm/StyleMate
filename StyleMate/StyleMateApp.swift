@@ -21,12 +21,14 @@ struct StyleMateApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var authService = AuthService()
     @StateObject private var wardrobeVM = WardrobeViewModel()
+    let persistenceController = PersistenceController.shared
     
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(authService)
                 .environmentObject(wardrobeVM)
+                .environment(\.managedObjectContext, persistenceController.container.viewContext)
         }
     }
 }

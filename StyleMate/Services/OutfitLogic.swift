@@ -4,11 +4,11 @@ import Foundation
 import UIKit
 
 struct Outfit: Equatable, Hashable {
-    let top: WardrobeItem?
-    let bottom: WardrobeItem?
-    let footwear: WardrobeItem?
-    let accessory: WardrobeItem?
-    let outerwear: WardrobeItem?
+    var items: [WardrobeItem]
+    
+    init(items: [WardrobeItem]) {
+        self.items = items
+    }
 }
 
 extension WardrobeItem {

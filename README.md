@@ -179,6 +179,30 @@ This feature ensures you always know which images need your attention and which 
 - Large SwiftUI files have been split into smaller, focused components (e.g., TodayOutfitSheet, WardrobeSummaryWidget) for faster builds and easier maintenance.
 - The `Views/` directory now contains both full screens and reusable SwiftUI components.
 
+## Data Model
+
+### WardrobeItem
+Represents a single clothing item in your wardrobe. Each `WardrobeItem` includes:
+- **id:** Unique identifier
+- **category:** The main category (e.g., Tops, Bottoms, Footwear, etc.)
+- **product:** The specific product type (e.g., T-Shirt, Jeans, Sneakers)
+- **color(s):** One or more detected colors
+- **pattern:** The detected pattern (e.g., Solid, Striped, Floral)
+- **brand:** (Optional) Brand name
+- **image:** Reference to the item's image in the app's file system
+
+### Outfit (Updated)
+An `Outfit` is now a flexible collection of any number of `WardrobeItem` objects. This enables:
+- Outfits with any combination and count of items (no longer limited to 5 or to fixed slots like top/bottom/shoes/etc.)
+- More realistic and creative outfit suggestions and user-created looks
+
+**Outfit properties:**
+- **id:** Unique identifier
+- **items:** `[WardrobeItem]` — An array of wardrobe items that make up the outfit
+- **(Optional) metadata:** Such as date created, user notes, or tags (if implemented)
+
+This change supports the upcoming "My Outfits" calendar feature, where multiple outfits can be mapped to any date, and each outfit can contain as many items as needed for the look.
+
 ## Contributing
 
 Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
