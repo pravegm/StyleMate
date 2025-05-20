@@ -8,70 +8,113 @@ struct MyOutfitsView: View {
     @StateObject private var viewModel = MyOutfitsViewModel()
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var showAddSheet = false
-    @State private var showOutfitsForDate: IdentifiableDate? = nil
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Top section: Today's Outfits
-            Group {
-                Text("Today's Outfits")
-                    .font(.title2.bold())
-                    .padding(.top, 16)
-                if let todaysOutfits = viewModel.outfitsByDate[Calendar.current.startOfDay(for: Date())], !todaysOutfits.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(todaysOutfits, id: \ .objectID) { outfit in
-                                OutfitCardView(outfit: outfit)
+        ZStack {
+            // Soft gradient background
+            LinearGradient(
+                colors: [Color.pink.opacity(0.13), Color.blue.opacity(0.13), Color.yellow.opacity(0.13)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center) {
+                    Text("My Outfits")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                        .padding(.leading, 20)
+                    Spacer()
+                }
+                .padding(.top, 16)
+                .padding(.bottom, 8)
+                Text("See, add, and manage your looks")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 20)
+                    .padding(.bottom, 8)
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Today's Outfits Card
+                        HomeCard {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Today's Outfits")
+                                    .font(.title2.bold())
+                                    .foregroundColor(.accentColor)
+                                    .padding(.bottom, 2)
+                                if let todaysOutfits = viewModel.outfitsByDate[Calendar.current.startOfDay(for: Date())], !todaysOutfits.isEmpty {
+                                    VStack(spacing: 16) {
+                                        ForEach(todaysOutfits, id: \ .objectID) { outfit in
+                                            OutfitCardView(outfit: outfit, viewModel: viewModel)
+                                                .environmentObject(wardrobeVM)
+                                        }
+                                    }
+                                } else {
+                                    Text("No outfit mapped for today. Add one!")
+                                        .foregroundColor(.secondary)
+                                        .padding(.bottom, 8)
+                                }
                             }
                         }
-                        .padding(.horizontal)
+                        // Calendar Card
+                        HomeCard {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Outfit Calendar")
+                                    .font(.title2.bold())
+                                    .foregroundColor(.accentColor)
+                                    .padding(.bottom, 2)
+                                CalendarGridView(
+                                    selectedDate: $selectedDate,
+                                    datesWithOutfits: Set(viewModel.outfitsByDate.keys)
+                                )
+                            }
+                            .padding(.bottom, 2)
+                        }
+                        // Add Outfit Button Card
+                        HomeCard {
+                            Button(action: {
+                                showAddSheet = true
+                            }) {
+                                Label("Add Outfit to Selected Date", systemImage: "plus")
+                                    .font(.headline)
+                                    .padding()
+                                    .frame(maxWidth: .infinity)
+                                    .background(
+                                        LinearGradient(colors: [Color.accentColor, Color.pink.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
+                                    )
+                                    .foregroundColor(.white)
+                                    .cornerRadius(12)
+                            }
+                            .padding(.horizontal, 2)
+                            .padding(.vertical, 2)
+                        }
+                        // Outfits for selected date (if any)
+                        if let outfits = viewModel.outfitsByDate[selectedDate], !outfits.isEmpty {
+                            HomeCard {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Outfits for \(dateFormatter.string(from: selectedDate))")
+                                        .font(.title3.bold())
+                                        .foregroundColor(.accentColor)
+                                    ForEach(outfits, id: \ .objectID) { outfit in
+                                        OutfitCardView(outfit: outfit, viewModel: viewModel)
+                                            .environmentObject(wardrobeVM)
+                                    }
+                                }
+                            }
+                        }
                     }
-                } else {
-                    Text("No outfit mapped for today. Add one!")
-                        .foregroundColor(.secondary)
-                        .padding(.bottom, 8)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 0)
+                    .padding(.bottom, 120)
                 }
             }
-            Divider().padding(.vertical, 8)
-            
-            // Calendar section
-            CalendarGridView(
-                selectedDate: $selectedDate,
-                datesWithOutfits: Set(viewModel.outfitsByDate.keys),
-                onDateWithOutfitsTapped: { date in
-                    showOutfitsForDate = IdentifiableDate(id: date)
-                }
-            )
-            .padding(.horizontal)
-            .padding(.bottom, 8)
-            
-            // Add Outfit Button - Always visible
-            Button(action: {
-                showAddSheet = true
-            }) {
-                Label("Add Outfit to Selected Date", systemImage: "plus")
-                    .font(.headline)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.accentColor)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            
-            Spacer()
         }
         .sheet(isPresented: $showAddSheet) {
             AddOutfitSheet(selectedDate: selectedDate) { items, notes in
                 viewModel.addOutfit(date: selectedDate, items: items, source: "manual", notes: notes)
-                showAddSheet = false
             }
             .environmentObject(wardrobeVM)
-        }
-        .sheet(item: $showOutfitsForDate) { identifiableDate in
-            OutfitsForDateSheet(date: identifiableDate.id, viewModel: viewModel)
         }
     }
 }
@@ -79,8 +122,11 @@ struct MyOutfitsView: View {
 struct AddOutfitSheet: View {
     let selectedDate: Date
     var onSave: ([WardrobeItem], String?) -> Void
+    var initialItems: [OutfitItem]? = nil
+    var initialNotes: String? = nil
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var showSavedOverlay = false
     @State private var selectedItems: Set<WardrobeItem> = []
     @State private var notes: String = ""
     @State private var expandedCategories: Set<Category> = []
@@ -99,143 +145,103 @@ struct AddOutfitSheet: View {
         }
     }
     
+    public init(selectedDate: Date, initialItems: [OutfitItem]? = nil, initialNotes: String? = nil, onSave: @escaping ([WardrobeItem], String?) -> Void) {
+        self.selectedDate = selectedDate
+        self.onSave = onSave
+        self.initialItems = initialItems
+        self.initialNotes = initialNotes
+    }
+    
     var body: some View {
         NavigationView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Select up to 10 items for your outfit on \(selectedDate, formatter: dateFormatter)")
-                    .font(.headline)
+            ZStack(alignment: .bottom) {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(groupedItems, id: \ .category) { group in
-                            Section(header:
-                                HStack {
-                                    Text(group.category.rawValue)
-                                        .font(.title3.bold())
-                                    Spacer()
-                                    Button(action: {
-                                        if expandedCategories.contains(group.category) {
-                                            expandedCategories.remove(group.category)
-                                        } else {
-                                            expandedCategories.insert(group.category)
-                                        }
-                                    }) {
-                                        Image(systemName: expandedCategories.contains(group.category) ? "chevron.down" : "chevron.right")
-                                            .foregroundColor(.accentColor)
-                                    }
-                                }
-                                .padding(.vertical, 6)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    if expandedCategories.contains(group.category) {
-                                        expandedCategories.remove(group.category)
-                                    } else {
-                                        expandedCategories.insert(group.category)
-                                    }
-                                }
-                            ) {
-                                if expandedCategories.contains(group.category) {
-                                    ForEach(group.products, id: \ .product) { productGroup in
-                                        Section(header:
-                                            HStack {
-                                                Text(productGroup.product)
-                                                    .font(.headline)
-                                                Spacer()
-                                                Button(action: {
-                                                    let key = "\(group.category.rawValue)-\(productGroup.product)"
-                                                    if expandedProducts.contains(key) {
-                                                        expandedProducts.remove(key)
-                                                    } else {
-                                                        expandedProducts.insert(key)
-                                                    }
-                                                }) {
-                                                    let key = "\(group.category.rawValue)-\(productGroup.product)"
-                                                    Image(systemName: expandedProducts.contains(key) ? "chevron.down" : "chevron.right")
-                                                        .foregroundColor(.accentColor)
-                                                }
-                                            }
-                                            .padding(.vertical, 4)
-                                            .contentShape(Rectangle())
-                                            .onTapGesture {
-                                                let key = "\(group.category.rawValue)-\(productGroup.product)"
-                                                if expandedProducts.contains(key) {
-                                                    expandedProducts.remove(key)
-                                                } else {
-                                                    expandedProducts.insert(key)
-                                                }
-                                            }
-                                        ) {
-                                            let key = "\(group.category.rawValue)-\(productGroup.product)"
-                                            if expandedProducts.contains(key) {
-                                                ForEach(productGroup.items, id: \ .id) { item in
-                                                    HStack {
-                                                        Button(action: {
-                                                            if selectedItems.contains(item) {
-                                                                selectedItems.remove(item)
-                                                            } else if selectedItems.count < 10 {
-                                                                selectedItems.insert(item)
-                                                            }
-                                                        }) {
-                                                            Image(systemName: selectedItems.contains(item) ? "checkmark.square.fill" : "square")
-                                                                .foregroundColor(selectedItems.contains(item) ? .accentColor : .secondary)
-                                                        }
-                                                        Button(action: {
-                                                            if let img = item.croppedImage ?? item.image {
-                                                                previewImage = PreviewImage(image: img)
-                                                            }
-                                                        }) {
-                                                            if let img = item.croppedImage ?? item.image {
-                                                                Image(uiImage: img)
-                                                                    .resizable()
-                                                                    .frame(width: 40, height: 40)
-                                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                                            } else {
-                                                                Rectangle()
-                                                                    .fill(Color.gray)
-                                                                    .frame(width: 40, height: 40)
-                                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                                            }
-                                                        }
-                                                        .buttonStyle(PlainButtonStyle())
-                                                        Button(action: {
-                                                            if selectedItems.contains(item) {
-                                                                selectedItems.remove(item)
-                                                            } else if selectedItems.count < 10 {
-                                                                selectedItems.insert(item)
-                                                            }
-                                                        }) {
-                                                            Text(item.name)
-                                                                .font(.body)
-                                                                .foregroundColor(.primary)
-                                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                                        }
-                                                        .buttonStyle(PlainButtonStyle())
-                                                        Spacer()
-                                                    }
-                                                    .padding(.vertical, 4)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text("Select up to 10 items for your outfit on \(selectedDate, formatter: dateFormatter)")
+                            .font(.headline)
+                            .padding(.top, 8)
+                            .padding(.horizontal, 8)
+                        // Notes field (moved up)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Notes (optional)")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            TextField("Add any notes for this outfit...", text: $notes)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .padding(.vertical, 2)
+                                .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemGray6)))
                         }
+                        .padding(.horizontal, 4)
+                        .padding(.top, 8)
+                        // Outfit item selection list
+                        OutfitItemSelectionList(
+                            selectedItems: $selectedItems,
+                            expandedCategories: $expandedCategories,
+                            expandedProducts: $expandedProducts,
+                            previewImage: $previewImage
+                        )
+                        .environmentObject(wardrobeVM)
+                        Spacer(minLength: 60)
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+                    .padding(.bottom, 80)
                 }
-                TextField("Notes (optional)", text: $notes)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                Spacer()
+                // Sticky Save/Cancel bar
                 HStack {
                     Button("Cancel") { dismiss() }
                         .foregroundColor(.red)
+                        .font(.headline)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 18)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemGray6)))
                     Spacer()
-                    Button("Save Outfit") {
+                    Button(action: {
                         onSave(Array(selectedItems), notes.isEmpty ? nil : notes)
+                        showSavedOverlay = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                            showSavedOverlay = false
+                            dismiss()
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Save Outfit")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 24)
+                        .background(selectedItems.isEmpty ? Color.gray.opacity(0.5) : Color.accentColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     .disabled(selectedItems.isEmpty)
-                    .buttonStyle(.borderedProminent)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 0)
+                .background(Color(.systemBackground))
+                // Overlay
+                if showSavedOverlay {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Label("Saved", systemImage: "checkmark.circle.fill")
+                                .font(.title2.bold())
+                                .padding(.vertical, 18)
+                                .padding(.horizontal, 32)
+                                .background(Color.green.opacity(0.95))
+                                .foregroundColor(.white)
+                                .clipShape(Capsule())
+                                .shadow(radius: 10)
+                            Spacer()
+                        }
+                        Spacer()
+                    }
+                    .transition(.opacity)
+                    .zIndex(10)
                 }
             }
-            .padding()
             .navigationTitle("Add Outfit")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $previewImage) { wrapper in
@@ -249,50 +255,17 @@ struct AddOutfitSheet: View {
                         .padding()
                 }
             }
-        }
-    }
-}
-
-// New sheet view for showing all outfits for a date
-struct OutfitsForDateSheet: View {
-    let date: Date
-    @ObservedObject var viewModel: MyOutfitsViewModel
-    @State private var showAddSheet = false
-    @EnvironmentObject var wardrobeVM: WardrobeViewModel
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(spacing: 16) {
-                        ForEach(viewModel.outfitsByDate[date] ?? [], id: \.objectID) { outfit in
-                            OutfitCardView(outfit: outfit)
-                        }
+            .onAppear {
+                if let initialItems = initialItems {
+                    // Convert OutfitItem to WardrobeItem by matching id
+                    let wardrobeItems = wardrobeVM.items.filter { wi in
+                        initialItems.contains(where: { $0.id == wi.id })
                     }
-                    .padding()
+                    selectedItems = Set(wardrobeItems)
                 }
-                Spacer(minLength: 0)
-                Button(action: {
-                    showAddSheet = true
-                }) {
-                    Label("Add another outfit to this date", systemImage: "plus")
-                        .font(.headline)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color.accentColor)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                        .padding([.horizontal, .bottom])
+                if let initialNotes = initialNotes {
+                    notes = initialNotes
                 }
-            }
-            .navigationTitle(dateFormatter.string(from: date))
-            .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $showAddSheet) {
-                AddOutfitSheet(selectedDate: date) { items, notes in
-                    viewModel.addOutfit(date: date, items: items, source: "manual", notes: notes)
-                    showAddSheet = false
-                }
-                .environmentObject(wardrobeVM)
             }
         }
     }
@@ -449,7 +422,11 @@ struct OutfitItemGroup {
 
 struct OutfitCardView: View {
     let outfit: DatedOutfit
+    @ObservedObject var viewModel: MyOutfitsViewModel
     @State private var previewImage: PreviewImage? = nil
+    @State private var showEditSheet = false
+    @State private var showDeleteAlert = false
+    @EnvironmentObject var wardrobeVM: WardrobeViewModel
     
     private var allItems: [OutfitItem] {
         (outfit.items as? Set<OutfitItem>)?.sorted { ($0.product ?? "") < ($1.product ?? "") } ?? []
@@ -457,79 +434,24 @@ struct OutfitCardView: View {
     
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
-            // Left: Only notes if present
-            if let notes = outfit.notes, !notes.isEmpty {
-                Text(notes)
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 8)
-                    .padding(.leading, 4)
-                    .frame(width: 110, alignment: .topLeading)
-            }
+            OutfitCardActionsColumn(
+                notes: outfit.notes,
+                showEditSheet: $showEditSheet,
+                showDeleteAlert: $showDeleteAlert,
+                onEdit: { showEditSheet = true },
+                onDelete: { showDeleteAlert = true }
+            )
             // Right: Horizontal scroll of all items
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    ForEach(allItems, id: \ .objectID) { item in
-                        Button(action: {
-                            if let img = item.croppedImage ?? item.image {
-                                previewImage = PreviewImage(image: img)
-                            }
-                        }) {
-                            VStack(spacing: 6) {
-                                if let img = item.croppedImage ?? item.image {
-                                    Image(uiImage: img)
-                                        .resizable()
-                                        .aspectRatio(1, contentMode: .fill)
-                                        .frame(width: 68, height: 68)
-                                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                                } else {
-                                    Rectangle()
-                                        .fill(Color.gray.opacity(0.18))
-                                        .frame(width: 68, height: 68)
-                                        .overlay(Text("No Image").font(.caption2))
-                                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                                }
-                                Text(item.product ?? "")
-                                    .font(.caption.bold())
-                                    .foregroundColor(.primary)
-                                    .lineLimit(1)
-                                    .frame(maxWidth: 68)
-                                if let colors = item.colors as? [String], !colors.isEmpty {
-                                    Text(colors.joined(separator: ", "))
-                                        .font(.caption2)
-                                        .foregroundColor(.accentColor)
-                                        .lineLimit(1)
-                                        .frame(maxWidth: 68)
-                                }
-                                if let pattern = item.pattern, !pattern.isEmpty {
-                                    Text(pattern)
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                        .frame(maxWidth: 68)
-                                }
-                                if let brand = item.brand, !brand.isEmpty {
-                                    Text(brand)
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                        .frame(maxWidth: 68)
-                                }
-                            }
-                            .padding(8)
-                            .background(Color(.systemGray6))
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                            .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                }
-                .padding(.vertical, 6)
-                .padding(.horizontal, 2)
-            }
+            OutfitCardItemsScroll(
+                allItems: allItems,
+                previewImage: $previewImage
+            )
         }
         .padding()
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color.accentColor.opacity(0.07))
+        )
         .shadow(color: Color.black.opacity(0.09), radius: 6, x: 0, y: 2)
         .padding(.horizontal, 8)
         .frame(maxWidth: 420, minHeight: 120, alignment: .leading)
@@ -543,6 +465,25 @@ struct OutfitCardView: View {
                     .font(.headline)
                     .padding()
             }
+        }
+        .sheet(isPresented: $showEditSheet) {
+            AddOutfitSheet(selectedDate: outfit.date ?? Date(),
+                          initialItems: allItems,
+                          initialNotes: outfit.notes ?? "") { items, notes in
+                viewModel.updateOutfit(outfit, items: items, notes: notes)
+                showEditSheet = false
+            }
+            .environmentObject(wardrobeVM)
+        }
+        .alert(isPresented: $showDeleteAlert) {
+            Alert(
+                title: Text("Delete Outfit?"),
+                message: Text("Are you sure you want to delete this outfit?"),
+                primaryButton: .destructive(Text("Delete")) {
+                    viewModel.deleteOutfit(outfit)
+                },
+                secondaryButton: .cancel()
+            )
         }
     }
 }

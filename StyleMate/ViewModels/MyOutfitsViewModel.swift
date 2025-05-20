@@ -17,8 +17,8 @@ class MyOutfitsViewModel: ObservableObject {
         do {
             let results = try context.fetch(request)
             let grouped = Dictionary(grouping: results) { outfit in
-                // Unwrap date safely, fallback to distantPast if nil
-                outfit.date ?? Date.distantPast
+                // Group by start of day to ensure all outfits for a day are together
+                Calendar.current.startOfDay(for: outfit.date ?? Date.distantPast)
             }
             DispatchQueue.main.async {
                 self.outfitsByDate = grouped
@@ -54,6 +54,33 @@ class MyOutfitsViewModel: ObservableObject {
     
     func deleteOutfit(_ outfit: DatedOutfit) {
         context.delete(outfit)
+        save()
+        fetchAllOutfits()
+    }
+    
+    func updateOutfit(_ outfit: DatedOutfit, items: [WardrobeItem], notes: String?) {
+        // Remove old OutfitItems
+        if let oldItems = outfit.items as? Set<OutfitItem> {
+            for item in oldItems {
+                context.delete(item)
+            }
+        }
+        // Add new OutfitItems
+        let newOutfitItems = items.map { item -> OutfitItem in
+            let oi = OutfitItem(context: context)
+            oi.id = item.id
+            oi.category = item.category.rawValue
+            oi.product = item.product
+            oi.colors = item.colors as NSObject
+            oi.brand = item.brand
+            oi.pattern = item.pattern.rawValue
+            oi.imagePath = item.imagePath
+            oi.croppedImagePath = item.croppedImagePath
+            oi.datedOutfit = outfit
+            return oi
+        }
+        outfit.items = NSSet(array: newOutfitItems)
+        outfit.notes = notes
         save()
         fetchAllOutfits()
     }

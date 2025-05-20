@@ -6,7 +6,12 @@ struct TodayOutfitSheet: View {
     @State private var previewImage: PreviewImage? = nil
     @EnvironmentObject var homeVM: HomeViewModel
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
+    @EnvironmentObject var outfitsVM: MyOutfitsViewModel
     @State private var animate = false
+    @State private var showSaveActionSheet = false
+    @State private var showDatePickerSheet = false
+    @State private var selectedDate = Calendar.current.startOfDay(for: Date())
+    @State private var showSavedOverlay = false
     let emojis = ["🎉", "✨", "🥳", "🎊", "💫", "👗", "🕺", "💃", "🧥", "👚", "👖", "👠", "👒", "🧢", "🧣", "🧤"]
     let burstCount = 18
     let subheadings = [
@@ -169,10 +174,10 @@ struct TodayOutfitSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                         .shadow(radius: 4)
                     }
-                    Button(action: { isPresented = false }) {
+                    Button(action: { showSaveActionSheet = true }) {
                         HStack {
-                            Image(systemName: "checkmark.seal.fill").font(.title2)
-                            Text("Love it!")
+                            Image(systemName: "square.and.arrow.down.fill").font(.title2)
+                            Text("Save this outfit")
                         }
                         .font(.headline)
                         .padding()
@@ -219,6 +224,26 @@ struct TodayOutfitSheet: View {
                     .padding(32)
                     .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
             }
+            if showSavedOverlay {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Label("Saved", systemImage: "checkmark.circle.fill")
+                            .font(.title2.bold())
+                            .padding(.vertical, 18)
+                            .padding(.horizontal, 32)
+                            .background(Color.green.opacity(0.95))
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+                            .shadow(radius: 10)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .transition(.opacity)
+                .zIndex(10)
+            }
         }
         .sheet(item: $previewImage) { wrapper in
             VStack {
@@ -240,6 +265,50 @@ struct TodayOutfitSheet: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("You're shuffling too fast! Please wait a moment and try again.")
+        }
+        .actionSheet(isPresented: $showSaveActionSheet) {
+            ActionSheet(title: Text("Save Outfit"), message: Text("How would you like to save this outfit?"), buttons: [
+                .default(Text("Save for today")) {
+                    let today = Calendar.current.startOfDay(for: Date())
+                    outfitsVM.addOutfit(date: today, items: outfit.items, source: "gemini")
+                    showSavedOverlay = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        showSavedOverlay = false
+                        isPresented = false
+                    }
+                },
+                .default(Text("Choose a date")) {
+                    selectedDate = Calendar.current.startOfDay(for: Date())
+                    showDatePickerSheet = true
+                },
+                .cancel()
+            ])
+        }
+        .sheet(isPresented: $showDatePickerSheet) {
+            NavigationView {
+                VStack(spacing: 24) {
+                    DatePicker("Select Date", selection: $selectedDate, displayedComponents: [.date])
+                        .datePickerStyle(GraphicalDatePickerStyle())
+                        .padding()
+                    Button("Save") {
+                        outfitsVM.addOutfit(date: selectedDate, items: outfit.items, source: "gemini")
+                        showSavedOverlay = true
+                        showDatePickerSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                            showSavedOverlay = false
+                            isPresented = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Cancel") {
+                        showDatePickerSheet = false
+                    }
+                    .foregroundColor(.red)
+                }
+                .padding()
+                .navigationTitle("Choose Date")
+                .navigationBarTitleDisplayMode(.inline)
+            }
         }
     }
     var outfitItems: [WardrobeItem] {

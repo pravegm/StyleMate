@@ -183,6 +183,7 @@ struct HomeView: View {
                     TodayOutfitSheet(outfit: outfit, isPresented: $homeVM.showOutfitSheet)
                         .environmentObject(homeVM)
                         .environmentObject(wardrobeViewModel)
+                        .environmentObject(MyOutfitsViewModel())
                 }
             }
             .alert("No valid outfit found", isPresented: $homeVM.showNoOutfitAlert) {

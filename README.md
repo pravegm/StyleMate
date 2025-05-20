@@ -55,6 +55,22 @@ All magical effects are implemented in a clean, modular way in `HomeView.swift`:
 - **Image Preview:** Tap an item to preview its image in full screen (when not in edit mode).
 - **Profile & Settings:** Access your profile and app settings from the main wardrobe view.
 
+## My Outfits Page Features
+
+- **Outfit Calendar:** View all your outfits mapped to specific dates in a beautiful, interactive calendar. Dates with outfits are highlighted for easy discovery.
+- **Today's Outfits Card:** Instantly see all outfits mapped to today, with a modern card UI and vertical list of items.
+- **Add Outfit:** Add a new outfit to any date using a visually rich, multi-step sheet. Select up to 10 items from your wardrobe, grouped by category and product, with category and product cards that expand/collapse for easy navigation.
+- **Edit Outfit:** Edit any existing outfit. The add/edit sheet is pre-filled with the outfit's items and notes for quick changes.
+- **Delete Outfit:** Remove any outfit with a single tap, with a confirmation alert to prevent accidental deletion.
+- **Notes:** Add optional notes to any outfit (e.g., "Wore this to a wedding"). Notes are always visible and editable.
+- **Item Grouping:** Items are grouped by category and product for fast selection. Product rows are fully clickable for expansion.
+- **Scrollable Item Cards:** Each outfit displays its items as horizontally scrollable cards, with a right-facing chevron indicator if there are more than two items.
+- **Full Item Names:** Item names are always fully visible, wrapping to multiple lines if needed, and are consistent with the wardrobe view.
+- **Image Preview:** Tap any item image to see a full-screen, zoomable preview.
+- **Modern UI/UX:** Gradient backgrounds, accent colors, and sticky save/cancel bars for a delightful, modern experience.
+- **Performance Optimized:** All views are modularized for fast loading and smooth scrolling, even with a large wardrobe.
+- **Accessibility:** Large tap targets, clear labels, and VoiceOver support for all interactive elements.
+
 ## Usage
 
 1. **Add Items:** Use the add button to add new clothing items to your wardrobe.
@@ -78,6 +94,12 @@ For more details, see the in-app help or contact the developer.
   - Uses Google Gemini to suggest outfits based on your wardrobe, following real fashion rules, color theory, and item compatibility.
   - Gemini is strictly prompted to use only the exact product, category, and pattern strings from your provided lists—no synonyms, no singular/plural variants, no typos.
   - Robust product detection and canonicalization: all detected product names are mapped to the exact, canonical product in your wardrobe list, handling singular/plural/case/typos. Picker selection is always valid and never defaults to an unrelated product.
+
+- **Save Suggested Outfits:**
+  - After receiving a Gemini-suggested outfit, tap the **"Save this outfit"** button to add it to your My Outfits calendar.
+  - Choose to save the outfit to today or select any other date using a date picker.
+  - A green "Saved" overlay confirms the action, and the outfit instantly appears in your My Outfits page for the chosen date.
+  - This makes it easy to keep track of AI-suggested looks and revisit them anytime.
 
 - **Multi-Image Add Flow:**
   - Select multiple images from your gallery at once.
