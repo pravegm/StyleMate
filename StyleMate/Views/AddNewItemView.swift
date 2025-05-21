@@ -193,14 +193,15 @@ struct AddNewItemView: View {
                 OutfitLoadingOverlay(
                     progress: progress,
                     emoji: "🤖",
-                    loadingMessages: aiMessages
+                    loadingMessages: aiMessages,
+                    animateEmoji: false
                 )
                 .onAppear {
                     progress = 0.0
                     progressTimer?.invalidate()
-                    progressTimer = Timer.scheduledTimer(withTimeInterval: 0.025, repeats: true) { timer in
+                    progressTimer = Timer.scheduledTimer(withTimeInterval: 0.035, repeats: true) { timer in
                         if progress < 0.98 {
-                            progress += 0.008
+                            progress += 0.006
                         } else {
                             timer.invalidate()
                         }

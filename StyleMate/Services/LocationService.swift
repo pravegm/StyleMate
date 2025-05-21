@@ -12,8 +12,16 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         manager.delegate = self
     }
     func requestLocation() {
-        manager.requestWhenInUseAuthorization()
-        manager.requestLocation()
+        let status = manager.authorizationStatus
+        if status == .notDetermined {
+            manager.requestWhenInUseAuthorization()
+            // Do NOT call requestLocation() yet; wait for user response
+        } else if status == .authorizedWhenInUse || status == .authorizedAlways {
+            manager.requestLocation()
+        } else {
+            // Handle denied/restricted
+            self.locationError = CLError(.denied)
+        }
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         location = locations.first

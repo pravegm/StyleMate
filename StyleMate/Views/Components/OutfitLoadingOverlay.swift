@@ -4,10 +4,11 @@ struct OutfitLoadingOverlay: View {
     let progress: Double
     let emoji: String
     let loadingMessages: [String]
+    let animateEmoji: Bool
     @State private var animate = false
     @State private var selectedMessage: String = ""
 
-    init(progress: Double, emoji: String, loadingMessages: [String]? = nil) {
+    init(progress: Double, emoji: String, loadingMessages: [String]? = nil, animateEmoji: Bool = true) {
         self.progress = progress
         self.emoji = emoji
         let defaultMessages = [
@@ -18,6 +19,7 @@ struct OutfitLoadingOverlay: View {
             "Styling your day with AI magic..."
         ]
         self.loadingMessages = loadingMessages ?? defaultMessages
+        self.animateEmoji = animateEmoji
         _selectedMessage = State(initialValue: self.loadingMessages.randomElement() ?? defaultMessages[0])
     }
 
@@ -27,8 +29,8 @@ struct OutfitLoadingOverlay: View {
             VStack(spacing: 24) {
                 Text(emoji)
                     .font(.system(size: 48))
-                    .scaleEffect(animate ? 1.1 : 0.95)
-                    .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: animate)
+                    .scaleEffect(animateEmoji ? (animate ? 1.1 : 0.95) : 1.0)
+                    .animation(animateEmoji ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .default, value: animate)
                 ProgressView(value: progress)
                     .progressViewStyle(LinearProgressViewStyle(tint: .green))
                     .frame(width: 180)
