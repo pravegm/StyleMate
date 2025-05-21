@@ -28,6 +28,14 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         if let clError = error as? CLError {
+            if clError.code == .locationUnknown {
+                // Ignore this error, location manager will keep trying
+                // Retry after a short delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    self?.manager.requestLocation()
+                }
+                return
+            }
             locationError = clError
         }
     }

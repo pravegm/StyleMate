@@ -15,11 +15,22 @@ struct MyWardrobeView: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .center) {
+                HStack(alignment: .center, spacing: 8) {
                     Text("My Wardrobe")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundColor(.primary)
                         .padding(.leading, 20)
+                    ZStack {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 28, height: 28)
+                        Text("\(wardrobeViewModel.items.count)")
+                            .font(.subheadline.bold())
+                            .foregroundColor(.white)
+                            .accessibilityLabel("\(wardrobeViewModel.items.count) items in wardrobe")
+                    }
+                    .padding(.trailing, 4)
+                    .accessibilityElement(children: .combine)
                     Spacer()
                 }
                 .padding(.top, 16)

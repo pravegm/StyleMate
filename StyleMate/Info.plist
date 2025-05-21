@@ -26,5 +26,7 @@
     <string>This app needs access to your camera to let you add photos of your clothes to your wardrobe.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>This app uses your location to show local weather on the home screen.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>This app uses your location to show local weather on the home screen.</string>
 </dict>
 </plist> 
