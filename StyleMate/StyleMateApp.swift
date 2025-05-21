@@ -325,8 +325,26 @@ struct MultiAddNewItemView: View {
     @State private var showSummary = false
     @State private var showCancelConfirm = false
     @State private var analysisStates: [Bool] = [] // true = analyzed, false = analyzing
-    // New: duplicate acknowledged state per image
     @State private var duplicateAcknowledged: [[Bool]] = []
+    // Progress overlay state
+    @State private var progress: Double = 0.0
+    @State private var progressTimer: Timer? = nil
+    let aiMessages = [
+        "AI is analyzing your style...",
+        "Letting AI work its magic...",
+        "AI is finding fashion insights...",
+        "AI is scanning for trends...",
+        "AI is curating your wardrobe...",
+        "AI is detecting your look...",
+        "AI is learning your vibe...",
+        "AI is matching your pieces...",
+        "AI is reviewing your images...",
+        "AI is unlocking outfit ideas..."
+    ]
+    // New: per-image reanalysis state
+    @State private var reanalyzingIndex: Int? = nil
+    @State private var reanalyzeProgress: Double = 0.0
+    @State private var reanalyzeProgressTimer: Timer? = nil
     var canFinish: Bool { savedStates.contains(true) }
     var allReviewed: Bool { savedStates.indices.allSatisfy { idx in savedStates[idx] != nil || !analysisStates.indices.contains(idx) || !analysisStates[idx] } }
     var canAddAll: Bool {
@@ -340,146 +358,244 @@ struct MultiAddNewItemView: View {
                     isPresented = false
                 }
             } else {
-                VStack(spacing: 0) {
-                    // Navigation controls
-                    HStack(alignment: .center, spacing: 16) {
-                        Button(action: { if currentIndex > 0 { currentIndex -= 1 } }) {
-                            Image(systemName: "chevron.left.circle.fill")
-                                .font(.system(size: 32))
-                                .foregroundColor(currentIndex == 0 ? .gray : .blue)
+                ZStack {
+                    VStack(spacing: 0) {
+                        // Navigation controls
+                        HStack(alignment: .center, spacing: 16) {
+                            Button(action: { if currentIndex > 0 { currentIndex -= 1 } }) {
+                                Image(systemName: "chevron.left.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(currentIndex == 0 ? .gray : .blue)
+                            }
+                            .disabled(currentIndex == 0)
+                            Spacer()
+                            Text("Image \(currentIndex + 1) of \(images.count)")
+                                .font(.headline)
+                            Spacer()
+                            Button(action: { if currentIndex < images.count - 1 { currentIndex += 1 } }) {
+                                Image(systemName: "chevron.right.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(currentIndex == images.count - 1 ? .gray : .blue)
+                            }
+                            .disabled(currentIndex == images.count - 1)
+                            Button("Add All") {
+                                addAllAndShowSummary()
+                            }
+                            .disabled(!canAddAll)
                         }
-                        .disabled(currentIndex == 0)
-                        Spacer()
-                        Text("Image \(currentIndex + 1) of \(images.count)")
-                            .font(.headline)
-                        Spacer()
-                        Button(action: { if currentIndex < images.count - 1 { currentIndex += 1 } }) {
-                            Image(systemName: "chevron.right.circle.fill")
-                                .font(.system(size: 32))
-                                .foregroundColor(currentIndex == images.count - 1 ? .gray : .blue)
+                        .padding(.horizontal)
+                        .padding(.top, 12)
+                        // Page indicator dots
+                        HStack(spacing: 8) {
+                            ForEach(0..<images.count, id: \ .self) { idx in
+                                let isSaved = savedStates.indices.contains(idx) && savedStates[idx] == true
+                                let isRejected = savedStates.indices.contains(idx) && savedStates[idx] == false
+                                // Show yellow if there is at least one duplicate item not acknowledged (use same logic as allDuplicatesAcknowledged)
+                                let hasUnacknowledgedWarning: Bool = {
+                                    guard detectedItems.indices.contains(idx), duplicateAcknowledged.indices.contains(idx) else { return false }
+                                    for (itemIdx, detected) in detectedItems[idx].enumerated() {
+                                        if isDuplicateItem(detected, imageIdx: idx, itemIdx: itemIdx) && (!duplicateAcknowledged[idx].indices.contains(itemIdx) || !duplicateAcknowledged[idx][itemIdx]) {
+                                            return true
+                                        }
+                                    }
+                                    return false
+                                }()
+                                let isCurrent = idx == currentIndex
+                                let color: Color = isSaved ? .green : (isRejected ? .red : (hasUnacknowledgedWarning ? .yellow : Color(.systemGray4)))
+                                Circle()
+                                    .fill(color)
+                                    .frame(width: isCurrent ? 16 : 10, height: isCurrent ? 16 : 10)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.accentColor.opacity(isCurrent ? 0.5 : 0), lineWidth: isCurrent ? 2 : 0)
+                                    )
+                                    .animation(.easeInOut(duration: 0.18), value: isCurrent)
+                            }
                         }
-                        .disabled(currentIndex == images.count - 1)
-                        Button("Add All") {
-                            addAllAndShowSummary()
-                        }
-                        .disabled(!canAddAll)
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 12)
-                    // Page indicator dots
-                    HStack(spacing: 8) {
-                        ForEach(0..<images.count, id: \ .self) { idx in
-                            let isSaved = savedStates.indices.contains(idx) && savedStates[idx] == true
-                            let isRejected = savedStates.indices.contains(idx) && savedStates[idx] == false
-                            // Show yellow if there is at least one duplicate item not acknowledged (use same logic as allDuplicatesAcknowledged)
-                            let hasUnacknowledgedWarning: Bool = {
-                                guard detectedItems.indices.contains(idx), duplicateAcknowledged.indices.contains(idx) else { return false }
-                                for (itemIdx, detected) in detectedItems[idx].enumerated() {
-                                    if isDuplicateItem(detected, imageIdx: idx, itemIdx: itemIdx) && (!duplicateAcknowledged[idx].indices.contains(itemIdx) || !duplicateAcknowledged[idx][itemIdx]) {
-                                        return true
+                        .padding(.vertical, 8)
+                        // Image review area
+                        ZStack {
+                            TabView(selection: $currentIndex) {
+                                ForEach(images.indices, id: \ .self) { idx in
+                                    ZStack {
+                                        if detectedItems.indices.contains(idx) && brandInputs.indices.contains(idx) && duplicateAcknowledged.indices.contains(idx) {
+                                            AddNewItemViewInternal(
+                                                image: images[idx],
+                                                detectedItems: $detectedItems[idx],
+                                                brandInputs: $brandInputs[idx],
+                                                hideToolbar: true,
+                                                duplicateAcknowledged: $duplicateAcknowledged[idx]
+                                            )
+                                            .tag(idx)
+                                            .padding(.vertical)
+                                        } else {
+                                            VStack {
+                                                Spacer()
+                                                ProgressView("Preparing...")
+                                                Spacer()
+                                            }
+                                            .tag(idx)
+                                        }
+                                        // Overlay spinner if not analyzed
+                                        if (!analysisStates.indices.contains(idx) || !analysisStates[idx]) && reanalyzingIndex != idx {
+                                            Color.white.opacity(0.7)
+                                                .cornerRadius(16)
+                                            VStack {
+                                                ProgressView()
+                                                Text("Analyzing...")
+                                                    .font(.subheadline)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                        // Overlay for reanalyzing this image
+                                        if reanalyzingIndex == idx {
+                                            OutfitLoadingOverlay(
+                                                progress: reanalyzeProgress,
+                                                emoji: "🤖",
+                                                loadingMessages: aiMessages
+                                            )
+                                            .onAppear {
+                                                reanalyzeProgress = 0.0
+                                                reanalyzeProgressTimer?.invalidate()
+                                                reanalyzeProgressTimer = Timer.scheduledTimer(withTimeInterval: 0.025, repeats: true) { timer in
+                                                    if reanalyzeProgress < 0.98 {
+                                                        reanalyzeProgress += 0.008
+                                                    } else {
+                                                        timer.invalidate()
+                                                    }
+                                                }
+                                            }
+                                            .onDisappear {
+                                                reanalyzeProgressTimer?.invalidate()
+                                            }
+                                        }
                                     }
                                 }
-                                return false
-                            }()
-                            let isCurrent = idx == currentIndex
-                            let color: Color = isSaved ? .green : (isRejected ? .red : (hasUnacknowledgedWarning ? .yellow : Color(.systemGray4)))
-                            Circle()
-                                .fill(color)
-                                .frame(width: isCurrent ? 16 : 10, height: isCurrent ? 16 : 10)
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color.accentColor.opacity(isCurrent ? 0.5 : 0), lineWidth: isCurrent ? 2 : 0)
-                                )
-                                .animation(.easeInOut(duration: 0.18), value: isCurrent)
+                            }
+                            .tabViewStyle(.page(indexDisplayMode: .never))
+                            .indexViewStyle(.page(backgroundDisplayMode: .never))
+                            .frame(maxHeight: .infinity)
+                            if showToast {
+                                VStack {
+                                    Spacer()
+                                    HStack {
+                                        Spacer()
+                                        Label(toastText, systemImage: toastText == "Saved!" ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                            .font(.title2.bold())
+                                            .padding(16)
+                                            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)).shadow(radius: 4))
+                                            .foregroundColor(toastText == "Saved!" ? .green : .red)
+                                        Spacer()
+                                    }
+                                    Spacer()
+                                }
+                                .transition(.opacity)
+                            }
                         }
-                    }
-                    .padding(.vertical, 8)
-                    // Image review area
-                    ZStack {
-                        TabView(selection: $currentIndex) {
-                            ForEach(images.indices, id: \ .self) { idx in
-                                ZStack {
-                                    if detectedItems.indices.contains(idx) && brandInputs.indices.contains(idx) && duplicateAcknowledged.indices.contains(idx) {
-                                        AddNewItemViewInternal(
-                                            image: images[idx],
-                                            detectedItems: $detectedItems[idx],
-                                            brandInputs: $brandInputs[idx],
-                                            hideToolbar: true,
-                                            duplicateAcknowledged: $duplicateAcknowledged[idx]
-                                        )
-                                        .tag(idx)
-                                        .padding(.vertical)
+                        // Reanalyze button for current image
+                        Button(action: {
+                            let idx = currentIndex
+                            reanalyzingIndex = idx
+                            reanalyzeProgress = 0.0
+                            reanalyzeProgressTimer?.invalidate()
+                            reanalyzeProgressTimer = Timer.scheduledTimer(withTimeInterval: 0.025, repeats: true) { timer in
+                                if reanalyzeProgress < 0.98 {
+                                    reanalyzeProgress += 0.008
+                                } else {
+                                    timer.invalidate()
+                                }
+                            }
+                            Task {
+                                let results = await ImageAnalysisService.shared.analyzeMultiple(image: images[idx], imageIndex: idx)
+                                var items = results.compactMap { cat, prod, colors, pattern, bbox in
+                                    if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
+                                        let cropped = cropImage(images[idx], with: bbox)
+                                        return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
                                     } else {
-                                        // Show a spinner/placeholder while arrays are not ready
-                                        VStack {
-                                            Spacer()
-                                            ProgressView("Preparing...")
-                                            Spacer()
-                                        }
-                                        .tag(idx)
+                                        return nil
                                     }
-                                    // Overlay spinner if not analyzed
-                                    if !analysisStates.indices.contains(idx) || !analysisStates[idx] {
-                                        Color.white.opacity(0.7)
-                                            .cornerRadius(16)
-                                        VStack {
-                                            ProgressView()
-                                            Text("Analyzing...")
-                                                .font(.subheadline)
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
+                                }
+                                // Filter duplicate footwear: if 2+ footwear, keep only one
+                                let footwearIndices = items.indices.filter { items[$0].category == .footwear }
+                                if footwearIndices.count > 1 {
+                                    items = items.enumerated().filter { idx2, item in
+                                        item.category != .footwear || idx2 == footwearIndices.first
+                                    }.map { $0.element }
+                                }
+                                await MainActor.run {
+                                    detectedItems[idx] = items
+                                    brandInputs[idx] = Array(repeating: "", count: items.count)
+                                    analysisStates[idx] = true
+                                    duplicateAcknowledged[idx] = Array(repeating: false, count: items.count)
+                                    reanalyzingIndex = nil
+                                    reanalyzeProgress = 1.0
+                                }
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.clockwise")
+                                Text("Reanalyze Image")
+                            }
+                            .font(.headline)
+                            .foregroundColor(.accentColor)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(12)
+                            .padding(.horizontal, 32)
+                        }
+                        .padding(.bottom, 8)
+                        // Per-image Save/Remove controls
+                        HStack(spacing: 24) {
+                            Button(role: .destructive) {
+                                markRemovedAndAdvance()
+                            } label: {
+                                Label("Remove Items", systemImage: "trash")
+                            }
+                            .disabled(
+                                !(savedStates.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
+                                savedStates[currentIndex] == false || !isAnalyzed(currentIndex)
+                            )
+                            Button {
+                                saveCurrentAndAdvance()
+                            } label: {
+                                Label("Save Items", systemImage: "checkmark")
+                            }
+                            .disabled(
+                                !(savedStates.indices.contains(currentIndex) && detectedItems.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
+                                savedStates[currentIndex] == true || detectedItems[currentIndex].isEmpty || !isAnalyzed(currentIndex) || !allDuplicatesAcknowledged(for: currentIndex)
+                            )
+                        }
+                        .padding(.vertical, 8)
+                        // Save/Cancel controls
+                        HStack {
+                            Button("Cancel") { showCancelConfirm = true }
+                            Spacer()
+                        }
+                        .padding()
+                    }
+                    // Overlay: show progress overlay when analyzing
+                    if isAnalyzing {
+                        OutfitLoadingOverlay(
+                            progress: progress,
+                            emoji: "🤖",
+                            loadingMessages: aiMessages
+                        )
+                        .onAppear {
+                            progress = 0.0
+                            progressTimer?.invalidate()
+                            progressTimer = Timer.scheduledTimer(withTimeInterval: 0.025, repeats: true) { timer in
+                                if progress < 0.98 {
+                                    progress += 0.008
+                                } else {
+                                    timer.invalidate()
                                 }
                             }
                         }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                        .indexViewStyle(.page(backgroundDisplayMode: .never))
-                        .frame(maxHeight: .infinity)
-                        if showToast {
-                            VStack {
-                                Spacer()
-                                HStack {
-                                    Spacer()
-                                    Label(toastText, systemImage: toastText == "Saved!" ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                        .font(.title2.bold())
-                                        .padding(16)
-                                        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)).shadow(radius: 4))
-                                        .foregroundColor(toastText == "Saved!" ? .green : .red)
-                                    Spacer()
-                                }
-                                Spacer()
-                            }
-                            .transition(.opacity)
+                        .onDisappear {
+                            progressTimer?.invalidate()
                         }
                     }
-                    // Per-image Save/Remove controls
-                    HStack(spacing: 24) {
-                        Button(role: .destructive) {
-                            markRemovedAndAdvance()
-                        } label: {
-                            Label("Remove Items", systemImage: "trash")
-                        }
-                        .disabled(
-                            !(savedStates.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
-                            savedStates[currentIndex] == false || !isAnalyzed(currentIndex)
-                        )
-                        Button {
-                            saveCurrentAndAdvance()
-                        } label: {
-                            Label("Save Items", systemImage: "checkmark")
-                        }
-                        .disabled(
-                            !(savedStates.indices.contains(currentIndex) && detectedItems.indices.contains(currentIndex) && analysisStates.indices.contains(currentIndex)) ||
-                            savedStates[currentIndex] == true || detectedItems[currentIndex].isEmpty || !isAnalyzed(currentIndex) || !allDuplicatesAcknowledged(for: currentIndex)
-                        )
-                    }
-                    .padding(.vertical, 8)
-                    // Save/Cancel controls
-                    HStack {
-                        Button("Cancel") { showCancelConfirm = true }
-                        Spacer()
-                    }
-                    .padding()
                 }
                 .navigationTitle("Review Items")
                 .alert("Error", isPresented: $showError) {
@@ -541,6 +657,7 @@ struct MultiAddNewItemView: View {
             }
             await MainActor.run {
                 isAnalyzing = false
+                progress = 1.0
             }
         }
     }

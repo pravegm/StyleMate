@@ -22,6 +22,20 @@ struct AddNewItemView: View {
     var duplicateAcknowledged: Binding<[Bool]> {
         duplicateAcknowledgedBinding ?? $_duplicateAcknowledged
     }
+    @State private var progress: Double = 0.0
+    @State private var progressTimer: Timer? = nil
+    let aiMessages = [
+        "AI is analyzing your style...",
+        "Letting AI work its magic...",
+        "AI is finding fashion insights...",
+        "AI is scanning for trends...",
+        "AI is curating your wardrobe...",
+        "AI is detecting your look...",
+        "AI is learning your vibe...",
+        "AI is matching your pieces...",
+        "AI is reviewing your images...",
+        "AI is unlocking outfit ideas..."
+    ]
     
     struct DetectedItem: Identifiable {
         let id = UUID()
@@ -176,10 +190,25 @@ struct AddNewItemView: View {
             }
             .disabled(isAnalyzing)
             if isAnalyzing {
-                Color.black.opacity(0.2).ignoresSafeArea()
-                ProgressView("Analyzing image...")
-                    .padding()
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground)))
+                OutfitLoadingOverlay(
+                    progress: progress,
+                    emoji: "🤖",
+                    loadingMessages: aiMessages
+                )
+                .onAppear {
+                    progress = 0.0
+                    progressTimer?.invalidate()
+                    progressTimer = Timer.scheduledTimer(withTimeInterval: 0.025, repeats: true) { timer in
+                        if progress < 0.98 {
+                            progress += 0.008
+                        } else {
+                            timer.invalidate()
+                        }
+                    }
+                }
+                .onDisappear {
+                    progressTimer?.invalidate()
+                }
             }
         }
         .navigationTitle("Add Item")
@@ -264,6 +293,7 @@ struct AddNewItemView: View {
             brandInputs.wrappedValue = Array(repeating: "", count: detectedItems.wrappedValue.count)
             duplicateAcknowledged.wrappedValue = Array(repeating: false, count: items.count)
             isAnalyzing = false
+            progress = 1.0
         }
     }
     

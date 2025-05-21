@@ -107,6 +107,7 @@ For more details, see the in-app help or contact the developer.
   - Review each image, edit detected details, and choose to save or remove each item individually.
   - "Add All" button lets you instantly add all analyzed items without reviewing each one.
   - Flexible: Save any, all, or none of the batch.
+  - **Reanalyze Image:** For any image in the batch, you can tap the **"Reanalyze Image"** button to send just that image back to Gemini for a fresh analysis. This is useful if you accidentally delete a detected item and want to restore it, or if you want to retry detection. The progress overlay appears for that image while analyzing, and only the selected image's detected items are updated—other images/items remain unchanged.
 
 - **Remove Individual Detected Items:**
   - While reviewing detected items (in both single and batch add flows), you can remove any specific item you don't want to add to your wardrobe, before saving.
