@@ -287,7 +287,8 @@ struct HomeView: View {
                                     .multilineTextAlignment(.center)
                                     .lineLimit(2)
                                     .minimumScaleFactor(0.6)
-                                    .frame(maxWidth: 56, minHeight: 28, alignment: .top)
+                                    .frame(width: 64, height: 32, alignment: .center)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             .frame(height: 72)
                             .frame(maxWidth: .infinity)

@@ -350,7 +350,7 @@ struct CalendarGridView: View {
                         }) {
                             Text("\(calendar.component(.day, from: date))")
                                 .frame(maxWidth: .infinity, minHeight: 36)
-                                .background(isSelected ? Color.accentColor.opacity(0.2) : (hasOutfit ? Color.green.opacity(0.15) : Color.clear))
+                                .background(isSelected ? Color.accentColor.opacity(0.2) : (hasOutfit ? Color.calendarHighlightGreen : Color.clear))
                                 .clipShape(Circle())
                                 .foregroundColor(isSelected ? .accentColor : .primary)
                         }
@@ -507,5 +507,19 @@ extension OutfitItem {
             return WardrobeImageFileHelper.loadImage(at: path)
         }
         return nil
+    }
+}
+
+extension Color {
+    static var calendarHighlightGreen: Color {
+        Color(UIColor { traitCollection in
+            if traitCollection.userInterfaceStyle == .dark {
+                // Brighter green for dark mode
+                return UIColor(red: 0.30, green: 0.85, blue: 0.45, alpha: 0.32)
+            } else {
+                // Softer green for light mode
+                return UIColor(red: 0.20, green: 0.70, blue: 0.30, alpha: 0.15)
+            }
+        })
     }
 } 
