@@ -505,6 +505,82 @@ You are an expert fashion stylist. Given the following information, suggest a ne
         }
         return nil
     }
+
+    /// Suggests a new outfit by adding a product of the given type (from availableItems) to the current outfit using Gemini.
+    /// Returns the new suggested outfit as an array of SuggestedOutfitItem (or nil on failure).
+    func suggestAddProductToOutfit(currentOutfit: Outfit, category: Category, productType: String, availableItems: [WardrobeItem]) async -> [SuggestedOutfitItem]? {
+        // 1. Summarize the current outfit
+        let outfitSummary = currentOutfit.items.map { item in
+            "Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+        }.joined(separator: "\n")
+        // 2. Summarize the available items for the product type
+        let availableSummary = availableItems.enumerated().map { (idx, item) in
+            "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+        }.joined(separator: "\n")
+        // 3. Build the prompt
+        let prompt = """
+You are an expert fashion stylist. The user has an outfit and wants to add a \(productType) (category: \(category.rawValue)) to it.
+
+Here is the current outfit:
+\(outfitSummary)
+
+Here are the \(productType) options from the user's wardrobe (choose only from these):
+\(availableSummary)
+
+Guidelines:
+- Follow established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).
+- Only combine items that make sense together (e.g., appropriate layering, no duplicate product types unless it makes sense, seasonally appropriate, etc.).
+- Avoid clashing colors, too many patterns, or inappropriate combinations (e.g., no sandals with winter coats, no more than one statement pattern).
+- Prefer color harmony: neutrals go with anything, but bold colors should be paired thoughtfully.
+- Be distinct and practical.
+- Only use items from the provided lists. Do not invent or hallucinate new items.
+- Do not remove any existing items unless absolutely necessary for style or practicality.
+
+Please update the outfit by adding the best \(productType) from the list above, ensuring the new outfit is stylish, harmonious, and practical.
+
+Return the new outfit as a JSON array of objects, where each object has: category, product, colors (array), pattern, and brand. Return only the JSON array, no extra text.
+"""
+        let requestBody: [String: Any] = [
+            "contents": [
+                [
+                    "parts": [
+                        ["text": prompt]
+                    ]
+                ]
+            ],
+            "generationConfig": [
+                "responseMimeType": "application/json"
+            ]
+        ]
+        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+              let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            return nil
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = httpBody
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return nil
+            }
+            if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
+               let text = result.candidates.first?.content.parts.first?.text,
+               let arrData = text.data(using: .utf8) {
+                let decoder = JSONDecoder()
+                if let arr = try? decoder.decode([SuggestedOutfitItem].self, from: arrData) {
+                    return arr
+                } else {
+                    return nil
+                }
+            } else {
+                return nil
+            }
+        } catch {
+            return nil
+        }
+    }
 }
 
 // MARK: - Gemini API Response Models

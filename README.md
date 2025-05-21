@@ -236,4 +236,12 @@ Pull requests are welcome! For major changes, please open an issue first to disc
 
 ---
 
-**StyleMate** — Your AI-powered, privacy-first fashion assistant for iOS. 
+**StyleMate** — Your AI-powered, privacy-first fashion assistant for iOS.
+
+### Add Product to Outfit (AI-powered)
+- On the outfit result page, tap the **Add Product** button to add a new product type (e.g., Jacket, Coat, Accessory) to your current outfit.
+- The app presents a collapsible menu showing only categories and products for which you have wardrobe items.
+- Select a category, then a product type. The app will send your current outfit and your wardrobe's items of that type to Gemini AI.
+- Gemini suggests the best way to add the new product, following fashion rules, color theory, and practical outfit guidelines.
+- The new outfit is displayed, and you can save it, shuffle individual items, or add more products.
+- The UI ensures only relevant categories/products are shown, and the loading overlay clearly indicates when a product is being added. 

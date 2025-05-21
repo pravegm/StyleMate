@@ -126,16 +126,17 @@ class HomeViewModel: ObservableObject {
         showNoMoreSuggestions = false
     }
 
-    // Shuffle a single item in the current outfit for a given category
-    func shuffleItemInOutfit(category: Category, wardrobe: [WardrobeItem]) {
+    // Shuffle a single item in the current outfit for a given item (not just category)
+    func shuffleItemInOutfit(itemToShuffle: WardrobeItem, wardrobe: [WardrobeItem]) {
         guard let currentOutfit = todayOutfit else { return }
+        let category = itemToShuffle.category
         Task {
             isLoading = true
             defer { isLoading = false }
             // Get all items in the category
-            let availableItems = wardrobe.filter { $0.category == category }
-            // If only one item, nothing to shuffle
-            guard availableItems.count > 1 else { return }
+            let availableItems = wardrobe.filter { $0.category == category && $0.id != itemToShuffle.id }
+            // If no other item, nothing to shuffle
+            guard !availableItems.isEmpty else { return }
             // Call Gemini for a new suggestion
             let result = await ImageAnalysisService.shared.suggestPartialShuffleWithResult(currentOutfit: currentOutfit, categoryToShuffle: category, availableItems: availableItems)
             switch result {
@@ -148,18 +149,10 @@ class HomeViewModel: ObservableObject {
                     (newItem.brand == nil || item.brand.caseInsensitiveCompare(newItem.brand ?? "") == .orderedSame || item.brand.isEmpty)
                 })
                 guard let replacement = matched else { return }
-                // Build new outfit
-                let updatedItems = currentOutfit.items.map { item in
-                    item.category == category ? replacement : item
-                }
-                // If the category was not present, add the replacement
-                let finalItems: [WardrobeItem]
-                if updatedItems.contains(where: { $0.id == replacement.id }) {
-                    finalItems = updatedItems
-                } else {
-                    finalItems = updatedItems + [replacement]
-                }
-                let updatedOutfit = Outfit(items: finalItems)
+                // Build new outfit: replace only the specific item
+                var updatedItems = currentOutfit.items.filter { $0.id != itemToShuffle.id }
+                updatedItems.append(replacement)
+                let updatedOutfit = Outfit(items: updatedItems)
                 todayOutfit = updatedOutfit
             case .rateLimited:
                 showRateLimitAlert = true
@@ -195,6 +188,37 @@ class HomeViewModel: ObservableObject {
                     self.weatherError = "Failed to fetch weather."
                     self.isWeatherLoading = false
                 }
+            }
+        }
+    }
+
+    /// Adds a product type to the current outfit using Gemini and updates todayOutfit.
+    func addProductToOutfit(category: Category, productType: String, wardrobe: [WardrobeItem]) {
+        guard let currentOutfit = todayOutfit else { return }
+        Task {
+            isLoading = true
+            defer { isLoading = false }
+            // Get all items in the wardrobe for the selected category and product type
+            let availableItems = wardrobe.filter { $0.category == category && $0.product.caseInsensitiveCompare(productType) == .orderedSame }
+            guard !availableItems.isEmpty else { return }
+            if let suggestion = await ImageAnalysisService.shared.suggestAddProductToOutfit(currentOutfit: currentOutfit, category: category, productType: productType, availableItems: availableItems) {
+                // Try to match Gemini's suggestions to actual WardrobeItem objects
+                func match(_ suggestion: ImageAnalysisService.SuggestedOutfitItem) -> WardrobeItem? {
+                    for item in wardrobe {
+                        let categoryMatch = ImageAnalysisService.shared.matchCategory(suggestion.category) == item.category
+                        let productMatch = ImageAnalysisService.shared.matchProduct(suggestion.product)?.caseInsensitiveCompare(item.product) == .orderedSame
+                        let colorMatch = Set(item.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }) == Set(suggestion.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) })
+                        let patternMatch = item.pattern.rawValue.caseInsensitiveCompare(suggestion.pattern) == .orderedSame
+                        let brandMatch = (suggestion.brand == nil || item.brand.caseInsensitiveCompare(suggestion.brand ?? "") == .orderedSame || item.brand.isEmpty)
+                        if categoryMatch && productMatch && colorMatch && patternMatch && brandMatch {
+                            return item
+                        }
+                    }
+                    return nil
+                }
+                let matchedItems = suggestion.compactMap { match($0) }
+                let newOutfit = Outfit(items: matchedItems)
+                todayOutfit = newOutfit
             }
         }
     }

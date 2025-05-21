@@ -12,6 +12,13 @@ struct TodayOutfitSheet: View {
     @State private var showDatePickerSheet = false
     @State private var selectedDate = Calendar.current.startOfDay(for: Date())
     @State private var showSavedOverlay = false
+    @State private var showAddProductSheet = false
+    @State private var addProductStep: AddProductStep? = nil
+    @State private var selectedCategory: Category? = nil
+    @State private var selectedProduct: WardrobeItem? = nil
+    @State private var expandedCategory: Category? = nil
+    @State private var selectedProductType: String? = nil
+    @State private var isAddingProduct: Bool = false
     let emojis = ["🎉", "✨", "🥳", "🎊", "💫", "👗", "🕺", "💃", "🧥", "👚", "👖", "👠", "👒", "🧢", "🧣", "🧤"]
     let burstCount = 18
     let subheadings = [
@@ -28,6 +35,11 @@ struct TodayOutfitSheet: View {
     ]
     @State private var selectedEmoji: String = "👗"
     @State private var selectedSubheading: String = "You'll rock this outfit! ✨"
+    
+    enum AddProductStep: Identifiable {
+        case category, product
+        var id: Int { hashValue }
+    }
     
     private func randomizeLook() {
         selectedEmoji = emojis.randomElement() ?? "👗"
@@ -127,9 +139,7 @@ struct TodayOutfitSheet: View {
                                 .padding(.bottom, 4)
                                 // Per-item shuffle button
                                 Button(action: {
-                                    if let category = Category.allCases.first(where: { $0 == item.category }) {
-                                        homeVM.shuffleItemInOutfit(category: category, wardrobe: wardrobeViewModel.items)
-                                    }
+                                    homeVM.shuffleItemInOutfit(itemToShuffle: item, wardrobe: wardrobeViewModel.items)
                                 }) {
                                     HStack(spacing: 4) {
                                         Image(systemName: "arrow.triangle.2.circlepath")
@@ -157,6 +167,22 @@ struct TodayOutfitSheet: View {
                 .padding(.top, 4)
                 Spacer(minLength: 0)
                 // Fixed bottom buttons
+                Button(action: { showAddProductSheet = true }) {
+                    HStack {
+                        Image(systemName: "plus.circle.fill").font(.title2)
+                        Text("Add Product")
+                    }
+                    .font(.headline)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.green.opacity(0.85))
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .shadow(radius: 4)
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+                .accessibilityIdentifier("addProductButton")
                 HStack(spacing: 16) {
                     Button(action: {
                         homeVM.shuffleOutfit()
@@ -219,7 +245,7 @@ struct TodayOutfitSheet: View {
             // Loading overlay
             if homeVM.isLoading {
                 Color.black.opacity(0.18).ignoresSafeArea()
-                ProgressView("Shuffling...")
+                ProgressView(isAddingProduct ? "Adding..." : "Shuffling...")
                     .progressViewStyle(CircularProgressViewStyle(tint: .accentColor))
                     .padding(32)
                     .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
@@ -308,6 +334,76 @@ struct TodayOutfitSheet: View {
                 .padding()
                 .navigationTitle("Choose Date")
                 .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .sheet(item: $addProductStep) { step in
+            if step == .category {
+                NavigationView {
+                    List {
+                        // Only show categories with at least one wardrobe item
+                        ForEach(Category.allCases.filter { category in
+                            wardrobeViewModel.items.contains(where: { $0.category == category })
+                        }, id: \ .self) { category in
+                            Section(header:
+                                HStack {
+                                    Text(category.rawValue)
+                                        .font(.headline)
+                                        .foregroundColor(.accentColor)
+                                    Spacer()
+                                    Image(systemName: expandedCategory == category ? "chevron.down" : "chevron.right")
+                                        .foregroundColor(.accentColor)
+                                }
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    withAnimation {
+                                        expandedCategory = expandedCategory == category ? nil : category
+                                    }
+                                }
+                            ) {
+                                if expandedCategory == category {
+                                    // Only show products in this category that the user has in their wardrobe
+                                    let userProducts = Set(wardrobeViewModel.items.filter { $0.category == category }.map { $0.product })
+                                    let products = (productTypesByCategory[category] ?? []).filter { userProducts.contains($0) }
+                                    ForEach(products, id: \ .self) { product in
+                                        Button(action: {
+                                            selectedCategory = category
+                                            selectedProductType = product
+                                            addProductStep = nil // Will trigger Gemini logic in next step
+                                            isAddingProduct = true
+                                            homeVM.addProductToOutfit(category: category, productType: product, wardrobe: wardrobeViewModel.items)
+                                        }) {
+                                            Text(product)
+                                                .font(.body)
+                                                .foregroundColor(.primary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .navigationTitle("Add Product")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { addProductStep = nil }
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: showAddProductSheet) { newValue in
+            if newValue {
+                addProductStep = .category
+                expandedCategory = nil
+                selectedProductType = nil
+            }
+        }
+        .onChange(of: addProductStep) { newValue in
+            if newValue == nil { showAddProductSheet = false }
+        }
+        .onChange(of: homeVM.isLoading) { loading in
+            if !loading {
+                isAddingProduct = false
             }
         }
     }
