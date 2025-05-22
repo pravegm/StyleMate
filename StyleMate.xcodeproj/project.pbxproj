@@ -34,6 +34,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				Models/StyleMateDataModel.xcdatamodeld,
 			);
 			target = C11A627E2DD281F600CF18D0 /* StyleMate */;
 		};

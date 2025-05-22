@@ -609,6 +609,7 @@ struct MultiAddNewItemView: View {
                     Button("No", role: .cancel) {}
                     Button("Yes", role: .destructive) { isPresented = false }
                 }
+                .interactiveDismissDisabled(showCancelConfirm == false)
                 .onAppear {
                     analyzeAllImagesInParallel()
                 }

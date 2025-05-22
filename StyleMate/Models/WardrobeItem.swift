@@ -51,12 +51,7 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
     }
     
     private var colorsList: String {
-        if let colors = self as? WardrobeItem, !colors.colors.isEmpty {
-            // For backward compatibility, if only 'color' exists
-            return colors.colors.joined(separator: ", ")
-        }
-        // If you have a [String] colors property, join them
-        // But since the struct only has 'color: String', you may need to update the model to store [String] if you want true multi-color support
+        // For backward compatibility, if only 'color' exists
         return colors.joined(separator: ", ")
     }
     

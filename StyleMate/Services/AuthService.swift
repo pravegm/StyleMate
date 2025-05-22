@@ -16,7 +16,7 @@ class AuthService: ObservableObject {
             self.user = decodedUser
             self.isAuthenticated = true
         } else if let email = UserDefaults.standard.string(forKey: Self.currentUserKey),
-                  let (password, name) = AuthService.users[email] {
+                  let (_password, name) = AuthService.users[email] {
             // Restore user session (legacy)
             let restoredUser = User(
                 id: email,

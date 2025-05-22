@@ -135,7 +135,7 @@ struct AddNewItemView: View {
                                 .padding(.horizontal, 12)
                                 if expandedCategoryStates[category] ?? true {
                                     VStack(spacing: 0) {
-                                        ForEach(indices, id: \.self) { idx in
+                                        ForEach(indices, id: \ .self) { idx in
                                             VStack(alignment: .leading, spacing: 4) {
                                                 DetectedItemCard(
                                                     item: Binding(get: { detectedItems.wrappedValue[idx] }, set: { detectedItems.wrappedValue[idx] = $0 }),
@@ -166,6 +166,12 @@ struct AddNewItemView: View {
                                                         }
                                                     }
                                                     .padding(.vertical, 2)
+                                                }
+                                                if idx != indices.last {
+                                                    Divider()
+                                                        .padding(.vertical, 8)
+                                                        .background(Color.gray.opacity(0.13))
+                                                        .opacity(0.7)
                                                 }
                                             }
                                         }
@@ -212,6 +218,11 @@ struct AddNewItemView: View {
                 }
             }
         }
+        .gesture(
+            TapGesture().onEnded { _ in
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
+        )
         .navigationTitle("Add Item")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

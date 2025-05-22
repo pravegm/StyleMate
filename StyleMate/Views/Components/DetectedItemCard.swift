@@ -34,6 +34,10 @@ struct DetectedItemCard: View {
                         .textContentType(.none)
                         .autocapitalization(.none)
                         .accessibilityLabel("Color")
+                        .submitLabel(.done)
+                        .onSubmit {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
                     Spacer(minLength: 8)
                     if item.colors.count > 1 {
                         Button(action: {
@@ -71,6 +75,10 @@ struct DetectedItemCard: View {
                 .textContentType(.none)
                 .autocapitalization(.none)
                 .accessibilityLabel("Brand")
+                .submitLabel(.done)
+                .onSubmit {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
             Button(action: onRemove) {
                 HStack {
                     Image(systemName: "trash").foregroundColor(.red)
