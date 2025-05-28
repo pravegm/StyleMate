@@ -367,43 +367,7 @@ struct CategoryDetailView: View {
         }
         .navigationTitle(category.rawValue)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                if editMode {
-                    Button(action: {
-                        // Delete selected items
-                        let toDelete = selectedItems
-                        for id in toDelete {
-                            if let item = wardrobeViewModel.items.first(where: { $0.id == id }) {
-                                WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-                                WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
-                                if let idx = wardrobeViewModel.items.firstIndex(of: item) {
-                                    wardrobeViewModel.items.remove(at: idx)
-                                }
-                            }
-                        }
-                        selectedItems.removeAll()
-                        editMode = false
-                    }) {
-                        Label("Delete", systemImage: "trash")
-                            .foregroundColor(.red)
-                    }
-                } else {
-                    Button(action: {
-                        editMode = true
-                        selectedItems.removeAll()
-                    }) {
-                        Text("Edit")
-                    }
-                }
-            }
-            if editMode {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        editMode = false
-                        selectedItems.removeAll()
-                    }
-                }
-            }
+            // No toolbar items for edit/delete/cancel
         }
         .sheet(item: $previewImage) { wrapper in
             VStack {
