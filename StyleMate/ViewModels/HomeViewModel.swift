@@ -130,6 +130,7 @@ class HomeViewModel: ObservableObject {
     func shuffleItemInOutfit(itemToShuffle: WardrobeItem, wardrobe: [WardrobeItem]) {
         guard let currentOutfit = todayOutfit else { return }
         let category = itemToShuffle.category
+        let user = AuthService().user // Use the current user for gender
         Task {
             isLoading = true
             defer { isLoading = false }
@@ -138,7 +139,7 @@ class HomeViewModel: ObservableObject {
             // If no other item, nothing to shuffle
             guard !availableItems.isEmpty else { return }
             // Call Gemini for a new suggestion
-            let result = await ImageAnalysisService.shared.suggestPartialShuffleWithResult(currentOutfit: currentOutfit, categoryToShuffle: category, availableItems: availableItems)
+            let result = await ImageAnalysisService.shared.suggestPartialShuffleWithResult(currentOutfit: currentOutfit, categoryToShuffle: category, availableItems: availableItems, user: user)
             switch result {
             case .success(let newItem):
                 // Find the matching WardrobeItem in the wardrobe
@@ -195,13 +196,14 @@ class HomeViewModel: ObservableObject {
     /// Adds a product type to the current outfit using Gemini and updates todayOutfit.
     func addProductToOutfit(category: Category, productType: String, wardrobe: [WardrobeItem]) {
         guard let currentOutfit = todayOutfit else { return }
+        let user = AuthService().user // Use the current user for gender
         Task {
             isLoading = true
             defer { isLoading = false }
             // Get all items in the wardrobe for the selected category and product type
             let availableItems = wardrobe.filter { $0.category == category && $0.product.caseInsensitiveCompare(productType) == .orderedSame }
             guard !availableItems.isEmpty else { return }
-            if let suggestion = await ImageAnalysisService.shared.suggestAddProductToOutfit(currentOutfit: currentOutfit, category: category, productType: productType, availableItems: availableItems) {
+            if let suggestion = await ImageAnalysisService.shared.suggestAddProductToOutfit(currentOutfit: currentOutfit, category: category, productType: productType, availableItems: availableItems, user: user) {
                 // Try to match Gemini's suggestions to actual WardrobeItem objects
                 func match(_ suggestion: ImageAnalysisService.SuggestedOutfitItem) -> WardrobeItem? {
                     for item in wardrobe {

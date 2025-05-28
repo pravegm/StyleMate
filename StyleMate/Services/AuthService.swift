@@ -8,6 +8,7 @@ class AuthService: ObservableObject {
     static private let usersKey = "users"
     static private let currentUserKey = "currentUserEmail"
     static private let currentUserObjectKey = "currentUserObject"
+    static private let userProfilesKey = "userProfiles"
     static var users: [String: (password: String, name: String)] = loadUsers()
     
     init() {
@@ -53,9 +54,31 @@ class AuthService: ObservableObject {
         UserDefaults.standard.set(dict, forKey: usersKey)
     }
     
+    // Load all user profiles from UserDefaults
+    static func loadUserProfiles() -> [String: User] {
+        guard let data = UserDefaults.standard.data(forKey: userProfilesKey),
+              let dict = try? JSONDecoder().decode([String: User].self, from: data) else {
+            return [:]
+        }
+        return dict
+    }
+    
+    // Save all user profiles to UserDefaults
+    static func saveUserProfiles(_ profiles: [String: User]) {
+        if let data = try? JSONEncoder().encode(profiles) {
+            UserDefaults.standard.set(data, forKey: userProfilesKey)
+        }
+    }
+    
+    // Save the current user to the profiles dictionary
     func saveCurrentUser() {
-        if let user = self.user, let data = try? JSONEncoder().encode(user) {
-            UserDefaults.standard.set(data, forKey: Self.currentUserObjectKey)
+        if let user = self.user {
+            var profiles = Self.loadUserProfiles()
+            profiles[user.email] = user
+            Self.saveUserProfiles(profiles)
+            if let data = try? JSONEncoder().encode(user) {
+                UserDefaults.standard.set(data, forKey: Self.currentUserObjectKey)
+            }
         }
     }
     
@@ -82,7 +105,7 @@ class AuthService: ObservableObject {
         self.user = newUser
         self.isAuthenticated = true
         UserDefaults.standard.set(email, forKey: Self.currentUserKey)
-        saveCurrentUser()
+        saveCurrentUser() // This will update the profiles dictionary
         return nil
     }
     
@@ -97,17 +120,28 @@ class AuthService: ObservableObject {
         if storedPassword != password {
             return "Incorrect password."
         }
-        let newUser = User(
-            id: email,
-            email: email,
-            name: name,
-            preferredStyles: [
-                .everyday, .formal, .date, .sports, .party, .business
-            ],
-            notificationsEnabled: true,
-            dateCreated: Date()
-        )
-        self.user = newUser
+        // Try to load the user profile from the profiles dictionary
+        let profiles = Self.loadUserProfiles()
+        if let profile = profiles[email] {
+            self.user = profile
+        } else if let userData = UserDefaults.standard.data(forKey: Self.currentUserObjectKey),
+                  let decodedUser = try? JSONDecoder().decode(User.self, from: userData),
+                  decodedUser.email == email {
+            self.user = decodedUser
+        } else {
+            // Fallback to legacy construction if not found
+            let newUser = User(
+                id: email,
+                email: email,
+                name: name,
+                preferredStyles: [
+                    .everyday, .formal, .date, .sports, .party, .business
+                ],
+                notificationsEnabled: true,
+                dateCreated: Date()
+            )
+            self.user = newUser
+        }
         self.isAuthenticated = true
         UserDefaults.standard.set(email, forKey: Self.currentUserKey)
         saveCurrentUser()

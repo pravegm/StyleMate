@@ -335,6 +335,13 @@ Return only the JSON array, no extra text.
         } else {
             typeInstruction = "The user wants an everyday casual outfit."
         }
+        // Add gender context if available
+        let genderInstruction: String
+        if let gender = user?.gender, !gender.isEmpty {
+            genderInstruction = "The user's gender is: \(gender). Please ensure your suggestions are appropriate for this gender."
+        } else {
+            genderInstruction = ""
+        }
         // Add weather context if available
         let weatherInstruction: String
         if let weather = weather {
@@ -362,7 +369,14 @@ You are an expert fashion stylist. Given the following wardrobe items, suggest 5
 - Be distinct from each other (no duplicate combinations).
 - Only use items from the provided list. Do not invent or hallucinate new items.
 - For each item in the outfit, specify: category, product, colors (array), pattern, and brand (optional).
+- Each outfit must be a complete, wearable look for going out in public, using items from the wardrobe. Do not suggest incomplete outfits (e.g., just outerwear and accessories).
+- If a one-piece item (like a dress, jumpsuit, or ethnic set) is used, a separate top or bottom is not needed.
+- For ethnic or cultural outfits, ensure the look is complete and appropriate as per cultural norms (e.g., a kurta with a bottom, a sari with a blouse and petticoat, etc.).
+- Never suggest an outfit that would leave the wearer inappropriately dressed (e.g., only a cardigan, shoes, and sunglasses).
+- Use your knowledge of fashion to ensure every outfit is practical, stylish, and something a person could actually wear outside.
+- Ensure each outfit is appropriate for the weather context provided.
 \(typeInstruction)
+\(genderInstruction)
 \(weatherInstruction)
 Return your answer as a JSON array of 5 arrays, where each inner array is an outfit (array of objects with: category, product, colors, pattern, and brand).
 
@@ -370,8 +384,7 @@ Here is the wardrobe:
 \n\(wardrobeSummary)\n
 Return only the JSON array, no extra text.
 """
-        // DEBUG: Print the prompt being sent
-        //         print("\n--- GEMINI OUTFIT SUGGESTION PROMPT ---\n\(prompt)\n--- END PROMPT ---\n")
+        print("\n[Gemini Prompt] suggestOutfitBatch:\n\(prompt)\n")
         // 3. Prepare Gemini API request
         let requestBody: [String: Any] = [
             "contents": [
@@ -423,16 +436,23 @@ Return only the JSON array, no extra text.
         case failure
     }
 
-    func suggestPartialShuffleWithResult(currentOutfit: Outfit, categoryToShuffle: Category, availableItems: [WardrobeItem]) async -> PartialShuffleResult {
+    func suggestPartialShuffleWithResult(currentOutfit: Outfit, categoryToShuffle: Category, availableItems: [WardrobeItem], user: User? = nil) async -> PartialShuffleResult {
         let outfitSummary = currentOutfit.items.map { item in
             "Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
         }.joined(separator: "\n")
         let availableSummary = availableItems.enumerated().map { (idx, item) in
             "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
         }.joined(separator: "\n")
+        let genderInstruction: String
+        if let gender = user?.gender, !gender.isEmpty {
+            genderInstruction = "The user's gender is: \(gender). Please ensure your suggestions are appropriate for this gender."
+        } else {
+            genderInstruction = ""
+        }
         let prompt = """
-You are an expert fashion stylist. Given the following information, suggest a new item for a specific category to improve today's outfit, while keeping all other items unchanged.\n\n**Current Outfit:**\n\(outfitSummary)\n\n**Category to Shuffle:** \(categoryToShuffle.rawValue)\n\n**Available Items in This Category:**\n\(availableSummary)\n\n**Instructions:**\n- Suggest a new item for the category \"\(categoryToShuffle.rawValue)\" from the available items in that category.\n- The new item must be different from the current one in the outfit.\n- The new item must harmonize with the rest of the outfit, following established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).\n- Only combine items that make sense together (e.g., seasonally appropriate, no clashing colors, no more than one statement pattern, no sandals with winter coats, etc.).\n- Prefer color harmony: neutrals go with anything, but bold colors should be paired thoughtfully.\n- Avoid inappropriate combinations (e.g., no sandals with winter coats, no more than one statement pattern).\n- Do not repeat the same product type (e.g., two tops).\n- Only use items from the provided list. Do not invent or hallucinate new items.\n- Do not change any other items in the outfit.\n- If you cannot find a perfect match, return the closest possible match from the available items. You must always return a result.\n- Return your answer as a JSON object with the following fields: category, product, colors (array), pattern, brand.\n- Return only the JSON object, no extra text.\n"
+You are an expert fashion stylist. Given the following information, suggest a new item for a specific category to improve today's outfit, while keeping all other items unchanged.\n\n**Current Outfit:**\n\(outfitSummary)\n\n**Category to Shuffle:** \(categoryToShuffle.rawValue)\n\n**Available Items in This Category:**\n\(availableSummary)\n\n\(genderInstruction)\n**Instructions:**\n- Suggest a new item for the category \"\(categoryToShuffle.rawValue)\" from the available items in that category.\n- The new item must be different from the current one in the outfit.\n- The new item must harmonize with the rest of the outfit, following established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).\n- Only combine items that make sense together (e.g., seasonally appropriate, no clashing colors, no more than one statement pattern, no sandals with winter coats, etc.).\n- Prefer color harmony: neutrals go with anything, but bold colors should be paired thoughtfully.\n- Avoid inappropriate combinations (e.g., no sandals with winter coats, no more than one statement pattern).\n- Do not repeat the same product type (e.g., two tops).\n- Only use items from the provided list. Do not invent or hallucinate new items.\n- Do not change any other items in the outfit.\n- If you cannot find a perfect match, return the closest possible match from the available items. You must always return a result.\n- Return your answer as a JSON object with the following fields: category, product, colors (array), pattern, brand.\n- Return only the JSON object, no extra text.\n"
 """
+        print("\n[Gemini Prompt] suggestPartialShuffleWithResult:\n\(prompt)\n")
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -508,7 +528,7 @@ You are an expert fashion stylist. Given the following information, suggest a ne
 
     /// Suggests a new outfit by adding a product of the given type (from availableItems) to the current outfit using Gemini.
     /// Returns the new suggested outfit as an array of SuggestedOutfitItem (or nil on failure).
-    func suggestAddProductToOutfit(currentOutfit: Outfit, category: Category, productType: String, availableItems: [WardrobeItem]) async -> [SuggestedOutfitItem]? {
+    func suggestAddProductToOutfit(currentOutfit: Outfit, category: Category, productType: String, availableItems: [WardrobeItem], user: User? = nil) async -> [SuggestedOutfitItem]? {
         // 1. Summarize the current outfit
         let outfitSummary = currentOutfit.items.map { item in
             "Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
@@ -517,6 +537,12 @@ You are an expert fashion stylist. Given the following information, suggest a ne
         let availableSummary = availableItems.enumerated().map { (idx, item) in
             "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
         }.joined(separator: "\n")
+        let genderInstruction: String
+        if let gender = user?.gender, !gender.isEmpty {
+            genderInstruction = "The user's gender is: \(gender). Please ensure your suggestions are appropriate for this gender."
+        } else {
+            genderInstruction = ""
+        }
         // 3. Build the prompt
         let prompt = """
 You are an expert fashion stylist. The user has an outfit and wants to add a \(productType) (category: \(category.rawValue)) to it.
@@ -527,6 +553,7 @@ Here is the current outfit:
 Here are the \(productType) options from the user's wardrobe (choose only from these):
 \(availableSummary)
 
+\(genderInstruction)
 Guidelines:
 - Follow established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).
 - Only combine items that make sense together (e.g., appropriate layering, no duplicate product types unless it makes sense, seasonally appropriate, etc.).
@@ -540,6 +567,7 @@ Please update the outfit by adding the best \(productType) from the list above, 
 
 Return the new outfit as a JSON array of objects, where each object has: category, product, colors (array), pattern, and brand. Return only the JSON array, no extra text.
 """
+        print("\n[Gemini Prompt] suggestAddProductToOutfit:\n\(prompt)\n")
         let requestBody: [String: Any] = [
             "contents": [
                 [

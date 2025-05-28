@@ -218,10 +218,12 @@ struct AddNewItemView: View {
                 }
             }
         }
-        .gesture(
-            TapGesture().onEnded { _ in
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            }
+        .background(
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
         )
         .navigationTitle("Add Item")
         .navigationBarTitleDisplayMode(.inline)

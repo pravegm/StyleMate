@@ -11,7 +11,7 @@ struct ProfileView: View {
     @State private var showStyleError = false
     @State private var editGender: String = ""
     @State private var editAge: String = ""
-    let genderOptions = ["Male", "Female", "Other", "Prefer not to say"]
+    let genderOptions = ["", "Male", "Female", "Other", "Prefer not to say"]
     
     private let maxStyles = 6
     private let allStyles = OutfitType.allCases
@@ -29,7 +29,7 @@ struct ProfileView: View {
                             .foregroundStyle(.secondary)
                         Picker("Gender", selection: $editGender) {
                             ForEach(genderOptions, id: \.self) { option in
-                                Text(option).tag(option)
+                                Text(option.isEmpty ? "Select Gender" : option).tag(option)
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
