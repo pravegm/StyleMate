@@ -148,6 +148,7 @@ struct RootView: View {
             if isAuthenticated, let id = authService.user?.id {
                 wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
+                wardrobeVM.migrateBackgroundRemoval()
             } else {
                 wardrobeVM.clear()
                 lastUserKey = ""
@@ -158,6 +159,7 @@ struct RootView: View {
             if authService.isAuthenticated, let id = authService.user?.id {
                 wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
+                wardrobeVM.migrateBackgroundRemoval()
             }
         }
     }
@@ -348,6 +350,7 @@ struct MultiAddNewItemView: View {
     @State private var reanalyzingIndex: Int? = nil
     @State private var reanalyzeProgress: Double = 0.0
     @State private var reanalyzeProgressTimer: Timer? = nil
+    @State private var bgRemovedImages: [UIImage?] = []
 
     var canFinish: Bool { savedStates.contains(true) }
     var allReviewed: Bool {
@@ -573,19 +576,22 @@ struct MultiAddNewItemView: View {
         savedStates = Array(repeating: nil, count: images.count)
         analysisStates = Array(repeating: false, count: images.count)
         duplicateAcknowledged = Array(repeating: [], count: images.count)
+        bgRemovedImages = Array(repeating: nil, count: images.count)
 
         Task {
-            await withTaskGroup(of: (Int, [(Category?, String?, [String], Pattern?, ImageAnalysisService.BoundingBox?)]).self) { group in
+            await withTaskGroup(of: (Int, [(Category?, String?, [String], Pattern?, ImageAnalysisService.BoundingBox?)], UIImage?).self) { group in
                 for (idx, image) in images.enumerated() {
                     group.addTask {
+                        let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: image)
                         let results = await ImageAnalysisService.shared.analyzeMultiple(image: image, imageIndex: idx)
-                        return (idx, results)
+                        return (idx, results, bgRemoved)
                     }
                 }
-                for await (idx, results) in group {
+                for await (idx, results, bgRemoved) in group {
                     var items = results.compactMap { cat, prod, colors, pattern, bbox in
                         if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                            let cropped = cropImage(images[idx], with: bbox)
+                            let cropSource = bgRemoved ?? images[idx]
+                            let cropped = cropImage(cropSource, with: bbox)
                             return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
                         } else { return nil }
                     }
@@ -596,6 +602,7 @@ struct MultiAddNewItemView: View {
                         }.map { $0.element }
                     }
                     await MainActor.run {
+                        bgRemovedImages[idx] = bgRemoved
                         detectedItems[idx] = items
                         brandInputs[idx] = Array(repeating: "", count: items.count)
                         analysisStates[idx] = true
@@ -619,10 +626,12 @@ struct MultiAddNewItemView: View {
             if reanalyzeProgress < 0.98 { reanalyzeProgress += 0.006 } else { timer.invalidate() }
         }
         Task {
+            let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: images[idx])
             let results = await ImageAnalysisService.shared.analyzeMultiple(image: images[idx], imageIndex: idx)
             var items = results.compactMap { cat, prod, colors, pattern, bbox in
                 if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                    let cropped = cropImage(images[idx], with: bbox)
+                    let cropSource = bgRemoved ?? images[idx]
+                    let cropped = cropImage(cropSource, with: bbox)
                     return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
                 } else { return nil }
             }
@@ -633,6 +642,7 @@ struct MultiAddNewItemView: View {
                 }.map { $0.element }
             }
             await MainActor.run {
+                bgRemovedImages[idx] = bgRemoved
                 detectedItems[idx] = items
                 brandInputs[idx] = Array(repeating: "", count: items.count)
                 analysisStates[idx] = true
@@ -687,7 +697,8 @@ struct MultiAddNewItemView: View {
     private func saveAllAndShowSummary() {
         for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
             for (itemIdx, detected) in items.enumerated() {
-                let imagePath = WardrobeImageFileHelper.saveImage(images[imgIdx]) ?? ""
+                let fullImage = bgRemovedImages.indices.contains(imgIdx) ? (bgRemovedImages[imgIdx] ?? images[imgIdx]) : images[imgIdx]
+                let imagePath = WardrobeImageFileHelper.saveImage(fullImage) ?? ""
                 let croppedImagePath = detected.croppedImage != nil ? WardrobeImageFileHelper.saveImage(detected.croppedImage!) : nil
                 let item = WardrobeItem(
                     category: detected.category,
@@ -708,7 +719,8 @@ struct MultiAddNewItemView: View {
         var result: [WardrobeItem] = []
         for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
             for (itemIdx, detected) in items.enumerated() {
-                let imagePath = WardrobeImageFileHelper.saveImage(images[imgIdx]) ?? ""
+                let fullImage = bgRemovedImages.indices.contains(imgIdx) ? (bgRemovedImages[imgIdx] ?? images[imgIdx]) : images[imgIdx]
+                let imagePath = WardrobeImageFileHelper.saveImage(fullImage) ?? ""
                 let croppedImagePath = detected.croppedImage != nil ? WardrobeImageFileHelper.saveImage(detected.croppedImage!) : nil
                 let item = WardrobeItem(
                     category: detected.category,

@@ -21,6 +21,7 @@ struct AddNewItemView: View {
     }
     @State private var progress: Double = 0.0
     @State private var progressTimer: Timer? = nil
+    @State private var bgRemovedImage: UIImage? = nil
 
     struct DetectedItem: Identifiable {
         let id = UUID()
@@ -192,7 +193,8 @@ struct AddNewItemView: View {
                     guard let img = pickedImage else { return }
                     Haptics.success()
                     for (idx, detected) in detectedItems.wrappedValue.enumerated() {
-                        let imagePath = WardrobeImageFileHelper.saveImage(img) ?? ""
+                        let fullImage = bgRemovedImage ?? img
+                        let imagePath = WardrobeImageFileHelper.saveImage(fullImage) ?? ""
                         let croppedImagePath = detected.croppedImage != nil ? WardrobeImageFileHelper.saveImage(detected.croppedImage!) : nil
                         let item = WardrobeItem(
                             category: detected.category,
@@ -228,10 +230,14 @@ struct AddNewItemView: View {
     private func analyzeMultipleImage(_ image: UIImage) {
         isAnalyzing = true
         Task {
+            let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: image)
+            self.bgRemovedImage = bgRemoved
+
             let results = await ImageAnalysisService.shared.analyzeMultiple(image: image)
             var items = results.compactMap { cat, prod, colors, pattern, bbox in
                 if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                    let cropped = cropImage(image, with: bbox)
+                    let cropSource = bgRemoved ?? image
+                    let cropped = cropImage(cropSource, with: bbox)
                     return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
                 } else {
                     return nil

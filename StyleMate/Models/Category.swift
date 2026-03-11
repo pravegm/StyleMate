@@ -62,6 +62,53 @@ class WardrobeViewModel: ObservableObject {
         suspendSaving = false
         currentUserEmail = ""
     }
+
+    func migrateBackgroundRemoval() {
+        let migrationKey = "bgRemovalMigrationComplete_\(currentUserEmail)"
+        guard !UserDefaults.standard.bool(forKey: migrationKey) else { return }
+        guard !items.isEmpty else {
+            UserDefaults.standard.set(true, forKey: migrationKey)
+            return
+        }
+
+        Task {
+            var updated = false
+            for (index, item) in items.enumerated() {
+                if let result = await BackgroundRemovalService.shared.processExistingItem(
+                    imagePath: item.imagePath,
+                    croppedImagePath: item.croppedImagePath
+                ) {
+                    WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+                    if let oldCropped = item.croppedImagePath {
+                        WardrobeImageFileHelper.deleteImage(at: oldCropped)
+                    }
+
+                    let updatedItem = WardrobeItem(
+                        id: item.id,
+                        category: item.category,
+                        product: item.product,
+                        colors: item.colors,
+                        brand: item.brand,
+                        pattern: item.pattern,
+                        imagePath: result.newImagePath,
+                        croppedImagePath: result.newCroppedPath ?? item.croppedImagePath
+                    )
+
+                    await MainActor.run {
+                        self.items[index] = updatedItem
+                    }
+                    updated = true
+                }
+            }
+
+            await MainActor.run {
+                if updated {
+                    self.save(forUser: self.currentUserEmail)
+                }
+                UserDefaults.standard.set(true, forKey: migrationKey)
+            }
+        }
+    }
 }
 
 // Codable wrapper for WardrobeItem (UIImage is not Codable)
