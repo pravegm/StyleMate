@@ -205,6 +205,7 @@ struct AddNewItemView: View {
                             croppedImagePath: croppedImagePath
                         )
                         wardrobeViewModel.items.append(item)
+                        wardrobeViewModel.syncItemToCloud(item)
                     }
                     isPresented = false
                 }

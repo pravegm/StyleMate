@@ -7,6 +7,7 @@ struct TodayOutfitSheet: View {
     @EnvironmentObject var homeVM: HomeViewModel
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var outfitsVM: MyOutfitsViewModel
+    @EnvironmentObject var authService: AuthService
     @State private var showSaveActionSheet = false
     @State private var showDatePickerSheet = false
     @State private var selectedDate = Calendar.current.startOfDay(for: Date())
@@ -74,7 +75,7 @@ struct TodayOutfitSheet: View {
                                 },
                                 onShuffle: {
                                     Haptics.light()
-                                    homeVM.shuffleItemInOutfit(itemToShuffle: item, wardrobe: wardrobeViewModel.items)
+                                    homeVM.shuffleItemInOutfit(itemToShuffle: item, wardrobe: wardrobeViewModel.items, user: authService.user)
                                 },
                                 isLoading: homeVM.isLoading
                             )
@@ -94,7 +95,18 @@ struct TodayOutfitSheet: View {
                     }) {
                         HStack(spacing: DS.Spacing.xs) {
                             Image(systemName: "arrow.triangle.2.circlepath")
-                            Text("Shuffle All")
+                            Text("Shuffle")
+                        }
+                    }
+                    .buttonStyle(DSSecondaryButton())
+
+                    Button(action: {
+                        Haptics.light()
+                        showAddProductSheet = true
+                    }) {
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image(systemName: "plus.circle")
+                            Text("Add")
                         }
                     }
                     .buttonStyle(DSSecondaryButton())
@@ -105,7 +117,7 @@ struct TodayOutfitSheet: View {
                     }) {
                         HStack(spacing: DS.Spacing.xs) {
                             Image(systemName: "square.and.arrow.down")
-                            Text("Save Outfit")
+                            Text("Save")
                         }
                     }
                     .buttonStyle(DSPrimaryButton())
@@ -209,14 +221,6 @@ struct TodayOutfitSheet: View {
                 .navigationBarTitleDisplayMode(.inline)
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button { showAddProductSheet = true } label: {
-                    Image(systemName: "plus.circle")
-                        .foregroundColor(DS.Colors.accent)
-                }
-            }
-        }
         .sheet(item: $addProductStep) { step in
             if step == .category {
                 NavigationView {
@@ -247,7 +251,7 @@ struct TodayOutfitSheet: View {
                                             selectedProductType = product
                                             addProductStep = nil
                                             isAddingProduct = true
-                                            homeVM.addProductToOutfit(category: category, productType: product, wardrobe: wardrobeViewModel.items)
+                                            homeVM.addProductToOutfit(category: category, productType: product, wardrobe: wardrobeViewModel.items, user: authService.user)
                                         }) {
                                             Text(product)
                                                 .font(DS.Font.body)

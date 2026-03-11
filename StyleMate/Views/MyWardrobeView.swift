@@ -15,13 +15,40 @@ struct MyWardrobeView: View {
                 DS.Colors.backgroundPrimary.ignoresSafeArea()
 
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: DS.Spacing.sm) {
-                        ForEach(Category.allCases) { category in
-                            let count = wardrobeViewModel.items.filter { $0.category == category }.count
-                            Button { selectedCategory = category } label: {
-                                CategoryTile(category: category, count: count)
+                    VStack(spacing: DS.Spacing.md) {
+                        if wardrobeViewModel.items.isEmpty {
+                            VStack(spacing: DS.Spacing.md) {
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 44))
+                                    .foregroundColor(DS.Colors.accent)
+                                Text("Start building your wardrobe")
+                                    .font(DS.Font.title3)
+                                    .foregroundColor(DS.Colors.textPrimary)
+                                Text("Take a photo or pick from your gallery to add your first items")
+                                    .font(DS.Font.subheadline)
+                                    .foregroundColor(DS.Colors.textSecondary)
+                                    .multilineTextAlignment(.center)
+                                Button(action: { Haptics.medium(); showAddSheet = true }) {
+                                    HStack(spacing: DS.Spacing.xs) {
+                                        Image(systemName: "plus")
+                                        Text("Add Items")
+                                    }
+                                }
+                                .buttonStyle(DSPrimaryButton())
+                                .padding(.horizontal, DS.Spacing.xl)
                             }
-                            .buttonStyle(.plain)
+                            .padding(DS.Spacing.xl)
+                            .frame(maxWidth: .infinity)
+                        }
+
+                        LazyVGrid(columns: columns, spacing: DS.Spacing.sm) {
+                            ForEach(Category.allCases) { category in
+                                let count = wardrobeViewModel.items.filter { $0.category == category }.count
+                                Button { selectedCategory = category } label: {
+                                    CategoryTile(category: category, count: count)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                     .padding(.horizontal, DS.Spacing.screenH)
@@ -121,7 +148,7 @@ struct CategoryTile: View {
         }
         .frame(maxWidth: .infinity)
         .padding(DS.Spacing.md)
-        .background(DS.Colors.backgroundCard)
+        .background(count > 0 ? DS.Colors.accent.opacity(0.04) : DS.Colors.backgroundCard)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
         .dsCardShadow()
     }

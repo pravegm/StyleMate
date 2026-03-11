@@ -245,110 +245,119 @@ struct CalendarGridView: View {
     @State private var showYearPicker = false
 
     var body: some View {
+        calendarContent
+    }
+
+    @ViewBuilder
+    private var calendarContent: some View {
         let calendar = Calendar.current
-        let monthInterval = calendar.dateInterval(of: .month, for: currentMonth) ?? calendar.dateInterval(of: .month, for: Date())!
-        let days = (0..<(calendar.range(of: .day, in: .month, for: currentMonth)!.count)).compactMap {
-            calendar.date(byAdding: .day, value: $0, to: monthInterval.start)
-        }
-        let monthYearFormatter: DateFormatter = {
-            let df = DateFormatter()
-            df.dateFormat = "LLLL yyyy"
-            return df
-        }()
-
-        VStack(spacing: DS.Spacing.xs) {
-            HStack {
-                Button(action: {
-                    if let prev = calendar.date(byAdding: .month, value: -1, to: currentMonth) { currentMonth = prev }
-                }) {
-                    Image(systemName: "chevron.left")
-                        .font(DS.Font.headline)
-                        .foregroundColor(DS.Colors.accent)
-                        .padding(DS.Spacing.xs)
-                }
-
-                Spacer()
-
-                Button(action: { showYearPicker = true }) {
-                    Text(monthYearFormatter.string(from: currentMonth))
-                        .font(DS.Font.headline)
-                        .foregroundColor(DS.Colors.textPrimary)
-                }
-                .sheet(isPresented: $showYearPicker) {
-                    YearMonthPicker(selectedDate: $currentMonth, isPresented: $showYearPicker)
-                }
-
-                Spacer()
-
-                Button(action: {
-                    if let next = calendar.date(byAdding: .month, value: 1, to: currentMonth) { currentMonth = next }
-                }) {
-                    Image(systemName: "chevron.right")
-                        .font(DS.Font.headline)
-                        .foregroundColor(DS.Colors.accent)
-                        .padding(DS.Spacing.xs)
-                }
+        if let monthInterval = calendar.dateInterval(of: .month, for: currentMonth) ?? calendar.dateInterval(of: .month, for: Date()),
+           let dayRange = calendar.range(of: .day, in: .month, for: currentMonth) {
+            let days = (0..<dayRange.count).compactMap {
+                calendar.date(byAdding: .day, value: $0, to: monthInterval.start)
             }
+            let monthYearFormatter: DateFormatter = {
+                let df = DateFormatter()
+                df.dateFormat = "LLLL yyyy"
+                return df
+            }()
 
-            HStack {
-                ForEach(calendar.shortWeekdaySymbols, id: \.self) { symbol in
-                    Text(symbol)
-                        .font(DS.Font.caption2)
-                        .frame(maxWidth: .infinity)
-                        .foregroundColor(DS.Colors.textTertiary)
+            VStack(spacing: DS.Spacing.xs) {
+                HStack {
+                    Button(action: {
+                        if let prev = calendar.date(byAdding: .month, value: -1, to: currentMonth) { currentMonth = prev }
+                    }) {
+                        Image(systemName: "chevron.left")
+                            .font(DS.Font.headline)
+                            .foregroundColor(DS.Colors.accent)
+                            .padding(DS.Spacing.xs)
+                    }
+
+                    Spacer()
+
+                    Button(action: { showYearPicker = true }) {
+                        Text(monthYearFormatter.string(from: currentMonth))
+                            .font(DS.Font.headline)
+                            .foregroundColor(DS.Colors.textPrimary)
+                    }
+                    .sheet(isPresented: $showYearPicker) {
+                        YearMonthPicker(selectedDate: $currentMonth, isPresented: $showYearPicker)
+                    }
+
+                    Spacer()
+
+                    Button(action: {
+                        if let next = calendar.date(byAdding: .month, value: 1, to: currentMonth) { currentMonth = next }
+                    }) {
+                        Image(systemName: "chevron.right")
+                            .font(DS.Font.headline)
+                            .foregroundColor(DS.Colors.accent)
+                            .padding(DS.Spacing.xs)
+                    }
                 }
-            }
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: DS.Spacing.xs) {
-                let firstWeekday = calendar.component(.weekday, from: monthInterval.start) - calendar.firstWeekday
-                let leadingEmpty = (firstWeekday + 7) % 7
+                HStack {
+                    ForEach(calendar.shortWeekdaySymbols, id: \.self) { symbol in
+                        Text(symbol)
+                            .font(DS.Font.caption2)
+                            .frame(maxWidth: .infinity)
+                            .foregroundColor(DS.Colors.textTertiary)
+                    }
+                }
 
-                ForEach(0..<(leadingEmpty + days.count), id: \.self) { idx in
-                    if idx < leadingEmpty {
-                        Color.clear.frame(height: 44)
-                    } else {
-                        let date = days[idx - leadingEmpty]
-                        let hasOutfit = datesWithOutfits.contains(calendar.startOfDay(for: date))
-                        let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
-                        let isToday = calendar.isDateInToday(date)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: DS.Spacing.xs) {
+                    let firstWeekday = calendar.component(.weekday, from: monthInterval.start) - calendar.firstWeekday
+                    let leadingEmpty = (firstWeekday + 7) % 7
 
-                        Button(action: {
-                            Haptics.selection()
-                            selectedDate = calendar.startOfDay(for: date)
-                            if hasOutfit { onDateWithOutfitsTapped?(calendar.startOfDay(for: date)) }
-                        }) {
-                            VStack(spacing: 2) {
-                                Text("\(calendar.component(.day, from: date))")
-                                    .font(DS.Font.subheadline)
-                                    .foregroundColor(isSelected ? .white : (isToday ? DS.Colors.accent : DS.Colors.textPrimary))
-                                    .frame(width: 36, height: 36)
-                                    .background(
-                                        isSelected
-                                            ? AnyShapeStyle(DS.Colors.accent)
-                                            : (isToday ? AnyShapeStyle(DS.Colors.accent.opacity(0.15)) : AnyShapeStyle(Color.clear))
-                                        , in: Circle()
-                                    )
+                    ForEach(0..<(leadingEmpty + days.count), id: \.self) { idx in
+                        if idx < leadingEmpty {
+                            Color.clear.frame(height: 44)
+                        } else {
+                            let date = days[idx - leadingEmpty]
+                            let hasOutfit = datesWithOutfits.contains(calendar.startOfDay(for: date))
+                            let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
+                            let isToday = calendar.isDateInToday(date)
 
-                                if hasOutfit {
-                                    Circle()
-                                        .fill(DS.Colors.accent)
-                                        .frame(width: 5, height: 5)
-                                } else {
-                                    Color.clear.frame(width: 5, height: 5)
+                            Button(action: {
+                                Haptics.selection()
+                                selectedDate = calendar.startOfDay(for: date)
+                                if hasOutfit { onDateWithOutfitsTapped?(calendar.startOfDay(for: date)) }
+                            }) {
+                                VStack(spacing: 2) {
+                                    Text("\(calendar.component(.day, from: date))")
+                                        .font(DS.Font.subheadline)
+                                        .foregroundColor(isSelected ? .white : (isToday ? DS.Colors.accent : DS.Colors.textPrimary))
+                                        .frame(width: 36, height: 36)
+                                        .background(
+                                            isSelected
+                                                ? AnyShapeStyle(DS.Colors.accent)
+                                                : (isToday ? AnyShapeStyle(DS.Colors.accent.opacity(0.15)) : AnyShapeStyle(Color.clear))
+                                            , in: Circle()
+                                        )
+
+                                    if hasOutfit {
+                                        Circle()
+                                            .fill(DS.Colors.accent)
+                                            .frame(width: 5, height: 5)
+                                    } else {
+                                        Color.clear.frame(width: 5, height: 5)
+                                    }
                                 }
                             }
+                            .frame(height: 44)
                         }
-                        .frame(height: 44)
                     }
                 }
             }
-        }
-        .onAppear {
-            currentMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: selectedDate)) ?? Calendar.current.startOfDay(for: Date())
-        }
-        .onChange(of: selectedDate) { newDate in
-            let newMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: newDate)) ?? currentMonth
-            if !calendar.isDate(newMonth, inSameDayAs: currentMonth) { currentMonth = newMonth }
+            .onAppear {
+                currentMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: selectedDate)) ?? Calendar.current.startOfDay(for: Date())
+            }
+            .onChange(of: selectedDate) { newDate in
+                let newMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: newDate)) ?? currentMonth
+                if !calendar.isDate(newMonth, inSameDayAs: currentMonth) { currentMonth = newMonth }
+            }
+        } else {
+            EmptyView()
         }
     }
 }

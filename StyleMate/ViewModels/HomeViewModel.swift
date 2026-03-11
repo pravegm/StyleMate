@@ -55,16 +55,22 @@ class HomeViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        locationService.$authorizationStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.locationStatus = status
+            }
+            .store(in: &cancellables)
     }
     
-    func suggestTodayOutfit(from items: [WardrobeItem]) {
+    func suggestTodayOutfit(from items: [WardrobeItem], user: User?) {
         Task {
             isLoading = true
             defer { isLoading = false }
             let typeToUse = selectedOutfitType
             let customDescription = customOutfitDescription
-            let weather = self.weather // Pass weather to Gemini
-            let user = AuthService().user
+            let weather = self.weather
             if let user = user, let type = typeToUse, !user.preferredStyles.contains(type) {
                 todayOutfit = nil
                 showNoOutfitAlert = true
@@ -127,10 +133,9 @@ class HomeViewModel: ObservableObject {
     }
 
     // Shuffle a single item in the current outfit for a given item (not just category)
-    func shuffleItemInOutfit(itemToShuffle: WardrobeItem, wardrobe: [WardrobeItem]) {
+    func shuffleItemInOutfit(itemToShuffle: WardrobeItem, wardrobe: [WardrobeItem], user: User?) {
         guard let currentOutfit = todayOutfit else { return }
         let category = itemToShuffle.category
-        let user = AuthService().user
         Task {
             isLoading = true
             defer { isLoading = false }
@@ -191,9 +196,8 @@ class HomeViewModel: ObservableObject {
     }
 
     /// Adds a product type to the current outfit using Gemini and updates todayOutfit.
-    func addProductToOutfit(category: Category, productType: String, wardrobe: [WardrobeItem]) {
+    func addProductToOutfit(category: Category, productType: String, wardrobe: [WardrobeItem], user: User?) {
         guard let currentOutfit = todayOutfit else { return }
-        let user = AuthService().user
         Task {
             isLoading = true
             defer { isLoading = false }
