@@ -91,12 +91,59 @@ class WardrobeViewModel: ObservableObject {
         guard !cloudItems.isEmpty else { return }
 
         await MainActor.run {
-            let localIDs = Set(items.map { $0.id })
-            let newItems = cloudItems.filter { !localIDs.contains($0.id) }
-            if !newItems.isEmpty {
-                suspendSaving = true
-                items.append(contentsOf: newItems)
-                suspendSaving = false
+            let localByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+            var changed = false
+            suspendSaving = true
+
+            for cloudItem in cloudItems {
+                if let localItem = localByID[cloudItem.id] {
+                    let metadataChanged = localItem.category != cloudItem.category
+                        || localItem.product != cloudItem.product
+                        || localItem.colors != cloudItem.colors
+                        || localItem.brand != cloudItem.brand
+                        || localItem.pattern != cloudItem.pattern
+
+                    if metadataChanged, let idx = items.firstIndex(where: { $0.id == cloudItem.id }) {
+                        let finalImagePath = WardrobeImageFileHelper.loadImage(at: localItem.imagePath) != nil
+                            ? localItem.imagePath : cloudItem.imagePath
+                        let finalCroppedPath: String? = {
+                            if let localCropped = localItem.croppedImagePath,
+                               WardrobeImageFileHelper.loadImage(at: localCropped) != nil {
+                                return localCropped
+                            }
+                            return cloudItem.croppedImagePath
+                        }()
+
+                        items[idx] = WardrobeItem(
+                            id: cloudItem.id,
+                            category: cloudItem.category,
+                            product: cloudItem.product,
+                            colors: cloudItem.colors,
+                            brand: cloudItem.brand,
+                            pattern: cloudItem.pattern,
+                            imagePath: finalImagePath,
+                            croppedImagePath: finalCroppedPath
+                        )
+                        changed = true
+                    }
+                } else {
+                    items.append(cloudItem)
+                    changed = true
+                }
+            }
+
+            // Remove local items that no longer exist in cloud
+            let cloudIDs = Set(cloudItems.map { $0.id })
+            let toRemove = items.filter { !cloudIDs.contains($0.id) }
+            for item in toRemove {
+                WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+                WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+                changed = true
+            }
+            items.removeAll { !cloudIDs.contains($0.id) }
+
+            suspendSaving = false
+            if changed {
                 save(forUser: currentUserEmail)
             }
         }
@@ -147,6 +194,7 @@ class WardrobeViewModel: ObservableObject {
             await MainActor.run {
                 if updated {
                     self.save(forUser: self.currentUserEmail)
+                    self.backupToCloud()
                 }
                 UserDefaults.standard.set(true, forKey: migrationKey)
                 self.migrateZoneCrop()
@@ -194,6 +242,7 @@ class WardrobeViewModel: ObservableObject {
             await MainActor.run {
                 if updated {
                     self.save(forUser: self.currentUserEmail)
+                    self.backupToCloud()
                 }
                 UserDefaults.standard.set(true, forKey: zoneCropKey)
             }

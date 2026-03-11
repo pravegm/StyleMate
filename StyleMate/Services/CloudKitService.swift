@@ -63,10 +63,13 @@ class CloudKitService: ObservableObject {
         }
 
         do {
-            _ = try await privateDB.save(record)
-            return true
-        } catch let error as CKError where error.code == .serverRecordChanged {
-            return true
+            let (saveResults, _) = try await privateDB.modifyRecords(
+                saving: [record],
+                deleting: [],
+                savePolicy: .changedKeys,
+                atomically: false
+            )
+            return !saveResults.isEmpty
         } catch {
             print("[CloudKit] Upload error: \(error.localizedDescription)")
             return false
@@ -117,6 +120,7 @@ class CloudKitService: ObservableObject {
         syncStatus = successCount > 0 ? .success : .error("Failed to upload items")
         lastSyncDate = Date()
         UserDefaults.standard.set(lastSyncDate, forKey: "lastCloudKitSync")
+        resetStatusAfterDelay()
     }
 
     // MARK: - Fetch All Items
@@ -129,25 +133,43 @@ class CloudKitService: ObservableObject {
         let query = CKQuery(recordType: recordType, predicate: predicate)
 
         do {
-            let (matchResults, _) = try await privateDB.records(matching: query, inZoneWith: zoneID, resultsLimit: CKQueryOperation.maximumResults)
+            var cursor: CKQueryOperation.Cursor? = nil
 
-            for (_, result) in matchResults {
-                switch result {
-                case .success(let record):
-                    if let item = wardrobeItem(from: record) {
+            let (firstResults, firstCursor) = try await privateDB.records(
+                matching: query,
+                inZoneWith: zoneID,
+                resultsLimit: CKQueryOperation.maximumResults
+            )
+            for (_, result) in firstResults {
+                if case .success(let record) = result,
+                   let item = wardrobeItem(from: record) {
+                    allItems.append(item)
+                }
+            }
+            cursor = firstCursor
+
+            while let activeCursor = cursor {
+                let (nextResults, nextCursor) = try await privateDB.records(
+                    continuingMatchFrom: activeCursor,
+                    resultsLimit: CKQueryOperation.maximumResults
+                )
+                for (_, result) in nextResults {
+                    if case .success(let record) = result,
+                       let item = wardrobeItem(from: record) {
                         allItems.append(item)
                     }
-                case .failure(let error):
-                    print("[CloudKit] Record fetch error: \(error.localizedDescription)")
                 }
+                cursor = nextCursor
             }
 
             syncStatus = .success
             lastSyncDate = Date()
             UserDefaults.standard.set(lastSyncDate, forKey: "lastCloudKitSync")
+            resetStatusAfterDelay()
         } catch {
             print("[CloudKit] Fetch error: \(error.localizedDescription)")
             syncStatus = .error("Could not fetch from iCloud")
+            resetStatusAfterDelay()
         }
 
         return allItems
@@ -176,6 +198,13 @@ class CloudKitService: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    private func resetStatusAfterDelay() {
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            syncStatus = .idle
+        }
+    }
 
     private func imageFileURL(for filename: String) -> URL? {
         let url = WardrobeImageFileHelper.folderURL.appendingPathComponent(filename)

@@ -57,6 +57,7 @@ struct RootView: View {
     @State private var galleryItems: [PhotosPickerItem] = []
     @State private var isLoadingGalleryImages = false
     @State private var showGalleryPicker = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var userKey: String {
         authService.user?.id ?? "guest"
@@ -171,6 +172,18 @@ struct RootView: View {
 
                 Task {
                     await CloudKitService.shared.setupZone()
+                    let isAvailable = await CloudKitService.shared.checkAccountStatus()
+                    if isAvailable {
+                        await wardrobeVM.restoreFromCloud()
+                    }
+                }
+            }
+        }
+        .onChange(of: scenePhase) { newPhase in
+            if newPhase == .active,
+               authService.isAuthenticated,
+               !wardrobeVM.currentUserEmail.isEmpty {
+                Task {
                     let isAvailable = await CloudKitService.shared.checkAccountStatus()
                     if isAvailable {
                         await wardrobeVM.restoreFromCloud()
@@ -730,26 +743,12 @@ struct MultiAddNewItemView: View {
     }
 
     private func savedWardrobeItems() -> [WardrobeItem] {
-        var result: [WardrobeItem] = []
-        for (imgIdx, items) in detectedItems.enumerated() where savedStates[imgIdx] == true {
-            for (itemIdx, detected) in items.enumerated() {
-                let fullImage = bgRemovedImages.indices.contains(imgIdx) ? (bgRemovedImages[imgIdx] ?? images[imgIdx]) : images[imgIdx]
-                let imagePath = WardrobeImageFileHelper.saveImage(fullImage) ?? ""
-                let zoneCrop = BodyZone.cropToZone(image: fullImage, category: detected.category)
-                let croppedImagePath = zoneCrop != nil ? WardrobeImageFileHelper.saveImage(zoneCrop!) : nil
-                let item = WardrobeItem(
-                    category: detected.category,
-                    product: detected.product,
-                    colors: detected.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
-                    brand: brandInputs[imgIdx][itemIdx],
-                    pattern: detected.pattern,
-                    imagePath: imagePath,
-                    croppedImagePath: croppedImagePath
-                )
-                result.append(item)
-            }
+        let savedCount = detectedItems.enumerated().reduce(0) { count, pair in
+            let (imgIdx, items) = pair
+            guard savedStates[imgIdx] == true else { return count }
+            return count + items.count
         }
-        return result
+        return Array(wardrobeViewModel.items.suffix(savedCount))
     }
 
     private func addAllAndShowSummary() {
