@@ -29,4 +29,5 @@ Package.resolved
 Pods/
 
 # Config files with sensitive data
-Config.plist 
+Config.plist
+**/Secrets.swift 

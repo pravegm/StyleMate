@@ -5,8 +5,8 @@ class ImageAnalysisService {
     static let shared = ImageAnalysisService()
     private init() {}
     
-    private let geminiAPIKey = "AIzaSyAoq8aUGlzCQzeq1pSKqRjThZ-qeaneQO8"
-    private let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="
+    private let geminiAPIKey = Secrets.geminiAPIKey
+    private let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key="
     
     struct BoundingBox: Codable {
         let x: CGFloat
@@ -16,14 +16,19 @@ class ImageAnalysisService {
     }
     func analyzeMultiple(image: UIImage, imageIndex: Int? = nil, retryCount: Int = 0) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?, boundingBox: BoundingBox?)] {
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            print("[StyleMate] Failed to convert image to JPEG")
             return []
         }
         let base64Image = imageData.base64EncodedString()
-        // Provide Gemini with the valid categories, products, and patterns, and instruct it to select only from these lists
+        print("[StyleMate] Image encoded: \(imageData.count) bytes (attempt \(retryCount + 1))")
+
         let prompt = """
-You are an expert fashion assistant. Here are the only valid clothing categories: [Tops, Bottoms, Mid-Layers, Outerwear, One-Pieces, Footwear, Accessories, Innerwear, Activewear, Ethnic Wear].
-For each category, here are the only valid products:
-- Tops: T-Shirts, Shirts, Blouses, Tank Tops, Tube Tops, Camisoles, Crop Tops, Off-Shoulder Tops, Bodysuits, Graphic Tees, Mesh Tops, Turtlenecks
+You are an expert fashion assistant. Analyze the clothing items worn by the person in this image.
+
+Valid categories: Tops, Bottoms, Mid-Layers, Outerwear, One-Pieces, Footwear, Accessories, Innerwear, Activewear, Ethnic Wear
+
+Valid products per category:
+- Tops: T-Shirts, Polo T-Shirts, Shirts, Blouses, Tank Tops, Tube Tops, Camisoles, Crop Tops, Off-Shoulder Tops, Bodysuits, Graphic Tees, Mesh Tops, Turtlenecks
 - Bottoms: Jeans, Trousers, Leggings, Joggers, Cargo Pants, Shorts, Skirts, Skorts, Palazzo Pants
 - Mid-Layers: Hoodies, Sweatshirts, Sweaters, Cardigans, Pullovers, Fleece Jackets, Vests, Shrugs, Gilets
 - Outerwear: Jackets, Coats, Puffer Jackets, Trench Coats, Blazers, Overcoats, Raincoats
@@ -33,25 +38,19 @@ For each category, here are the only valid products:
 - Innerwear: Bras, Underwear, Boxers, Thongs, Socks, Thermal Wear, Shapewear, Lingerie
 - Activewear: Sports Bras, Active Leggings, Athletic Tops, Track Pants, Athletic Shorts, Active Jackets, Compression Wear, Swimwear, Tennis Dresses
 - Ethnic Wear: Kurta, Kurti, Sherwani, Nehru Jacket, Dupatta, Saree, Blouse (saree), Lehenga, Choli, Salwar, Patiala Pants, Anarkali, Angrakha, Dhoti, Lungis, Mundu, Jodhpuri Suit
-Here are the only valid patterns: [Solid, Stripes, Checks, Plaid, Polka Dot, Floral, Animal Print, Camouflage, Geometric, Houndstooth, Paisley, Tie-Dye].
 
-IMPORTANT: For each clothing item you detect in the image, you MUST select the category, product, and pattern string **EXACTLY** as provided in the above lists.
-- Do not change the spelling, do not use singular or plural forms that are not in the list, do not use synonyms, and do not invent new words.
-- Your answer must use the exact string from the list, character for character, including spaces, hyphens, and capitalization.
-- If you do not use the exact string, your answer will be rejected.
-- **For each detected item, you MUST return at least one color in the colors array. The colors array must NEVER be empty. If you are unsure, make your best guess, but do not leave it empty.**
+Valid patterns: Solid, Stripes, Checks, Plaid, Polka Dot, Floral, Animal Print, Camouflage, Geometric, Houndstooth, Paisley, Tie-Dye
 
-Examples:
-- If the valid product is \"T-shirts\", you must return \"T-shirts\" (not \"Tshirt\", \"Tee shirt\", or \"t-shirts\").
-- If the valid pattern is \"Polka Dot\", you must return \"Polka Dot\" (not \"polka dot\", \"Polka Dots\", or \"dots\").
-- If you detect a black t-shirt, you must return colors: [\"Black\"] (not [] or [\"\"]).
+For EACH visible clothing item, return:
+- category: one of the valid categories above (exact string)
+- product: one of the valid products above (exact string)
+- colors: array of color names (MUST have at least one, e.g. [\"Blue\", \"White\"])
+- pattern: one of the valid patterns above (exact string)
+- boundingBox: {x, y, width, height} normalized 0-1 relative to image dimensions
 
-If you are unsure, copy and paste the string from the list above.
-
-For each item, also return the bounding box as {\"x\": <left>, \"y\": <top>, \"width\": <width>, \"height\": <height>} where all values are normalized between 0 and 1 relative to the image size. Only use the provided categories, products, and patterns. Do not invent new ones.
-
-Return only the JSON array, no extra text.
+Return a JSON array of objects. Use EXACT strings from the lists above.
 """
+
         let responseSchema: [String: Any] = [
             "type": "array",
             "items": [
@@ -75,10 +74,10 @@ Return only the JSON array, no extra text.
                         "required": ["x", "y", "width", "height"]
                     ]
                 ],
-                "required": ["category", "product", "colors", "pattern", "boundingBox"],
-                "propertyOrdering": ["category", "product", "colors", "pattern", "boundingBox"]
+                "required": ["category", "product", "colors", "pattern", "boundingBox"]
             ]
         ]
+
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -96,86 +95,141 @@ Return only the JSON array, no extra text.
                 "responseSchema": responseSchema
             ]
         ]
-        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
-              let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
+
+        guard let url = URL(string: geminiEndpoint + geminiAPIKey) else {
+            print("[StyleMate] Invalid API URL")
             return []
         }
+        guard let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            print("[StyleMate] Failed to serialize request body")
+            return []
+        }
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = httpBody
+        request.timeoutInterval = 60
+
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode != 200 {
-                    if httpResponse.statusCode == 429 {
-                        let delay: UInt64 = retryCount == 0 ? 2_000_000_000 : 4_000_000_000
-                        if retryCount < 2 {
-                            try? await Task.sleep(nanoseconds: delay)
-                            return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
-                        } else {
-                            return []
-                        }
-                    } else if retryCount < 2 {
-                        try? await Task.sleep(nanoseconds: 1_000_000_000)
-                        return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
-                    } else {
-                        return []
-                    }
-                }
-            }
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("[StyleMate] No HTTP response received")
                 return []
             }
-            if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
-               let text = result.candidates.first?.content.parts.first?.text,
-               let arrData = text.data(using: .utf8) {
-                if let arr = try? JSONSerialization.jsonObject(with: arrData) as? [[String: Any]] {
-                    let mapped = arr.compactMap { dict in
-                        let categoryString = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let productString = (dict["product"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let colorsArray = dict["colors"] as? [String] ?? []
-                        let patternString = (dict["pattern"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let category = Category(rawValue: categoryString ?? "")
-                        let product = matchProduct(productString)
-                        let colors = colorsArray.map { matchColor($0) ?? $0 }.filter { !$0.isEmpty }
-                        let pattern = Pattern(rawValue: patternString ?? "")
-                        var boundingBox: BoundingBox? = nil
-                        if let bboxDict = dict["boundingBox"] as? [String: Any],
-                           let x = bboxDict["x"] as? Double,
-                           let y = bboxDict["y"] as? Double,
-                           let width = bboxDict["width"] as? Double,
-                           let height = bboxDict["height"] as? Double {
-                            boundingBox = BoundingBox(x: CGFloat(x), y: CGFloat(y), width: CGFloat(width), height: CGFloat(height))
-                        }
-                        if let product = product {
-                            return (category, product, colors, pattern, boundingBox)
-                        } else {
-                            return nil
-                        }
-                    }
-                    let hasEmpty = mapped.contains { $0.0 == nil || $0.1 == nil || $0.2.isEmpty || $0.3 == nil }
-                    if hasEmpty && retryCount < 2 {
-                        try? await Task.sleep(nanoseconds: 1_000_000_000)
-                        return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
-                    } else if hasEmpty {
-                        return []
-                    }
-                    return mapped
+            print("[StyleMate] HTTP \(httpResponse.statusCode)")
+
+            if httpResponse.statusCode == 429 {
+                if retryCount < 3 {
+                    let delay = UInt64(pow(2.0, Double(retryCount + 1))) * 1_000_000_000
+                    print("[StyleMate] Rate limited, waiting \(delay / 1_000_000_000)s before retry...")
+                    try? await Task.sleep(nanoseconds: delay)
+                    return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+                }
+                print("[StyleMate] Rate limited after all retries")
+                return []
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                let errorBody = String(data: data, encoding: .utf8) ?? "no body"
+                print("[StyleMate] API error \(httpResponse.statusCode): \(errorBody.prefix(500))")
+                if retryCount < 2 {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+                }
+                return []
+            }
+
+            // Parse the Gemini response manually for robustness
+            guard let responseJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                print("[StyleMate] Response is not valid JSON: \(String(data: data, encoding: .utf8)?.prefix(300) ?? "nil")")
+                return await retryOrEmpty(image: image, imageIndex: imageIndex, retryCount: retryCount)
+            }
+
+            guard let candidates = responseJson["candidates"] as? [[String: Any]],
+                  let firstCandidate = candidates.first,
+                  let content = firstCandidate["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]] else {
+                print("[StyleMate] Unexpected response structure: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "nil")")
+                return await retryOrEmpty(image: image, imageIndex: imageIndex, retryCount: retryCount)
+            }
+
+            // Find the text part (skip thinking parts if present with 2.5 Flash)
+            guard let textPart = parts.first(where: { $0["text"] != nil }),
+                  let text = textPart["text"] as? String else {
+                print("[StyleMate] No text part in response parts: \(parts)")
+                return await retryOrEmpty(image: image, imageIndex: imageIndex, retryCount: retryCount)
+            }
+
+            print("[StyleMate] Response text: \(text.prefix(300))")
+
+            guard let textData = text.data(using: .utf8),
+                  let itemsArray = try? JSONSerialization.jsonObject(with: textData) as? [[String: Any]] else {
+                print("[StyleMate] Failed to parse JSON array from response text")
+                return await retryOrEmpty(image: image, imageIndex: imageIndex, retryCount: retryCount)
+            }
+
+            print("[StyleMate] Parsed \(itemsArray.count) raw items from API")
+
+            // Parse each item with fuzzy matching
+            var validResults: [(Category?, String?, [String], Pattern?, BoundingBox?)] = []
+            for (i, dict) in itemsArray.enumerated() {
+                let catStr = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let prodStr = (dict["product"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let colorsArr = dict["colors"] as? [String] ?? []
+                let patStr = (dict["pattern"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                let category = matchCategory(catStr)
+                let product = matchProduct(prodStr)
+                let colors = colorsArr.map { matchColor($0) ?? $0 }.filter { !$0.isEmpty }
+                let pattern = matchPattern(patStr)
+
+                var bbox: BoundingBox? = nil
+                if let bboxDict = dict["boundingBox"] as? [String: Any],
+                   let x = bboxDict["x"] as? Double,
+                   let y = bboxDict["y"] as? Double,
+                   let w = bboxDict["width"] as? Double,
+                   let h = bboxDict["height"] as? Double {
+                    bbox = BoundingBox(x: CGFloat(x), y: CGFloat(y), width: CGFloat(w), height: CGFloat(h))
+                }
+
+                if let category = category, let product = product, let pattern = pattern, !colors.isEmpty {
+                    validResults.append((category, product, colors, pattern, bbox))
+                    print("[StyleMate] Item \(i): OK - \(category.rawValue) / \(product) / \(colors.joined(separator: ",")) / \(pattern.rawValue)")
                 } else {
-                    return []
+                    print("[StyleMate] Item \(i): SKIP - raw(cat=\(catStr ?? "nil"), prod=\(prodStr ?? "nil"), pat=\(patStr ?? "nil"), colors=\(colorsArr)) -> matched(cat=\(category?.rawValue ?? "nil"), prod=\(product ?? "nil"), pat=\(pattern?.rawValue ?? "nil"), colors=\(colors.count))")
                 }
-            } else {
-                return []
             }
-        } catch {
-            if retryCount < 2 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+            // Retry only if the API returned items but ALL failed parsing
+            if validResults.isEmpty && !itemsArray.isEmpty && retryCount < 2 {
+                print("[StyleMate] All \(itemsArray.count) items failed to parse, retrying...")
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
                 return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
-            } else {
-                return []
             }
+
+            print("[StyleMate] Returning \(validResults.count) valid items")
+            return validResults
+
+        } catch {
+            print("[StyleMate] Network error: \(error.localizedDescription)")
+            if retryCount < 2 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+            }
+            return []
         }
+    }
+
+    private func retryOrEmpty(image: UIImage, imageIndex: Int?, retryCount: Int) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?, boundingBox: BoundingBox?)] {
+        if retryCount < 2 {
+            print("[StyleMate] Retrying (attempt \(retryCount + 2))...")
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+        }
+        print("[StyleMate] All retries exhausted, returning empty")
+        return []
     }
 
     // Improved category matching (case-insensitive, partial, with synonyms)
@@ -216,6 +270,27 @@ Return only the JSON array, no extra text.
             return partial
         }
         return nil
+    }
+
+    func matchPattern(_ pattern: String?) -> Pattern? {
+        guard let pattern = pattern?.trimmingCharacters(in: .whitespacesAndNewlines), !pattern.isEmpty else { return nil }
+        if let exact = Pattern(rawValue: pattern) { return exact }
+        let lower = pattern.lowercased()
+        for p in Pattern.allCases {
+            if p.rawValue.lowercased() == lower { return p }
+        }
+        let normalized = lower.replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
+        for p in Pattern.allCases {
+            let pNorm = p.rawValue.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
+            if pNorm == normalized || pNorm.contains(normalized) || normalized.contains(pNorm) { return p }
+        }
+        var bestScore = Int.max
+        var bestPattern: Pattern? = nil
+        for p in Pattern.allCases {
+            let score = Self.levenshtein(lower, p.rawValue.lowercased())
+            if score < bestScore { bestScore = score; bestPattern = p }
+        }
+        return bestScore <= 3 ? bestPattern : nil
     }
 
     // Improved product matching (case-insensitive, partial, fuzzy, prefer exact/singular/plural)

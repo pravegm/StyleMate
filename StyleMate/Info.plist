@@ -28,5 +28,16 @@
     <string>This app uses your location to show local weather on the home screen.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>This app uses your location to show local weather on the home screen.</string>
+    <key>GIDClientID</key>
+    <string>651391756470-6844lut70ldjg7b9isqm49thvmsu5bha.apps.googleusercontent.com</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>com.googleusercontent.apps.651391756470-6844lut70ldjg7b9isqm49thvmsu5bha</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist> 

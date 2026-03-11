@@ -7,6 +7,7 @@
 
 import SwiftUI
 import PhotosUI
+import GoogleSignIn
 
 @main
 struct StyleMateApp: App {
@@ -20,6 +21,9 @@ struct StyleMateApp: App {
                 .environmentObject(authService)
                 .environmentObject(wardrobeVM)
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                .onOpenURL { url in
+                    GIDSignIn.sharedInstance.handle(url)
+                }
         }
     }
 }
@@ -55,11 +59,7 @@ struct RootView: View {
     @State private var showGalleryPicker = false
     
     var userKey: String {
-        if let email = authService.user?.email, !email.isEmpty {
-            return email
-        } else {
-            return "guest"
-        }
+        authService.user?.id ?? "guest"
     }
     
     var body: some View {
@@ -150,8 +150,8 @@ struct RootView: View {
             }
         }
         .onChange(of: authService.isAuthenticated) { isAuthenticated in
-            if isAuthenticated, let email = authService.user?.email {
-                wardrobeVM.load(forUser: email)
+            if isAuthenticated, let id = authService.user?.id {
+                wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
             } else {
                 wardrobeVM.clear()
@@ -159,8 +159,9 @@ struct RootView: View {
             }
         }
         .onAppear {
-            if authService.isAuthenticated, let email = authService.user?.email {
-                wardrobeVM.load(forUser: email)
+            authService.checkCredentialState()
+            if authService.isAuthenticated, let id = authService.user?.id {
+                wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
             }
         }

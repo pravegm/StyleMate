@@ -24,9 +24,11 @@ struct ProfileView: View {
                         TextField("Your Name", text: .constant(user.name))
                             .textContentType(.name)
                             .disabled(true)
-                        
-                        Text(user.email)
-                            .foregroundStyle(.secondary)
+
+                        if let email = user.email, !email.isEmpty {
+                            Text(email)
+                                .foregroundStyle(.secondary)
+                        }
                         Picker("Gender", selection: $editGender) {
                             ForEach(genderOptions, id: \.self) { option in
                                 Text(option.isEmpty ? "Select Gender" : option).tag(option)

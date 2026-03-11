@@ -1,19 +1,16 @@
 import SwiftUI
+import AuthenticationServices
+import GoogleSignInSwift
 
 struct LoginView: View {
     @EnvironmentObject private var authService: AuthService
     @State private var showError = false
     @State private var errorMessage = ""
-    @State private var email: String = ""
-    @State private var password: String = ""
-    @State private var name: String = ""
-    @State private var isSignUp = false
     @State private var appear = false
     @State private var selectedQuote: String = ""
-    @State private var gender: String = ""
-    @State private var age: String = ""
-    let genderOptions = ["Male", "Female", "Other", "Prefer not to say"]
-    
+    @State private var pulseGlow = false
+    @Environment(\.colorScheme) private var colorScheme
+
     let aiQuotes = [
         "Unlock daily style inspiration, powered by AI magic.",
         "Your next outfit is just an algorithm away.",
@@ -26,234 +23,259 @@ struct LoginView: View {
         "Dress smart. Dress AI.",
         "Where technology meets trend.",
         "AI-powered looks for every day.",
-        "Let algorithms inspire your attire.",
         "Your wardrobe, upgraded by AI.",
         "From code to couture—AI styles you.",
-        "Step into tomorrow's fashion, today.",
         "AI knows what looks good on you.",
         "Personalized fashion, powered by AI.",
         "Let AI help you find your signature style.",
         "The smartest way to dress is here."
     ]
-    
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                // Magical gradient background
-                LinearGradient(
-                    colors: [Color.pink.opacity(0.18), Color.blue.opacity(0.18), Color.yellow.opacity(0.18)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+
+    private var backgroundGradient: some View {
+        ZStack {
+            Color(colorScheme == .dark ? .black : .white)
                 .ignoresSafeArea()
-                
-                VStack(spacing: 28) {
-                    Spacer(minLength: 24)
-                    // Logo and magical intro
-                    VStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.accentColor.opacity(0.18))
-                                .frame(width: 100, height: 100)
-                                .blur(radius: 16)
-                            Image(systemName: "tshirt.fill")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 64, height: 64)
-                                .foregroundColor(.accentColor)
-                                .shadow(color: Color.accentColor.opacity(0.18), radius: 8, x: 0, y: 4)
-                            // Subtle sparkles
-                            MagicalSparkles()
-                        }
-                        Text("StyleMate")
-                            .font(.system(size: 38, weight: .bold, design: .rounded))
-                            .foregroundColor(.primary)
-                        Text(selectedQuote)
-                            .font(.headline)
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color.accentColor.opacity(0.25), Color.accentColor.opacity(0)],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 200
+                    )
+                )
+                .frame(width: 400, height: 400)
+                .offset(x: -80, y: -200)
+                .blur(radius: 60)
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color.pink.opacity(0.18), Color.pink.opacity(0)],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 180
+                    )
+                )
+                .frame(width: 360, height: 360)
+                .offset(x: 100, y: -100)
+                .blur(radius: 50)
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color.blue.opacity(0.12), Color.blue.opacity(0)],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 160
+                    )
+                )
+                .frame(width: 320, height: 320)
+                .offset(x: 60, y: 280)
+                .blur(radius: 50)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            backgroundGradient
+
+            VStack(spacing: 0) {
+                Spacer()
+                    .frame(height: 80)
+
+                // MARK: - Hero
+                VStack(spacing: 20) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.accentColor.opacity(pulseGlow ? 0.15 : 0.08))
+                            .frame(width: 130, height: 130)
+                            .scaleEffect(pulseGlow ? 1.1 : 1.0)
+                            .animation(.easeInOut(duration: 3).repeatForever(autoreverses: true), value: pulseGlow)
+
+                        Circle()
+                            .fill(Color.accentColor.opacity(0.08))
+                            .frame(width: 100, height: 100)
+
+                        Image(systemName: "tshirt.fill")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 52, height: 52)
                             .foregroundStyle(
                                 LinearGradient(
-                                    colors: [Color.accentColor, Color.pink.opacity(0.85), Color.blue.opacity(0.85)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
+                                    colors: [Color.accentColor, Color.accentColor.opacity(0.7)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
                                 )
                             )
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 2)
+
+                        MagicalSparkles()
                     }
-                    .padding(.top, 36)
-                    .opacity(appear ? 1 : 0)
-                    .offset(y: appear ? 0 : 24)
-                    .animation(.easeOut(duration: 1.1), value: appear)
-                    
-                    Spacer(minLength: 8)
-                    // Card for input fields
-                    VStack(spacing: 16) {
-                        if isSignUp {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Name")
-                                    .font(.headline)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.primary)
-                                TextField("Enter your name here", text: $name)
-                                    .textContentType(.name)
-                                    .padding()
-                                    .background(Color(.secondarySystemBackground))
-                                    .cornerRadius(10)
-                            }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Gender")
-                                    .font(.headline)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.primary)
-                                Menu {
-                                    ForEach(genderOptions, id: \.self) { option in
-                                        Button(option) { gender = option }
-                                    }
-                                } label: {
-                                    HStack {
-                                        Text(gender.isEmpty ? "Select your gender" : gender)
-                                            .foregroundColor(gender.isEmpty ? .gray : .primary)
-                                        Spacer()
-                                        Image(systemName: "chevron.down")
-                                            .foregroundColor(.gray)
-                                    }
-                                    .padding()
-                                    .background(Color(.secondarySystemBackground))
-                                    .cornerRadius(10)
-                                }
-                            }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Age")
-                                    .font(.headline)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.primary)
-                                TextField("Enter your age", text: $age)
-                                    .keyboardType(.numberPad)
-                                    .padding()
-                                    .background(Color(.secondarySystemBackground))
-                                    .cornerRadius(10)
-                                    .onChange(of: age) { newValue in
-                                        let filtered = newValue.filter { $0.isNumber }
-                                        if filtered != newValue {
-                                            age = filtered
-                                        }
-                                    }
-                            }
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Email")
-                                .font(.headline)
-                                .fontWeight(.bold)
-                                .foregroundColor(.primary)
-                            TextField("Enter your email here", text: $email)
-                                .textContentType(.emailAddress)
-                                .keyboardType(.emailAddress)
-                                .autocapitalization(.none)
-                                .padding()
-                                .background(Color(.secondarySystemBackground))
-                                .cornerRadius(10)
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Password")
-                                .font(.headline)
-                                .fontWeight(.bold)
-                                .foregroundColor(.primary)
-                            SecureField("Enter your password here", text: $password)
-                                .textContentType(.password)
-                                .padding()
-                                .background(Color(.secondarySystemBackground))
-                                .cornerRadius(10)
-                        }
-                    }
-                    .padding(20)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Color(.systemBackground).opacity(0.96))
-                            .shadow(color: Color.accentColor.opacity(0.08), radius: 8, x: 0, y: 4)
-                    )
-                    .padding(.horizontal, 24)
-                    .opacity(appear ? 1 : 0)
-                    .offset(y: appear ? 0 : 24)
-                    .animation(.easeOut(duration: 1.2).delay(0.2), value: appear)
-                    
-                    // Sign In/Up Buttons
-                    VStack(spacing: 16) {
-                        Button(isSignUp ? "Create Your Style Account" : "Sign in to the Style Portal") {
-                            Task {
-                                if isSignUp {
-                                    let ageInt = Int(age)
-                                    let result = await authService.signUpWithEmail(email: email, password: password, name: name, gender: gender, age: ageInt)
-                                    if let error = result {
-                                        errorMessage = error
-                                        showError = true
-                                    }
-                                } else {
-                                    let result = await authService.signInWithEmail(email: email, password: password)
-                                    if let error = result {
-                                        errorMessage = error
-                                        showError = true
-                                    }
-                                }
-                            }
-                        }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .frame(height: 50)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            LinearGradient(colors: [Color.accentColor, Color.pink.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .shadow(color: Color.accentColor.opacity(0.13), radius: 8, x: 0, y: 4)
-                        .accessibilityLabel(isSignUp ? "Sign up for StyleMate" : "Sign in to StyleMate")
-                        Button(isSignUp ? "Already have an account? Sign In" : "Don't have an account? Sign Up") {
-                            withAnimation { isSignUp.toggle() }
-                        }
-                        .font(.title3)
-                        .foregroundColor(.accentColor)
-                    }
-                    .padding(.horizontal, 24)
-                    .opacity(appear ? 1 : 0)
-                    .offset(y: appear ? 0 : 24)
-                    .animation(.easeOut(duration: 1.2).delay(0.3), value: appear)
-                    
-                    Spacer()
-                    // Terms and Privacy
+
                     VStack(spacing: 8) {
-                        Text("By continuing, you agree to our")
-                            .font(.footnote)
+                        Text("StyleMate")
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundColor(.primary)
+
+                        Text("Your AI-Powered Wardrobe")
+                            .font(.system(size: 16, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary)
-                        HStack(spacing: 4) {
-                            Link("Terms of Service", destination: URL(string: "https://your-terms-url.com")!)
-                            Text("and")
-                            Link("Privacy Policy", destination: URL(string: "https://your-privacy-url.com")!)
-                        }
-                        .font(.footnote)
                     }
-                    .padding(.bottom, 20)
+
+                    Text(selectedQuote)
+                        .font(.system(size: 15, weight: .regular, design: .rounded))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.accentColor, Color.pink.opacity(0.8)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .opacity(appear ? 1 : 0)
+                .offset(y: appear ? 0 : 30)
+                .animation(.easeOut(duration: 0.9), value: appear)
+
+                Spacer()
+
+                // MARK: - Sign In Buttons
+                VStack(spacing: 14) {
+                    SignInWithAppleButton(.signIn) { request in
+                        request.requestedScopes = [.fullName, .email]
+                    } onCompletion: { result in
+                        if let error = authService.handleAppleSignIn(result: result) {
+                            errorMessage = error
+                            showError = true
+                        }
+                    }
+                    .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                    .frame(height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    Button(action: { authService.handleGoogleSignIn() }) {
+                        HStack(spacing: 10) {
+                            GoogleLogoView()
+                                .frame(width: 20, height: 20)
+                            Text("Sign in with Google")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundColor(.primary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.white)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(colorScheme == .dark ? Color.white.opacity(0.2) : Color.black.opacity(0.15), lineWidth: 1)
+                        )
+                    }
+                }
+                .padding(.horizontal, 32)
+                .opacity(appear ? 1 : 0)
+                .offset(y: appear ? 0 : 20)
+                .animation(.easeOut(duration: 0.9).delay(0.15), value: appear)
+
+                Text("Your data stays private on this device")
+                    .font(.system(size: 13, weight: .regular, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 16)
                     .opacity(appear ? 1 : 0)
-                    .offset(y: appear ? 0 : 12)
-                    .animation(.easeOut(duration: 1.2).delay(0.4), value: appear)
+                    .animation(.easeOut(duration: 0.9).delay(0.25), value: appear)
+
+                Spacer()
+                    .frame(height: 24)
+
+                // MARK: - Legal
+                VStack(spacing: 4) {
+                    Text("By continuing, you agree to our")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 3) {
+                        Link("Terms of Service", destination: URL(string: "https://your-terms-url.com")!)
+                        Text("and")
+                            .foregroundStyle(.tertiary)
+                        Link("Privacy Policy", destination: URL(string: "https://your-privacy-url.com")!)
+                    }
+                    .font(.caption2)
                 }
-                .onAppear {
-                    appear = true
-                    selectedQuote = aiQuotes.shuffled().first ?? aiQuotes[0]
-                }
+                .padding(.bottom, 16)
+                .opacity(appear ? 1 : 0)
+                .animation(.easeOut(duration: 0.9).delay(0.35), value: appear)
             }
-            .gesture(
-                TapGesture().onEnded { _ in
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                }
-            )
-            .alert("Error", isPresented: $showError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(errorMessage)
-            }
+        }
+        .onAppear {
+            appear = true
+            pulseGlow = true
+            selectedQuote = aiQuotes.randomElement() ?? aiQuotes[0]
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage)
+        }
+    }
+}
+
+struct GoogleLogoView: View {
+    var body: some View {
+        Canvas { context, size in
+            let w = size.width
+            let h = size.height
+            let cx = w / 2
+            let cy = h / 2
+            let r = min(w, h) / 2 * 0.85
+
+            // Blue arc (top-right)
+            var blueArc = Path()
+            blueArc.addArc(center: CGPoint(x: cx, y: cy), radius: r, startAngle: .degrees(-45), endAngle: .degrees(-135), clockwise: true)
+            blueArc.addLine(to: CGPoint(x: cx, y: cy))
+            blueArc.closeSubpath()
+            context.fill(blueArc, with: .color(Color(red: 0.26, green: 0.52, blue: 0.96)))
+
+            // Green arc (bottom-right)
+            var greenArc = Path()
+            greenArc.addArc(center: CGPoint(x: cx, y: cy), radius: r, startAngle: .degrees(-45), endAngle: .degrees(45), clockwise: false)
+            greenArc.addLine(to: CGPoint(x: cx, y: cy))
+            greenArc.closeSubpath()
+            context.fill(greenArc, with: .color(Color(red: 0.20, green: 0.66, blue: 0.33)))
+
+            // Yellow arc (bottom-left)
+            var yellowArc = Path()
+            yellowArc.addArc(center: CGPoint(x: cx, y: cy), radius: r, startAngle: .degrees(45), endAngle: .degrees(135), clockwise: false)
+            yellowArc.addLine(to: CGPoint(x: cx, y: cy))
+            yellowArc.closeSubpath()
+            context.fill(yellowArc, with: .color(Color(red: 0.98, green: 0.74, blue: 0.02)))
+
+            // Red arc (top-left)
+            var redArc = Path()
+            redArc.addArc(center: CGPoint(x: cx, y: cy), radius: r, startAngle: .degrees(135), endAngle: .degrees(-135), clockwise: false)
+            redArc.addLine(to: CGPoint(x: cx, y: cy))
+            redArc.closeSubpath()
+            context.fill(redArc, with: .color(Color(red: 0.92, green: 0.26, blue: 0.21)))
+
+            // White inner circle
+            let innerR = r * 0.55
+            let innerCircle = Path(ellipseIn: CGRect(x: cx - innerR, y: cy - innerR, width: innerR * 2, height: innerR * 2))
+            context.fill(innerCircle, with: .color(.white))
+
+            // Blue bar (right side cutout for the "G" opening)
+            let barH = r * 0.3
+            let barRect = CGRect(x: cx, y: cy - barH / 2, width: r + 1, height: barH)
+            context.fill(Path(barRect), with: .color(Color(red: 0.26, green: 0.52, blue: 0.96)))
+
+            // White cutout above the bar
+            let cutoutRect = CGRect(x: cx + innerR * 0.2, y: cy - r, width: r, height: r - barH / 2)
+            context.fill(Path(cutoutRect), with: .color(.white))
         }
     }
 }
 
 #Preview {
     LoginView()
-} 
+}
