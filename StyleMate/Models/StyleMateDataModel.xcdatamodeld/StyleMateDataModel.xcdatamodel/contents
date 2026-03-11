@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23788" systemVersion="24E263" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithSwiftData="YES" userDefinedModelVersionIdentifier="">
-    <entity name="DatedOutfit" representedClassName="DatedOutfit" syncable="YES" codeGenerationType="manual/none">
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="24587" systemVersion="25D2128" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithSwiftData="NO" userDefinedModelVersionIdentifier="">
+    <entity name="DatedOutfit" representedClassName="DatedOutfit" syncable="YES" codeGenerationType="class">
         <attribute name="date" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="notes" optional="YES" attributeType="String"/>
         <attribute name="source" attributeType="String"/>
         <relationship name="items" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="OutfitItem" inverseName="datedOutfit" inverseEntity="OutfitItem"/>
     </entity>
-    <entity name="OutfitItem" representedClassName="OutfitItem" syncable="YES" codeGenerationType="manual/none">
+    <entity name="OutfitItem" representedClassName="OutfitItem" syncable="YES" codeGenerationType="class">
         <attribute name="brand" attributeType="String"/>
         <attribute name="category" attributeType="String"/>
         <attribute name="colors" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromData"/>
