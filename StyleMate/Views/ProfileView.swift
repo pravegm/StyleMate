@@ -3,6 +3,7 @@ import SwiftUI
 struct ProfileView: View {
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
+    @ObservedObject private var cloudKitService = CloudKitService.shared
     @State private var showingSignOutAlert = false
     @State private var showEmptyConfirmation = false
     @State private var showStyleSheet = false
@@ -10,6 +11,7 @@ struct ProfileView: View {
     @State private var showStyleError = false
     @State private var editGender: String = ""
     @State private var editAge: String = ""
+    @State private var iCloudAvailable = true
     let genderOptions = ["", "Male", "Female", "Other", "Prefer not to say"]
 
     private let maxStyles = 6
@@ -107,6 +109,60 @@ struct ProfileView: View {
                             .tint(DS.Colors.accent)
                     }
 
+                    Section("iCloud Backup") {
+                        HStack {
+                            Image(systemName: "icloud.fill")
+                                .foregroundColor(DS.Colors.accent)
+                            VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                                Text("iCloud Sync")
+                                    .font(DS.Font.body)
+                                    .foregroundColor(DS.Colors.textPrimary)
+                                if let lastSync = cloudKitService.lastSyncDate {
+                                    Text("Last synced \(lastSync, style: .relative) ago")
+                                        .font(DS.Font.caption1)
+                                        .foregroundColor(DS.Colors.textSecondary)
+                                } else {
+                                    Text("Not yet synced")
+                                        .font(DS.Font.caption1)
+                                        .foregroundColor(DS.Colors.textTertiary)
+                                }
+                            }
+                            Spacer()
+                            switch cloudKitService.syncStatus {
+                            case .syncing:
+                                ProgressView()
+                            case .success:
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(DS.Colors.success)
+                            case .error:
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(DS.Colors.warning)
+                            case .idle:
+                                EmptyView()
+                            }
+                        }
+
+                        Button("Backup Now") {
+                            Haptics.medium()
+                            wardrobeViewModel.backupToCloud()
+                        }
+                        .foregroundColor(DS.Colors.accent)
+                        .disabled(cloudKitService.syncStatus == .syncing)
+
+                        Button("Restore from iCloud") {
+                            Haptics.medium()
+                            Task { await wardrobeViewModel.restoreFromCloud() }
+                        }
+                        .foregroundColor(DS.Colors.accent)
+                        .disabled(cloudKitService.syncStatus == .syncing)
+
+                        if !iCloudAvailable {
+                            Text("Sign in to iCloud in Settings to enable backup.")
+                                .font(DS.Font.caption1)
+                                .foregroundColor(DS.Colors.textSecondary)
+                        }
+                    }
+
                     Section("Subscription") {
                         HStack {
                             Text("Plan")
@@ -156,6 +212,9 @@ struct ProfileView: View {
             }
             .tint(DS.Colors.accent)
             .navigationTitle("Profile")
+            .task {
+                iCloudAvailable = await CloudKitService.shared.checkAccountStatus()
+            }
             .alert("Sign Out", isPresented: $showingSignOutAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Sign Out", role: .destructive) { authService.signOut() }
@@ -166,6 +225,7 @@ struct ProfileView: View {
                 Button("Cancel", role: .cancel) {}
                 Button("Empty", role: .destructive) {
                     for item in wardrobeViewModel.items {
+                        wardrobeViewModel.deleteItemFromCloud(item)
                         WardrobeImageFileHelper.deleteImage(at: item.imagePath)
                         WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
                     }

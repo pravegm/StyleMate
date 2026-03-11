@@ -149,6 +149,14 @@ struct RootView: View {
                 wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
                 wardrobeVM.migrateBackgroundRemoval()
+
+                Task {
+                    await CloudKitService.shared.setupZone()
+                    let isAvailable = await CloudKitService.shared.checkAccountStatus()
+                    if isAvailable {
+                        await wardrobeVM.restoreFromCloud()
+                    }
+                }
             } else {
                 wardrobeVM.clear()
                 lastUserKey = ""
@@ -160,6 +168,14 @@ struct RootView: View {
                 wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
                 wardrobeVM.migrateBackgroundRemoval()
+
+                Task {
+                    await CloudKitService.shared.setupZone()
+                    let isAvailable = await CloudKitService.shared.checkAccountStatus()
+                    if isAvailable {
+                        await wardrobeVM.restoreFromCloud()
+                    }
+                }
             }
         }
     }
@@ -707,6 +723,7 @@ struct MultiAddNewItemView: View {
                     croppedImagePath: croppedImagePath
                 )
                 wardrobeViewModel.items.append(item)
+                wardrobeViewModel.syncItemToCloud(item)
             }
         }
         showSummary = true

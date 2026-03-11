@@ -63,6 +63,45 @@ class WardrobeViewModel: ObservableObject {
         currentUserEmail = ""
     }
 
+    // MARK: - iCloud Sync
+
+    func syncItemToCloud(_ item: WardrobeItem) {
+        guard !currentUserEmail.isEmpty else { return }
+        Task {
+            _ = await CloudKitService.shared.uploadItem(item, userID: currentUserEmail)
+        }
+    }
+
+    func deleteItemFromCloud(_ item: WardrobeItem) {
+        Task {
+            await CloudKitService.shared.deleteItem(id: item.id)
+        }
+    }
+
+    func backupToCloud() {
+        guard !currentUserEmail.isEmpty else { return }
+        Task {
+            await CloudKitService.shared.uploadAll(items: items, userID: currentUserEmail)
+        }
+    }
+
+    func restoreFromCloud() async {
+        guard !currentUserEmail.isEmpty else { return }
+        let cloudItems = await CloudKitService.shared.fetchAll(userID: currentUserEmail)
+        guard !cloudItems.isEmpty else { return }
+
+        await MainActor.run {
+            let localIDs = Set(items.map { $0.id })
+            let newItems = cloudItems.filter { !localIDs.contains($0.id) }
+            if !newItems.isEmpty {
+                suspendSaving = true
+                items.append(contentsOf: newItems)
+                suspendSaving = false
+                save(forUser: currentUserEmail)
+            }
+        }
+    }
+
     func migrateBackgroundRemoval() {
         let migrationKey = "bgRemovalMigrationComplete_\(currentUserEmail)"
         guard !UserDefaults.standard.bool(forKey: migrationKey) else {

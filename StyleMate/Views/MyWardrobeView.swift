@@ -63,6 +63,7 @@ struct MyWardrobeView: View {
                     EditWardrobeItemView(item: editingItem) { updatedItem in
                         if let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == updatedItem.id }) {
                             wardrobeViewModel.items[idx] = updatedItem
+                            wardrobeViewModel.syncItemToCloud(updatedItem)
                         }
                         self.showEditSheet = false
                         self.editingItem = nil
@@ -252,6 +253,7 @@ struct CategoryDetailView: View {
                                             }
                                             Button(role: .destructive) {
                                                 if let idx = wardrobeViewModel.items.firstIndex(of: item) {
+                                                    wardrobeViewModel.deleteItemFromCloud(item)
                                                     WardrobeImageFileHelper.deleteImage(at: item.imagePath)
                                                     WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
                                                     wardrobeViewModel.items.remove(at: idx)
@@ -289,6 +291,7 @@ struct CategoryDetailView: View {
             EditWardrobeItemView(item: item) { updatedItem in
                 if let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == updatedItem.id }) {
                     wardrobeViewModel.items[idx] = updatedItem
+                    wardrobeViewModel.syncItemToCloud(updatedItem)
                 }
                 editingItem = nil
             }
@@ -361,6 +364,7 @@ struct CategoryDetailView: View {
             await MainActor.run {
                 if let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == item.id }) {
                     wardrobeViewModel.items[idx] = updatedItem
+                    wardrobeViewModel.syncItemToCloud(updatedItem)
                 }
                 replacePhotoItem = nil
                 isReplacingPhoto = false
