@@ -42,4 +42,5 @@ struct MainTabView: View {
     MainTabView(showAddSheet: .constant(false))
         .environmentObject(WardrobeViewModel())
         .environmentObject(AuthService())
+        .environmentObject(MyOutfitsViewModel())
 }

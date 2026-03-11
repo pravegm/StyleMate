@@ -45,6 +45,7 @@ struct CapturedImage: Identifiable {
 struct RootView: View {
     @EnvironmentObject var authService: AuthService
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
+    @StateObject private var outfitsVM = MyOutfitsViewModel()
     @State private var lastUserKey: String = ""
     @State private var showAddSheet: Bool = false
     @State private var activeAddFlow: AddFlow?
@@ -68,6 +69,7 @@ struct RootView: View {
             Group {
                 if authService.isAuthenticated {
                     MainTabViewWrapper(showAddSheet: $showAddSheet)
+                        .environmentObject(outfitsVM)
                 } else {
                     LoginView()
                 }

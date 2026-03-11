@@ -5,7 +5,7 @@ struct IdentifiableDate: Identifiable, Equatable {
 }
 
 struct MyOutfitsView: View {
-    @StateObject private var viewModel = MyOutfitsViewModel()
+    @EnvironmentObject var viewModel: MyOutfitsViewModel
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var showAddSheet = false
     @EnvironmentObject var wardrobeVM: WardrobeViewModel

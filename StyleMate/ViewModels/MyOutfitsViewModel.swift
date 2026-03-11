@@ -27,9 +27,10 @@ class MyOutfitsViewModel: ObservableObject {
     }
     
     func addOutfit(date: Date, items: [WardrobeItem], source: String, notes: String? = nil) {
+        let normalizedDate = Calendar.current.startOfDay(for: date)
         let datedOutfit = DatedOutfit(context: context)
         datedOutfit.id = UUID()
-        datedOutfit.date = date
+        datedOutfit.date = normalizedDate
         datedOutfit.source = source
         datedOutfit.notes = notes
         let outfitItems = items.map { item -> OutfitItem in

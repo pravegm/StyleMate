@@ -3,7 +3,7 @@ import CoreLocation
 
 struct HomeView: View {
     @StateObject private var homeVM = HomeViewModel()
-    @StateObject private var outfitsVM = MyOutfitsViewModel()
+    @EnvironmentObject var outfitsVM: MyOutfitsViewModel
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var authService: AuthService
     @State private var loadingProgress: Double = 0.0
