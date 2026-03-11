@@ -6,8 +6,7 @@ struct OutfitItemSelectionList: View {
     @Binding var expandedProducts: Set<String>
     @Binding var previewImage: PreviewImage?
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
-    
-    // Helper to group items by category and product
+
     private var groupedItems: [(category: Category, products: [(product: String, items: [WardrobeItem])])] {
         let itemsByCategory = Dictionary(grouping: wardrobeVM.items, by: { $0.category })
         return Category.allCases.compactMap { category in
@@ -20,18 +19,23 @@ struct OutfitItemSelectionList: View {
     }
 
     var body: some View {
-        ForEach(groupedItems, id: \ .category) { group in
-            VStack(alignment: .leading, spacing: 8) {
-                CategoryCardView(category: group.category, isExpanded: expandedCategories.contains(group.category), onToggle: {
-                    if expandedCategories.contains(group.category) {
-                        expandedCategories.remove(group.category)
-                    } else {
-                        expandedCategories.insert(group.category)
+        ForEach(groupedItems, id: \.category) { group in
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                CategoryCardView(
+                    category: group.category,
+                    isExpanded: expandedCategories.contains(group.category),
+                    onToggle: {
+                        if expandedCategories.contains(group.category) {
+                            expandedCategories.remove(group.category)
+                        } else {
+                            expandedCategories.insert(group.category)
+                        }
                     }
-                })
+                )
+
                 if expandedCategories.contains(group.category) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(group.products, id: \ .product) { productGroup in
+                    VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                        ForEach(group.products, id: \.product) { productGroup in
                             ProductGroupView(
                                 category: group.category,
                                 product: productGroup.product,
@@ -50,10 +54,9 @@ struct OutfitItemSelectionList: View {
                             )
                         }
                     }
-                    .padding(.leading, 8)
+                    .padding(.leading, DS.Spacing.xs)
                 }
             }
-            .padding(.bottom, 2)
         }
     }
-} 
+}

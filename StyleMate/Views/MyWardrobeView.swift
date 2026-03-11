@@ -2,73 +2,60 @@ import SwiftUI
 
 struct MyWardrobeView: View {
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
-    private let columns = [GridItem(.adaptive(minimum: 140), spacing: 16)]
+    @Binding var showAddSheet: Bool
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: DS.Spacing.sm)]
     @State private var selectedCategory: Category?
-    @State private var showPhotoPicker = false
-    @State private var selectedImages: [UIImage] = []
-    @State private var showReviewBatch = false
     @State private var editingItem: WardrobeItem? = nil
     @State private var showEditSheet = false
-    
+
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .center, spacing: 8) {
-                    Text("My Wardrobe")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-                        .padding(.leading, 20)
-                    ZStack {
-                        Circle()
-                            .fill(Color.accentColor)
-                            .frame(width: 28, height: 28)
-                        Text("\(wardrobeViewModel.items.count)")
-                            .font(.subheadline.bold())
-                            .foregroundColor(.white)
-                            .accessibilityLabel("\(wardrobeViewModel.items.count) items in wardrobe")
-                    }
-                    .padding(.trailing, 4)
-                    .accessibilityElement(children: .combine)
-                    Spacer()
-                }
-                .padding(.top, 16)
-                .padding(.bottom, 8)
+            ZStack(alignment: .bottomTrailing) {
+                DS.Colors.backgroundPrimary.ignoresSafeArea()
+
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 16) {
+                    LazyVGrid(columns: columns, spacing: DS.Spacing.sm) {
                         ForEach(Category.allCases) { category in
                             let count = wardrobeViewModel.items.filter { $0.category == category }.count
-                            Button {
-                                selectedCategory = category
-                            } label: {
+                            Button { selectedCategory = category } label: {
                                 CategoryTile(category: category, count: count)
                             }
-                            .accessibilityLabel("\(category.rawValue) category tile")
+                            .buttonStyle(.plain)
                         }
                     }
-                    .padding()
-                    .padding(.bottom, 120)
+                    .padding(.horizontal, DS.Spacing.screenH)
+                    .padding(.top, DS.Spacing.md)
+                    .padding(.bottom, 100)
                 }
-            }
-            .sheet(isPresented: $showPhotoPicker, onDismiss: {
-                if !selectedImages.isEmpty {
-                    showReviewBatch = true
+
+                // Floating Add Button
+                Button {
+                    Haptics.medium()
+                    showAddSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 56, height: 56)
+                        .background(DS.Colors.accent)
+                        .clipShape(Circle())
+                        .shadow(color: DS.Colors.accent.opacity(0.3), radius: 8, x: 0, y: 4)
                 }
-            }) {
-                PhotoPicker(images: $selectedImages, selectionLimit: 0)
+                .padding(.trailing, DS.Spacing.screenH)
+                .padding(.bottom, DS.Spacing.lg)
             }
-            .sheet(isPresented: $showReviewBatch, onDismiss: {
-                selectedImages = []
-            }) {
-                MultiAddNewItemView(images: selectedImages, isPresented: $showReviewBatch)
-                    .environmentObject(wardrobeViewModel)
+            .navigationTitle("Wardrobe")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Text("\(wardrobeViewModel.items.count) items")
+                        .font(DS.Font.subheadline)
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
             }
             .sheet(isPresented: Binding(
                 get: { showEditSheet && editingItem != nil },
                 set: { newValue in
-                    if !newValue {
-                        showEditSheet = false
-                        editingItem = nil
-                    }
+                    if !newValue { showEditSheet = false; editingItem = nil }
                 }
             )) {
                 if let editingItem = editingItem {
@@ -89,114 +76,84 @@ struct MyWardrobeView: View {
     }
 }
 
-// Helper for category icon and color
+// MARK: - Category Icon Mapping
+
 extension Category {
     var iconName: String {
         switch self {
-        case .tops: return "tshirt"
-        case .bottoms: return "figure.stand"
-        case .midLayers: return "wind"
-        case .outerwear: return "cloud.rain"
-        case .onePieces: return "figure.dance"
-        case .footwear: return "shoeprints.fill"
+        case .tops:       return "tshirt"
+        case .bottoms:    return "figure.stand"
+        case .midLayers:  return "wind"
+        case .outerwear:  return "cloud.rain"
+        case .onePieces:  return "figure.dance"
+        case .footwear:   return "shoeprints.fill"
         case .accessories: return "suitcase"
-        case .innerwear: return "bed.double"
+        case .innerwear:  return "bed.double"
         case .activewear: return "figure.run"
         case .ethnicWear: return "sparkles"
         }
     }
-    var tileColor: Color {
-        switch self {
-        case .tops: return Color.blue.opacity(0.15)
-        case .bottoms: return Color.green.opacity(0.15)
-        case .midLayers: return Color.cyan.opacity(0.15)
-        case .outerwear: return Color.gray.opacity(0.15)
-        case .onePieces: return Color.purple.opacity(0.15)
-        case .footwear: return Color.orange.opacity(0.15)
-        case .accessories: return Color.pink.opacity(0.15)
-        case .innerwear: return Color.indigo.opacity(0.15)
-        case .activewear: return Color.mint.opacity(0.15)
-        case .ethnicWear: return Color.yellow.opacity(0.15)
-        }
-    }
-    var iconColor: Color {
-        switch self {
-        case .tops: return .blue
-        case .bottoms: return .green
-        case .midLayers: return .cyan
-        case .outerwear: return .gray
-        case .onePieces: return .purple
-        case .footwear: return .orange
-        case .accessories: return .pink
-        case .innerwear: return .indigo
-        case .activewear: return .mint
-        case .ethnicWear: return .yellow
-        }
-    }
 }
+
+// MARK: - Category Tile
 
 struct CategoryTile: View {
     let category: Category
     let count: Int
+
     var body: some View {
-        VStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(category.tileColor)
-                    .frame(width: 80, height: 80)
-                    .shadow(color: category.iconColor.opacity(0.15), radius: 6, x: 0, y: 4)
-                Image(systemName: category.iconName)
-                    .font(.system(size: 38, weight: .semibold))
-                    .foregroundColor(category.iconColor)
-            }
+        VStack(spacing: DS.Spacing.sm) {
+            Image(systemName: category.iconName)
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundColor(DS.Colors.accent)
+
             Text(category.rawValue)
-                .font(.headline)
-                .foregroundColor(.primary)
+                .font(DS.Font.headline)
+                .foregroundColor(DS.Colors.textPrimary)
                 .multilineTextAlignment(.center)
+                .lineLimit(2)
+
             Text("\(count) item\(count == 1 ? "" : "s")")
-                .font(.body)
-                .foregroundColor(.primary)
-                .accessibilityLabel("\(count) \(category.rawValue) items")
+                .font(DS.Font.subheadline)
+                .foregroundColor(DS.Colors.textSecondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(10)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 2)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(category.rawValue) category tile, \(count) item\(count == 1 ? "" : "s")")
+        .padding(DS.Spacing.md)
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+        .dsCardShadow()
     }
 }
 
-// Wrapper for image preview
+// MARK: - Preview Image Wrapper
+
 struct PreviewImage: Identifiable {
     let id = UUID()
     let image: UIImage
 }
 
+// MARK: - Category Detail View (Photo Grid)
+
 struct CategoryDetailView: View {
     let category: Category
     var initialProduct: String? = nil
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
+
     var items: [WardrobeItem] {
         wardrobeViewModel.items.filter { $0.category == category }
     }
+
     @State private var previewImage: PreviewImage? = nil
     @State private var editingItem: WardrobeItem? = nil
-    @State private var expandedProducts: Set<String> = []
-    @State private var hasAutoExpanded: Bool = false
 
-    // Helper to normalize product names (lowercase, singularize)
     private func normalizedProduct(_ product: String) -> String {
         let lower = product.lowercased().trimmingCharacters(in: .whitespaces)
-        if lower.hasSuffix("s") && lower.count > 1 {
-            return String(lower.dropLast())
-        }
+        if lower.hasSuffix("s") && lower.count > 1 { return String(lower.dropLast()) }
         return lower
     }
+
     var groupedItems: [(product: String, items: [WardrobeItem])] {
         let groups = Dictionary(grouping: items, by: { normalizedProduct($0.product) })
-        // For display, pick the most common form (or the first) for the group header
         return groups.map { (normKey, items) in
             let display = items.map { $0.product }
                 .reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
@@ -206,103 +163,83 @@ struct CategoryDetailView: View {
         .sorted { $0.product.localizedCaseInsensitiveCompare($1.product) == .orderedAscending }
     }
 
+    private let photoColumns = [GridItem(.adaptive(minimum: 150), spacing: DS.Spacing.sm)]
+
     var body: some View {
         Group {
             if items.isEmpty {
-                VStack(spacing: 16) {
-                    Text(emptyStateEmoji(for: category))
+                VStack(spacing: DS.Spacing.md) {
+                    Image(systemName: category.iconName)
                         .font(.system(size: 48))
-                        .padding(.bottom, 2)
-                    Text("No \(category.rawValue) yet!")
-                        .font(.title3.bold())
-                        .foregroundColor(.accentColor)
-                    Text("Start building your wardrobe by adding your first \(category.rawValue.lowercased()) item.\nTap the + button to get started!")
-                        .font(.body)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(DS.Colors.textTertiary)
+
+                    Text("No \(category.rawValue) yet")
+                        .font(DS.Font.title3)
+                        .foregroundColor(DS.Colors.textPrimary)
+
+                    Text("Add your first \(category.rawValue.lowercased()) item to get started.")
+                        .font(DS.Font.body)
+                        .foregroundColor(DS.Colors.textSecondary)
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, 60)
-                .background(Color.clear)
+                .padding(.top, DS.Spacing.xxxl)
             } else {
-                List {
-                    ForEach(groupedItems, id: \.product) { group in
-                        Section(header:
-                            HStack {
-                                Text(group.product)
-                                    .font(.headline)
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.accentColor)
-                                        .frame(width: 22, height: 22)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                        ForEach(groupedItems, id: \.product) { group in
+                            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                                HStack {
+                                    Text(group.product)
+                                        .font(DS.Font.headline)
+                                        .foregroundColor(DS.Colors.textPrimary)
+
                                     Text("\(group.items.count)")
-                                        .font(.body.bold())
-                                        .foregroundColor(.white)
-                                        .accessibilityLabel("\(group.items.count) items")
+                                        .font(DS.Font.caption1)
+                                        .foregroundColor(DS.Colors.textSecondary)
+                                        .padding(.horizontal, DS.Spacing.xs)
+                                        .padding(.vertical, DS.Spacing.micro)
+                                        .background(DS.Colors.backgroundSecondary)
+                                        .clipShape(Capsule())
                                 }
-                                .accessibilityLabel("\(group.items.count) items")
-                                Spacer()
-                                Button(action: {
-                                    if expandedProducts.contains(group.product) {
-                                        expandedProducts.remove(group.product)
-                                    } else {
-                                        expandedProducts.insert(group.product)
-                                    }
-                                }) {
-                                    Image(systemName: expandedProducts.contains(group.product) ? "chevron.down" : "chevron.right")
-                                        .foregroundColor(.accentColor)
-                                }
-                                .buttonStyle(BorderlessButtonStyle())
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if expandedProducts.contains(group.product) {
-                                    expandedProducts.remove(group.product)
-                                } else {
-                                    expandedProducts.insert(group.product)
-                                }
-                            }
-                        ) {
-                            if expandedProducts.contains(group.product) {
-                                ForEach(group.items) { item in
-                                    HStack {
+
+                                LazyVGrid(columns: photoColumns, spacing: DS.Spacing.sm) {
+                                    ForEach(group.items) { item in
                                         Button {
-                                            if let previewImg = item.croppedImage ?? item.image {
-                                                previewImage = PreviewImage(image: previewImg)
+                                            if let img = item.croppedImage ?? item.image {
+                                                previewImage = PreviewImage(image: img)
                                             }
                                         } label: {
-                                            HStack {
-                                                if let cropped = item.croppedImage {
-                                                    Image(uiImage: cropped)
+                                            VStack(spacing: DS.Spacing.xs) {
+                                                if let img = item.croppedImage ?? item.image {
+                                                    Image(uiImage: img)
                                                         .resizable()
                                                         .scaledToFill()
-                                                        .frame(width: 60, height: 60)
+                                                        .frame(height: 140)
                                                         .clipped()
-                                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                                } else if let original = item.image {
-                                                    Image(uiImage: original)
-                                                        .resizable()
-                                                        .scaledToFill()
-                                                        .frame(width: 60, height: 60)
-                                                        .clipped()
-                                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
                                                 } else {
-                                                    Rectangle()
-                                                        .fill(Color.gray)
-                                                        .frame(width: 60, height: 60)
-                                                        .overlay(Text("No Image").font(.caption2))
-                                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                    RoundedRectangle(cornerRadius: DS.Radius.button)
+                                                        .fill(DS.Colors.backgroundSecondary)
+                                                        .frame(height: 140)
+                                                        .overlay(
+                                                            Image(systemName: "photo")
+                                                                .foregroundColor(DS.Colors.textTertiary)
+                                                        )
                                                 }
-                                                VStack(alignment: .leading) {
-                                                    Text(item.name)
-                                                        .font(.headline)
-                                                    Text(item.pattern.rawValue)
-                                                        .font(.subheadline)
-                                                        .foregroundColor(.secondary)
-                                                }
+
+                                                Text(item.name)
+                                                    .font(DS.Font.caption1)
+                                                    .foregroundColor(DS.Colors.textSecondary)
+                                                    .lineLimit(2)
+                                                    .multilineTextAlignment(.center)
                                             }
                                         }
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                        .buttonStyle(.plain)
+                                        .contextMenu {
+                                            Button { editingItem = item } label: {
+                                                Label("Edit", systemImage: "pencil")
+                                            }
                                             Button(role: .destructive) {
                                                 if let idx = wardrobeViewModel.items.firstIndex(of: item) {
                                                     WardrobeImageFileHelper.deleteImage(at: item.imagePath)
@@ -312,35 +249,19 @@ struct CategoryDetailView: View {
                                             } label: {
                                                 Label("Delete", systemImage: "trash")
                                             }
-                                            .tint(.red)
-                                            Button {
-                                                editingItem = item
-                                            } label: {
-                                                Label("Edit", systemImage: "pencil")
-                                            }
-                                            .tint(.blue)
                                         }
                                     }
                                 }
                             }
                         }
                     }
+                    .padding(.horizontal, DS.Spacing.screenH)
+                    .padding(.top, DS.Spacing.md)
+                    .padding(.bottom, DS.Spacing.xxxl)
                 }
             }
         }
-        .onAppear {
-            if let initial = initialProduct, !hasAutoExpanded {
-                // Try to expand the matching product group
-                if let match = groupedItems.first(where: { $0.product.localizedCaseInsensitiveCompare(initial) == .orderedSame }) {
-                    expandedProducts.insert(match.product)
-                } else if let match = groupedItems.first(where: { normalizedProduct($0.product) == normalizedProduct(initial) }) {
-                    expandedProducts.insert(match.product)
-                }
-                hasAutoExpanded = true
-            } else {
-                expandedProducts = [] // All collapsed by default
-            }
-        }
+        .background(DS.Colors.backgroundPrimary)
         .navigationTitle(category.rawValue)
         .sheet(item: $previewImage) { wrapper in
             VStack {
@@ -349,8 +270,9 @@ struct CategoryDetailView: View {
                     .padding()
                 Spacer()
                 Button("Close") { previewImage = nil }
-                    .font(.headline)
-                    .padding()
+                    .buttonStyle(DSSecondaryButton())
+                    .padding(.horizontal, DS.Spacing.screenH)
+                    .padding(.bottom, DS.Spacing.lg)
             }
         }
         .sheet(item: $editingItem) { item in
@@ -362,36 +284,22 @@ struct CategoryDetailView: View {
             }
         }
     }
-
-    private func emptyStateEmoji(for category: Category) -> String {
-        switch category {
-        case .tops: return "👚"
-        case .bottoms: return "👖"
-        case .onePieces: return "👗"
-        case .footwear: return "👟"
-        case .accessories: return "🕶️"
-        case .innerwear: return "🩲"
-        case .ethnicWear: return "🥻"
-        case .midLayers: return "🌬️"
-        case .outerwear: return "🌧️"
-        case .activewear: return "🏃"
-        }
-    }
 }
 
-// ZoomableImage view for pinch-to-zoom support
+// MARK: - Zoomable Image
+
 struct ZoomableImage: View {
     let image: UIImage
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
+
     var body: some View {
         GeometryReader { geometry in
             let frameSize = geometry.size
             let imageAspect = image.size.width / image.size.height
             let frameAspect = frameSize.width / frameSize.height
-            // Calculate the displayed image size (fit)
             let (displayWidth, displayHeight): (CGFloat, CGFloat) = {
                 if imageAspect > frameAspect {
                     return (frameSize.width, frameSize.width / imageAspect)
@@ -405,6 +313,7 @@ struct ZoomableImage: View {
                 width: min(max(offset.width, -maxOffsetX), maxOffsetX),
                 height: min(max(offset.height, -maxOffsetY), maxOffsetY)
             )
+
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()
@@ -426,16 +335,16 @@ struct ZoomableImage: View {
                         DragGesture()
                             .onChanged { value in
                                 guard scale > 1 else { return }
-                                let newOffset = CGSize(width: lastOffset.width + value.translation.width, height: lastOffset.height + value.translation.height)
-                                offset = newOffset
+                                offset = CGSize(
+                                    width: lastOffset.width + value.translation.width,
+                                    height: lastOffset.height + value.translation.height
+                                )
                             }
-                            .onEnded { value in
+                            .onEnded { _ in
                                 guard scale > 1 else { offset = .zero; lastOffset = .zero; return }
-                                let maxX = max(0, (displayWidth * scale - frameSize.width) / 2)
-                                let maxY = max(0, (displayHeight * scale - frameSize.height) / 2)
                                 let clamped = CGSize(
-                                    width: min(max(offset.width, -maxX), maxX),
-                                    height: min(max(offset.height, -maxY), maxY)
+                                    width: min(max(offset.width, -maxOffsetX), maxOffsetX),
+                                    height: min(max(offset.height, -maxOffsetY), maxOffsetY)
                                 )
                                 offset = clamped
                                 lastOffset = clamped
@@ -449,5 +358,6 @@ struct ZoomableImage: View {
 }
 
 #Preview {
-    MyWardrobeView().environmentObject(WardrobeViewModel())
-} 
+    MyWardrobeView(showAddSheet: .constant(false))
+        .environmentObject(WardrobeViewModel())
+}

@@ -4,22 +4,24 @@ struct ItemRowView: View {
     let item: WardrobeItem
     @Binding var selectedItems: Set<WardrobeItem>
     @Binding var previewImage: PreviewImage?
-    
+
     private func toggleSelection() {
+        Haptics.light()
         if selectedItems.contains(item) {
             selectedItems.remove(item)
         } else if selectedItems.count < 10 {
             selectedItems.insert(item)
         }
     }
-    
+
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DS.Spacing.sm) {
             Button(action: toggleSelection) {
                 Image(systemName: selectedItems.contains(item) ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundColor(selectedItems.contains(item) ? .accentColor : .secondary)
+                    .font(DS.Font.title3)
+                    .foregroundColor(selectedItems.contains(item) ? DS.Colors.accent : DS.Colors.textTertiary)
             }
+
             Button(action: {
                 if let img = item.croppedImage ?? item.image {
                     previewImage = PreviewImage(image: img)
@@ -28,27 +30,28 @@ struct ItemRowView: View {
                 if let img = item.croppedImage ?? item.image {
                     Image(uiImage: img)
                         .resizable()
-                        .frame(width: 40, height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
                 } else {
-                    Rectangle()
-                        .fill(Color.gray)
-                        .frame(width: 40, height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    RoundedRectangle(cornerRadius: DS.Radius.button)
+                        .fill(DS.Colors.backgroundSecondary)
+                        .frame(width: 44, height: 44)
                 }
             }
             .buttonStyle(PlainButtonStyle())
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
-                    .font(.body.bold())
-                    .foregroundColor(.primary)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture { toggleSelection() }
+
+            Text(item.name)
+                .font(DS.Font.body)
+                .foregroundColor(DS.Colors.textPrimary)
+                .contentShape(Rectangle())
+                .onTapGesture { toggleSelection() }
+
             Spacer()
         }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 12).fill(selectedItems.contains(item) ? Color.accentColor.opacity(0.09) : Color(.systemGray6)))
-        .shadow(color: selectedItems.contains(item) ? Color.accentColor.opacity(0.10) : Color.clear, radius: 2, x: 0, y: 1)
+        .padding(DS.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: DS.Radius.card)
+                .fill(selectedItems.contains(item) ? DS.Colors.accent.opacity(0.08) : DS.Colors.backgroundSecondary)
+        )
     }
 }

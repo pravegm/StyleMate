@@ -1,87 +1,31 @@
 import SwiftUI
 
-struct ProductCategoryKey: Hashable {
-    let product: String
-    let category: Category
-}
-
-struct ProductSummary: Hashable {
-    let product: String
-    let count: Int
-    let category: Category
-}
-
 struct WardrobeSummaryWidget: View {
     let items: [WardrobeItem]
     var onSummaryTap: ((Category, String) -> Void)? = nil
-    var productCounts: [ProductSummary] {
-        let grouped = Dictionary(grouping: items, by: { ProductCategoryKey(product: $0.product, category: $0.category) })
-        return grouped.map { (key, value) in
-            ProductSummary(product: key.product, count: value.count, category: key.category)
-        }
-        .sorted { $0.product < $1.product }
-    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text("Your Wardrobe at a Glance")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                Text("✨")
-                    .font(.title2)
+        if items.isEmpty {
+            HStack(spacing: DS.Spacing.xs) {
+                Image(systemName: "hanger")
+                    .foregroundColor(DS.Colors.textTertiary)
+                Text("Your wardrobe is empty — add your first item!")
+                    .font(DS.Font.subheadline)
+                    .foregroundColor(DS.Colors.textSecondary)
             }
-            if productCounts.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Your wardrobe is looking a little empty...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text("Add your first item to get started!")
-                        .font(.footnote)
-                        .foregroundColor(.accentColor)
-                }
-                .padding(.vertical, 8)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(productCounts, id: \.self) { summary in
-                            let icon = summary.category.iconName
-                            let color = summary.category.iconColor
-                            Button(action: {
-                                onSummaryTap?(summary.category, summary.product)
-                            }) {
-                                HStack(spacing: 8) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(color.opacity(0.13))
-                                            .frame(width: 32, height: 32)
-                                        Image(systemName: icon)
-                                            .font(.system(size: 18, weight: .semibold))
-                                            .foregroundColor(color)
-                                    }
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        Text("\(summary.count) \(summary.product)")
-                                            .font(.subheadline.bold())
-                                            .foregroundColor(color)
-                                    }
-                                }
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 14)
-                                .background(
-                                    BlurView(style: .systemMaterial)
-                                        .clipShape(Capsule())
-                                        .opacity(0.85)
-                                )
-                                .clipShape(Capsule())
-                                .shadow(color: color.opacity(0.08), radius: 4, x: 0, y: 2)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
+        } else {
+            HStack(spacing: DS.Spacing.xs) {
+                Image(systemName: "tshirt")
+                    .foregroundColor(DS.Colors.accent)
+                Text("\(items.count) item\(items.count == 1 ? "" : "s") in your wardrobe")
+                    .font(DS.Font.subheadline)
+                    .foregroundColor(DS.Colors.textSecondary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.textTertiary)
             }
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 8)
     }
-} 
+}

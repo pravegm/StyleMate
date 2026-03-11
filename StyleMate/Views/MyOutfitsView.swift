@@ -9,105 +9,83 @@ struct MyOutfitsView: View {
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var showAddSheet = false
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
-    
+
     var body: some View {
         ZStack {
-            // Soft gradient background
-            LinearGradient(
-                colors: [Color.pink.opacity(0.13), Color.blue.opacity(0.13), Color.yellow.opacity(0.13)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .center) {
-                    Text("My Outfits")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-                        .padding(.leading, 20)
-                    Spacer()
-                }
-                .padding(.top, 16)
-                .padding(.bottom, 8)
-                Text("See, add, and manage your looks")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 20)
-                    .padding(.bottom, 8)
-                ScrollView {
-                    VStack(spacing: 24) {
-                        // Today's Outfits Card
-                        HomeCard {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Today's Outfits")
-                                    .font(.title2.bold())
-                                    .foregroundColor(.accentColor)
-                                    .padding(.bottom, 2)
-                                if let todaysOutfits = viewModel.outfitsByDate[Calendar.current.startOfDay(for: Date())], !todaysOutfits.isEmpty {
-                                    VStack(spacing: 16) {
-                                        ForEach(todaysOutfits, id: \.objectID) { outfit in
-                                            OutfitCardView(outfit: outfit, viewModel: viewModel)
-                                                .environmentObject(wardrobeVM)
-                                        }
-                                    }
-                                } else {
-                                    Text("No outfit mapped for today. Add one!")
-                                        .foregroundColor(.secondary)
-                                        .padding(.bottom, 8)
-                                }
+            DS.Colors.backgroundPrimary.ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                    // Header
+                    Text("Outfits")
+                        .font(DS.Font.largeTitle)
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .padding(.top, DS.Spacing.md)
+
+                    Text("See, add, and manage your looks")
+                        .font(DS.Font.subheadline)
+                        .foregroundColor(DS.Colors.textSecondary)
+
+                    // Today's Outfits
+                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                        Text("Today's Outfits")
+                            .font(DS.Font.title3)
+                            .foregroundColor(DS.Colors.textPrimary)
+
+                        if let todaysOutfits = viewModel.outfitsByDate[Calendar.current.startOfDay(for: Date())], !todaysOutfits.isEmpty {
+                            ForEach(todaysOutfits, id: \.objectID) { outfit in
+                                OutfitCardView(outfit: outfit, viewModel: viewModel)
+                                    .environmentObject(wardrobeVM)
                             }
+                        } else {
+                            Text("No outfit for today — add one!")
+                                .font(DS.Font.body)
+                                .foregroundColor(DS.Colors.textTertiary)
+                                .padding(.vertical, DS.Spacing.xs)
                         }
-                        // Calendar Card
-                        HomeCard {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Outfit Calendar")
-                                    .font(.title2.bold())
-                                    .foregroundColor(.accentColor)
-                                    .padding(.bottom, 2)
-                                CalendarGridView(
-                                    selectedDate: $selectedDate,
-                                    datesWithOutfits: Set(viewModel.outfitsByDate.keys)
-                                )
-                            }
-                            .padding(.bottom, 2)
+                    }
+
+                    // Calendar
+                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                        Text("Outfit Calendar")
+                            .font(DS.Font.title3)
+                            .foregroundColor(DS.Colors.textPrimary)
+
+                        CalendarGridView(
+                            selectedDate: $selectedDate,
+                            datesWithOutfits: Set(viewModel.outfitsByDate.keys)
+                        )
+                        .padding(DS.Spacing.md)
+                        .background(DS.Colors.backgroundCard)
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+                        .dsCardShadow()
+                    }
+
+                    // Add Outfit Button
+                    Button(action: { showAddSheet = true }) {
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image(systemName: "plus")
+                            Text("Add Outfit to Selected Date")
                         }
-                        // Add Outfit Button Card
-                        HomeCard {
-                            Button(action: {
-                                showAddSheet = true
-                            }) {
-                                Label("Add Outfit to Selected Date", systemImage: "plus")
-                                    .font(.headline)
-                                    .padding()
-                                    .frame(maxWidth: .infinity)
-                                    .background(
-                                        LinearGradient(colors: [Color.accentColor, Color.pink.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
-                                    )
-                                    .foregroundColor(.white)
-                                    .cornerRadius(12)
-                            }
-                            .padding(.horizontal, 2)
-                            .padding(.vertical, 2)
-                        }
-                        // Outfits for selected date (if any)
-                        if let outfits = viewModel.outfitsByDate[selectedDate], !outfits.isEmpty {
-                            HomeCard {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Outfits for \(dateFormatter.string(from: selectedDate))")
-                                        .font(.title3.bold())
-                                        .foregroundColor(.accentColor)
-                                    ForEach(outfits, id: \.objectID) { outfit in
-                                        OutfitCardView(outfit: outfit, viewModel: viewModel)
-                                            .environmentObject(wardrobeVM)
-                                    }
-                                }
+                    }
+                    .buttonStyle(DSPrimaryButton())
+
+                    // Outfits for selected date
+                    if let outfits = viewModel.outfitsByDate[selectedDate], !outfits.isEmpty {
+                        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                            Text("Outfits for \(dateFormatter.string(from: selectedDate))")
+                                .font(DS.Font.headline)
+                                .foregroundColor(DS.Colors.textPrimary)
+
+                            ForEach(outfits, id: \.objectID) { outfit in
+                                OutfitCardView(outfit: outfit, viewModel: viewModel)
+                                    .environmentObject(wardrobeVM)
                             }
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 0)
-                    .padding(.bottom, 120)
                 }
+                .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.bottom, 100)
             }
         }
         .sheet(isPresented: $showAddSheet) {
@@ -118,6 +96,8 @@ struct MyOutfitsView: View {
         }
     }
 }
+
+// MARK: - Add Outfit Sheet
 
 struct AddOutfitSheet: View {
     let selectedDate: Date
@@ -132,8 +112,7 @@ struct AddOutfitSheet: View {
     @State private var expandedCategories: Set<Category> = []
     @State private var expandedProducts: Set<String> = []
     @State private var previewImage: PreviewImage? = nil
-    
-    // Helper to group items by category and product
+
     private var groupedItems: [(category: Category, products: [(product: String, items: [WardrobeItem])])] {
         let itemsByCategory = Dictionary(grouping: wardrobeVM.items, by: { $0.category })
         return Category.allCases.compactMap { category in
@@ -144,36 +123,35 @@ struct AddOutfitSheet: View {
             return (category: category, products: products)
         }
     }
-    
+
     public init(selectedDate: Date, initialItems: [OutfitItem]? = nil, initialNotes: String? = nil, onSave: @escaping ([WardrobeItem], String?) -> Void) {
         self.selectedDate = selectedDate
         self.onSave = onSave
         self.initialItems = initialItems
         self.initialNotes = initialNotes
     }
-    
+
     var body: some View {
         NavigationView {
             ZStack(alignment: .bottom) {
+                DS.Colors.backgroundPrimary.ignoresSafeArea()
+
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.md) {
                         Text("Select up to 10 items for your outfit on \(selectedDate, formatter: dateFormatter)")
-                            .font(.headline)
-                            .padding(.top, 8)
-                            .padding(.horizontal, 8)
-                        // Notes field (moved up)
-                        VStack(alignment: .leading, spacing: 6) {
+                            .font(DS.Font.subheadline)
+                            .foregroundColor(DS.Colors.textSecondary)
+                            .padding(.top, DS.Spacing.xs)
+
+                        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                             Text("Notes (optional)")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            TextField("Add any notes for this outfit...", text: $notes)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .padding(.vertical, 2)
-                                .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemGray6)))
+                                .font(DS.Font.caption1)
+                                .foregroundColor(DS.Colors.textTertiary)
+                            TextField("Add any notes for this outfit…", text: $notes)
+                                .font(DS.Font.body)
+                                .textFieldStyle(.roundedBorder)
                         }
-                        .padding(.horizontal, 4)
-                        .padding(.top, 8)
-                        // Outfit item selection list
+
                         OutfitItemSelectionList(
                             selectedItems: $selectedItems,
                             expandedCategories: $expandedCategories,
@@ -181,61 +159,50 @@ struct AddOutfitSheet: View {
                             previewImage: $previewImage
                         )
                         .environmentObject(wardrobeVM)
-                        Spacer(minLength: 60)
+
+                        Spacer(minLength: 80)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.top, 8)
-                    .padding(.bottom, 80)
+                    .padding(.horizontal, DS.Spacing.screenH)
+                    .padding(.top, DS.Spacing.xs)
+                    .padding(.bottom, 100)
                 }
-                // Sticky Save/Cancel bar
+
+                // Bottom bar
                 HStack {
                     Button("Cancel") { dismiss() }
-                        .foregroundColor(.red)
-                        .font(.headline)
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 18)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemGray6)))
-                    Spacer()
+                        .buttonStyle(DSSecondaryButton())
+
                     Button(action: {
                         onSave(Array(selectedItems), notes.isEmpty ? nil : notes)
+                        Haptics.success()
                         showSavedOverlay = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                             showSavedOverlay = false
                             dismiss()
                         }
                     }) {
-                        HStack {
+                        HStack(spacing: DS.Spacing.xs) {
                             Image(systemName: "checkmark.circle.fill")
                             Text("Save Outfit")
                         }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 24)
-                        .background(selectedItems.isEmpty ? Color.gray.opacity(0.5) : Color.accentColor)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
+                    .buttonStyle(DSPrimaryButton(isDisabled: selectedItems.isEmpty))
                     .disabled(selectedItems.isEmpty)
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 0)
-                .background(Color(.systemBackground))
-                // Overlay
+                .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.vertical, DS.Spacing.sm)
+                .dsGlassBar()
+
                 if showSavedOverlay {
                     VStack {
                         Spacer()
-                        HStack {
-                            Spacer()
-                            Label("Saved", systemImage: "checkmark.circle.fill")
-                                .font(.title2.bold())
-                                .padding(.vertical, 18)
-                                .padding(.horizontal, 32)
-                                .background(Color.green.opacity(0.95))
-                                .foregroundColor(.white)
-                                .clipShape(Capsule())
-                                .shadow(radius: 10)
-                            Spacer()
-                        }
+                        Label("Saved", systemImage: "checkmark.circle.fill")
+                            .font(DS.Font.title3)
+                            .foregroundColor(.white)
+                            .padding(.vertical, DS.Spacing.md)
+                            .padding(.horizontal, DS.Spacing.xl)
+                            .background(DS.Colors.success)
+                            .clipShape(Capsule())
                         Spacer()
                     }
                     .transition(.opacity)
@@ -247,38 +214,36 @@ struct AddOutfitSheet: View {
             .sheet(item: $previewImage) { wrapper in
                 VStack {
                     Spacer()
-                    ZoomableImage(image: wrapper.image)
-                        .padding()
+                    ZoomableImage(image: wrapper.image).padding()
                     Spacer()
                     Button("Close") { previewImage = nil }
-                        .font(.headline)
-                        .padding()
+                        .buttonStyle(DSSecondaryButton())
+                        .padding(.horizontal, DS.Spacing.screenH)
+                        .padding(.bottom, DS.Spacing.lg)
                 }
             }
             .onAppear {
                 if let initialItems = initialItems {
-                    // Convert OutfitItem to WardrobeItem by matching id
                     let wardrobeItems = wardrobeVM.items.filter { wi in
                         initialItems.contains(where: { $0.id == wi.id })
                     }
                     selectedItems = Set(wardrobeItems)
                 }
-                if let initialNotes = initialNotes {
-                    notes = initialNotes
-                }
+                if let initialNotes = initialNotes { notes = initialNotes }
             }
         }
     }
 }
 
-// Update CalendarGridView to accept onDateWithOutfitsTapped
+// MARK: - Calendar Grid
+
 struct CalendarGridView: View {
     @Binding var selectedDate: Date
     let datesWithOutfits: Set<Date>
     var onDateWithOutfitsTapped: ((Date) -> Void)? = nil
     @State private var currentMonth: Date = Calendar.current.startOfDay(for: Date())
     @State private var showYearPicker = false
-    
+
     var body: some View {
         let calendar = Calendar.current
         let monthInterval = calendar.dateInterval(of: .month, for: currentMonth) ?? calendar.dateInterval(of: .month, for: Date())!
@@ -290,70 +255,90 @@ struct CalendarGridView: View {
             df.dateFormat = "LLLL yyyy"
             return df
         }()
-        VStack(spacing: 8) {
+
+        VStack(spacing: DS.Spacing.xs) {
             HStack {
                 Button(action: {
-                    if let prevMonth = calendar.date(byAdding: .month, value: -1, to: currentMonth) {
-                        currentMonth = prevMonth
-                    }
+                    if let prev = calendar.date(byAdding: .month, value: -1, to: currentMonth) { currentMonth = prev }
                 }) {
                     Image(systemName: "chevron.left")
-                        .font(.title3)
-                        .padding(6)
+                        .font(DS.Font.headline)
+                        .foregroundColor(DS.Colors.accent)
+                        .padding(DS.Spacing.xs)
                 }
+
                 Spacer()
+
                 Button(action: { showYearPicker = true }) {
                     Text(monthYearFormatter.string(from: currentMonth))
-                        .font(.headline)
-                        .padding(.horizontal, 8)
+                        .font(DS.Font.headline)
+                        .foregroundColor(DS.Colors.textPrimary)
                 }
                 .sheet(isPresented: $showYearPicker) {
                     YearMonthPicker(selectedDate: $currentMonth, isPresented: $showYearPicker)
                 }
+
                 Spacer()
+
                 Button(action: {
-                    if let nextMonth = calendar.date(byAdding: .month, value: 1, to: currentMonth) {
-                        currentMonth = nextMonth
-                    }
+                    if let next = calendar.date(byAdding: .month, value: 1, to: currentMonth) { currentMonth = next }
                 }) {
                     Image(systemName: "chevron.right")
-                        .font(.title3)
-                        .padding(6)
+                        .font(DS.Font.headline)
+                        .foregroundColor(DS.Colors.accent)
+                        .padding(DS.Spacing.xs)
                 }
             }
-            .padding(.horizontal, 8)
-            // Weekday headers
+
             HStack {
                 ForEach(calendar.shortWeekdaySymbols, id: \.self) { symbol in
                     Text(symbol)
-                        .font(.caption2)
+                        .font(DS.Font.caption2)
                         .frame(maxWidth: .infinity)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(DS.Colors.textTertiary)
                 }
             }
-            // Calendar grid
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: DS.Spacing.xs) {
                 let firstWeekday = calendar.component(.weekday, from: monthInterval.start) - calendar.firstWeekday
                 let leadingEmpty = (firstWeekday + 7) % 7
+
                 ForEach(0..<(leadingEmpty + days.count), id: \.self) { idx in
                     if idx < leadingEmpty {
-                        Color.clear.frame(height: 36)
+                        Color.clear.frame(height: 44)
                     } else {
                         let date = days[idx - leadingEmpty]
                         let hasOutfit = datesWithOutfits.contains(calendar.startOfDay(for: date))
                         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
+                        let isToday = calendar.isDateInToday(date)
+
                         Button(action: {
+                            Haptics.selection()
                             selectedDate = calendar.startOfDay(for: date)
-                            if hasOutfit {
-                                onDateWithOutfitsTapped?(calendar.startOfDay(for: date))
-                            }
+                            if hasOutfit { onDateWithOutfitsTapped?(calendar.startOfDay(for: date)) }
                         }) {
-                            Text("\(calendar.component(.day, from: date))")
-                                .frame(maxWidth: .infinity, minHeight: 36)
-                                .background(isSelected ? Color.accentColor.opacity(0.2) : (hasOutfit ? Color.calendarHighlightGreen : Color.clear))
-                                .clipShape(Circle())
-                                .foregroundColor(isSelected ? .accentColor : .primary)
+                            VStack(spacing: 2) {
+                                Text("\(calendar.component(.day, from: date))")
+                                    .font(DS.Font.subheadline)
+                                    .foregroundColor(isSelected ? .white : (isToday ? DS.Colors.accent : DS.Colors.textPrimary))
+                                    .frame(width: 36, height: 36)
+                                    .background(
+                                        isSelected
+                                            ? AnyShapeStyle(DS.Colors.accent)
+                                            : (isToday ? AnyShapeStyle(DS.Colors.accent.opacity(0.15)) : AnyShapeStyle(Color.clear))
+                                        , in: Circle()
+                                    )
+
+                                if hasOutfit {
+                                    Circle()
+                                        .fill(DS.Colors.accent)
+                                        .frame(width: 5, height: 5)
+                                } else {
+                                    Color.clear.frame(width: 5, height: 5)
+                                }
+                            }
                         }
+                        .frame(height: 44)
                     }
                 }
             }
@@ -363,12 +348,12 @@ struct CalendarGridView: View {
         }
         .onChange(of: selectedDate) { newDate in
             let newMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: newDate)) ?? currentMonth
-            if !calendar.isDate(newMonth, inSameDayAs: currentMonth) {
-                currentMonth = newMonth
-            }
+            if !calendar.isDate(newMonth, inSameDayAs: currentMonth) { currentMonth = newMonth }
         }
     }
 }
+
+// MARK: - Year Month Picker
 
 struct YearMonthPicker: View {
     @Binding var selectedDate: Date
@@ -376,44 +361,49 @@ struct YearMonthPicker: View {
     @State private var selectedYear: Int = Calendar.current.component(.year, from: Date())
     @State private var selectedMonth: Int = Calendar.current.component(.month, from: Date())
     let years: [Int] = Array(1970...2100)
+
     var body: some View {
         NavigationView {
-            VStack(spacing: 16) {
+            VStack(spacing: DS.Spacing.md) {
                 Picker("Year", selection: $selectedYear) {
                     ForEach(years, id: \.self) { year in
                         Text("\(year)").tag(year)
                     }
                 }
                 .pickerStyle(WheelPickerStyle())
+
                 Picker("Month", selection: $selectedMonth) {
                     ForEach(1...12, id: \.self) { month in
-                        Text(DateFormatter().monthSymbols[month-1]).tag(month)
+                        Text(DateFormatter().monthSymbols[month - 1]).tag(month)
                     }
                 }
                 .pickerStyle(WheelPickerStyle())
+
                 Spacer()
+
                 Button("Select") {
-                    let calendar = Calendar.current
-                    if let newDate = calendar.date(from: DateComponents(year: selectedYear, month: selectedMonth, day: 1)) {
+                    if let newDate = Calendar.current.date(from: DateComponents(year: selectedYear, month: selectedMonth, day: 1)) {
                         selectedDate = newDate
                     }
                     isPresented = false
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(DSPrimaryButton())
+
                 Button("Cancel") { isPresented = false }
-                    .foregroundColor(.red)
+                    .buttonStyle(DSTertiaryButton())
             }
-            .padding()
+            .padding(DS.Spacing.screenH)
             .navigationTitle("Select Year & Month")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                let calendar = Calendar.current
-                selectedYear = calendar.component(.year, from: selectedDate)
-                selectedMonth = calendar.component(.month, from: selectedDate)
+                selectedYear = Calendar.current.component(.year, from: selectedDate)
+                selectedMonth = Calendar.current.component(.month, from: selectedDate)
             }
         }
     }
 }
+
+// MARK: - Outfit Card
 
 struct OutfitCardView: View {
     let outfit: DatedOutfit
@@ -422,13 +412,13 @@ struct OutfitCardView: View {
     @State private var showEditSheet = false
     @State private var showDeleteAlert = false
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
-    
+
     private var allItems: [OutfitItem] {
         (outfit.items as? Set<OutfitItem>)?.sorted { ($0.product ?? "") < ($1.product ?? "") } ?? []
     }
-    
+
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: DS.Spacing.md) {
             OutfitCardActionsColumn(
                 notes: outfit.notes,
                 showEditSheet: $showEditSheet,
@@ -436,29 +426,25 @@ struct OutfitCardView: View {
                 onEdit: { showEditSheet = true },
                 onDelete: { showDeleteAlert = true }
             )
-            // Right: Horizontal scroll of all items
+
             OutfitCardItemsScroll(
                 allItems: allItems,
                 previewImage: $previewImage
             )
         }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 18)
-                .fill(Color.accentColor.opacity(0.07))
-        )
-        .shadow(color: Color.black.opacity(0.09), radius: 6, x: 0, y: 2)
-        .padding(.horizontal, 8)
-        .frame(maxWidth: 420, minHeight: 120, alignment: .leading)
+        .padding(DS.Spacing.md)
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+        .dsCardShadow()
         .sheet(item: $previewImage) { wrapper in
             VStack {
                 Spacer()
-                ZoomableImage(image: wrapper.image)
-                    .padding()
+                ZoomableImage(image: wrapper.image).padding()
                 Spacer()
                 Button("Close") { previewImage = nil }
-                    .font(.headline)
-                    .padding()
+                    .buttonStyle(DSSecondaryButton())
+                    .padding(.horizontal, DS.Spacing.screenH)
+                    .padding(.bottom, DS.Spacing.lg)
             }
         }
         .sheet(isPresented: $showEditSheet) {
@@ -474,14 +460,14 @@ struct OutfitCardView: View {
             Alert(
                 title: Text("Delete Outfit?"),
                 message: Text("Are you sure you want to delete this outfit?"),
-                primaryButton: .destructive(Text("Delete")) {
-                    viewModel.deleteOutfit(outfit)
-                },
+                primaryButton: .destructive(Text("Delete")) { viewModel.deleteOutfit(outfit) },
                 secondaryButton: .cancel()
             )
         }
     }
 }
+
+// MARK: - Date Formatter
 
 private let dateFormatter: DateFormatter = {
     let df = DateFormatter()
@@ -489,32 +475,25 @@ private let dateFormatter: DateFormatter = {
     return df
 }()
 
-// Helper extension for Core Data OutfitItem to get images
+// MARK: - Core Data OutfitItem Extensions
+
 extension OutfitItem {
     var image: UIImage? {
-        if let path = self.imagePath {
-            return WardrobeImageFileHelper.loadImage(at: path)
-        }
+        if let path = self.imagePath { return WardrobeImageFileHelper.loadImage(at: path) }
         return nil
     }
     var croppedImage: UIImage? {
-        if let path = self.croppedImagePath {
-            return WardrobeImageFileHelper.loadImage(at: path)
-        }
+        if let path = self.croppedImagePath { return WardrobeImageFileHelper.loadImage(at: path) }
         return nil
     }
 }
 
 extension Color {
     static var calendarHighlightGreen: Color {
-        Color(UIColor { traitCollection in
-            if traitCollection.userInterfaceStyle == .dark {
-                // Brighter green for dark mode
-                return UIColor(red: 0.30, green: 0.85, blue: 0.45, alpha: 0.32)
-            } else {
-                // Softer green for light mode
-                return UIColor(red: 0.20, green: 0.70, blue: 0.30, alpha: 0.15)
-            }
+        Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.30, green: 0.85, blue: 0.45, alpha: 0.32)
+                : UIColor(red: 0.20, green: 0.70, blue: 0.30, alpha: 0.15)
         })
     }
-} 
+}

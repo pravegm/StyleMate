@@ -4,29 +4,31 @@ struct CategoryCardView: View {
     let category: Category
     let isExpanded: Bool
     let onToggle: () -> Void
+
     var body: some View {
         Button(action: onToggle) {
-            HStack(spacing: 12) {
+            HStack(spacing: DS.Spacing.sm) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(isExpanded ? Color.accentColor.opacity(0.18) : Color(.systemGray6))
+                    RoundedRectangle(cornerRadius: DS.Radius.button)
+                        .fill(isExpanded ? DS.Colors.accent.opacity(0.15) : DS.Colors.backgroundSecondary)
                         .frame(width: 44, height: 44)
                     Image(systemName: category.iconName)
                         .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(DS.Colors.accent)
                 }
                 Text(category.rawValue)
-                    .font(.title3.bold())
-                    .foregroundColor(.primary)
+                    .font(DS.Font.title3)
+                    .foregroundColor(DS.Colors.textPrimary)
                 Spacer()
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(DS.Colors.accent)
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 8)
-            .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemBackground)))
-            .shadow(color: Color.accentColor.opacity(0.06), radius: 2, x: 0, y: 1)
+            .padding(.vertical, DS.Spacing.xs)
+            .padding(.horizontal, DS.Spacing.xs)
+            .background(DS.Colors.backgroundCard)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+            .dsCardShadow()
         }
         .buttonStyle(PlainButtonStyle())
     }
-} 
+}

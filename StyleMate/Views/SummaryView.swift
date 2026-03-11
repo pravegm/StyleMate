@@ -3,101 +3,62 @@ import SwiftUI
 struct SummaryView: View {
     let savedItems: [WardrobeItem]
     var onDone: () -> Void
-    @State private var animate = false
-    let emojis = ["🎉", "✨", "🥳", "🎊", "💫"]
-    let burstCount = 18
 
     var body: some View {
         ZStack {
-            // Colorful celebratory background
-            LinearGradient(
-                colors: [Color.pink.opacity(0.2), Color.blue.opacity(0.2), Color.yellow.opacity(0.2)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            DS.Colors.backgroundPrimary.ignoresSafeArea()
 
-            VStack(spacing: 32) {
-                // Big celebratory emoji/icon
-                Text("🎉")
-                    .font(.system(size: 48))
-                    .scaleEffect(1.2)
-                    .shadow(radius: 10)
+            VStack(spacing: DS.Spacing.xl) {
+                Spacer()
 
-                // Congratulatory text
-                Text("Added to your wardrobe!")
-                    .font(.largeTitle.bold())
-                    .foregroundColor(.accentColor)
-                    .multilineTextAlignment(.center)
-                    .transition(.scale)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundColor(DS.Colors.success)
 
-                // Summary of items
-                VStack(alignment: .center, spacing: 8) {
-                    HStack {
-                        Text("Items Added")
-                            .font(.title.bold())
-                            .foregroundColor(.accentColor)
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down")
-                            .foregroundColor(.accentColor)
-                            .font(.title2)
-                    }
-                    .padding(.bottom, 2)
+                Text("Added to Wardrobe")
+                    .font(DS.Font.title2)
+                    .foregroundColor(DS.Colors.textPrimary)
+
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    Text("Items Added")
+                        .font(DS.Font.headline)
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .padding(.bottom, DS.Spacing.micro)
+
                     ScrollView {
                         VStack(spacing: 0) {
                             ForEach(summaryStrings, id: \.self) { str in
-                                Text(str)
-                                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                                    .foregroundColor(.primary)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity, alignment: .center)
+                                HStack {
+                                    Text(str)
+                                        .font(DS.Font.body)
+                                        .foregroundColor(DS.Colors.textPrimary)
+                                    Spacer()
+                                }
+                                .padding(.vertical, DS.Spacing.sm)
+
                                 Divider()
                             }
                         }
-                        .padding(.horizontal, 8)
                     }
-                    .frame(maxHeight: 400)
-                    Text("Scroll to see all items")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 4)
+                    .frame(maxHeight: 300)
                 }
-                .frame(maxHeight: .infinity)
+                .padding(DS.Spacing.md)
+                .background(DS.Colors.backgroundCard)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+                .dsCardShadow()
 
                 Spacer()
 
-                // Done button
-                Button("Done") { onDone() }
-                    .font(.headline)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.accentColor)
-                    .foregroundColor(.white)
-                    .cornerRadius(16)
-                    .shadow(radius: 4)
-            }
-            .padding()
-            .onAppear { animate = true }
-
-            // Native SwiftUI emoji burst
-            ZStack {
-                ForEach(0..<burstCount, id: \.self) { i in
-                    let angle = Double(i) / Double(burstCount) * 2 * Double.pi
-                    let radius: CGFloat = animate ? CGFloat.random(in: 120...220) : 0
-                    let x = cos(angle) * radius
-                    let y = sin(angle) * radius
-                    Text(emojis.randomElement()!)
-                        .font(.system(size: 36))
-                        .opacity(animate ? 0 : 1)
-                        .offset(x: x, y: y)
-                        .scaleEffect(animate ? 1.6 : 0.7)
-                        .animation(
-                            .easeOut(duration: 1.2).delay(Double(i) * 0.03),
-                            value: animate
-                        )
+                Button("Done") {
+                    Haptics.success()
+                    onDone()
                 }
+                .buttonStyle(DSPrimaryButton())
+                .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.bottom, DS.Spacing.xl)
             }
-            .allowsHitTesting(false)
+            .padding(.horizontal, DS.Spacing.screenH)
+            .onAppear { Haptics.success() }
         }
     }
 
@@ -108,4 +69,4 @@ struct SummaryView: View {
             return "\(items.count) \(product)\(plural)"
         }.sorted()
     }
-} 
+}

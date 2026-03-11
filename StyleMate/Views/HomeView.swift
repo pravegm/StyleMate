@@ -6,162 +6,112 @@ struct HomeView: View {
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var authService: AuthService
     @State private var showProfile = false
-    @State private var animateButton = false
     @State private var loadingProgress: Double = 0.0
     @State private var loadingTimer: Timer? = nil
-    let styleQuotes = [
-        "Style is a way to say who you are without having to speak. – Rachel Zoe",
-        "Fashion is the armor to survive the reality of everyday life. – Bill Cunningham",
-        "Good clothes open all doors.",
-        "Dress how you want to be addressed.",
-        "Style is a reflection of your attitude and personality.",
-        "Clothes mean nothing until someone lives in them. – Marc Jacobs",
-        "Fashion is about something that comes from within you. – Ralph Lauren",
-        "The joy of dressing is an art. – John Galliano",
-        "You can have anything you want in life if you dress for it. – Edith Head",
-        "Style is knowing who you are, what you want to say, and not giving a damn. – Orson Welles",
-        "People will stare. Make it worth their while. – Harry Winston",
-        "Fashion is instant language. – Miuccia Prada",
-        "Life isn't perfect but your outfit can be.",
-        "Elegance is not standing out, but being remembered. – Giorgio Armani",
-        "When in doubt, overdress."
-    ]
-    @State private var selectedQuote: String = ""
-    let emojiList = ["🧥", "👗", "👚", "👖", "👠", "🧢", "🧣", "👒", "👞", "👟", "🥿", "👔", "🩳", "🩱", "👜", "🎩"]
-    @State private var emojiIndex: Int = 0
-    let emojiTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
-    @State private var emojiCycling: Bool = false
     @State private var selectedCategory: Category? = nil
     @State private var selectedProduct: String? = nil
     @State private var showWeatherWarning = false
-    
+
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 5..<12:  return "Good morning"
+        case 12..<17: return "Good afternoon"
+        case 17..<21: return "Good evening"
+        default:      return "Good night"
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                // Elegant gradient background
-                LinearGradient(
-                    colors: [Color.pink.opacity(0.13), Color.blue.opacity(0.13), Color.yellow.opacity(0.13)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                DS.Colors.backgroundPrimary.ignoresSafeArea()
+
                 ScrollView {
-                    VStack(spacing: 20) {
-                        // StyleMate Card
-                        HomeCard {
-                            VStack(spacing: 8) {
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.accentColor.opacity(0.18))
-                                        .frame(width: 80, height: 80)
-                                        .blur(radius: 12)
-                                    Image(systemName: "tshirt.fill")
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 56, height: 56)
-                                        .foregroundColor(.accentColor)
-                                        .padding(.top, 10)
-                                    MagicalSparkles()
-                                }
-                                Text("StyleMate")
-                                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                                    .foregroundColor(.primary)
-                                Text("Your AI Fashion Stylist")
-                                    .font(.title3)
-                                    .foregroundStyle(.secondary)
-                                HStack {
-                                    Image(systemName: "quote.opening")
-                                        .font(.title3)
-                                        .foregroundColor(.accentColor)
-                                    Text(selectedQuote)
-                                        .font(.body.italic())
-                                        .foregroundColor(.primary)
-                                        .multilineTextAlignment(.center)
-                                    Image(systemName: "quote.closing")
-                                        .font(.title3)
-                                        .foregroundColor(.accentColor)
-                                }
-                                .padding(.top, 4)
-                                .padding(.horizontal, 8)
+                    VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                        // MARK: - Greeting + Weather
+                        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                            Text(greeting)
+                                .font(DS.Font.largeTitle)
+                                .foregroundColor(DS.Colors.textPrimary)
+
+                            WeatherInlineRow(
+                                weather: homeVM.weather,
+                                isLoading: homeVM.isWeatherLoading,
+                                error: homeVM.weatherError,
+                                locationStatus: homeVM.locationStatus,
+                                onRequest: { homeVM.requestWeatherForCurrentLocation() },
+                                city: homeVM.lastCity,
+                                temperatureC: homeVM.lastCelsius,
+                                temperatureF: homeVM.lastFahrenheit,
+                                displayFahrenheit: homeVM.displayFahrenheit,
+                                onToggleUnit: { homeVM.toggleTemperatureUnit() }
+                            )
+                        }
+                        .padding(.top, DS.Spacing.md)
+
+                        // MARK: - Outfit Type Selector
+                        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                            Text("What's the vibe today?")
+                                .font(DS.Font.headline)
+                                .foregroundColor(DS.Colors.textPrimary)
+
+                            OutfitTypeChipRow(
+                                selectedOutfitType: $homeVM.selectedOutfitType,
+                                customOutfitDescription: $homeVM.customOutfitDescription
+                            )
+                        }
+
+                        // MARK: - Get Outfit Button
+                        Button(action: {
+                            Haptics.medium()
+                            if homeVM.isWeatherLoading || homeVM.weather == nil || homeVM.weatherError != nil {
+                                showWeatherWarning = true
+                            } else {
+                                homeVM.suggestTodayOutfit(from: wardrobeViewModel.items)
+                            }
+                        }) {
+                            HStack(spacing: DS.Spacing.xs) {
+                                Image(systemName: "wand.and.stars")
+                                Text("Get Today's Outfit")
                             }
                         }
-                        // Outfit Suggestion Card
-                        HomeCard {
-                            VStack(spacing: 16) {
-                                Text("What type of occasion or vibe are you dressing for today?")
-                                    .font(.title2.bold())
-                                    .foregroundColor(.accentColor)
-                                    .multilineTextAlignment(.center)
-                                OutfitTypeSelector(
-                                    selectedOutfitType: $homeVM.selectedOutfitType,
-                                    customOutfitDescription: $homeVM.customOutfitDescription
-                                )
-                                Button(action: {
-                                    withAnimation(.easeInOut(duration: 0.18)) {
-                                        animateButton = true
-                                    }
-                                    // Weather logic: if weather is loading, show warning first
-                                    if homeVM.isWeatherLoading {
-                                        showWeatherWarning = true
-                                    } else if homeVM.weather == nil || homeVM.weatherError != nil {
-                                        showWeatherWarning = true
-                                    } else {
-                                        homeVM.suggestTodayOutfit(from: wardrobeViewModel.items)
-                                    }
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                        animateButton = false
-                                    }
-                                }) {
-                                    HStack {
-                                        Image(systemName: "wand.and.stars")
-                                        Text("Get Today's Outfit")
-                                    }
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(
-                                        LinearGradient(colors: [Color.accentColor, Color.pink.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                                    .scaleEffect(animateButton ? 1.06 : 1.0)
-                                    .shadow(color: Color.accentColor.opacity(0.13), radius: 8, x: 0, y: 4)
-                                }
-                                .padding(.top, 8)
-                                .accessibilityLabel("Suggest an outfit")
-                                .disabled(homeVM.isLoading || (homeVM.selectedOutfitType == nil && !homeVM.isCustomDescriptionValid))
-                            }
-                        }
-                        // Weather Card
-                        WeatherCard(
-                            weather: homeVM.weather,
-                            isLoading: homeVM.isWeatherLoading,
-                            error: homeVM.weatherError,
-                            locationStatus: homeVM.locationStatus,
-                            onRequest: { homeVM.requestWeatherForCurrentLocation() },
-                            city: homeVM.lastCity,
-                            temperatureC: homeVM.lastCelsius,
-                            temperatureF: homeVM.lastFahrenheit,
-                            displayFahrenheit: homeVM.displayFahrenheit,
-                            onToggleUnit: { homeVM.toggleTemperatureUnit() }
-                        )
-                        // Wardrobe Summary Card
-                        HomeCard {
+                        .buttonStyle(DSPrimaryButton(
+                            isDisabled: homeVM.isLoading || (homeVM.selectedOutfitType == nil && !homeVM.isCustomDescriptionValid)
+                        ))
+                        .disabled(homeVM.isLoading || (homeVM.selectedOutfitType == nil && !homeVM.isCustomDescriptionValid))
+
+                        // MARK: - Wardrobe Summary
+                        Button(action: {}) {
                             WardrobeSummaryWidget(items: wardrobeViewModel.items, onSummaryTap: { category, product in
                                 selectedCategory = category
                                 selectedProduct = product
                             })
                         }
+                        .buttonStyle(.plain)
+                        .padding(.top, DS.Spacing.xs)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 120)
+                    .padding(.horizontal, DS.Spacing.screenH)
+                    .padding(.bottom, DS.Spacing.xxxl)
                 }
-                // Loading overlay
+
                 if homeVM.isLoading {
-                    OutfitLoadingOverlay(progress: loadingProgress, emoji: emojiList[emojiIndex])
+                    OutfitLoadingOverlay(
+                        progress: loadingProgress,
+                        message: "Finding your perfect outfit…"
+                    )
                 }
             }
             .navigationTitle("")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { showProfile = true } label: {
+                        Image(systemName: "person.circle")
+                            .font(DS.Font.title3)
+                            .foregroundColor(DS.Colors.accent)
+                    }
+                }
+            }
             .sheet(isPresented: $showProfile) {
                 ProfileView()
             }
@@ -191,39 +141,25 @@ struct HomeView: View {
                 }
             }
             .onAppear {
-                selectedQuote = styleQuotes.shuffled().first ?? "Style is a way to say who you are without having to speak."
                 if homeVM.weather == nil && !homeVM.isWeatherLoading {
                     homeVM.requestWeatherForCurrentLocation()
                 }
             }
             .onChange(of: homeVM.isLoading) { isLoading in
                 if isLoading {
-                    emojiCycling = true
                     loadingProgress = 0.0
                     loadingTimer?.invalidate()
                     loadingTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
                         if loadingProgress < 0.9 {
                             loadingProgress += 0.005
                         } else {
-                            loadingProgress = 0.9
                             timer.invalidate()
                         }
                     }
                 } else {
-                    emojiCycling = false
-                    emojiIndex = 0
                     loadingTimer?.invalidate()
-                    withAnimation(.linear(duration: 0.2)) {
-                        loadingProgress = 1.0
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        loadingProgress = 0.0
-                    }
-                }
-            }
-            .onReceive(emojiTimer) { _ in
-                if emojiCycling {
-                    emojiIndex = (emojiIndex + 1) % emojiList.count
+                    withAnimation(.linear(duration: 0.2)) { loadingProgress = 1.0 }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { loadingProgress = 0.0 }
                 }
             }
             .navigationDestination(isPresented: Binding(
@@ -237,103 +173,92 @@ struct HomeView: View {
             }
         }
     }
-    
-    private struct OutfitTypeSelector: View {
-        @Binding var selectedOutfitType: OutfitType?
-        @Binding var customOutfitDescription: String?
-        @EnvironmentObject var authService: AuthService
-        let columns = Array(repeating: GridItem(.flexible()), count: 3)
-        var preferredStyles: [OutfitType] {
-            authService.user?.preferredStyles ?? Array(OutfitType.allCases.prefix(6))
-        }
-        var body: some View {
-            VStack(spacing: 18) {
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(preferredStyles, id: \ .self) { type in
-                        Button(action: {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                selectedOutfitType = type
-                                customOutfitDescription = nil
-                            }
-                        }) {
-                            VStack(spacing: 4) {
-                                ZStack {
-                                    Circle()
-                                        .fill(selectedOutfitType == type && customOutfitDescription == nil ? Color.accentColor : Color.gray.opacity(0.13))
-                                        .frame(width: 40, height: 40)
-                                    Image(systemName: type.icon)
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundColor(selectedOutfitType == type && customOutfitDescription == nil ? .white : .primary)
+}
+
+// MARK: - Outfit Type Chip Row
+
+private struct OutfitTypeChipRow: View {
+    @Binding var selectedOutfitType: OutfitType?
+    @Binding var customOutfitDescription: String?
+    @EnvironmentObject var authService: AuthService
+
+    var preferredStyles: [OutfitType] {
+        authService.user?.preferredStyles ?? Array(OutfitType.allCases.prefix(6))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DS.Spacing.xs) {
+                    ForEach(preferredStyles, id: \.self) { type in
+                        ChipButton(
+                            label: type.rawValue,
+                            isSelected: selectedOutfitType == type && customOutfitDescription == nil,
+                            action: {
+                                Haptics.light()
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    selectedOutfitType = type
+                                    customOutfitDescription = nil
                                 }
-                                Text(type.rawValue)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.primary)
-                                    .multilineTextAlignment(.center)
-                                    .lineLimit(2)
-                                    .minimumScaleFactor(0.6)
-                                    .frame(width: 64, height: 32, alignment: .center)
-                                    .fixedSize(horizontal: false, vertical: true)
                             }
-                            .frame(height: 72)
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(PlainButtonStyle())
+                        )
                     }
-                }
-                // 'Other' option as a wide rectangle button
-                HStack(spacing: 14) {
-                    Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                            if selectedOutfitType == nil && customOutfitDescription != nil {
-                                selectedOutfitType = preferredStyles.first
-                                customOutfitDescription = nil
-                            } else {
-                                selectedOutfitType = nil
-                                if customOutfitDescription == nil {
-                                    customOutfitDescription = ""
+
+                    ChipButton(
+                        label: "Other",
+                        isSelected: selectedOutfitType == nil && customOutfitDescription != nil,
+                        action: {
+                            Haptics.light()
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                if selectedOutfitType == nil && customOutfitDescription != nil {
+                                    selectedOutfitType = preferredStyles.first
+                                    customOutfitDescription = nil
+                                } else {
+                                    selectedOutfitType = nil
+                                    customOutfitDescription = customOutfitDescription ?? ""
                                 }
                             }
                         }
-                    }) {
-                        HStack(spacing: 8) {
-                            ZStack {
-                                Circle()
-                                    .fill(selectedOutfitType == nil && customOutfitDescription != nil ? Color.accentColor : Color.gray.opacity(0.13))
-                                    .frame(width: 32, height: 32)
-                                Image(systemName: "ellipsis.bubble")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(selectedOutfitType == nil && customOutfitDescription != nil ? .white : .primary)
-                            }
-                            Text(selectedOutfitType == nil && customOutfitDescription != nil ? "Describe your event or outfit need" : "Other")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                                .frame(alignment: .leading)
-                            Spacer()
-                        }
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 16)
-                        .background(Color.gray.opacity(0.13))
-                        .cornerRadius(14)
-                    }
-                    .buttonStyle(PlainButtonStyle())
+                    )
                 }
-                // Show the text field below the button when 'Other' is selected
-                if selectedOutfitType == nil && customOutfitDescription != nil {
-                    VStack(spacing: 6) {
-                        TextField("e.g. Outdoor wedding in summer evening", text: Binding(
-                            get: { customOutfitDescription ?? "" },
-                            set: { customOutfitDescription = $0 }
-                        ))
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .frame(maxWidth: 340)
-                        .padding(.top, 8)
-                        .padding(.bottom, 2)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
+                .padding(.horizontal, DS.Spacing.micro)
+            }
+
+            if selectedOutfitType == nil && customOutfitDescription != nil {
+                TextField("e.g. Outdoor wedding in summer evening", text: Binding(
+                    get: { customOutfitDescription ?? "" },
+                    set: { customOutfitDescription = $0 }
+                ))
+                .font(DS.Font.body)
+                .textFieldStyle(.roundedBorder)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+    }
+}
+
+private struct ChipButton: View {
+    let label: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(DS.Font.subheadline)
+                .foregroundColor(isSelected ? DS.Colors.accent : DS.Colors.textPrimary)
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.vertical, DS.Spacing.xs)
+        }
+        .buttonStyle(.plain)
+        .if(isSelected) { $0.dsGlassChipSelected() }
+        .if(!isSelected) { $0.dsGlassChipUnselected() }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func `if`(_ condition: Bool, transform: (Self) -> some View) -> some View {
+        if condition { transform(self) } else { self }
     }
 }

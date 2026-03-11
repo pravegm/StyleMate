@@ -14,7 +14,6 @@ struct AddNewItemView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var isAnalyzing = false
-    @State private var expandedCategoryStates: [Category: Bool] = [:]
     @State private var _duplicateAcknowledged: [Bool] = []
     var duplicateAcknowledgedBinding: Binding<[Bool]>? = nil
     var duplicateAcknowledged: Binding<[Bool]> {
@@ -22,19 +21,7 @@ struct AddNewItemView: View {
     }
     @State private var progress: Double = 0.0
     @State private var progressTimer: Timer? = nil
-    let aiMessages = [
-        "AI is analyzing your style...",
-        "Letting AI work its magic...",
-        "AI is finding fashion insights...",
-        "AI is scanning for trends...",
-        "AI is curating your wardrobe...",
-        "AI is detecting your look...",
-        "AI is learning your vibe...",
-        "AI is matching your pieces...",
-        "AI is reviewing your images...",
-        "AI is unlocking outfit ideas..."
-    ]
-    
+
     struct DetectedItem: Identifiable {
         let id = UUID()
         var category: Category
@@ -44,14 +31,14 @@ struct AddNewItemView: View {
         var boundingBox: ImageAnalysisService.BoundingBox? = nil
         var croppedImage: UIImage? = nil
     }
-    
+
     var detectedItems: Binding<[DetectedItem]> {
         detectedItemsBinding ?? $detectedItemsState
     }
     var brandInputs: Binding<[String]> {
         brandInputsBinding ?? $brandInputsState
     }
-    
+
     var canSave: Bool {
         !detectedItems.wrappedValue.isEmpty && detectedItems.wrappedValue.indices.allSatisfy { idx in
             !detectedItems.wrappedValue[idx].colors.isEmpty &&
@@ -60,7 +47,7 @@ struct AddNewItemView: View {
             (productTypesByCategory[detectedItems.wrappedValue[idx].category]?.contains(detectedItems.wrappedValue[idx].product) ?? false)
         } && pickedImage != nil
     }
-    
+
     init(
         showPhotoPicker: Binding<Bool>,
         showCamera: Binding<Bool>,
@@ -79,137 +66,105 @@ struct AddNewItemView: View {
         self.duplicateAcknowledgedBinding = duplicateAcknowledgedBinding
         _pickedImage = State(initialValue: prefilledImage)
     }
-    
+
     var body: some View {
         ZStack {
-            Form {
-                Section {
+            DS.Colors.backgroundPrimary.ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: DS.Spacing.lg) {
+                    // Image preview
                     if let img = pickedImage {
                         Image(uiImage: img)
                             .resizable()
                             .scaledToFit()
-                            .frame(maxHeight: 200)
-                            .cornerRadius(12)
+                            .frame(maxHeight: UIScreen.main.bounds.height * 0.4)
+                            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
                     } else {
-                        Image(systemName: "photo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxHeight: 200)
-                            .foregroundColor(.gray)
-                        Text("No image selected.")
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                if !detectedItems.wrappedValue.isEmpty {
-                    Section(header:
-                        Text("Detected Items")
-                            .font(.title2.bold())
-                            .foregroundColor(.accentColor)
-                            .padding(.vertical, 4)
-                    ) {
-                        let grouped = Dictionary(grouping: detectedItems.wrappedValue.indices, by: { detectedItems.wrappedValue[$0].category })
-                        ForEach(Array(grouped.keys).sorted { $0.rawValue < $1.rawValue }, id: \.self) { category in
-                            let indices = grouped[category] ?? []
-                            VStack(alignment: .leading, spacing: 0) {
-                                HStack {
-                                    Text(category.rawValue)
-                                        .font(.headline)
-                                        .foregroundColor(.accentColor)
-                                    Spacer()
-                                    Button(action: { withAnimation { expandedCategoryStates[category] = !(expandedCategoryStates[category] ?? true) } }) {
-                                        Image(systemName: (expandedCategoryStates[category] ?? true) ? "chevron.down" : "chevron.right")
-                                            .foregroundColor(.accentColor)
-                                            .imageScale(.medium)
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                    .padding(.trailing, 4)
+                        RoundedRectangle(cornerRadius: DS.Radius.card)
+                            .fill(DS.Colors.backgroundSecondary)
+                            .frame(height: 200)
+                            .overlay(
+                                VStack(spacing: DS.Spacing.xs) {
+                                    Image(systemName: "photo")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(DS.Colors.textTertiary)
+                                    Text("No image selected")
+                                        .font(DS.Font.subheadline)
+                                        .foregroundColor(DS.Colors.textSecondary)
                                 }
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 12)
-                                if expandedCategoryStates[category] ?? true {
-                                    VStack(spacing: 0) {
-                                        ForEach(indices, id: \ .self) { idx in
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                DetectedItemCard(
-                                                    item: Binding(get: { detectedItems.wrappedValue[idx] }, set: { detectedItems.wrappedValue[idx] = $0 }),
-                                                    brand: Binding(get: { brandInputs.wrappedValue[idx] }, set: { brandInputs.wrappedValue[idx] = $0 }),
-                                                    onRemove: { removeDetectedItem(at: idx) }
-                                                )
-                                                if isDuplicateItem(detectedItems.wrappedValue[idx]) {
-                                                    HStack(alignment: .center, spacing: 8) {
-                                                        Image(systemName: "exclamationmark.triangle.fill")
-                                                            .foregroundColor(.orange)
-                                                        Text("This might already be in your wardrobe.")
-                                                            .font(.footnote)
-                                                            .foregroundColor(.orange)
-                                                        Spacer()
-                                                        if !duplicateAcknowledged.wrappedValue.indices.contains(idx) || !duplicateAcknowledged.wrappedValue[idx] {
-                                                            Button("OK") {
-                                                                if duplicateAcknowledged.wrappedValue.indices.contains(idx) {
-                                                                    duplicateAcknowledged.wrappedValue[idx] = true
-                                                                }
-                                                            }
-                                                            .font(.footnote.bold())
-                                                            .padding(.horizontal, 8)
-                                                            .padding(.vertical, 2)
-                                                            .background(Color.orange.opacity(0.15))
-                                                            .cornerRadius(6)
-                                                        } else {
-                                                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-                                                        }
+                            )
+                    }
+
+                    // Detected items
+                    if !detectedItems.wrappedValue.isEmpty {
+                        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                            Text("Detected Items")
+                                .font(DS.Font.title3)
+                                .foregroundColor(DS.Colors.textPrimary)
+
+                            ForEach(detectedItems.wrappedValue.indices, id: \.self) { idx in
+                                VStack(spacing: DS.Spacing.xs) {
+                                    DetectedItemCard(
+                                        item: Binding(
+                                            get: { detectedItems.wrappedValue[idx] },
+                                            set: { detectedItems.wrappedValue[idx] = $0 }
+                                        ),
+                                        brand: Binding(
+                                            get: { brandInputs.wrappedValue[idx] },
+                                            set: { brandInputs.wrappedValue[idx] = $0 }
+                                        ),
+                                        onRemove: { removeDetectedItem(at: idx) }
+                                    )
+
+                                    if isDuplicateItem(detectedItems.wrappedValue[idx]) {
+                                        HStack(spacing: DS.Spacing.xs) {
+                                            Circle()
+                                                .fill(DS.Colors.warning)
+                                                .frame(width: 8, height: 8)
+
+                                            Text("Possible duplicate")
+                                                .font(DS.Font.caption1)
+                                                .foregroundColor(DS.Colors.warning)
+
+                                            Spacer()
+
+                                            if !duplicateAcknowledged.wrappedValue.indices.contains(idx) || !duplicateAcknowledged.wrappedValue[idx] {
+                                                Button("Dismiss") {
+                                                    if duplicateAcknowledged.wrappedValue.indices.contains(idx) {
+                                                        duplicateAcknowledged.wrappedValue[idx] = true
                                                     }
-                                                    .padding(.vertical, 2)
                                                 }
-                                                if idx != indices.last {
-                                                    Divider()
-                                                        .padding(.vertical, 8)
-                                                        .background(Color.gray.opacity(0.13))
-                                                        .opacity(0.7)
-                                                }
+                                                .font(DS.Font.caption1)
+                                                .foregroundColor(DS.Colors.accent)
+                                            } else {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundColor(DS.Colors.success)
+                                                    .font(DS.Font.caption1)
                                             }
                                         }
+                                        .padding(.horizontal, DS.Spacing.md)
                                     }
-                                    .padding(.bottom, 8)
                                 }
                             }
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color(.systemBackground))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .stroke(Color.accentColor.opacity(0.25), lineWidth: 2)
-                                    )
-                                    .shadow(color: Color.accentColor.opacity(0.18), radius: 12, x: 0, y: 8)
-                            )
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 4)
                         }
                     }
                 }
+                .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.vertical, DS.Spacing.md)
             }
             .disabled(isAnalyzing)
+
             if isAnalyzing {
-                OutfitLoadingOverlay(
-                    progress: progress,
-                    emoji: "🤖",
-                    loadingMessages: aiMessages,
-                    animateEmoji: false
-                )
-                .onAppear {
-                    progress = 0.0
-                    progressTimer?.invalidate()
-                    progressTimer = Timer.scheduledTimer(withTimeInterval: 0.035, repeats: true) { timer in
-                        if progress < 0.98 {
-                            progress += 0.006
-                        } else {
-                            timer.invalidate()
+                OutfitLoadingOverlay(progress: progress, message: "Analyzing your items…")
+                    .onAppear {
+                        progress = 0.0
+                        progressTimer?.invalidate()
+                        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.035, repeats: true) { timer in
+                            if progress < 0.98 { progress += 0.006 } else { timer.invalidate() }
                         }
                     }
-                }
-                .onDisappear {
-                    progressTimer?.invalidate()
-                }
+                    .onDisappear { progressTimer?.invalidate() }
             }
         }
         .background(
@@ -223,24 +178,19 @@ struct AddNewItemView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { 
-                    isPresented = false 
-                }
+                Button("Cancel") { isPresented = false }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save Items") {
                     if !canSave {
-                        if !allProductsValid() {
-                            errorMessage = "Please select a valid product for each item."
-                        } else {
-                            errorMessage = "All fields are required."
-                        }
+                        errorMessage = !allProductsValid()
+                            ? "Please select a valid product for each item."
+                            : "All fields are required."
                         showError = true
                         return
                     }
-                    guard let img = pickedImage else { 
-                        return 
-                    }
+                    guard let img = pickedImage else { return }
+                    Haptics.success()
                     for (idx, detected) in detectedItems.wrappedValue.enumerated() {
                         let imagePath = WardrobeImageFileHelper.saveImage(img) ?? ""
                         let croppedImagePath = detected.croppedImage != nil ? WardrobeImageFileHelper.saveImage(detected.croppedImage!) : nil
@@ -271,12 +221,10 @@ struct AddNewItemView: View {
             }
         }
         .onChange(of: prefilledImage) { newImage in
-            if let img = newImage {
-                pickedImage = img
-            }
+            if let img = newImage { pickedImage = img }
         }
     }
-    
+
     private func analyzeMultipleImage(_ image: UIImage) {
         isAnalyzing = true
         Task {
@@ -289,10 +237,8 @@ struct AddNewItemView: View {
                     return nil
                 }
             }
-            // Filter duplicate footwear: if 2+ footwear, keep only one
             let footwearIndices = items.indices.filter { items[$0].category == .footwear }
             if footwearIndices.count > 1 {
-                // Keep only the first footwear, remove the rest
                 items = items.enumerated().filter { idx, item in
                     item.category != .footwear || idx == footwearIndices.first
                 }.map { $0.element }
@@ -304,35 +250,29 @@ struct AddNewItemView: View {
             progress = 1.0
         }
     }
-    
+
     private func cropImage(_ image: UIImage, with bbox: ImageAnalysisService.BoundingBox?) -> UIImage? {
         guard let bbox = bbox else { return nil }
         let width = image.size.width
         let height = image.size.height
         let rect = CGRect(x: bbox.x * width, y: bbox.y * height, width: bbox.width * width, height: bbox.height * height)
-        guard let cgImage = image.cgImage?.cropping(to: rect) else {
-            return nil
-        }
+        guard let cgImage = image.cgImage?.cropping(to: rect) else { return nil }
         return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
-    
+
     private func removeDetectedItem(at idx: Int) {
         guard detectedItems.wrappedValue.indices.contains(idx) else { return }
         detectedItems.wrappedValue.remove(at: idx)
-        if brandInputs.wrappedValue.indices.contains(idx) {
-            brandInputs.wrappedValue.remove(at: idx)
-        }
-        if duplicateAcknowledged.wrappedValue.indices.contains(idx) {
-            duplicateAcknowledged.wrappedValue.remove(at: idx)
-        }
+        if brandInputs.wrappedValue.indices.contains(idx) { brandInputs.wrappedValue.remove(at: idx) }
+        if duplicateAcknowledged.wrappedValue.indices.contains(idx) { duplicateAcknowledged.wrappedValue.remove(at: idx) }
     }
-    
+
     private func allProductsValid() -> Bool {
         detectedItems.wrappedValue.allSatisfy { item in
             productTypesByCategory[item.category]?.contains(item.product) ?? false
         }
     }
-    
+
     private func isDuplicateItem(_ item: DetectedItem) -> Bool {
         let idx = detectedItems.wrappedValue.firstIndex(where: { $0.id == item.id }) ?? 0
         let brand = brandInputs.wrappedValue.indices.contains(idx) ? brandInputs.wrappedValue[idx] : ""
@@ -344,7 +284,7 @@ struct AddNewItemView: View {
             Set(wardrobeItem.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }) == Set(item.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) })
         }
     }
-    
+
     private func allDuplicatesAcknowledged() -> Bool {
         for (idx, detected) in detectedItems.wrappedValue.enumerated() {
             if isDuplicateItem(detected) && (!duplicateAcknowledged.wrappedValue.indices.contains(idx) || !duplicateAcknowledged.wrappedValue[idx]) {
@@ -355,24 +295,24 @@ struct AddNewItemView: View {
     }
 }
 
-// UIKit camera wrapper
+// MARK: - UIKit Camera Wrapper
+
 struct ImagePicker: UIViewControllerRepresentable {
     @Environment(\.presentationMode) var presentationMode
     @Binding var image: UIImage?
-    
+
     class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
         let parent: ImagePicker
         init(_ parent: ImagePicker) { self.parent = parent }
-        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-            if let uiImage = info[.originalImage] as? UIImage {
-                parent.image = uiImage
-            }
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let uiImage = info[.originalImage] as? UIImage { parent.image = uiImage }
             parent.presentationMode.wrappedValue.dismiss()
         }
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.presentationMode.wrappedValue.dismiss()
         }
     }
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
@@ -392,4 +332,4 @@ struct ImagePicker: UIViewControllerRepresentable {
         )
         .environmentObject(WardrobeViewModel())
     }
-} 
+}

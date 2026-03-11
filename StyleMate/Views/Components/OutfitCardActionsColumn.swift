@@ -6,40 +6,35 @@ struct OutfitCardActionsColumn: View {
     @Binding var showDeleteAlert: Bool
     var onEdit: () -> Void
     var onDelete: () -> Void
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // Notes (narrower width)
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             if let notes = notes, !notes.isEmpty {
                 Text(notes)
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 8)
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.textSecondary)
                     .frame(width: 64, alignment: .topLeading)
             }
-            // Edit/Delete buttons (vertical stack)
-            VStack(alignment: .leading, spacing: 6) {
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                 Button(action: onEdit) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: DS.Spacing.micro) {
                         Image(systemName: "pencil")
-                            .foregroundColor(.accentColor)
                         Text("Edit")
-                            .font(.caption)
-                            .foregroundColor(.accentColor)
+                            .font(DS.Font.caption1)
                     }
+                    .foregroundColor(DS.Colors.accent)
                 }
-                .accessibilityLabel("Edit Outfit")
+
                 Button(action: onDelete) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: DS.Spacing.micro) {
                         Image(systemName: "trash")
-                            .foregroundColor(.red)
                         Text("Delete")
-                            .font(.caption)
-                            .foregroundColor(.red)
+                            .font(DS.Font.caption1)
                     }
+                    .foregroundColor(DS.Colors.error)
                 }
-                .accessibilityLabel("Delete Outfit")
             }
-            .padding(.top, 2)
         }
     }
-} 
+}

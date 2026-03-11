@@ -7,7 +7,6 @@ struct TodayOutfitSheet: View {
     @EnvironmentObject var homeVM: HomeViewModel
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var outfitsVM: MyOutfitsViewModel
-    @State private var animate = false
     @State private var showSaveActionSheet = false
     @State private var showDatePickerSheet = false
     @State private var selectedDate = Calendar.current.startOfDay(for: Date())
@@ -18,267 +17,139 @@ struct TodayOutfitSheet: View {
     @State private var expandedCategory: Category? = nil
     @State private var selectedProductType: String? = nil
     @State private var isAddingProduct: Bool = false
-    let emojis = ["🎉", "✨", "🥳", "🎊", "💫", "👗", "🕺", "💃", "🧥", "👚", "👖", "👠", "👒", "🧢", "🧣", "🧤"]
-    let burstCount = 18
-    let subheadings = [
-        "You'll rock this outfit! ✨",
-        "Ready to shine today!",
-        "This look is all you!",
-        "Step out in style!",
-        "Fashion on point!",
-        "You look amazing!",
-        "Confidence looks good on you!",
-        "Today's your runway!",
-        "Own your style!",
-        "You're going to turn heads!"
-    ]
-    @State private var selectedEmoji: String = "👗"
-    @State private var selectedSubheading: String = "You'll rock this outfit! ✨"
-    
+
     enum AddProductStep: Identifiable {
         case category, product
         var id: Int { hashValue }
     }
-    
-    private func randomizeLook() {
-        selectedEmoji = emojis.randomElement() ?? "👗"
-        selectedSubheading = subheadings.randomElement() ?? "You'll rock this outfit! ✨"
-    }
-    
-    // Helper to split items into rows for grid centering
-    private func gridRows(items: [WardrobeItem], columnsCount: Int) -> [[WardrobeItem]] {
-        var rows: [[WardrobeItem]] = []
-        var currentRow: [WardrobeItem] = []
-        for (idx, item) in items.enumerated() {
-            currentRow.append(item)
-            if currentRow.count == columnsCount || idx == items.count - 1 {
-                rows.append(currentRow)
-                currentRow = []
-            }
+
+    private var contextLine: String {
+        var parts: [String] = []
+        if let type = homeVM.selectedOutfitType { parts.append(type.rawValue) }
+        if let tempC = homeVM.lastCelsius {
+            let temp = homeVM.displayFahrenheit ? Int((tempC * 9.0 / 5.0) + 32) : Int(tempC)
+            parts.append("\(temp)°\(homeVM.displayFahrenheit ? "F" : "C")")
         }
-        return rows
+        if let weather = homeVM.weather {
+            parts.append(weatherDescription(for: weather.weathercode))
+        }
+        return parts.isEmpty ? "Curated for you" : parts.joined(separator: " · ")
     }
-    
+
+    private let photoColumns = [
+        GridItem(.flexible(), spacing: DS.Spacing.sm),
+        GridItem(.flexible(), spacing: DS.Spacing.sm)
+    ]
+
     var body: some View {
-        let horizontalPadding: CGFloat = 20
         ZStack {
-            LinearGradient(
-                colors: [Color.pink.opacity(0.18), Color.blue.opacity(0.18), Color.yellow.opacity(0.18)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            DS.Colors.backgroundPrimary.ignoresSafeArea()
+
             VStack(spacing: 0) {
-                // Drag indicator
-                Capsule()
-                    .fill(Color.secondary.opacity(0.25))
-                    .frame(width: 44, height: 5)
-                    .padding(.top, 10)
-                    .padding(.bottom, 8)
-                VStack(alignment: .leading, spacing: 10) {
-                    // Energetic heading
-                    Text("Your Look for Today!")
-                        .font(.largeTitle.bold())
-                        .foregroundColor(.accentColor)
-                        .padding(.top, 24)
-                        .transition(.scale)
-                    Text(selectedSubheading)
-                        .font(.body)
-                        .foregroundColor(.secondary.opacity(0.85))
-                        .padding(.bottom, 18)
+                // Header
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    Text("Today's Outfit")
+                        .font(DS.Font.title1)
+                        .foregroundColor(DS.Colors.textPrimary)
+
+                    Text(contextLine)
+                        .font(DS.Font.subheadline)
+                        .foregroundColor(DS.Colors.textSecondary)
                 }
-                .padding(.horizontal, horizontalPadding)
-                // Outfit items as tiles in a grid
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.top, DS.Spacing.xl)
+                .padding(.bottom, DS.Spacing.md)
+
+                // Outfit items grid
                 ScrollView {
-                    let minTileWidth: CGFloat = 180
-                    let spacing: CGFloat = 16
-                    let totalWidth = UIScreen.main.bounds.width - 2 * horizontalPadding
-                    let columnsCount = max(1, Int((totalWidth + spacing) / (minTileWidth + spacing)))
-                    let columns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: columnsCount)
-                    let items = outfitItems
-                    LazyVGrid(columns: columns, alignment: .center, spacing: spacing) {
-                        ForEach(items, id: \ .id) { item in
-                            VStack(spacing: 0) {
-                                Button(action: {
+                    LazyVGrid(columns: photoColumns, spacing: DS.Spacing.sm) {
+                        ForEach(outfitItems, id: \.id) { item in
+                            OutfitItemTile(
+                                item: item,
+                                onTap: {
                                     if let img = item.croppedImage ?? item.image {
                                         previewImage = PreviewImage(image: img)
                                     }
-                                }) {
-                                    VStack(spacing: 10) {
-                                        if let uiImage = item.croppedImage ?? item.image {
-                                            Image(uiImage: uiImage)
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(height: 90)
-                                                .cornerRadius(18)
-                                                .shadow(color: Color.accentColor.opacity(0.18), radius: 8, x: 0, y: 6)
-                                        } else {
-                                            Rectangle()
-                                                .fill(Color.gray)
-                                                .frame(height: 90)
-                                                .cornerRadius(18)
-                                                .overlay(Text("No Image").font(.caption2))
-                                        }
-                                        Text(item.product)
-                                            .font(.headline)
-                                            .foregroundColor(.primary)
-                                        Text(item.colors.joined(separator: ", "))
-                                            .font(.subheadline)
-                                            .foregroundColor(.accentColor)
-                                        Text(item.pattern.rawValue)
-                                            .font(.footnote)
-                                            .foregroundColor(.secondary)
-                                        if !item.brand.isEmpty {
-                                            Text(item.brand)
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                }
-                                .padding(.bottom, 4)
-                                // Per-item shuffle button
-                                Button(action: {
+                                },
+                                onShuffle: {
+                                    Haptics.light()
                                     homeVM.shuffleItemInOutfit(itemToShuffle: item, wardrobe: wardrobeViewModel.items)
-                                }) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "arrow.triangle.2.circlepath")
-                                            .font(.subheadline)
-                                        Text("Shuffle")
-                                            .font(.caption)
-                                    }
-                                    .padding(.vertical, 4)
-                                    .padding(.horizontal, 10)
-                                    .background(Color.accentColor.opacity(0.13))
-                                    .foregroundColor(.accentColor)
-                                    .clipShape(Capsule())
-                                }
-                                .padding(.top, 2)
-                                .disabled(homeVM.isLoading)
-                            }
-                            .padding()
-                            .frame(width: minTileWidth)
-                            .background(RoundedRectangle(cornerRadius: 22).fill(Color(.systemBackground).opacity(0.97)))
-                            .shadow(color: Color.accentColor.opacity(0.10), radius: 10, x: 0, y: 6)
+                                },
+                                isLoading: homeVM.isLoading
+                            )
                         }
                     }
+                    .padding(.horizontal, DS.Spacing.screenH)
+                    .padding(.bottom, 120)
                 }
-                .padding(.horizontal, horizontalPadding)
-                .padding(.top, 4)
+
                 Spacer(minLength: 0)
-                // Fixed bottom buttons
-                Button(action: { showAddProductSheet = true }) {
-                    HStack {
-                        Image(systemName: "plus.circle.fill").font(.title2)
-                        Text("Add Product")
-                    }
-                    .font(.headline)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.green.opacity(0.85))
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .shadow(radius: 4)
-                }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 4)
-                .accessibilityIdentifier("addProductButton")
-                HStack(spacing: 16) {
+
+                // Bottom action bar
+                HStack(spacing: DS.Spacing.sm) {
                     Button(action: {
+                        Haptics.light()
                         homeVM.shuffleOutfit()
-                        randomizeLook()
                     }) {
-                        HStack {
-                            Image(systemName: "arrow.triangle.2.circlepath").font(.title2)
-                            Text("Shuffle")
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                            Text("Shuffle All")
                         }
-                        .font(.headline)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(LinearGradient(colors: [Color.blue.opacity(0.7), Color.pink.opacity(0.7)], startPoint: .leading, endPoint: .trailing))
-                        .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .shadow(radius: 4)
                     }
-                    Button(action: { showSaveActionSheet = true }) {
-                        HStack {
-                            Image(systemName: "square.and.arrow.down.fill").font(.title2)
-                            Text("Save this outfit")
+                    .buttonStyle(DSSecondaryButton())
+
+                    Button(action: {
+                        Haptics.medium()
+                        showSaveActionSheet = true
+                    }) {
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image(systemName: "square.and.arrow.down")
+                            Text("Save Outfit")
                         }
-                        .font(.headline)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color.accentColor)
-                        .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .shadow(radius: 4)
                     }
+                    .buttonStyle(DSPrimaryButton())
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 12)
-                .background(Color(.systemBackground).opacity(0.7).ignoresSafeArea(edges: .bottom))
+                .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.vertical, DS.Spacing.md)
+                .dsGlassBar(cornerRadius: DS.Spacing.md)
             }
-            .padding(.top, 8)
-            .onAppear {
-                animate = true
-                randomizeLook()
-            }
-            // Emoji burst animation
-            ZStack {
-                ForEach(0..<burstCount, id: \ .self) { i in
-                    let angle = Double(i) / Double(burstCount) * 2 * Double.pi
-                    let radius: CGFloat = animate ? CGFloat.random(in: 120...220) : 0
-                    let x = cos(angle) * radius
-                    let y = sin(angle) * radius
-                    Text(emojis.randomElement()!)
-                        .font(.system(size: 36))
-                        .opacity(animate ? 0 : 1)
-                        .offset(x: x, y: y)
-                        .scaleEffect(animate ? 1.6 : 0.7)
-                        .animation(
-                            .easeOut(duration: 1.2).delay(Double(i) * 0.03),
-                            value: animate
-                        )
-                }
-            }
-            .allowsHitTesting(false)
+
             // Loading overlay
             if homeVM.isLoading {
                 Color.black.opacity(0.18).ignoresSafeArea()
-                ProgressView(isAddingProduct ? "Adding..." : "Shuffling...")
-                    .progressViewStyle(CircularProgressViewStyle(tint: .accentColor))
-                    .padding(32)
-                    .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+                ProgressView(isAddingProduct ? "Adding…" : "Shuffling…")
+                    .padding(DS.Spacing.xl)
+                    .background(DS.Colors.backgroundCard)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
             }
+
             if showSavedOverlay {
                 VStack {
                     Spacer()
-                    HStack {
-                        Spacer()
-                        Label("Saved", systemImage: "checkmark.circle.fill")
-                            .font(.title2.bold())
-                            .padding(.vertical, 18)
-                            .padding(.horizontal, 32)
-                            .background(Color.green.opacity(0.95))
-                            .foregroundColor(.white)
-                            .clipShape(Capsule())
-                            .shadow(radius: 10)
-                        Spacer()
-                    }
+                    Label("Saved", systemImage: "checkmark.circle.fill")
+                        .font(DS.Font.title3)
+                        .foregroundColor(.white)
+                        .padding(.vertical, DS.Spacing.md)
+                        .padding(.horizontal, DS.Spacing.xl)
+                        .background(DS.Colors.success)
+                        .clipShape(Capsule())
                     Spacer()
                 }
                 .transition(.opacity)
                 .zIndex(10)
             }
         }
+        .presentationDragIndicator(.visible)
         .sheet(item: $previewImage) { wrapper in
             VStack {
                 Spacer()
-                ZoomableImage(image: wrapper.image)
-                    .padding()
+                ZoomableImage(image: wrapper.image).padding()
                 Spacer()
                 Button("Close") { previewImage = nil }
-                    .font(.headline)
-                    .padding()
+                    .buttonStyle(DSSecondaryButton())
+                    .padding(.horizontal, DS.Spacing.screenH)
+                    .padding(.bottom, DS.Spacing.lg)
             }
         }
         .alert("No more new suggestions. Would you like to see them again?", isPresented: $homeVM.showNoMoreSuggestions) {
@@ -296,6 +167,7 @@ struct TodayOutfitSheet: View {
                 .default(Text("Save for today")) {
                     let today = Calendar.current.startOfDay(for: Date())
                     outfitsVM.addOutfit(date: today, items: outfit.items, source: "gemini")
+                    Haptics.success()
                     showSavedOverlay = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                         showSavedOverlay = false
@@ -311,12 +183,14 @@ struct TodayOutfitSheet: View {
         }
         .sheet(isPresented: $showDatePickerSheet) {
             NavigationView {
-                VStack(spacing: 24) {
+                VStack(spacing: DS.Spacing.lg) {
                     DatePicker("Select Date", selection: $selectedDate, displayedComponents: [.date])
                         .datePickerStyle(GraphicalDatePickerStyle())
                         .padding()
+
                     Button("Save") {
                         outfitsVM.addOutfit(date: selectedDate, items: outfit.items, source: "gemini")
+                        Haptics.success()
                         showSavedOverlay = true
                         showDatePickerSheet = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -324,56 +198,60 @@ struct TodayOutfitSheet: View {
                             isPresented = false
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    Button("Cancel") {
-                        showDatePickerSheet = false
-                    }
-                    .foregroundColor(.red)
+                    .buttonStyle(DSPrimaryButton())
+                    .padding(.horizontal, DS.Spacing.screenH)
+
+                    Button("Cancel") { showDatePickerSheet = false }
+                        .buttonStyle(DSTertiaryButton())
                 }
                 .padding()
                 .navigationTitle("Choose Date")
                 .navigationBarTitleDisplayMode(.inline)
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showAddProductSheet = true } label: {
+                    Image(systemName: "plus.circle")
+                        .foregroundColor(DS.Colors.accent)
+                }
+            }
+        }
         .sheet(item: $addProductStep) { step in
             if step == .category {
                 NavigationView {
                     List {
-                        // Only show categories with at least one wardrobe item
                         ForEach(Category.allCases.filter { category in
                             wardrobeViewModel.items.contains(where: { $0.category == category })
-                        }, id: \ .self) { category in
+                        }, id: \.self) { category in
                             Section(header:
                                 HStack {
                                     Text(category.rawValue)
-                                        .font(.headline)
-                                        .foregroundColor(.accentColor)
+                                        .font(DS.Font.headline)
+                                        .foregroundColor(DS.Colors.accent)
                                     Spacer()
                                     Image(systemName: expandedCategory == category ? "chevron.down" : "chevron.right")
-                                        .foregroundColor(.accentColor)
+                                        .foregroundColor(DS.Colors.accent)
                                 }
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    withAnimation {
-                                        expandedCategory = expandedCategory == category ? nil : category
-                                    }
+                                    withAnimation { expandedCategory = expandedCategory == category ? nil : category }
                                 }
                             ) {
                                 if expandedCategory == category {
-                                    // Only show products in this category that the user has in their wardrobe
                                     let userProducts = Set(wardrobeViewModel.items.filter { $0.category == category }.map { $0.product })
                                     let products = (productTypesByCategory[category] ?? []).filter { userProducts.contains($0) }
-                                    ForEach(products, id: \ .self) { product in
+                                    ForEach(products, id: \.self) { product in
                                         Button(action: {
                                             selectedCategory = category
                                             selectedProductType = product
-                                            addProductStep = nil // Will trigger Gemini logic in next step
+                                            addProductStep = nil
                                             isAddingProduct = true
                                             homeVM.addProductToOutfit(category: category, productType: product, wardrobe: wardrobeViewModel.items)
                                         }) {
                                             Text(product)
-                                                .font(.body)
-                                                .foregroundColor(.primary)
+                                                .font(DS.Font.body)
+                                                .foregroundColor(DS.Colors.textPrimary)
                                         }
                                     }
                                 }
@@ -401,12 +279,80 @@ struct TodayOutfitSheet: View {
             if newValue == nil { showAddProductSheet = false }
         }
         .onChange(of: homeVM.isLoading) { loading in
-            if !loading {
-                isAddingProduct = false
-            }
+            if !loading { isAddingProduct = false }
         }
     }
-    var outfitItems: [WardrobeItem] {
-        outfit.items
+
+    var outfitItems: [WardrobeItem] { outfit.items }
+
+    private func weatherDescription(for code: Int) -> String {
+        switch code {
+        case 0: return "Clear sky"
+        case 1: return "Mainly clear"
+        case 2: return "Partly cloudy"
+        case 3: return "Overcast"
+        case 45, 48: return "Fog"
+        case 51...57: return "Drizzle"
+        case 61...67: return "Rain"
+        case 71...77: return "Snow"
+        case 80...82: return "Rain showers"
+        case 85, 86: return "Snow showers"
+        case 95: return "Thunderstorm"
+        case 96, 99: return "Thunderstorm with hail"
+        default: return ""
+        }
     }
-} 
+}
+
+// MARK: - Outfit Item Tile
+
+private struct OutfitItemTile: View {
+    let item: WardrobeItem
+    let onTap: () -> Void
+    let onShuffle: () -> Void
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(spacing: DS.Spacing.xs) {
+            Button(action: onTap) {
+                if let uiImage = item.croppedImage ?? item.image {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 110)
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                } else {
+                    RoundedRectangle(cornerRadius: DS.Radius.button)
+                        .fill(DS.Colors.backgroundSecondary)
+                        .frame(height: 110)
+                        .overlay(Text("No Image").font(DS.Font.caption2).foregroundColor(DS.Colors.textTertiary))
+                }
+            }
+            .buttonStyle(.plain)
+
+            Text(item.product)
+                .font(DS.Font.subheadline)
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(1)
+
+            Text(item.colors.joined(separator: ", "))
+                .font(DS.Font.caption1)
+                .foregroundColor(DS.Colors.textSecondary)
+                .lineLimit(1)
+
+            Button(action: onShuffle) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.accent)
+                    .padding(DS.Spacing.xs)
+                    .background(DS.Colors.accent.opacity(0.1))
+                    .clipShape(Circle())
+            }
+            .disabled(isLoading)
+        }
+        .padding(DS.Spacing.sm)
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+        .dsCardShadow()
+    }
+}

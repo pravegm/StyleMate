@@ -8,28 +8,29 @@ struct ProductGroupView: View {
     let onToggle: () -> Void
     @Binding var selectedItems: Set<WardrobeItem>
     @Binding var previewImage: PreviewImage?
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             HStack {
                 Text(product)
-                    .font(.headline)
-                    .foregroundColor(.accentColor)
+                    .font(DS.Font.headline)
+                    .foregroundColor(DS.Colors.accent)
                 Spacer()
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(DS.Colors.accent)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, DS.Spacing.micro)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
+
             if isExpanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(items, id: \ .id) { item in
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    ForEach(items, id: \.id) { item in
                         ItemRowView(item: item, selectedItems: $selectedItems, previewImage: $previewImage)
                     }
                 }
-                .padding(.leading, 8)
+                .padding(.leading, DS.Spacing.xs)
             }
         }
-        .padding(.vertical, 2)
     }
-} 
+}

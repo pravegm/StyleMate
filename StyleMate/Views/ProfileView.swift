@@ -4,7 +4,6 @@ struct ProfileView: View {
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @State private var showingSignOutAlert = false
-    @State private var showingOptionsMenu = false
     @State private var showEmptyConfirmation = false
     @State private var showStyleSheet = false
     @State private var tempSelectedStyles: [OutfitType] = []
@@ -12,23 +11,36 @@ struct ProfileView: View {
     @State private var editGender: String = ""
     @State private var editAge: String = ""
     let genderOptions = ["", "Male", "Female", "Other", "Prefer not to say"]
-    
+
     private let maxStyles = 6
     private let allStyles = OutfitType.allCases
-    
+
     var body: some View {
         NavigationStack {
             Form {
+                // Profile header
                 if let user = authService.user {
-                    Section("Personal Information") {
-                        TextField("Your Name", text: .constant(user.name))
-                            .textContentType(.name)
-                            .disabled(true)
+                    Section {
+                        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                            Text(user.name)
+                                .font(DS.Font.title2)
+                                .foregroundColor(DS.Colors.textPrimary)
 
-                        if let email = user.email, !email.isEmpty {
-                            Text(email)
-                                .foregroundStyle(.secondary)
+                            if let email = user.email, !email.isEmpty {
+                                Text(email)
+                                    .font(DS.Font.subheadline)
+                                    .foregroundColor(DS.Colors.textSecondary)
+                            }
+
+                            Text("\(wardrobeViewModel.items.count) items")
+                                .font(DS.Font.caption1)
+                                .foregroundColor(DS.Colors.textTertiary)
+                                .padding(.top, DS.Spacing.micro)
                         }
+                        .padding(.vertical, DS.Spacing.xs)
+                    }
+
+                    Section("Personal Information") {
                         Picker("Gender", selection: $editGender) {
                             ForEach(genderOptions, id: \.self) { option in
                                 Text(option.isEmpty ? "Select Gender" : option).tag(option)
@@ -43,6 +55,7 @@ struct ProfileView: View {
                                 authService.saveCurrentUser()
                             }
                         }
+
                         TextField("Age", text: $editAge)
                             .keyboardType(.numberPad)
                             .onAppear { editAge = user.age != nil ? String(user.age!) : "" }
@@ -54,9 +67,25 @@ struct ProfileView: View {
                                 }
                             }
                     }
-                    
-                    Section("Preferences") {
-                        VStack(alignment: .leading, spacing: 0) {
+
+                    Section("Style Preferences") {
+                        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                            if !user.preferredStyles.isEmpty {
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: DS.Spacing.xs) {
+                                        ForEach(user.preferredStyles, id: \.self) { style in
+                                            Text(style.rawValue)
+                                                .font(DS.Font.caption1)
+                                                .foregroundColor(DS.Colors.accent)
+                                                .padding(.horizontal, DS.Spacing.sm)
+                                                .padding(.vertical, DS.Spacing.xs)
+                                                .background(DS.Colors.accent.opacity(0.12))
+                                                .clipShape(Capsule())
+                                        }
+                                    }
+                                }
+                            }
+
                             Button(action: {
                                 if let user = authService.user {
                                     tempSelectedStyles = user.preferredStyles
@@ -64,24 +93,30 @@ struct ProfileView: View {
                                 }
                             }) {
                                 HStack {
-                                    Text("Your Style Preferences")
-                                        .foregroundColor(.primary)
+                                    Text("Edit Preferences")
+                                        .foregroundColor(DS.Colors.accent)
                                     Spacer()
                                     Image(systemName: "chevron.right")
-                                        .foregroundColor(.gray)
+                                        .foregroundColor(DS.Colors.textTertiary)
                                 }
-                                .padding(.vertical, 12)
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(PlainButtonStyle())
-                            Divider()
-                            Toggle("Enable Notifications", isOn: .constant(user.notificationsEnabled))
-                                .disabled(true)
-                                .padding(.vertical, 8)
+                        }
+
+                        Toggle("Enable Notifications", isOn: .constant(user.notificationsEnabled))
+                            .disabled(true)
+                            .tint(DS.Colors.accent)
+                    }
+
+                    Section("Subscription") {
+                        HStack {
+                            Text("Plan")
+                            Spacer()
+                            Text("Free")
+                                .foregroundColor(DS.Colors.textSecondary)
                         }
                     }
                 }
-                
+
                 Section {
                     Button(role: .destructive) {
                         showingSignOutAlert = true
@@ -93,37 +128,37 @@ struct ProfileView: View {
                         }
                     }
                 }
-                
+
                 Section("App Information") {
                     HStack {
                         Text("Version")
                         Spacer()
                         Text("1.0.0")
-                            .foregroundStyle(.secondary)
+                            .foregroundColor(DS.Colors.textSecondary)
                     }
                 }
-            }
-            .navigationTitle("Profile")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button(role: .destructive) {
-                            showEmptyConfirmation = true
-                        } label: {
-                            Label("Empty My Wardrobe", systemImage: "trash")
-                        }
+
+                // Destructive section
+                Section {
+                    Button(role: .destructive) {
+                        showEmptyConfirmation = true
                     } label: {
-                        Image(systemName: "line.3.horizontal")
-                            .imageScale(.large)
-                            .accessibilityLabel("Options Menu")
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Empty My Wardrobe")
+                        }
+                        .foregroundColor(DS.Colors.error)
                     }
+                } footer: {
+                    Text("This permanently removes all items from your wardrobe.")
+                        .font(DS.Font.caption2)
                 }
             }
+            .tint(DS.Colors.accent)
+            .navigationTitle("Profile")
             .alert("Sign Out", isPresented: $showingSignOutAlert) {
                 Button("Cancel", role: .cancel) {}
-                Button("Sign Out", role: .destructive) {
-                    authService.signOut()
-                }
+                Button("Sign Out", role: .destructive) { authService.signOut() }
             } message: {
                 Text("Are you sure you want to sign out?")
             }
@@ -139,7 +174,6 @@ struct ProfileView: View {
             } message: {
                 Text("This will remove all items from your wardrobe and cannot be undone.")
             }
-            .padding(.bottom, 120)
             .sheet(isPresented: $showStyleSheet) {
                 StylePreferencesSheet(
                     selectedStyles: $tempSelectedStyles,
@@ -167,6 +201,8 @@ struct ProfileView: View {
     }
 }
 
+// MARK: - Style Preferences Sheet
+
 struct StylePreferencesSheet: View {
     @Binding var selectedStyles: [OutfitType]
     @Binding var showStyleError: Bool
@@ -175,28 +211,34 @@ struct StylePreferencesSheet: View {
     @EnvironmentObject var authService: AuthService
     private let maxStyles = 6
     private let allStyles = OutfitType.allCases
-    private let columns = [GridItem(.flexible(minimum: 0, maximum: .infinity)), GridItem(.flexible(minimum: 0, maximum: .infinity))]
+    private let columns = [GridItem(.flexible()), GridItem(.flexible())]
     private let cellHeight: CGFloat = 56
+
     var isChanged: Bool {
         guard let user = authService.user else { return false }
         return Set(selectedStyles) != Set(user.preferredStyles)
     }
+
     var body: some View {
         NavigationView {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Edit Style Preferences")
-                    .font(.title2.bold())
-                    .padding(.top, 24)
-                    .padding(.bottom, 8)
+                    .font(DS.Font.title2)
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .padding(.top, DS.Spacing.lg)
                     .frame(maxWidth: .infinity, alignment: .center)
+
                 Text("Choose exactly 6 preferred styles")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding(.bottom, 16)
+                    .font(DS.Font.subheadline)
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .padding(.top, DS.Spacing.xs)
+                    .padding(.bottom, DS.Spacing.md)
                     .frame(maxWidth: .infinity, alignment: .center)
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(Array(allStyles.enumerated()), id: \.element) { idx, style in
+
+                LazyVGrid(columns: columns, spacing: DS.Spacing.md) {
+                    ForEach(Array(allStyles.enumerated()), id: \.element) { _, style in
                         Button(action: {
+                            Haptics.light()
                             if selectedStyles.contains(style) {
                                 selectedStyles.removeAll { $0 == style }
                             } else if selectedStyles.count < maxStyles {
@@ -205,64 +247,60 @@ struct StylePreferencesSheet: View {
                                 showStyleError = true
                             }
                         }) {
-                            HStack(spacing: 12) {
+                            HStack(spacing: DS.Spacing.sm) {
                                 Image(systemName: selectedStyles.contains(style) ? "checkmark.square.fill" : "square")
-                                    .foregroundColor(selectedStyles.contains(style) ? .accentColor : .gray)
-                                    .font(.title3)
-                                Image(systemName: style.icon)
-                                    .foregroundColor(.primary)
-                                    .font(.title3)
+                                    .foregroundColor(selectedStyles.contains(style) ? DS.Colors.accent : DS.Colors.textTertiary)
+                                    .font(DS.Font.title3)
+
                                 Text(style.rawValue)
-                                    .foregroundColor(.primary)
-                                    .font(.body)
+                                    .foregroundColor(DS.Colors.textPrimary)
+                                    .font(DS.Font.body)
                                     .multilineTextAlignment(.leading)
+
                                 Spacer()
                             }
-                            .padding(.leading, 12)
+                            .padding(.leading, DS.Spacing.sm)
                             .frame(maxWidth: .infinity, minHeight: cellHeight, maxHeight: cellHeight, alignment: .leading)
                             .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(selectedStyles.contains(style) ? Color.accentColor.opacity(0.13) : Color(.systemGray6))
+                                RoundedRectangle(cornerRadius: DS.Radius.card)
+                                    .fill(selectedStyles.contains(style) ? DS.Colors.accent.opacity(0.1) : DS.Colors.backgroundSecondary)
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
+                .padding(.horizontal, DS.Spacing.xs)
+
                 if showStyleError {
                     Text("Please select exactly 6 styles.")
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .padding(.top, 4)
+                        .foregroundColor(DS.Colors.error)
+                        .font(DS.Font.caption1)
+                        .padding(.top, DS.Spacing.xs)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
+
                 Spacer()
-                VStack(spacing: 12) {
-                    Button(action: {
+
+                VStack(spacing: DS.Spacing.sm) {
+                    Button("Save My Style Preferences") {
                         if selectedStyles.count == maxStyles && isChanged {
+                            Haptics.medium()
                             onApply()
                         } else {
                             showStyleError = true
                         }
-                    }) {
-                        Text("Save My Style Preferences")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(isChanged && selectedStyles.count == maxStyles ? Color.accentColor : Color.gray.opacity(0.4))
-                            .cornerRadius(12)
                     }
+                    .buttonStyle(DSPrimaryButton(isDisabled: !isChanged || selectedStyles.count != maxStyles))
                     .disabled(!isChanged || selectedStyles.count != maxStyles)
+
                     Button("Cancel") { onCancel() }
-                        .styleMateSecondaryButton()
+                        .buttonStyle(DSSecondaryButton())
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 24)
+                .padding(.horizontal, DS.Spacing.xs)
+                .padding(.bottom, DS.Spacing.lg)
             }
-            .padding(.horizontal, 16)
-            .background(Color(.systemBackground))
+            .padding(.horizontal, DS.Spacing.md)
+            .background(DS.Colors.backgroundPrimary)
         }
     }
 }
@@ -271,4 +309,4 @@ struct StylePreferencesSheet: View {
     ProfileView()
         .environmentObject(AuthService())
         .environmentObject(WardrobeViewModel())
-} 
+}
