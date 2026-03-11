@@ -13,7 +13,7 @@ struct CategoryCardView: View {
                         .fill(isExpanded ? DS.Colors.accent.opacity(0.15) : DS.Colors.backgroundSecondary)
                         .frame(width: 44, height: 44)
                     Image(systemName: category.iconName)
-                        .font(.system(size: 22, weight: .bold))
+                        .font(DS.Font.title2)
                         .foregroundColor(DS.Colors.accent)
                 }
                 Text(category.rawValue)

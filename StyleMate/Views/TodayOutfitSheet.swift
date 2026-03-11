@@ -31,7 +31,7 @@ struct TodayOutfitSheet: View {
             parts.append("\(temp)°\(homeVM.displayFahrenheit ? "F" : "C")")
         }
         if let weather = homeVM.weather {
-            parts.append(weatherDescription(for: weather.weathercode))
+            parts.append(WeatherService.weatherDescription(for: weather.weathercode))
         }
         return parts.isEmpty ? "Curated for you" : parts.joined(separator: " · ")
     }
@@ -81,7 +81,7 @@ struct TodayOutfitSheet: View {
                         }
                     }
                     .padding(.horizontal, DS.Spacing.screenH)
-                    .padding(.bottom, 120)
+                    .padding(.bottom, DS.Spacing.xxxl * 2)
                 }
 
                 Spacer(minLength: 0)
@@ -285,23 +285,6 @@ struct TodayOutfitSheet: View {
 
     var outfitItems: [WardrobeItem] { outfit.items }
 
-    private func weatherDescription(for code: Int) -> String {
-        switch code {
-        case 0: return "Clear sky"
-        case 1: return "Mainly clear"
-        case 2: return "Partly cloudy"
-        case 3: return "Overcast"
-        case 45, 48: return "Fog"
-        case 51...57: return "Drizzle"
-        case 61...67: return "Rain"
-        case 71...77: return "Snow"
-        case 80...82: return "Rain showers"
-        case 85, 86: return "Snow showers"
-        case 95: return "Thunderstorm"
-        case 96, 99: return "Thunderstorm with hail"
-        default: return ""
-        }
-    }
 }
 
 // MARK: - Outfit Item Tile

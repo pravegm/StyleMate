@@ -22,7 +22,7 @@ struct DetectedItemCard: View {
 
                 Button(action: onRemove) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22))
+                        .font(DS.Font.title2)
                         .foregroundColor(DS.Colors.textTertiary)
                 }
                 .buttonStyle(.plain)
