@@ -29,8 +29,6 @@ struct AddNewItemView: View {
         var product: String
         var colors: [String]
         var pattern: Pattern = .solid
-        var boundingBox: ImageAnalysisService.BoundingBox? = nil
-        var croppedImage: UIImage? = nil
     }
 
     var detectedItems: Binding<[DetectedItem]> {
@@ -195,7 +193,8 @@ struct AddNewItemView: View {
                     for (idx, detected) in detectedItems.wrappedValue.enumerated() {
                         let fullImage = bgRemovedImage ?? img
                         let imagePath = WardrobeImageFileHelper.saveImage(fullImage) ?? ""
-                        let croppedImagePath = detected.croppedImage != nil ? WardrobeImageFileHelper.saveImage(detected.croppedImage!) : nil
+                        let zoneCrop = BodyZone.cropToZone(image: fullImage, category: detected.category)
+                        let croppedImagePath = zoneCrop != nil ? WardrobeImageFileHelper.saveImage(zoneCrop!) : nil
                         let item = WardrobeItem(
                             category: detected.category,
                             product: detected.product,
@@ -234,11 +233,9 @@ struct AddNewItemView: View {
             self.bgRemovedImage = bgRemoved
 
             let results = await ImageAnalysisService.shared.analyzeMultiple(image: image)
-            var items = results.compactMap { cat, prod, colors, pattern, bbox in
+            var items = results.compactMap { cat, prod, colors, pattern in
                 if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                    let cropSource = bgRemoved ?? image
-                    let cropped = cropImage(cropSource, with: bbox)
-                    return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
+                    return DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern)
                 } else {
                     return nil
                 }
@@ -255,15 +252,6 @@ struct AddNewItemView: View {
             isAnalyzing = false
             progress = 1.0
         }
-    }
-
-    private func cropImage(_ image: UIImage, with bbox: ImageAnalysisService.BoundingBox?) -> UIImage? {
-        guard let bbox = bbox else { return nil }
-        let width = image.size.width
-        let height = image.size.height
-        let rect = CGRect(x: bbox.x * width, y: bbox.y * height, width: bbox.width * width, height: bbox.height * height)
-        guard let cgImage = image.cgImage?.cropping(to: rect) else { return nil }
-        return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
 
     private func removeDetectedItem(at idx: Int) {

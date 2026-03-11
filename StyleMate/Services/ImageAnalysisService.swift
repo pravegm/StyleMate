@@ -14,7 +14,7 @@ class ImageAnalysisService {
         let width: CGFloat
         let height: CGFloat
     }
-    func analyzeMultiple(image: UIImage, imageIndex: Int? = nil, retryCount: Int = 0) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?, boundingBox: BoundingBox?)] {
+    func analyzeMultiple(image: UIImage, imageIndex: Int? = nil, retryCount: Int = 0) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?)] {
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
             print("[StyleMate] Failed to convert image to JPEG")
             return []
@@ -46,7 +46,6 @@ For EACH visible clothing item, return:
 - product: one of the valid products above (exact string)
 - colors: array of color names (MUST have at least one, e.g. [\"Blue\", \"White\"])
 - pattern: one of the valid patterns above (exact string)
-- boundingBox: {x, y, width, height} normalized 0-1 relative to image dimensions
 
 Return a JSON array of objects. Use EXACT strings from the lists above.
 """
@@ -62,19 +61,9 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
                         "type": "array",
                         "items": ["type": "string"]
                     ],
-                    "pattern": ["type": "string"],
-                    "boundingBox": [
-                        "type": "object",
-                        "properties": [
-                            "x": ["type": "number"],
-                            "y": ["type": "number"],
-                            "width": ["type": "number"],
-                            "height": ["type": "number"]
-                        ],
-                        "required": ["x", "y", "width", "height"]
-                    ]
+                    "pattern": ["type": "string"]
                 ],
-                "required": ["category", "product", "colors", "pattern", "boundingBox"]
+                "required": ["category", "product", "colors", "pattern"]
             ]
         ]
 
@@ -173,7 +162,7 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
             print("[StyleMate] Parsed \(itemsArray.count) raw items from API")
 
             // Parse each item with fuzzy matching
-            var validResults: [(Category?, String?, [String], Pattern?, BoundingBox?)] = []
+            var validResults: [(Category?, String?, [String], Pattern?)] = []
             for (i, dict) in itemsArray.enumerated() {
                 let catStr = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let prodStr = (dict["product"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -185,17 +174,8 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
                 let colors = colorsArr.map { matchColor($0) ?? $0 }.filter { !$0.isEmpty }
                 let pattern = matchPattern(patStr)
 
-                var bbox: BoundingBox? = nil
-                if let bboxDict = dict["boundingBox"] as? [String: Any],
-                   let x = bboxDict["x"] as? Double,
-                   let y = bboxDict["y"] as? Double,
-                   let w = bboxDict["width"] as? Double,
-                   let h = bboxDict["height"] as? Double {
-                    bbox = BoundingBox(x: CGFloat(x), y: CGFloat(y), width: CGFloat(w), height: CGFloat(h))
-                }
-
                 if let category = category, let product = product, let pattern = pattern, !colors.isEmpty {
-                    validResults.append((category, product, colors, pattern, bbox))
+                    validResults.append((category, product, colors, pattern))
                     print("[StyleMate] Item \(i): OK - \(category.rawValue) / \(product) / \(colors.joined(separator: ",")) / \(pattern.rawValue)")
                 } else {
                     print("[StyleMate] Item \(i): SKIP - raw(cat=\(catStr ?? "nil"), prod=\(prodStr ?? "nil"), pat=\(patStr ?? "nil"), colors=\(colorsArr)) -> matched(cat=\(category?.rawValue ?? "nil"), prod=\(product ?? "nil"), pat=\(pattern?.rawValue ?? "nil"), colors=\(colors.count))")
@@ -222,7 +202,7 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
         }
     }
 
-    private func retryOrEmpty(image: UIImage, imageIndex: Int?, retryCount: Int) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?, boundingBox: BoundingBox?)] {
+    private func retryOrEmpty(image: UIImage, imageIndex: Int?, retryCount: Int) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?)] {
         if retryCount < 2 {
             print("[StyleMate] Retrying (attempt \(retryCount + 2))...")
             try? await Task.sleep(nanoseconds: 1_500_000_000)

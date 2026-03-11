@@ -65,9 +65,13 @@ class WardrobeViewModel: ObservableObject {
 
     func migrateBackgroundRemoval() {
         let migrationKey = "bgRemovalMigrationComplete_\(currentUserEmail)"
-        guard !UserDefaults.standard.bool(forKey: migrationKey) else { return }
+        guard !UserDefaults.standard.bool(forKey: migrationKey) else {
+            migrateZoneCrop()
+            return
+        }
         guard !items.isEmpty else {
             UserDefaults.standard.set(true, forKey: migrationKey)
+            migrateZoneCrop()
             return
         }
 
@@ -106,6 +110,53 @@ class WardrobeViewModel: ObservableObject {
                     self.save(forUser: self.currentUserEmail)
                 }
                 UserDefaults.standard.set(true, forKey: migrationKey)
+                self.migrateZoneCrop()
+            }
+        }
+    }
+
+    func migrateZoneCrop() {
+        let zoneCropKey = "zoneCropMigrationComplete_\(currentUserEmail)"
+        guard !UserDefaults.standard.bool(forKey: zoneCropKey) else { return }
+        guard !items.isEmpty else {
+            UserDefaults.standard.set(true, forKey: zoneCropKey)
+            return
+        }
+
+        Task {
+            var updated = false
+            for (index, item) in items.enumerated() {
+                guard let fullImage = WardrobeImageFileHelper.loadImage(at: item.imagePath) else { continue }
+
+                let zoneCrop = BodyZone.cropToZone(image: fullImage, category: item.category)
+                let newCroppedPath = zoneCrop != nil ? WardrobeImageFileHelper.saveImage(zoneCrop!) : nil
+
+                if let oldCropped = item.croppedImagePath {
+                    WardrobeImageFileHelper.deleteImage(at: oldCropped)
+                }
+
+                let updatedItem = WardrobeItem(
+                    id: item.id,
+                    category: item.category,
+                    product: item.product,
+                    colors: item.colors,
+                    brand: item.brand,
+                    pattern: item.pattern,
+                    imagePath: item.imagePath,
+                    croppedImagePath: newCroppedPath
+                )
+
+                await MainActor.run {
+                    self.items[index] = updatedItem
+                }
+                updated = true
+            }
+
+            await MainActor.run {
+                if updated {
+                    self.save(forUser: self.currentUserEmail)
+                }
+                UserDefaults.standard.set(true, forKey: zoneCropKey)
             }
         }
     }

@@ -579,7 +579,7 @@ struct MultiAddNewItemView: View {
         bgRemovedImages = Array(repeating: nil, count: images.count)
 
         Task {
-            await withTaskGroup(of: (Int, [(Category?, String?, [String], Pattern?, ImageAnalysisService.BoundingBox?)], UIImage?).self) { group in
+            await withTaskGroup(of: (Int, [(Category?, String?, [String], Pattern?)], UIImage?).self) { group in
                 for (idx, image) in images.enumerated() {
                     group.addTask {
                         let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: image)
@@ -588,11 +588,9 @@ struct MultiAddNewItemView: View {
                     }
                 }
                 for await (idx, results, bgRemoved) in group {
-                    var items = results.compactMap { cat, prod, colors, pattern, bbox in
+                    var items = results.compactMap { cat, prod, colors, pattern in
                         if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                            let cropSource = bgRemoved ?? images[idx]
-                            let cropped = cropImage(cropSource, with: bbox)
-                            return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
+                            return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern)
                         } else { return nil }
                     }
                     let footwearIndices = items.indices.filter { items[$0].category == .footwear }
@@ -628,11 +626,9 @@ struct MultiAddNewItemView: View {
         Task {
             let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: images[idx])
             let results = await ImageAnalysisService.shared.analyzeMultiple(image: images[idx], imageIndex: idx)
-            var items = results.compactMap { cat, prod, colors, pattern, bbox in
+            var items = results.compactMap { cat, prod, colors, pattern in
                 if let cat = cat, let prod = prod, let pattern = pattern, !colors.isEmpty {
-                    let cropSource = bgRemoved ?? images[idx]
-                    let cropped = cropImage(cropSource, with: bbox)
-                    return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern, boundingBox: bbox, croppedImage: cropped)
+                    return AddNewItemView.DetectedItem(category: cat, product: prod, colors: colors, pattern: pattern)
                 } else { return nil }
             }
             let footwearIndices = items.indices.filter { items[$0].category == .footwear }
@@ -699,7 +695,8 @@ struct MultiAddNewItemView: View {
             for (itemIdx, detected) in items.enumerated() {
                 let fullImage = bgRemovedImages.indices.contains(imgIdx) ? (bgRemovedImages[imgIdx] ?? images[imgIdx]) : images[imgIdx]
                 let imagePath = WardrobeImageFileHelper.saveImage(fullImage) ?? ""
-                let croppedImagePath = detected.croppedImage != nil ? WardrobeImageFileHelper.saveImage(detected.croppedImage!) : nil
+                let zoneCrop = BodyZone.cropToZone(image: fullImage, category: detected.category)
+                let croppedImagePath = zoneCrop != nil ? WardrobeImageFileHelper.saveImage(zoneCrop!) : nil
                 let item = WardrobeItem(
                     category: detected.category,
                     product: detected.product,
@@ -721,7 +718,8 @@ struct MultiAddNewItemView: View {
             for (itemIdx, detected) in items.enumerated() {
                 let fullImage = bgRemovedImages.indices.contains(imgIdx) ? (bgRemovedImages[imgIdx] ?? images[imgIdx]) : images[imgIdx]
                 let imagePath = WardrobeImageFileHelper.saveImage(fullImage) ?? ""
-                let croppedImagePath = detected.croppedImage != nil ? WardrobeImageFileHelper.saveImage(detected.croppedImage!) : nil
+                let zoneCrop = BodyZone.cropToZone(image: fullImage, category: detected.category)
+                let croppedImagePath = zoneCrop != nil ? WardrobeImageFileHelper.saveImage(zoneCrop!) : nil
                 let item = WardrobeItem(
                     category: detected.category,
                     product: detected.product,
@@ -735,43 +733,6 @@ struct MultiAddNewItemView: View {
             }
         }
         return result
-    }
-
-    private func cropImage(_ image: UIImage, with bbox: ImageAnalysisService.BoundingBox?) -> UIImage? {
-        guard let bbox = bbox else { return nil }
-        let width = image.size.width
-        let height = image.size.height
-        let minCropPercent: CGFloat = 0.5
-        var rect: CGRect
-        if height >= width {
-            let cropY = bbox.y * height
-            var cropH = bbox.height * height
-            if cropH < height * minCropPercent {
-                cropH = height * minCropPercent
-                let centerY = cropY + (bbox.height * height) / 2
-                let newY = max(0, min(centerY - cropH / 2, height - cropH))
-                rect = CGRect(x: 0, y: newY, width: width, height: cropH)
-            } else {
-                rect = CGRect(x: 0, y: cropY, width: width, height: cropH)
-            }
-            rect.origin.y = max(0, rect.origin.y)
-            if rect.maxY > height { rect.size.height = height - rect.origin.y }
-        } else {
-            let cropX = bbox.x * width
-            var cropW = bbox.width * width
-            if cropW < width * minCropPercent {
-                cropW = width * minCropPercent
-                let centerX = cropX + (bbox.width * width) / 2
-                let newX = max(0, min(centerX - cropW / 2, width - cropW))
-                rect = CGRect(x: newX, y: 0, width: cropW, height: height)
-            } else {
-                rect = CGRect(x: cropX, y: 0, width: cropW, height: height)
-            }
-            rect.origin.x = max(0, rect.origin.x)
-            if rect.maxX > width { rect.size.width = width - rect.origin.x }
-        }
-        guard let cgImage = image.cgImage?.cropping(to: rect) else { return nil }
-        return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
 
     private func addAllAndShowSummary() {

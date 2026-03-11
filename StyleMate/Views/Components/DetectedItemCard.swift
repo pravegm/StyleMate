@@ -10,12 +10,13 @@ struct DetectedItemCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             HStack {
-                if let cropped = item.croppedImage {
-                    Image(uiImage: cropped)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 64, height: 64)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.category.rawValue)
+                        .font(DS.Font.headline)
+                        .foregroundColor(DS.Colors.accent)
+                    Text(item.product)
+                        .font(DS.Font.subheadline)
+                        .foregroundColor(DS.Colors.textSecondary)
                 }
 
                 Spacer()

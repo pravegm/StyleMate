@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct MyWardrobeView: View {
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
@@ -145,6 +146,12 @@ struct CategoryDetailView: View {
 
     @State private var previewImage: PreviewImage? = nil
     @State private var editingItem: WardrobeItem? = nil
+    @State private var replacePhotoItem: WardrobeItem? = nil
+    @State private var showPhotoSourcePicker = false
+    @State private var showReplaceCamera = false
+    @State private var showReplaceGallery = false
+    @State private var replaceGallerySelection: [PhotosPickerItem] = []
+    @State private var isReplacingPhoto = false
 
     private func normalizedProduct(_ product: String) -> String {
         let lower = product.lowercased().trimmingCharacters(in: .whitespaces)
@@ -240,6 +247,9 @@ struct CategoryDetailView: View {
                                             Button { editingItem = item } label: {
                                                 Label("Edit", systemImage: "pencil")
                                             }
+                                            Button { replacePhotoItem = item } label: {
+                                                Label("Replace Photo", systemImage: "camera")
+                                            }
                                             Button(role: .destructive) {
                                                 if let idx = wardrobeViewModel.items.firstIndex(of: item) {
                                                     WardrobeImageFileHelper.deleteImage(at: item.imagePath)
@@ -281,6 +291,80 @@ struct CategoryDetailView: View {
                     wardrobeViewModel.items[idx] = updatedItem
                 }
                 editingItem = nil
+            }
+        }
+        .confirmationDialog("Replace Photo", isPresented: $showPhotoSourcePicker, presenting: replacePhotoItem) { item in
+            Button("Take Photo") { showReplaceCamera = true }
+            Button("Choose from Gallery") { showReplaceGallery = true }
+            Button("Cancel", role: .cancel) { replacePhotoItem = nil }
+        } message: { item in
+            Text("Choose a new photo for this \(item.product)")
+        }
+        .onChange(of: replacePhotoItem) { item in
+            if item != nil { showPhotoSourcePicker = true }
+        }
+        .sheet(isPresented: $showReplaceCamera) {
+            ImagePicker(image: Binding(
+                get: { nil },
+                set: { newImage in
+                    if let img = newImage, let item = replacePhotoItem {
+                        replacePhoto(for: item, with: img)
+                    }
+                }
+            ))
+        }
+        .photosPicker(isPresented: $showReplaceGallery, selection: $replaceGallerySelection, maxSelectionCount: 1, matching: .images)
+        .onChange(of: replaceGallerySelection) { items in
+            guard let first = items.first else { return }
+            Task {
+                if let data = try? await first.loadTransferable(type: Data.self),
+                   let img = UIImage(data: data),
+                   let item = replacePhotoItem {
+                    replacePhoto(for: item, with: img)
+                }
+                replaceGallerySelection = []
+            }
+        }
+        .overlay {
+            if isReplacingPhoto {
+                OutfitLoadingOverlay(progress: 0.5, message: "Processing photo…")
+            }
+        }
+    }
+
+    private func replacePhoto(for item: WardrobeItem, with newImage: UIImage) {
+        isReplacingPhoto = true
+        Task {
+            let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: newImage) ?? newImage
+
+            guard let newImagePath = WardrobeImageFileHelper.saveImage(bgRemoved) else {
+                await MainActor.run { isReplacingPhoto = false }
+                return
+            }
+            let zoneCrop = BodyZone.cropToZone(image: bgRemoved, category: item.category)
+            let newCroppedPath = zoneCrop != nil ? WardrobeImageFileHelper.saveImage(zoneCrop!) : nil
+
+            WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+            WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+
+            let updatedItem = WardrobeItem(
+                id: item.id,
+                category: item.category,
+                product: item.product,
+                colors: item.colors,
+                brand: item.brand,
+                pattern: item.pattern,
+                imagePath: newImagePath,
+                croppedImagePath: newCroppedPath ?? item.croppedImagePath
+            )
+
+            await MainActor.run {
+                if let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == item.id }) {
+                    wardrobeViewModel.items[idx] = updatedItem
+                }
+                replacePhotoItem = nil
+                isReplacingPhoto = false
+                Haptics.success()
             }
         }
     }
