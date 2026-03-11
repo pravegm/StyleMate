@@ -3,6 +3,7 @@ import CoreLocation
 
 struct HomeView: View {
     @StateObject private var homeVM = HomeViewModel()
+    @StateObject private var outfitsVM = MyOutfitsViewModel()
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var authService: AuthService
     @State private var showProfile = false
@@ -120,7 +121,7 @@ struct HomeView: View {
                     TodayOutfitSheet(outfit: outfit, isPresented: $homeVM.showOutfitSheet)
                         .environmentObject(homeVM)
                         .environmentObject(wardrobeViewModel)
-                        .environmentObject(MyOutfitsViewModel())
+                        .environmentObject(outfitsVM)
                 }
             }
             .alert("No valid outfit found", isPresented: $homeVM.showNoOutfitAlert) {

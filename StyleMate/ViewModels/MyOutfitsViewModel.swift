@@ -2,6 +2,7 @@ import Foundation
 import CoreData
 import SwiftUI
 
+@MainActor
 class MyOutfitsViewModel: ObservableObject {
     @Published var outfitsByDate: [Date: [DatedOutfit]] = [:]
     private let context: NSManagedObjectContext
@@ -17,12 +18,9 @@ class MyOutfitsViewModel: ObservableObject {
         do {
             let results = try context.fetch(request)
             let grouped = Dictionary(grouping: results) { outfit in
-                // Group by start of day to ensure all outfits for a day are together
                 Calendar.current.startOfDay(for: outfit.date ?? Date.distantPast)
             }
-            DispatchQueue.main.async {
-                self.outfitsByDate = grouped
-            }
+            self.outfitsByDate = grouped
         } catch {
             print("Failed to fetch outfits: \(error)")
         }
