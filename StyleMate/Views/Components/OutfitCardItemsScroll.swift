@@ -7,7 +7,7 @@ struct OutfitCardItemsScroll: View {
         ZStack(alignment: .trailing) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(allItems, id: \ .objectID) { item in
+                    ForEach(allItems, id: \.objectID) { item in
                         Button(action: {
                             if let img = item.croppedImage ?? item.image {
                                 previewImage = PreviewImage(image: img)

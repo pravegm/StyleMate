@@ -45,7 +45,7 @@ struct MyOutfitsView: View {
                                     .padding(.bottom, 2)
                                 if let todaysOutfits = viewModel.outfitsByDate[Calendar.current.startOfDay(for: Date())], !todaysOutfits.isEmpty {
                                     VStack(spacing: 16) {
-                                        ForEach(todaysOutfits, id: \ .objectID) { outfit in
+                                        ForEach(todaysOutfits, id: \.objectID) { outfit in
                                             OutfitCardView(outfit: outfit, viewModel: viewModel)
                                                 .environmentObject(wardrobeVM)
                                         }
@@ -96,7 +96,7 @@ struct MyOutfitsView: View {
                                     Text("Outfits for \(dateFormatter.string(from: selectedDate))")
                                         .font(.title3.bold())
                                         .foregroundColor(.accentColor)
-                                    ForEach(outfits, id: \ .objectID) { outfit in
+                                    ForEach(outfits, id: \.objectID) { outfit in
                                         OutfitCardView(outfit: outfit, viewModel: viewModel)
                                             .environmentObject(wardrobeVM)
                                     }
