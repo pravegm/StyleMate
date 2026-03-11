@@ -37,11 +37,6 @@ struct TodayOutfitSheet: View {
         return parts.isEmpty ? "Curated for you" : parts.joined(separator: " · ")
     }
 
-    private let photoColumns = [
-        GridItem(.flexible(), spacing: DS.Spacing.sm),
-        GridItem(.flexible(), spacing: DS.Spacing.sm)
-    ]
-
     var body: some View {
         ZStack {
             DS.Colors.backgroundPrimary.ignoresSafeArea()
@@ -59,14 +54,13 @@ struct TodayOutfitSheet: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, DS.Spacing.screenH)
-                .padding(.top, DS.Spacing.xl)
+                .padding(.top, DS.Spacing.md)
                 .padding(.bottom, DS.Spacing.md)
 
-                // Outfit items grid
                 ScrollView {
-                    LazyVGrid(columns: photoColumns, spacing: DS.Spacing.sm) {
+                    VStack(spacing: DS.Spacing.sm) {
                         ForEach(outfitItems, id: \.id) { item in
-                            OutfitItemTile(
+                            OutfitItemRow(
                                 item: item,
                                 onTap: {
                                     if let img = item.croppedImage ?? item.image {
@@ -82,7 +76,7 @@ struct TodayOutfitSheet: View {
                         }
                     }
                     .padding(.horizontal, DS.Spacing.screenH)
-                    .padding(.bottom, DS.Spacing.xxxl * 2)
+                    .padding(.bottom, DS.Spacing.xxxl)
                 }
 
                 Spacer(minLength: 0)
@@ -287,55 +281,81 @@ struct TodayOutfitSheet: View {
         }
     }
 
-    var outfitItems: [WardrobeItem] { outfit.items }
+    var outfitItems: [WardrobeItem] {
+        outfit.items.sorted { $0.category.wearingOrder < $1.category.wearingOrder }
+    }
 
 }
 
-// MARK: - Outfit Item Tile
+// MARK: - Outfit Item Row
 
-private struct OutfitItemTile: View {
+private struct OutfitItemRow: View {
     let item: WardrobeItem
     let onTap: () -> Void
     let onShuffle: () -> Void
     let isLoading: Bool
 
     var body: some View {
-        VStack(spacing: DS.Spacing.xs) {
+        HStack(spacing: DS.Spacing.md) {
             Button(action: onTap) {
                 if let uiImage = item.croppedImage ?? item.image {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()
-                        .frame(height: 110)
+                        .frame(width: 100, height: 100)
                         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
                 } else {
                     RoundedRectangle(cornerRadius: DS.Radius.button)
                         .fill(DS.Colors.backgroundSecondary)
-                        .frame(height: 110)
-                        .overlay(Text("No Image").font(DS.Font.caption2).foregroundColor(DS.Colors.textTertiary))
+                        .frame(width: 100, height: 100)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .foregroundColor(DS.Colors.textTertiary)
+                        )
                 }
             }
             .buttonStyle(.plain)
 
-            Text(item.product)
-                .font(DS.Font.subheadline)
-                .foregroundColor(DS.Colors.textPrimary)
-                .lineLimit(1)
-
-            Text(item.colors.joined(separator: ", "))
-                .font(DS.Font.caption1)
-                .foregroundColor(DS.Colors.textSecondary)
-                .lineLimit(1)
-
-            Button(action: onShuffle) {
-                Image(systemName: "arrow.triangle.2.circlepath")
+            VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                Text(item.category.rawValue)
                     .font(DS.Font.caption1)
                     .foregroundColor(DS.Colors.accent)
-                    .padding(DS.Spacing.xs)
-                    .background(DS.Colors.accent.opacity(0.1))
-                    .clipShape(Circle())
+
+                Text(item.product)
+                    .font(DS.Font.headline)
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
+
+                Text(item.colors.joined(separator: ", "))
+                    .font(DS.Font.subheadline)
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .lineLimit(1)
+
+                if !item.brand.isEmpty {
+                    Text(item.brand)
+                        .font(DS.Font.caption1)
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            Button(action: onShuffle) {
+                VStack(spacing: DS.Spacing.micro) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(DS.Font.body)
+                        .foregroundColor(DS.Colors.accent)
+                    Text("Swap")
+                        .font(DS.Font.caption2)
+                        .foregroundColor(DS.Colors.accent)
+                }
+                .padding(DS.Spacing.sm)
+                .background(DS.Colors.accent.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
             }
             .disabled(isLoading)
+            .opacity(isLoading ? 0.4 : 1.0)
         }
         .padding(DS.Spacing.sm)
         .background(DS.Colors.backgroundCard)

@@ -14,6 +14,21 @@ enum Category: String, CaseIterable, Identifiable, Hashable {
     case ethnicWear = "Ethnic Wear"
     
     var id: String { self.rawValue }
+
+    var wearingOrder: Int {
+        switch self {
+        case .accessories:  return 0
+        case .outerwear:    return 1
+        case .midLayers:    return 2
+        case .tops:         return 3
+        case .onePieces:    return 3
+        case .activewear:   return 3
+        case .ethnicWear:   return 3
+        case .innerwear:    return 4
+        case .bottoms:      return 5
+        case .footwear:     return 6
+        }
+    }
 }
 
 // Shared wardrobe view model
