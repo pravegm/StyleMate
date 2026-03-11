@@ -120,11 +120,7 @@ struct ProfileView: View {
             .alert("Sign Out", isPresented: $showingSignOutAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Sign Out", role: .destructive) {
-                    do {
-                        try authService.signOut()
-                    } catch {
-                        // Error handling removed
-                    }
+                    authService.signOut()
                 }
             } message: {
                 Text("Are you sure you want to sign out?")
@@ -197,8 +193,7 @@ struct StylePreferencesSheet: View {
                     .padding(.bottom, 16)
                     .frame(maxWidth: .infinity, alignment: .center)
                 LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(0..<10) { idx in
-                        let style = allStyles[idx]
+                    ForEach(Array(allStyles.enumerated()), id: \.element) { idx, style in
                         Button(action: {
                             if selectedStyles.contains(style) {
                                 selectedStyles.removeAll { $0 == style }

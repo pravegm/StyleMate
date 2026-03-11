@@ -1,6 +1,5 @@
 import UIKit
 
-// Pattern enum moved here from Pattern.swift
 enum Pattern: String, CaseIterable, Identifiable, Codable {
     case solid = "Solid"
     case stripes = "Stripes"
@@ -48,11 +47,6 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
         ([colors.joined(separator: ", ")] + [pattern.rawValue, brand, displayProduct])
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             .joined(separator: " ")
-    }
-    
-    private var colorsList: String {
-        // For backward compatibility, if only 'color' exists
-        return colors.joined(separator: ", ")
     }
     
     init(id: UUID = UUID(), category: Category, product: String, colors: [String], brand: String, pattern: Pattern, imagePath: String, croppedImagePath: String? = nil) {

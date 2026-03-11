@@ -4,8 +4,6 @@ struct MyWardrobeView: View {
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     private let columns = [GridItem(.adaptive(minimum: 140), spacing: 16)]
     @State private var selectedCategory: Category?
-    @State private var showProfile = false
-    @State private var showEmptyConfirmation = false
     @State private var showPhotoPicker = false
     @State private var selectedImages: [UIImage] = []
     @State private var showReviewBatch = false
@@ -50,9 +48,6 @@ struct MyWardrobeView: View {
                     .padding()
                     .padding(.bottom, 120)
                 }
-            }
-            .sheet(isPresented: $showProfile) {
-                ProfileView()
             }
             .sheet(isPresented: $showPhotoPicker, onDismiss: {
                 if !selectedImages.isEmpty {
@@ -189,8 +184,6 @@ struct CategoryDetailView: View {
     @State private var previewImage: PreviewImage? = nil
     @State private var editingItem: WardrobeItem? = nil
     @State private var expandedProducts: Set<String> = []
-    @State private var editMode: Bool = false
-    @State private var selectedItems: Set<UUID> = []
     @State private var hasAutoExpanded: Bool = false
 
     // Helper to normalize product names (lowercase, singularize)
@@ -273,22 +266,8 @@ struct CategoryDetailView: View {
                             if expandedProducts.contains(group.product) {
                                 ForEach(group.items) { item in
                                     HStack {
-                                        if editMode {
-                                            Button(action: {
-                                                if selectedItems.contains(item.id) {
-                                                    selectedItems.remove(item.id)
-                                                } else {
-                                                    selectedItems.insert(item.id)
-                                                }
-                                            }) {
-                                                Image(systemName: selectedItems.contains(item.id) ? "checkmark.circle.fill" : "circle")
-                                                    .foregroundColor(selectedItems.contains(item.id) ? .accentColor : .secondary)
-                                                    .imageScale(.large)
-                                            }
-                                            .buttonStyle(BorderlessButtonStyle())
-                                        }
                                         Button {
-                                            if !editMode, let previewImg = item.croppedImage ?? item.image {
+                                            if let previewImg = item.croppedImage ?? item.image {
                                                 previewImage = PreviewImage(image: previewImg)
                                             }
                                         } label: {
@@ -323,26 +302,23 @@ struct CategoryDetailView: View {
                                                 }
                                             }
                                         }
-                                        .disabled(editMode) // Disable preview in edit mode
                                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                            if !editMode {
-                                                Button(role: .destructive) {
-                                                    if let idx = wardrobeViewModel.items.firstIndex(of: item) {
-                                                        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-                                                        WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
-                                                        wardrobeViewModel.items.remove(at: idx)
-                                                    }
-                                                } label: {
-                                                    Label("Delete", systemImage: "trash")
+                                            Button(role: .destructive) {
+                                                if let idx = wardrobeViewModel.items.firstIndex(of: item) {
+                                                    WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+                                                    WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+                                                    wardrobeViewModel.items.remove(at: idx)
                                                 }
-                                                .tint(.red)
-                                                Button {
-                                                    editingItem = item
-                                                } label: {
-                                                    Label("Edit", systemImage: "pencil")
-                                                }
-                                                .tint(.blue)
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
                                             }
+                                            .tint(.red)
+                                            Button {
+                                                editingItem = item
+                                            } label: {
+                                                Label("Edit", systemImage: "pencil")
+                                            }
+                                            .tint(.blue)
                                         }
                                     }
                                 }
@@ -366,9 +342,6 @@ struct CategoryDetailView: View {
             }
         }
         .navigationTitle(category.rawValue)
-        .toolbar {
-            // No toolbar items for edit/delete/cancel
-        }
         .sheet(item: $previewImage) { wrapper in
             VStack {
                 Spacer()
@@ -472,14 +445,6 @@ struct ZoomableImage: View {
                 .animation(.easeInOut(duration: 0.2), value: scale)
         }
         .clipped()
-    }
-}
-
-// PreferenceKey for scroll offset
-struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 

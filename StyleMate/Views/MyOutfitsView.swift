@@ -415,11 +415,6 @@ struct YearMonthPicker: View {
     }
 }
 
-struct OutfitItemGroup {
-    let category: String
-    let items: [OutfitItem]
-}
-
 struct OutfitCardView: View {
     let outfit: DatedOutfit
     @ObservedObject var viewModel: MyOutfitsViewModel

@@ -1,5 +1,4 @@
 import SwiftUI
-import PhotosUI
 
 struct AddNewItemView: View {
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
@@ -12,7 +11,6 @@ struct AddNewItemView: View {
     @State private var pickedImage: UIImage?
     @State private var detectedItemsState: [DetectedItem] = []
     @State private var brandInputsState: [String] = []
-    @State private var photoPickerItem: PhotosPickerItem?
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var isAnalyzing = false
@@ -47,10 +45,6 @@ struct AddNewItemView: View {
         var croppedImage: UIImage? = nil
     }
     
-    func productOptions(for category: Category) -> [String] {
-        productTypesByCategory[category] ?? []
-    }
-
     var detectedItems: Binding<[DetectedItem]> {
         detectedItemsBinding ?? $detectedItemsState
     }
@@ -327,6 +321,9 @@ struct AddNewItemView: View {
         detectedItems.wrappedValue.remove(at: idx)
         if brandInputs.wrappedValue.indices.contains(idx) {
             brandInputs.wrappedValue.remove(at: idx)
+        }
+        if duplicateAcknowledged.wrappedValue.indices.contains(idx) {
+            duplicateAcknowledged.wrappedValue.remove(at: idx)
         }
     }
     

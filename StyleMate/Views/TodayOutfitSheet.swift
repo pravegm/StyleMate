@@ -15,7 +15,6 @@ struct TodayOutfitSheet: View {
     @State private var showAddProductSheet = false
     @State private var addProductStep: AddProductStep? = nil
     @State private var selectedCategory: Category? = nil
-    @State private var selectedProduct: WardrobeItem? = nil
     @State private var expandedCategory: Category? = nil
     @State private var selectedProductType: String? = nil
     @State private var isAddingProduct: Bool = false

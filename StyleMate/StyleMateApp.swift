@@ -8,17 +8,8 @@
 import SwiftUI
 import PhotosUI
 
-class AppDelegate: NSObject, UIApplicationDelegate {
-    func application(_ application: UIApplication,
-                    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        // No Firebase needed for local only
-        return true
-    }
-}
-
 @main
 struct StyleMateApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var authService = AuthService()
     @StateObject private var wardrobeVM = WardrobeViewModel()
     let persistenceController = PersistenceController.shared
@@ -35,11 +26,9 @@ struct StyleMateApp: App {
 
 enum AddFlow: Identifiable {
     case camera
-    case form(UIImage)
     var id: String {
         switch self {
         case .camera: return "camera"
-        case .form: return "form"
         }
     }
 }
@@ -61,7 +50,6 @@ struct RootView: View {
     @State private var showPickerTip = false
     @AppStorage("hasShownPickerTip") private var hasShownPickerTip: Bool = false
     @State private var pendingAction: (() -> Void)? = nil
-    // PhotosPicker state
     @State private var galleryItems: [PhotosPickerItem] = []
     @State private var isLoadingGalleryImages = false
     @State private var showGalleryPicker = false
@@ -78,13 +66,12 @@ struct RootView: View {
         ZStack {
             Group {
                 if authService.isAuthenticated {
-                    MainTabViewWrapper(showAddSheet: $showAddSheet, activeAddFlow: $activeAddFlow)
+                    MainTabViewWrapper(showAddSheet: $showAddSheet)
                 } else {
                     LoginView()
                 }
             }
         }
-        // Present PhotosPicker directly from AddSourceSheet
         .photosPicker(isPresented: $showGalleryPicker, selection: $galleryItems, maxSelectionCount: 15, matching: .images)
         .onChange(of: galleryItems) { items in
             if !items.isEmpty {
@@ -135,16 +122,11 @@ struct RootView: View {
                 .environmentObject(wardrobeVM)
         }
         .sheet(item: $activeAddFlow) { flow in
-            switch flow {
-            case .camera:
-                CameraSheet { image in
-                    if let image = image {
-                        capturedImage = CapturedImage(image: image)
-                    }
-                    activeAddFlow = nil
+            CameraSheet { image in
+                if let image = image {
+                    capturedImage = CapturedImage(image: image)
                 }
-            case .form:
-                EmptyView()
+                activeAddFlow = nil
             }
         }
         .sheet(item: $capturedImage, onDismiss: { capturedImage = nil }) { captured in
@@ -183,7 +165,6 @@ struct RootView: View {
             }
         }
     }
-    // Helper for loading images from PhotosPickerItems
     private func loadGalleryImages() {
         Task {
             var images: [UIImage] = []
@@ -301,14 +282,11 @@ struct CameraSheet: View {
 
 struct MainTabViewWrapper: View {
     @Binding var showAddSheet: Bool
-    @Binding var activeAddFlow: AddFlow?
     var body: some View {
-        MainTabView(showAddSheet: $showAddSheet, activeAddFlow: $activeAddFlow)
+        MainTabView(showAddSheet: $showAddSheet)
     }
 }
 
-// New: MultiAddNewItemView for reviewing multiple images in AddNewItemView style
-import SwiftUI
 struct MultiAddNewItemView: View {
     let images: [UIImage]
     @Binding var isPresented: Bool
@@ -646,9 +624,6 @@ struct MultiAddNewItemView: View {
                         items = items.enumerated().filter { idx2, item in
                             item.category != .footwear || idx2 == footwearIndices.first
                         }.map { $0.element }
-                    }
-                    if items.isEmpty && !results.isEmpty {
-//                         print("[DEBUG] Gemini raw results for image #\(idx): \(results)")
                     }
                     await MainActor.run {
                         detectedItems[idx] = items

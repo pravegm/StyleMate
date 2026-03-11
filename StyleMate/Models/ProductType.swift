@@ -1,8 +1,4 @@
 import Foundation
-import UIKit
-import SwiftUI
-
-import Foundation
 
 let productTypesByCategory: [Category: [String]] = [
     .tops: [

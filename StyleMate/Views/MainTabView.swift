@@ -3,7 +3,6 @@ import SwiftUI
 struct MainTabView: View {
     @State private var selectedTab = 0
     @Binding var showAddSheet: Bool
-    @Binding var activeAddFlow: AddFlow?
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -76,5 +75,5 @@ struct CustomTabBar: View {
 }
 
 #Preview {
-    MainTabView(showAddSheet: .constant(false), activeAddFlow: .constant(nil))
+    MainTabView(showAddSheet: .constant(false))
 } 

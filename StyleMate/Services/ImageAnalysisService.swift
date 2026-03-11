@@ -5,11 +5,9 @@ class ImageAnalysisService {
     static let shared = ImageAnalysisService()
     private init() {}
     
-    // Gemini 2.5 Flash API Key
     private let geminiAPIKey = "AIzaSyAoq8aUGlzCQzeq1pSKqRjThZ-qeaneQO8"
     private let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="
     
-    // New: Analyze multiple items in an image
     struct BoundingBox: Codable {
         let x: CGFloat
         let y: CGFloat
@@ -17,13 +15,7 @@ class ImageAnalysisService {
         let height: CGFloat
     }
     func analyzeMultiple(image: UIImage, imageIndex: Int? = nil, retryCount: Int = 0) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?, boundingBox: BoundingBox?)] {
-        if let idx = imageIndex {
-            //             print("[Gemini] Starting analysis for image #\(idx), attempt #\(retryCount+1)")
-        } else {
-            //             print("[Gemini] Starting analysis for image (no index), attempt #\(retryCount+1)")
-        }
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
-            //             print("[Gemini] Failed to get JPEG data for image")
             return []
         }
         let base64Image = imageData.base64EncodedString()
@@ -106,7 +98,6 @@ Return only the JSON array, no extra text.
         ]
         guard let url = URL(string: geminiEndpoint + geminiAPIKey),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
-            //             print("[Gemini] Invalid URL or request body")
             return []
         }
         var request = URLRequest(url: url)
@@ -384,8 +375,7 @@ Here is the wardrobe:
 \n\(wardrobeSummary)\n
 Return only the JSON array, no extra text.
 """
-        print("\n[Gemini Prompt] suggestOutfitBatch:\n\(prompt)\n")
-        // 3. Prepare Gemini API request
+        // Prepare Gemini API request
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -414,8 +404,6 @@ Return only the JSON array, no extra text.
             if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
                let text = result.candidates.first?.content.parts.first?.text,
                let arrData = text.data(using: .utf8) {
-                // DEBUG: Print the raw Gemini response
-                //         print("\n--- GEMINI RAW RESPONSE ---\n\(text)\n--- END RESPONSE ---\n")
                 let decoder = JSONDecoder()
                 if let arr = try? decoder.decode([[SuggestedOutfitItem]].self, from: arrData) {
                     return arr
@@ -452,7 +440,6 @@ Return only the JSON array, no extra text.
         let prompt = """
 You are an expert fashion stylist. Given the following information, suggest a new item for a specific category to improve today's outfit, while keeping all other items unchanged.\n\n**Current Outfit:**\n\(outfitSummary)\n\n**Category to Shuffle:** \(categoryToShuffle.rawValue)\n\n**Available Items in This Category:**\n\(availableSummary)\n\n\(genderInstruction)\n**Instructions:**\n- Suggest a new item for the category \"\(categoryToShuffle.rawValue)\" from the available items in that category.\n- The new item must be different from the current one in the outfit.\n- The new item must harmonize with the rest of the outfit, following established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).\n- Only combine items that make sense together (e.g., seasonally appropriate, no clashing colors, no more than one statement pattern, no sandals with winter coats, etc.).\n- Prefer color harmony: neutrals go with anything, but bold colors should be paired thoughtfully.\n- Avoid inappropriate combinations (e.g., no sandals with winter coats, no more than one statement pattern).\n- Do not repeat the same product type (e.g., two tops).\n- Only use items from the provided list. Do not invent or hallucinate new items.\n- Do not change any other items in the outfit.\n- If you cannot find a perfect match, return the closest possible match from the available items. You must always return a result.\n- Return your answer as a JSON object with the following fields: category, product, colors (array), pattern, brand.\n- Return only the JSON object, no extra text.\n"
 """
-        print("\n[Gemini Prompt] suggestPartialShuffleWithResult:\n\(prompt)\n")
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -517,15 +504,6 @@ You are an expert fashion stylist. Given the following information, suggest a ne
         return .failure
     }
 
-    // For backward compatibility
-    func suggestPartialShuffle(currentOutfit: Outfit, categoryToShuffle: Category, availableItems: [WardrobeItem]) async -> SuggestedOutfitItem? {
-        let result = await suggestPartialShuffleWithResult(currentOutfit: currentOutfit, categoryToShuffle: categoryToShuffle, availableItems: availableItems)
-        if case let .success(item) = result {
-            return item
-        }
-        return nil
-    }
-
     /// Suggests a new outfit by adding a product of the given type (from availableItems) to the current outfit using Gemini.
     /// Returns the new suggested outfit as an array of SuggestedOutfitItem (or nil on failure).
     func suggestAddProductToOutfit(currentOutfit: Outfit, category: Category, productType: String, availableItems: [WardrobeItem], user: User? = nil) async -> [SuggestedOutfitItem]? {
@@ -567,7 +545,6 @@ Please update the outfit by adding the best \(productType) from the list above, 
 
 Return the new outfit as a JSON array of objects, where each object has: category, product, colors (array), pattern, and brand. Return only the JSON array, no extra text.
 """
-        print("\n[Gemini Prompt] suggestAddProductToOutfit:\n\(prompt)\n")
         let requestBody: [String: Any] = [
             "contents": [
                 [

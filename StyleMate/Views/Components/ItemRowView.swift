@@ -4,15 +4,18 @@ struct ItemRowView: View {
     let item: WardrobeItem
     @Binding var selectedItems: Set<WardrobeItem>
     @Binding var previewImage: PreviewImage?
+    
+    private func toggleSelection() {
+        if selectedItems.contains(item) {
+            selectedItems.remove(item)
+        } else if selectedItems.count < 10 {
+            selectedItems.insert(item)
+        }
+    }
+    
     var body: some View {
         HStack(spacing: 10) {
-            Button(action: {
-                if selectedItems.contains(item) {
-                    selectedItems.remove(item)
-                } else if selectedItems.count < 10 {
-                    selectedItems.insert(item)
-                }
-            }) {
+            Button(action: toggleSelection) {
                 Image(systemName: selectedItems.contains(item) ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundColor(selectedItems.contains(item) ? .accentColor : .secondary)
@@ -41,17 +44,11 @@ struct ItemRowView: View {
                     .foregroundColor(.primary)
             }
             .contentShape(Rectangle())
-            .onTapGesture {
-                if selectedItems.contains(item) {
-                    selectedItems.remove(item)
-                } else if selectedItems.count < 10 {
-                    selectedItems.insert(item)
-                }
-            }
+            .onTapGesture { toggleSelection() }
             Spacer()
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 12).fill(selectedItems.contains(item) ? Color.accentColor.opacity(0.09) : Color(.systemGray6)))
         .shadow(color: selectedItems.contains(item) ? Color.accentColor.opacity(0.10) : Color.clear, radius: 2, x: 0, y: 1)
     }
-} 
+}

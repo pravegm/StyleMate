@@ -6,19 +6,6 @@ struct HomeView: View {
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var authService: AuthService
     @State private var showProfile = false
-    // Add for celebratory emoji and subheading
-    let emojis = ["✨", "🕺", "💃", "👗", "🎉", "🌟", "🧥", "👚", "🧢", "🧣", "🧤", "👠", "👒"]
-    let subheadings = [
-        "Ready to style your day?",
-        "Step into your best look!",
-        "Your wardrobe, reimagined.",
-        "Let's make today stylish!",
-        "Fashion, powered by you.",
-        "Unleash your inner icon.",
-        "Every day is a runway!"
-    ]
-    @State private var selectedEmoji: String = "✨"
-    @State private var selectedSubheading: String = "Ready to style your day?"
     @State private var animateButton = false
     @State private var loadingProgress: Double = 0.0
     @State private var loadingTimer: Timer? = nil
@@ -204,9 +191,6 @@ struct HomeView: View {
                 }
             }
             .onAppear {
-                // Randomize emoji and subheading on appear
-                selectedEmoji = emojis.randomElement() ?? "✨"
-                selectedSubheading = subheadings.randomElement() ?? "Ready to style your day?"
                 selectedQuote = styleQuotes.shuffled().first ?? "Style is a way to say who you are without having to speak."
                 if homeVM.weather == nil && !homeVM.isWeatherLoading {
                     homeVM.requestWeatherForCurrentLocation()
@@ -350,27 +334,6 @@ struct HomeView: View {
                     }
                 }
             }
-        }
-    }
-    
-    // Magical subheading with fade/slide and gradient
-    struct MagicalSubheading: View {
-        let text: String
-        @State private var appear = false
-        var body: some View {
-            Text(text)
-                .font(.headline)
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color.accentColor, Color.pink.opacity(0.85), Color.blue.opacity(0.85)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .opacity(appear ? 1 : 0)
-                .offset(y: appear ? 0 : 12)
-                .animation(.easeOut(duration: 1.1), value: appear)
-                .onAppear { appear = true }
         }
     }
 }

@@ -12,22 +12,6 @@ struct StyleMateTheme {
 }
 
 extension View {
-    func styleMateCard() -> some View {
-        self
-            .background(StyleMateTheme.cardBackground)
-            .cornerRadius(12)
-            .shadow(color: StyleMateTheme.cardShadow, radius: 4, x: 0, y: 2)
-    }
-    func styleMatePrimaryButton() -> some View {
-        self
-            .font(.headline)
-            .foregroundColor(.white)
-            .frame(height: 50)
-            .frame(maxWidth: .infinity)
-            .background(StyleMateTheme.accent)
-            .cornerRadius(12)
-            .contentShape(Rectangle())
-    }
     func styleMateSecondaryButton() -> some View {
         self
             .font(.headline)
@@ -41,11 +25,5 @@ extension View {
             .background(StyleMateTheme.cardBackground)
             .cornerRadius(12)
             .contentShape(Rectangle())
-    }
-    func styleMateSectionSpacing() -> some View {
-        self.padding(.vertical, 24)
-    }
-    func styleMateElementSpacing() -> some View {
-        self.padding(.vertical, 8)
     }
 } 

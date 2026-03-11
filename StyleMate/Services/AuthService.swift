@@ -155,11 +155,4 @@ class AuthService: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.currentUserObjectKey)
         // Do not clear users for persistence
     }
-    
-    // Clear all users (for development/testing)
-    static func clearAllUsers() {
-        users = [:]
-        UserDefaults.standard.removeObject(forKey: usersKey)
-        UserDefaults.standard.removeObject(forKey: currentUserKey)
-    }
 } 
