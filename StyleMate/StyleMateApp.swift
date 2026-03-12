@@ -26,7 +26,10 @@ struct RootView: View {
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
     @StateObject private var outfitsVM = MyOutfitsViewModel()
     @State private var lastUserKey: String = ""
-    @State private var showAddSheet = false
+    @State private var showSourcePicker = false
+    @State private var showPhotoPicker = false
+    @State private var showCamera = false
+    @State private var capturedCameraImage: UIImage? = nil
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var reviewImages: [UIImage] = []
     @State private var showReview = false
@@ -41,14 +44,18 @@ struct RootView: View {
         ZStack {
             Group {
                 if authService.isAuthenticated {
-                    MainTabView(showAddSheet: $showAddSheet)
+                    MainTabView(showAddSheet: $showSourcePicker)
                         .environmentObject(outfitsVM)
                 } else {
                     LoginView()
                 }
             }
         }
-        .photosPicker(isPresented: $showAddSheet, selection: $pickerItems, maxSelectionCount: 15, matching: .images)
+        .confirmationDialog("Add New Item", isPresented: $showSourcePicker, titleVisibility: .visible) {
+            Button("Choose from Gallery") { showPhotoPicker = true }
+            Button("Take Photo") { showCamera = true }
+        }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $pickerItems, maxSelectionCount: 15, matching: .images)
         .onChange(of: pickerItems) { items in
             guard !items.isEmpty else { return }
             isLoadingImages = true
@@ -68,7 +75,26 @@ struct RootView: View {
                 }
             }
         }
-        .fullScreenCover(isPresented: $showReview) {
+        .fullScreenCover(isPresented: $showCamera) {
+            ImagePicker(image: Binding(
+                get: { capturedCameraImage },
+                set: { img in
+                    capturedCameraImage = img
+                    showCamera = false
+                    if let image = img {
+                        reviewImages = [image]
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showReview = true
+                        }
+                    }
+                }
+            ))
+            .ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $showReview, onDismiss: {
+            capturedCameraImage = nil
+            reviewImages = []
+        }) {
             AddItemReviewView(images: reviewImages, isPresented: $showReview)
                 .environmentObject(wardrobeVM)
         }
