@@ -34,14 +34,18 @@ class ImageAnalysisService {
             return []
         }
 
-        print("[StyleMate] Segmentation: Pass 1 classified \(classifications.count) items, starting mask extraction...")
+        print("[StyleMate] Segmentation: Pass 1 classified \(classifications.count) items")
 
-        let apiImage = resizedForAPI(image)
+        let bgRemovedRaw = await BackgroundRemovalService.shared.removeBackground(from: image) ?? image
+        let bgRemoved = trimWhitespace(bgRemovedRaw)
+        print("[StyleMate] Segmentation: BG removed and trimmed: \(Int(bgRemovedRaw.size.width))x\(Int(bgRemovedRaw.size.height)) -> \(Int(bgRemoved.size.width))x\(Int(bgRemoved.size.height))")
+
+        let apiImage = resizedForAPI(bgRemoved)
         guard let imageData = apiImage.jpegData(compressionQuality: 0.7) else { return [] }
         let base64Image = imageData.base64EncodedString()
-        print("[StyleMate] Segmentation: Image for masks: \(imageData.count) bytes, original: \(Int(image.size.width))x\(Int(image.size.height)), sent: \(Int(apiImage.size.width))x\(Int(apiImage.size.height))")
+        print("[StyleMate] Segmentation: Image for bboxes: \(imageData.count) bytes, sent: \(Int(apiImage.size.width))x\(Int(apiImage.size.height))")
 
-        // Pass 2: Per-item segmentation (parallel)
+        // Pass 2: Per-item bounding box detection (parallel)
         let results = await withTaskGroup(of: SegmentedItem?.self) { group in
             for (category, product, colors, pattern) in classifications {
                 guard let category = category, let product = product,
@@ -49,21 +53,24 @@ class ImageAnalysisService {
 
                 group.addTask {
                     let label = "\(product) (\(category.rawValue))"
-                    let mask = await self.segmentSingleItem(
-                        base64Image: base64Image,
-                        originalImage: image,
-                        itemLabel: label,
-                        category: category
-                    )
-
                     let garmentImage: UIImage?
-                    if let mask = mask {
-                        garmentImage = mask
+
+                    if let box = await self.getItemBoundingBox(
+                        base64Image: base64Image,
+                        itemLabel: label
+                    ) {
+                        garmentImage = self.extractGarment(from: bgRemoved, boxNormalized: box)
+                        if garmentImage != nil {
+                            print("[StyleMate] Segmentation: Extracted \(label) via bounding box")
+                        } else {
+                            let cropped = BodyZone.cropToZone(image: bgRemoved, category: category) ?? bgRemoved
+                            garmentImage = self.padToSquare(cropped)
+                            print("[StyleMate] Segmentation: Fallback zone crop for \(label)")
+                        }
                     } else {
-                        let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: image)
-                        let cropped = BodyZone.cropToZone(image: bgRemoved ?? image, category: category) ?? bgRemoved ?? image
+                        let cropped = BodyZone.cropToZone(image: bgRemoved, category: category) ?? bgRemoved
                         garmentImage = self.padToSquare(cropped)
-                        print("[StyleMate] Segmentation: Fallback used for \(label)")
+                        print("[StyleMate] Segmentation: Fallback zone crop for \(label)")
                     }
 
                     return SegmentedItem(
@@ -78,22 +85,20 @@ class ImageAnalysisService {
 
             var collected: [SegmentedItem] = []
             for await result in group {
-                if let item = result {
-                    collected.append(item)
-                }
+                if let item = result { collected.append(item) }
             }
             return collected
         }
 
-        print("[StyleMate] Segmentation: Returning \(results.count) segmented items")
+        print("[StyleMate] Segmentation: Returning \(results.count) items")
         return results
     }
 
-    private func segmentSingleItem(base64Image: String, originalImage: UIImage, itemLabel: String, category: Category) async -> UIImage? {
+    private func getItemBoundingBox(base64Image: String, itemLabel: String) async -> [Int]? {
         let prompt = """
-Give the segmentation mask for the \(itemLabel) in this image.
-Output a JSON list with ONE entry containing the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".
-The mask should cover ONLY the fabric/material of this specific garment. Do NOT include any skin, face, hair, hands, or other body parts.
+Detect the \(itemLabel) in this image.
+Output a JSON list with ONE entry containing the 2D bounding box in the key "box_2d" and the text label in the key "label".
+The box_2d should tightly surround ONLY this garment, not the person's body.
 """
 
         let requestBody: [String: Any] = [
@@ -125,14 +130,14 @@ The mask should cover ONLY the fabric/material of this specific garment. Do NOT 
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = httpBody
-        request.timeoutInterval = 30
+        request.timeoutInterval = 15
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
-                print("[StyleMate] Segmentation mask failed for \(itemLabel): HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                print("[StyleMate] BBox failed for \(itemLabel): HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
                 return nil
             }
 
@@ -143,39 +148,29 @@ The mask should cover ONLY the fabric/material of this specific garment. Do NOT 
                   let parts = content["parts"] as? [[String: Any]],
                   let textPart = parts.first(where: { $0["text"] != nil }),
                   let text = textPart["text"] as? String else {
-                print("[StyleMate] Segmentation mask: bad response structure for \(itemLabel)")
+                print("[StyleMate] BBox: bad response for \(itemLabel)")
                 return nil
             }
 
             guard let items = parseSegmentationJSON(text), let first = items.first else {
-                print("[StyleMate] Segmentation mask: JSON parse failed for \(itemLabel)")
+                print("[StyleMate] BBox: JSON parse failed for \(itemLabel)")
                 return nil
             }
 
-            let box: [Int]?
             if let boxInts = first["box_2d"] as? [Int], boxInts.count == 4 {
-                box = boxInts
+                print("[StyleMate] BBox: success for \(itemLabel): \(boxInts)")
+                return boxInts
             } else if let boxDoubles = first["box_2d"] as? [Double], boxDoubles.count == 4 {
-                box = boxDoubles.map { Int($0) }
-            } else {
-                box = nil
+                let boxInts = boxDoubles.map { Int($0) }
+                print("[StyleMate] BBox: success for \(itemLabel): \(boxInts)")
+                return boxInts
             }
 
-            guard let box = box, let maskBase64 = first["mask"] as? String else {
-                print("[StyleMate] Segmentation mask: no valid box/mask for \(itemLabel)")
-                return nil
-            }
-
-            if let garment = extractGarment(from: originalImage, boxNormalized: box, maskBase64: maskBase64) {
-                print("[StyleMate] Segmentation mask: success for \(itemLabel)")
-                return garment
-            } else {
-                print("[StyleMate] Segmentation mask: extraction failed for \(itemLabel)")
-                return nil
-            }
+            print("[StyleMate] BBox: no valid box for \(itemLabel)")
+            return nil
 
         } catch {
-            print("[StyleMate] Segmentation mask: network error for \(itemLabel): \(error.localizedDescription)")
+            print("[StyleMate] BBox: network error for \(itemLabel): \(error.localizedDescription)")
             return nil
         }
     }
@@ -200,8 +195,8 @@ The mask should cover ONLY the fabric/material of this specific garment. Do NOT 
         return array
     }
 
-    private func extractGarment(from originalImage: UIImage, boxNormalized: [Int], maskBase64: String) -> UIImage? {
-        guard let cgImage = originalImage.cgImage else { return nil }
+    private func extractGarment(from bgRemovedImage: UIImage, boxNormalized: [Int]) -> UIImage? {
+        guard let cgImage = bgRemovedImage.cgImage else { return nil }
         let imgWidth = CGFloat(cgImage.width)
         let imgHeight = CGFloat(cgImage.height)
 
@@ -214,68 +209,21 @@ The mask should cover ONLY the fabric/material of this specific garment. Do NOT 
         let boxHeight = y1 - y0
         guard boxWidth > 0, boxHeight > 0 else { return nil }
 
-        var cleanBase64 = maskBase64
-        if let range = cleanBase64.range(of: "base64,") {
-            cleanBase64 = String(cleanBase64[range.upperBound...])
-        }
+        let padX = boxWidth * 0.05
+        let padY = boxHeight * 0.05
 
-        guard let maskData = Data(base64Encoded: cleanBase64),
-              let maskUIImage = UIImage(data: maskData),
-              let maskCG = maskUIImage.cgImage else { return nil }
+        let cropRect = CGRect(
+            x: max(0, x0 - padX),
+            y: max(0, y0 - padY),
+            width: min(imgWidth - max(0, x0 - padX), boxWidth + padX * 2),
+            height: min(imgHeight - max(0, y0 - padY), boxHeight + padY * 2)
+        )
 
-        let maskSize = CGSize(width: boxWidth, height: boxHeight)
-        UIGraphicsBeginImageContextWithOptions(maskSize, false, 1.0)
-        guard let maskContext = UIGraphicsGetCurrentContext() else {
-            UIGraphicsEndImageContext()
-            return nil
-        }
-        maskContext.draw(maskCG, in: CGRect(origin: .zero, size: maskSize))
-        guard let resizedMaskCG = maskContext.makeImage() else {
-            UIGraphicsEndImageContext()
-            return nil
-        }
-        UIGraphicsEndImageContext()
+        guard !cropRect.isEmpty,
+              let cropped = cgImage.cropping(to: cropRect) else { return nil }
 
-        let colorSpace = CGColorSpaceCreateDeviceGray()
-        guard let binaryContext = CGContext(
-            data: nil,
-            width: Int(boxWidth),
-            height: Int(boxHeight),
-            bitsPerComponent: 8,
-            bytesPerRow: Int(boxWidth),
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.none.rawValue
-        ) else { return nil }
-
-        binaryContext.draw(resizedMaskCG, in: CGRect(x: 0, y: 0, width: boxWidth, height: boxHeight))
-
-        guard let pixelData = binaryContext.data else { return nil }
-        let buffer = pixelData.bindMemory(to: UInt8.self, capacity: Int(boxWidth * boxHeight))
-        for i in 0..<Int(boxWidth * boxHeight) {
-            buffer[i] = buffer[i] > 127 ? 255 : 0
-        }
-        guard let binarizedMaskCG = binaryContext.makeImage() else { return nil }
-
-        let cropRect = CGRect(x: x0, y: y0, width: boxWidth, height: boxHeight)
-        guard let croppedCG = cgImage.cropping(to: cropRect) else { return nil }
-
-        let outputSize = CGSize(width: boxWidth, height: boxHeight)
-        UIGraphicsBeginImageContextWithOptions(outputSize, false, originalImage.scale)
-        guard let ctx = UIGraphicsGetCurrentContext() else {
-            UIGraphicsEndImageContext()
-            return nil
-        }
-
-        ctx.translateBy(x: 0, y: boxHeight)
-        ctx.scaleBy(x: 1, y: -1)
-        ctx.clip(to: CGRect(origin: .zero, size: outputSize), mask: binarizedMaskCG)
-        ctx.draw(croppedCG, in: CGRect(origin: .zero, size: outputSize))
-
-        let garmentImage = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-
-        guard let garment = garmentImage else { return nil }
-        return padToSquare(garment)
+        let result = UIImage(cgImage: cropped, scale: bgRemovedImage.scale, orientation: bgRemovedImage.imageOrientation)
+        return padToSquare(result)
     }
 
     func padToSquare(_ image: UIImage) -> UIImage {
@@ -314,6 +262,68 @@ The mask should cover ONLY the fabric/material of this specific garment. Do NOT 
         let resized = UIGraphicsGetImageFromCurrentImageContext() ?? image
         UIGraphicsEndImageContext()
         return resized
+    }
+
+    private func trimWhitespace(_ image: UIImage, threshold: UInt8 = 240) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+
+        let width = cgImage.width
+        let height = cgImage.height
+
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return image }
+
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        guard let pixelData = context.data else { return image }
+        let data = pixelData.bindMemory(to: UInt8.self, capacity: width * height * 4)
+
+        var minX = width, minY = height, maxX = 0, maxY = 0
+
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                let r = data[offset]
+                let g = data[offset + 1]
+                let b = data[offset + 2]
+                let a = data[offset + 3]
+
+                if a < 10 { continue }
+                if r >= threshold && g >= threshold && b >= threshold { continue }
+
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+
+        guard minX < maxX, minY < maxY else { return image }
+
+        let contentWidth = CGFloat(maxX - minX)
+        let contentHeight = CGFloat(maxY - minY)
+        let padX = contentWidth * 0.03
+        let padY = contentHeight * 0.03
+
+        let cropRect = CGRect(
+            x: max(0, CGFloat(minX) - padX),
+            y: max(0, CGFloat(minY) - padY),
+            width: min(CGFloat(width) - max(0, CGFloat(minX) - padX), contentWidth + padX * 2),
+            height: min(CGFloat(height) - max(0, CGFloat(minY) - padY), contentHeight + padY * 2)
+        )
+
+        guard !cropRect.isEmpty,
+              let cropped = cgImage.cropping(to: cropRect) else { return image }
+
+        return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
     }
 
     // MARK: - Classification Pipeline (legacy)
