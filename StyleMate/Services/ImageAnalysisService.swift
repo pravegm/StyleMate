@@ -26,43 +26,74 @@ class ImageAnalysisService {
     }
 
     func analyzeAndSegment(image: UIImage, retryCount: Int = 0) async -> [SegmentedItem] {
-        let apiImage = resizedForAPI(image)
+        // Pass 1: Classification (fast, text-only, existing proven code)
+        let classifications = await analyzeMultiple(image: image)
 
-        guard let imageData = apiImage.jpegData(compressionQuality: 0.7) else {
-            print("[StyleMate] Segmentation: Failed to convert image to JPEG")
+        guard !classifications.isEmpty else {
+            print("[StyleMate] Segmentation: No items classified, returning empty")
             return []
         }
+
+        print("[StyleMate] Segmentation: Pass 1 classified \(classifications.count) items, starting mask extraction...")
+
+        let apiImage = resizedForAPI(image)
+        guard let imageData = apiImage.jpegData(compressionQuality: 0.7) else { return [] }
         let base64Image = imageData.base64EncodedString()
-        print("[StyleMate] Segmentation: Image encoded: \(imageData.count) bytes, original: \(Int(image.size.width))x\(Int(image.size.height)), sent: \(Int(apiImage.size.width))x\(Int(apiImage.size.height)) (attempt \(retryCount + 1))")
+        print("[StyleMate] Segmentation: Image for masks: \(imageData.count) bytes, original: \(Int(image.size.width))x\(Int(image.size.height)), sent: \(Int(apiImage.size.width))x\(Int(apiImage.size.height))")
 
-        let validCategories = Category.allCases.map(\.rawValue).joined(separator: ", ")
-        let validPatterns = Pattern.allCases.map(\.rawValue).joined(separator: ", ")
-        let validProducts = productTypesByCategory.map { cat, prods in
-            "- \(cat.rawValue): \(prods.joined(separator: ", "))"
-        }.joined(separator: "\n")
+        // Pass 2: Per-item segmentation (parallel)
+        let results = await withTaskGroup(of: SegmentedItem?.self) { group in
+            for (category, product, colors, pattern) in classifications {
+                guard let category = category, let product = product,
+                      let pattern = pattern, !colors.isEmpty else { continue }
 
+                group.addTask {
+                    let label = "\(product) (\(category.rawValue))"
+                    let mask = await self.segmentSingleItem(
+                        base64Image: base64Image,
+                        originalImage: image,
+                        itemLabel: label,
+                        category: category
+                    )
+
+                    let garmentImage: UIImage?
+                    if let mask = mask {
+                        garmentImage = mask
+                    } else {
+                        let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: image)
+                        let cropped = BodyZone.cropToZone(image: bgRemoved ?? image, category: category) ?? bgRemoved ?? image
+                        garmentImage = self.padToSquare(cropped)
+                        print("[StyleMate] Segmentation: Fallback used for \(label)")
+                    }
+
+                    return SegmentedItem(
+                        category: category,
+                        product: product,
+                        colors: colors,
+                        pattern: pattern,
+                        maskImage: garmentImage
+                    )
+                }
+            }
+
+            var collected: [SegmentedItem] = []
+            for await result in group {
+                if let item = result {
+                    collected.append(item)
+                }
+            }
+            return collected
+        }
+
+        print("[StyleMate] Segmentation: Returning \(results.count) segmented items")
+        return results
+    }
+
+    private func segmentSingleItem(base64Image: String, originalImage: UIImage, itemLabel: String, category: Category) async -> UIImage? {
         let prompt = """
-You are an expert fashion assistant. Analyze the clothing items worn by the person in this image.
-
-For EACH visible clothing item (including partially visible ones), provide:
-- category: one of [\(validCategories)]
-- product: one of the valid products for that category
-- colors: array of color names
-- pattern: one of [\(validPatterns)]
-- label: a short description of the item
-
-Valid products per category:
-\(validProducts)
-
-Also provide segmentation data:
-- box_2d: bounding box as [y0, x0, y1, x1] normalized to 0-1000
-- mask: segmentation mask for JUST the clothing item (no skin, no face, no hair, no other garments)
-
-Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".
-
-Also include "category", "product", "colors", and "pattern" keys for each item.
-
-IMPORTANT: The mask should cover ONLY the fabric/material of that specific garment. Do NOT include any skin, face, hair, hands, or other body parts in the mask. Do NOT include other garments that overlap.
+Give the segmentation mask for the \(itemLabel) in this image.
+Output a JSON list with ONE entry containing the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".
+The mask should cover ONLY the fabric/material of this specific garment. Do NOT include any skin, face, hair, hands, or other body parts.
 """
 
         let requestBody: [String: Any] = [
@@ -85,160 +116,67 @@ IMPORTANT: The mask should cover ONLY the fabric/material of that specific garme
             ]
         ]
 
-        guard let url = URL(string: geminiEndpoint + geminiAPIKey) else {
-            print("[StyleMate] Segmentation: Invalid API URL")
-            return []
-        }
-        guard let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
-            print("[StyleMate] Segmentation: Failed to serialize request body")
-            return []
+        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+              let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            return nil
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = httpBody
-        request.timeoutInterval = 120
+        request.timeoutInterval = 30
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
 
-            guard let httpResponse = response as? HTTPURLResponse else {
-                print("[StyleMate] Segmentation: No HTTP response received")
-                return []
-            }
-            print("[StyleMate] Segmentation: HTTP \(httpResponse.statusCode)")
-
-            if httpResponse.statusCode == 429 {
-                if retryCount < 3 {
-                    let delay = UInt64(pow(2.0, Double(retryCount + 1))) * 1_000_000_000
-                    print("[StyleMate] Segmentation: Rate limited, waiting \(delay / 1_000_000_000)s before retry...")
-                    try? await Task.sleep(nanoseconds: delay)
-                    return await analyzeAndSegment(image: image, retryCount: retryCount + 1)
-                }
-                print("[StyleMate] Segmentation: Rate limited after all retries")
-                return []
-            }
-
-            guard httpResponse.statusCode == 200 else {
-                let errorBody = String(data: data, encoding: .utf8) ?? "no body"
-                print("[StyleMate] Segmentation: API error \(httpResponse.statusCode): \(errorBody.prefix(500))")
-                if retryCount < 2 {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    return await analyzeAndSegment(image: image, retryCount: retryCount + 1)
-                }
-                return []
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                print("[StyleMate] Segmentation mask failed for \(itemLabel): HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                return nil
             }
 
             guard let responseJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let candidates = responseJson["candidates"] as? [[String: Any]],
                   let firstCandidate = candidates.first,
                   let content = firstCandidate["content"] as? [String: Any],
-                  let parts = content["parts"] as? [[String: Any]] else {
-                print("[StyleMate] Segmentation: Unexpected response structure")
-                if retryCount < 2 {
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    return await analyzeAndSegment(image: image, retryCount: retryCount + 1)
-                }
-                return []
-            }
-
-            guard let textPart = parts.first(where: { $0["text"] != nil }),
+                  let parts = content["parts"] as? [[String: Any]],
+                  let textPart = parts.first(where: { $0["text"] != nil }),
                   let text = textPart["text"] as? String else {
-                print("[StyleMate] Segmentation: No text part in response")
-                if retryCount < 2 {
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    return await analyzeAndSegment(image: image, retryCount: retryCount + 1)
-                }
-                return []
+                print("[StyleMate] Segmentation mask: bad response structure for \(itemLabel)")
+                return nil
             }
 
-            print("[StyleMate] Segmentation: Response text length: \(text.count)")
-
-            guard let itemsArray = parseSegmentationJSON(text) else {
-                print("[StyleMate] Segmentation: Failed to parse JSON from response")
-                if retryCount < 2 {
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    return await analyzeAndSegment(image: image, retryCount: retryCount + 1)
-                }
-                return []
+            guard let items = parseSegmentationJSON(text), let first = items.first else {
+                print("[StyleMate] Segmentation mask: JSON parse failed for \(itemLabel)")
+                return nil
             }
 
-            print("[StyleMate] Segmentation: Parsed \(itemsArray.count) items")
-
-            var results: [SegmentedItem] = []
-            for (i, dict) in itemsArray.enumerated() {
-                let catStr = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let prodStr = (dict["product"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let colorsArr = dict["colors"] as? [String] ?? []
-                let patStr = (dict["pattern"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-                let category = matchCategory(catStr)
-                let product = matchProduct(prodStr)
-                let colors = colorsArr.map { matchColor($0) ?? $0 }.filter { !$0.isEmpty }
-                let pattern = matchPattern(patStr)
-
-                guard let category = category, let product = product, let pattern = pattern, !colors.isEmpty else {
-                    print("[StyleMate] Segmentation item \(i): SKIP - parsing failed (cat=\(catStr ?? "nil"), prod=\(prodStr ?? "nil"))")
-                    continue
-                }
-
-                var garmentImage: UIImage? = nil
-
-                if let box = dict["box_2d"] as? [Int], box.count == 4,
-                   let maskBase64 = dict["mask"] as? String {
-                    garmentImage = extractGarment(from: image, boxNormalized: box, maskBase64: maskBase64)
-                    if garmentImage != nil {
-                        print("[StyleMate] Segmentation item \(i): Mask extracted successfully for \(category.rawValue)/\(product)")
-                    } else {
-                        print("[StyleMate] Segmentation item \(i): Mask extraction failed, falling back for \(category.rawValue)/\(product)")
-                    }
-                } else {
-                    let boxRaw = dict["box_2d"]
-                    if let boxDoubles = boxRaw as? [Double], boxDoubles.count == 4 {
-                        let boxInts = boxDoubles.map { Int($0) }
-                        if let maskBase64 = dict["mask"] as? String {
-                            garmentImage = extractGarment(from: image, boxNormalized: boxInts, maskBase64: maskBase64)
-                        }
-                    }
-                    if garmentImage == nil {
-                        print("[StyleMate] Segmentation item \(i): No valid box_2d/mask, falling back for \(category.rawValue)/\(product)")
-                    }
-                }
-
-                if garmentImage == nil {
-                    let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: image)
-                    let cropped = BodyZone.cropToZone(image: bgRemoved ?? image, category: category) ?? bgRemoved ?? image
-                    garmentImage = padToSquare(cropped)
-                    print("[StyleMate] Segmentation item \(i): Fallback pipeline used for \(category.rawValue)/\(product)")
-                }
-
-                results.append(SegmentedItem(
-                    category: category,
-                    product: product,
-                    colors: colors,
-                    pattern: pattern,
-                    maskImage: garmentImage
-                ))
-                print("[StyleMate] Segmentation item \(i): OK - \(category.rawValue) / \(product) / \(colors.joined(separator: ",")) / \(pattern.rawValue)")
+            let box: [Int]?
+            if let boxInts = first["box_2d"] as? [Int], boxInts.count == 4 {
+                box = boxInts
+            } else if let boxDoubles = first["box_2d"] as? [Double], boxDoubles.count == 4 {
+                box = boxDoubles.map { Int($0) }
+            } else {
+                box = nil
             }
 
-            if results.isEmpty && !itemsArray.isEmpty && retryCount < 2 {
-                print("[StyleMate] Segmentation: All \(itemsArray.count) items failed to parse, retrying...")
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-                return await analyzeAndSegment(image: image, retryCount: retryCount + 1)
+            guard let box = box, let maskBase64 = first["mask"] as? String else {
+                print("[StyleMate] Segmentation mask: no valid box/mask for \(itemLabel)")
+                return nil
             }
 
-            print("[StyleMate] Segmentation: Returning \(results.count) segmented items")
-            return results
+            if let garment = extractGarment(from: originalImage, boxNormalized: box, maskBase64: maskBase64) {
+                print("[StyleMate] Segmentation mask: success for \(itemLabel)")
+                return garment
+            } else {
+                print("[StyleMate] Segmentation mask: extraction failed for \(itemLabel)")
+                return nil
+            }
 
         } catch {
-            print("[StyleMate] Segmentation: Network error: \(error.localizedDescription)")
-            if retryCount < 2 {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                return await analyzeAndSegment(image: image, retryCount: retryCount + 1)
-            }
-            return []
+            print("[StyleMate] Segmentation mask: network error for \(itemLabel): \(error.localizedDescription)")
+            return nil
         }
     }
 
