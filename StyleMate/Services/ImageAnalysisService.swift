@@ -26,12 +26,14 @@ class ImageAnalysisService {
     }
 
     func analyzeAndSegment(image: UIImage, retryCount: Int = 0) async -> [SegmentedItem] {
-        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+        let apiImage = resizedForAPI(image)
+
+        guard let imageData = apiImage.jpegData(compressionQuality: 0.7) else {
             print("[StyleMate] Segmentation: Failed to convert image to JPEG")
             return []
         }
         let base64Image = imageData.base64EncodedString()
-        print("[StyleMate] Segmentation: Image encoded: \(imageData.count) bytes (attempt \(retryCount + 1))")
+        print("[StyleMate] Segmentation: Image encoded: \(imageData.count) bytes, original: \(Int(image.size.width))x\(Int(image.size.height)), sent: \(Int(apiImage.size.width))x\(Int(apiImage.size.height)) (attempt \(retryCount + 1))")
 
         let validCategories = Category.allCases.map(\.rawValue).joined(separator: ", ")
         let validPatterns = Pattern.allCases.map(\.rawValue).joined(separator: ", ")
@@ -96,7 +98,7 @@ IMPORTANT: The mask should cover ONLY the fabric/material of that specific garme
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = httpBody
-        request.timeoutInterval = 90
+        request.timeoutInterval = 120
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -355,6 +357,25 @@ IMPORTANT: The mask should cover ONLY the fabric/material of that specific garme
         UIGraphicsEndImageContext()
 
         return result
+    }
+
+    private func resizedForAPI(_ image: UIImage, maxDimension: CGFloat = 1024) -> UIImage {
+        let size = image.size
+        guard max(size.width, size.height) > maxDimension else { return image }
+
+        let scale: CGFloat
+        if size.width > size.height {
+            scale = maxDimension / size.width
+        } else {
+            scale = maxDimension / size.height
+        }
+
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+        image.draw(in: CGRect(origin: .zero, size: newSize))
+        let resized = UIGraphicsGetImageFromCurrentImageContext() ?? image
+        UIGraphicsEndImageContext()
+        return resized
     }
 
     // MARK: - Classification Pipeline (legacy)
