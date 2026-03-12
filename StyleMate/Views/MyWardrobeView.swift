@@ -385,7 +385,13 @@ struct CategoryDetailView: View {
                 brand: item.brand,
                 pattern: item.pattern,
                 imagePath: newImagePath,
-                croppedImagePath: newCroppedPath ?? item.croppedImagePath
+                croppedImagePath: newCroppedPath ?? item.croppedImagePath,
+                material: item.material,
+                fit: item.fit,
+                neckline: item.neckline,
+                sleeveLength: item.sleeveLength,
+                garmentLength: item.garmentLength,
+                details: item.details
             )
 
             await MainActor.run {

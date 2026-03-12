@@ -12,7 +12,7 @@ struct ProfileView: View {
     @State private var editGender: String = ""
     @State private var editAge: String = ""
     @State private var iCloudAvailable = true
-    let genderOptions = ["", "Male", "Female", "Other", "Prefer not to say"]
+    let genderOptions = ["", "Male", "Female"]
 
     private let maxStyles = 6
     private let allStyles = OutfitType.allCases

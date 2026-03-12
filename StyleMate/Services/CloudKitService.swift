@@ -53,6 +53,12 @@ class CloudKitService: ObservableObject {
         record["pattern"] = item.pattern.rawValue
         record["imagePath"] = item.imagePath
         record["croppedImagePath"] = item.croppedImagePath
+        record["material"] = item.material
+        record["fit"] = item.fit?.rawValue
+        record["neckline"] = item.neckline?.rawValue
+        record["sleeveLength"] = item.sleeveLength?.rawValue
+        record["garmentLength"] = item.garmentLength?.rawValue
+        record["details"] = item.details
 
         if let imageURL = imageFileURL(for: item.imagePath) {
             record["imageAsset"] = CKAsset(fileURL: imageURL)
@@ -98,6 +104,12 @@ class CloudKitService: ObservableObject {
                 record["pattern"] = item.pattern.rawValue
                 record["imagePath"] = item.imagePath
                 record["croppedImagePath"] = item.croppedImagePath
+                record["material"] = item.material
+                record["fit"] = item.fit?.rawValue
+                record["neckline"] = item.neckline?.rawValue
+                record["sleeveLength"] = item.sleeveLength?.rawValue
+                record["garmentLength"] = item.garmentLength?.rawValue
+                record["details"] = item.details
 
                 if let imageURL = imageFileURL(for: item.imagePath) {
                     record["imageAsset"] = CKAsset(fileURL: imageURL)
@@ -248,6 +260,13 @@ class CloudKitService: ObservableObject {
             }
         }
 
+        let material = record["material"] as? String
+        let fitStr = record["fit"] as? String
+        let necklineStr = record["neckline"] as? String
+        let sleeveLengthStr = record["sleeveLength"] as? String
+        let garmentLengthStr = record["garmentLength"] as? String
+        let details = record["details"] as? String
+
         return WardrobeItem(
             id: id,
             category: category,
@@ -256,7 +275,13 @@ class CloudKitService: ObservableObject {
             brand: brand,
             pattern: pattern,
             imagePath: imagePath,
-            croppedImagePath: croppedImagePath
+            croppedImagePath: croppedImagePath,
+            material: material,
+            fit: fitStr != nil ? Fit(rawValue: fitStr!) : nil,
+            neckline: necklineStr != nil ? Neckline(rawValue: necklineStr!) : nil,
+            sleeveLength: sleeveLengthStr != nil ? SleeveLength(rawValue: sleeveLengthStr!) : nil,
+            garmentLength: garmentLengthStr != nil ? GarmentLength(rawValue: garmentLengthStr!) : nil,
+            details: details
         )
     }
 }

@@ -117,6 +117,12 @@ class WardrobeViewModel: ObservableObject {
                         || localItem.colors != cloudItem.colors
                         || localItem.brand != cloudItem.brand
                         || localItem.pattern != cloudItem.pattern
+                        || localItem.material != cloudItem.material
+                        || localItem.fit != cloudItem.fit
+                        || localItem.neckline != cloudItem.neckline
+                        || localItem.sleeveLength != cloudItem.sleeveLength
+                        || localItem.garmentLength != cloudItem.garmentLength
+                        || localItem.details != cloudItem.details
 
                     if metadataChanged, let idx = items.firstIndex(where: { $0.id == cloudItem.id }) {
                         let finalImagePath = WardrobeImageFileHelper.loadImage(at: localItem.imagePath) != nil
@@ -137,7 +143,13 @@ class WardrobeViewModel: ObservableObject {
                             brand: cloudItem.brand,
                             pattern: cloudItem.pattern,
                             imagePath: finalImagePath,
-                            croppedImagePath: finalCroppedPath
+                            croppedImagePath: finalCroppedPath,
+                            material: cloudItem.material,
+                            fit: cloudItem.fit,
+                            neckline: cloudItem.neckline,
+                            sleeveLength: cloudItem.sleeveLength,
+                            garmentLength: cloudItem.garmentLength,
+                            details: cloudItem.details
                         )
                         changed = true
                     }
@@ -196,7 +208,13 @@ class WardrobeViewModel: ObservableObject {
                         brand: item.brand,
                         pattern: item.pattern,
                         imagePath: result.newImagePath,
-                        croppedImagePath: result.newCroppedPath ?? item.croppedImagePath
+                        croppedImagePath: result.newCroppedPath ?? item.croppedImagePath,
+                        material: item.material,
+                        fit: item.fit,
+                        neckline: item.neckline,
+                        sleeveLength: item.sleeveLength,
+                        garmentLength: item.garmentLength,
+                        details: item.details
                     )
 
                     await MainActor.run {
@@ -245,7 +263,13 @@ class WardrobeViewModel: ObservableObject {
                     brand: item.brand,
                     pattern: item.pattern,
                     imagePath: item.imagePath,
-                    croppedImagePath: newCroppedPath
+                    croppedImagePath: newCroppedPath,
+                    material: item.material,
+                    fit: item.fit,
+                    neckline: item.neckline,
+                    sleeveLength: item.sleeveLength,
+                    garmentLength: item.garmentLength,
+                    details: item.details
                 )
 
                 await MainActor.run {
@@ -265,7 +289,6 @@ class WardrobeViewModel: ObservableObject {
     }
 }
 
-// Codable wrapper for WardrobeItem (UIImage is not Codable)
 struct WardrobeItemCodable: Codable {
     let id: String
     let category: String
@@ -275,7 +298,19 @@ struct WardrobeItemCodable: Codable {
     let pattern: String
     let imagePath: String
     let croppedImagePath: String?
-    
+
+    let material: String?
+    let fit: String?
+    let neckline: String?
+    let sleeveLength: String?
+    let garmentLength: String?
+    let details: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, category, product, colors, brand, pattern, imagePath, croppedImagePath
+        case material, fit, neckline, sleeveLength, garmentLength, details
+    }
+
     init(from item: WardrobeItem) {
         self.id = item.id.uuidString
         self.category = item.category.rawValue
@@ -285,6 +320,30 @@ struct WardrobeItemCodable: Codable {
         self.pattern = item.pattern.rawValue
         self.imagePath = item.imagePath
         self.croppedImagePath = item.croppedImagePath
+        self.material = item.material
+        self.fit = item.fit?.rawValue
+        self.neckline = item.neckline?.rawValue
+        self.sleeveLength = item.sleeveLength?.rawValue
+        self.garmentLength = item.garmentLength?.rawValue
+        self.details = item.details
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        category = try container.decode(String.self, forKey: .category)
+        product = try container.decode(String.self, forKey: .product)
+        colors = try container.decode([String].self, forKey: .colors)
+        brand = try container.decode(String.self, forKey: .brand)
+        pattern = try container.decode(String.self, forKey: .pattern)
+        imagePath = try container.decode(String.self, forKey: .imagePath)
+        croppedImagePath = try container.decodeIfPresent(String.self, forKey: .croppedImagePath)
+        material = try container.decodeIfPresent(String.self, forKey: .material)
+        fit = try container.decodeIfPresent(String.self, forKey: .fit)
+        neckline = try container.decodeIfPresent(String.self, forKey: .neckline)
+        sleeveLength = try container.decodeIfPresent(String.self, forKey: .sleeveLength)
+        garmentLength = try container.decodeIfPresent(String.self, forKey: .garmentLength)
+        details = try container.decodeIfPresent(String.self, forKey: .details)
     }
     
     func toWardrobeItem() -> WardrobeItem? {
@@ -298,7 +357,13 @@ struct WardrobeItemCodable: Codable {
             brand: brand,
             pattern: pat,
             imagePath: imagePath,
-            croppedImagePath: croppedImagePath
+            croppedImagePath: croppedImagePath,
+            material: material,
+            fit: fit != nil ? Fit(rawValue: fit!) : nil,
+            neckline: neckline != nil ? Neckline(rawValue: neckline!) : nil,
+            sleeveLength: sleeveLength != nil ? SleeveLength(rawValue: sleeveLength!) : nil,
+            garmentLength: garmentLength != nil ? GarmentLength(rawValue: garmentLength!) : nil,
+            details: details
         )
     }
 } 

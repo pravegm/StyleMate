@@ -10,6 +10,12 @@ struct EditWardrobeItemView: View {
     @State private var pattern: Pattern
     @State private var imagePath: String
     @State private var croppedImagePath: String?
+    @State private var material: String
+    @State private var fit: Fit?
+    @State private var neckline: Neckline?
+    @State private var sleeveLength: SleeveLength?
+    @State private var garmentLength: GarmentLength?
+    @State private var details: String
     let id: UUID
     var onSave: (WardrobeItem) -> Void
     @State private var showReplacePhotoSource = false
@@ -26,6 +32,12 @@ struct EditWardrobeItemView: View {
         _pattern = State(initialValue: item.pattern)
         _imagePath = State(initialValue: item.imagePath)
         _croppedImagePath = State(initialValue: item.croppedImagePath)
+        _material = State(initialValue: item.material ?? "")
+        _fit = State(initialValue: item.fit)
+        _neckline = State(initialValue: item.neckline)
+        _sleeveLength = State(initialValue: item.sleeveLength)
+        _garmentLength = State(initialValue: item.garmentLength)
+        _details = State(initialValue: item.details ?? "")
         self.id = item.id
         self.onSave = onSave
     }
@@ -105,6 +117,60 @@ struct EditWardrobeItemView: View {
                 .tint(DS.Colors.accent)
 
                 TextField("Brand (e.g. Nike)", text: $brand)
+
+                Section(header: Text("Attributes")) {
+                    TextField("Material (e.g. Cotton, Denim, Wool)", text: $material)
+
+                    if ![.footwear, .accessories].contains(category) {
+                        Picker("Fit", selection: Binding(
+                            get: { fit ?? .regular },
+                            set: { fit = $0 }
+                        )) {
+                            ForEach(Fit.allCases) { f in
+                                Text(f.rawValue).tag(f)
+                            }
+                        }
+                        .tint(DS.Colors.accent)
+                    }
+
+                    if [.tops, .midLayers, .onePieces, .outerwear].contains(category) {
+                        Picker("Neckline", selection: Binding(
+                            get: { neckline ?? .crewNeck },
+                            set: { neckline = $0 }
+                        )) {
+                            ForEach(Neckline.allCases) { n in
+                                Text(n.rawValue).tag(n)
+                            }
+                        }
+                        .tint(DS.Colors.accent)
+                    }
+
+                    if [.tops, .midLayers, .outerwear, .onePieces, .activewear].contains(category) {
+                        Picker("Sleeve Length", selection: Binding(
+                            get: { sleeveLength ?? .longSleeve },
+                            set: { sleeveLength = $0 }
+                        )) {
+                            ForEach(SleeveLength.allCases) { s in
+                                Text(s.rawValue).tag(s)
+                            }
+                        }
+                        .tint(DS.Colors.accent)
+                    }
+
+                    if [.bottoms, .onePieces, .outerwear].contains(category) {
+                        Picker("Length", selection: Binding(
+                            get: { garmentLength ?? .fullLength },
+                            set: { garmentLength = $0 }
+                        )) {
+                            ForEach(GarmentLength.allCases) { l in
+                                Text(l.rawValue).tag(l)
+                            }
+                        }
+                        .tint(DS.Colors.accent)
+                    }
+
+                    TextField("Details (e.g. ribbed cuffs, front zip)", text: $details)
+                }
             }
             .tint(DS.Colors.accent)
             .navigationTitle("Edit Item")
@@ -124,7 +190,13 @@ struct EditWardrobeItemView: View {
                             brand: brand,
                             pattern: pattern,
                             imagePath: imagePath,
-                            croppedImagePath: croppedImagePath
+                            croppedImagePath: croppedImagePath,
+                            material: material.isEmpty ? nil : material,
+                            fit: fit,
+                            neckline: neckline,
+                            sleeveLength: sleeveLength,
+                            garmentLength: garmentLength,
+                            details: details.isEmpty ? nil : details
                         )
                         onSave(updatedItem)
                         dismiss()

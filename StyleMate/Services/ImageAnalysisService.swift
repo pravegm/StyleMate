@@ -15,19 +15,39 @@ class ImageAnalysisService {
         let height: CGFloat
     }
 
-    // MARK: - Segmentation Pipeline
+    // MARK: - Classified / Segmented Items
+
+    struct ClassifiedItem {
+        let category: Category?
+        let product: String?
+        let colors: [String]
+        let pattern: Pattern?
+        let material: String?
+        let fit: Fit?
+        let neckline: Neckline?
+        let sleeveLength: SleeveLength?
+        let garmentLength: GarmentLength?
+        let details: String?
+    }
 
     struct SegmentedItem {
         let category: Category?
         let product: String?
         let colors: [String]
         let pattern: Pattern?
+        let material: String?
+        let fit: Fit?
+        let neckline: Neckline?
+        let sleeveLength: SleeveLength?
+        let garmentLength: GarmentLength?
+        let details: String?
         let maskImage: UIImage?
     }
 
-    func analyzeAndSegment(image: UIImage, retryCount: Int = 0) async -> [SegmentedItem] {
-        // Pass 1: Classification (fast, text-only, existing proven code)
-        let classifications = await analyzeMultiple(image: image)
+    // MARK: - Segmentation Pipeline
+
+    func analyzeAndSegment(image: UIImage, userGender: String? = nil, retryCount: Int = 0) async -> [SegmentedItem] {
+        let classifications = await analyzeMultiple(image: image, userGender: userGender)
 
         guard !classifications.isEmpty else {
             print("[StyleMate] Segmentation: No items classified, returning empty")
@@ -45,11 +65,10 @@ class ImageAnalysisService {
         let base64Image = imageData.base64EncodedString()
         print("[StyleMate] Segmentation: Image for bboxes: \(imageData.count) bytes, sent: \(Int(apiImage.size.width))x\(Int(apiImage.size.height))")
 
-        // Pass 2: Per-item bounding box detection (parallel)
         let results = await withTaskGroup(of: SegmentedItem?.self) { group in
-            for (category, product, colors, pattern) in classifications {
-                guard let category = category, let product = product,
-                      let pattern = pattern, !colors.isEmpty else { continue }
+            for item in classifications {
+                guard let category = item.category, let product = item.product,
+                      let pattern = item.pattern, !item.colors.isEmpty else { continue }
 
                 group.addTask {
                     let label = "\(product) (\(category.rawValue))"
@@ -76,8 +95,14 @@ class ImageAnalysisService {
                     return SegmentedItem(
                         category: category,
                         product: product,
-                        colors: colors,
+                        colors: item.colors,
                         pattern: pattern,
+                        material: item.material,
+                        fit: item.fit,
+                        neckline: item.neckline,
+                        sleeveLength: item.sleeveLength,
+                        garmentLength: item.garmentLength,
+                        details: item.details,
                         maskImage: garmentImage
                     )
                 }
@@ -326,9 +351,9 @@ The box_2d should tightly surround ONLY this garment, not the person's body.
         return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
     }
 
-    // MARK: - Classification Pipeline (legacy)
+    // MARK: - Classification Pipeline
 
-    func analyzeMultiple(image: UIImage, imageIndex: Int? = nil, retryCount: Int = 0) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?)] {
+    func analyzeMultiple(image: UIImage, userGender: String? = nil, imageIndex: Int? = nil, retryCount: Int = 0) async -> [ClassifiedItem] {
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
             print("[StyleMate] Failed to convert image to JPEG")
             return []
@@ -336,32 +361,50 @@ The box_2d should tightly surround ONLY this garment, not the person's body.
         let base64Image = imageData.base64EncodedString()
         print("[StyleMate] Image encoded: \(imageData.count) bytes (attempt \(retryCount + 1))")
 
+        let genderContext: String
+        if let gender = userGender, !gender.isEmpty {
+            genderContext = "\nThe user is \(gender). Use this to better identify garment types (e.g., distinguish men's kurta vs women's kurti, men's tank top vs camisole)."
+        } else {
+            genderContext = ""
+        }
+
         let prompt = """
-You are an expert fashion assistant. Analyze the clothing items worn by the person in this image.
+You are an expert fashion assistant. Analyze the clothing items worn by the person in this image.\(genderContext)
 
 Valid categories: Tops, Bottoms, Mid-Layers, Outerwear, One-Pieces, Footwear, Accessories, Innerwear, Activewear, Ethnic Wear
 
 Valid products per category:
-- Tops: T-Shirts, Polo T-Shirts, Shirts, Blouses, Tank Tops, Tube Tops, Camisoles, Crop Tops, Off-Shoulder Tops, Bodysuits, Graphic Tees, Mesh Tops, Turtlenecks
-- Bottoms: Jeans, Trousers, Leggings, Joggers, Cargo Pants, Shorts, Skirts, Skorts, Palazzo Pants
-- Mid-Layers: Hoodies, Sweatshirts, Sweaters, Cardigans, Pullovers, Fleece Jackets, Vests, Shrugs, Gilets
-- Outerwear: Jackets, Coats, Puffer Jackets, Trench Coats, Blazers, Overcoats, Raincoats
-- One-Pieces: Dresses, Jumpsuits, Rompers, Playsuits, Dungarees, Overalls
-- Footwear: Sneakers, Boots, Heels, Flats, Sandals, Slippers, Loafers, Formal shoes
-- Accessories: Hats, Scarves, Gloves, Belts, Handbags, Jewelry, Watches, Sunglasses, Hair Accessories, Ties, Bowties
-- Innerwear: Bras, Underwear, Boxers, Thongs, Socks, Thermal Wear, Shapewear, Lingerie
-- Activewear: Sports Bras, Active Leggings, Athletic Tops, Track Pants, Athletic Shorts, Active Jackets, Compression Wear, Swimwear, Tennis Dresses
-- Ethnic Wear: Kurta, Kurti, Sherwani, Nehru Jacket, Dupatta, Saree, Blouse (saree), Lehenga, Choli, Salwar, Patiala Pants, Anarkali, Angrakha, Dhoti, Lungis, Mundu, Jodhpuri Suit
+- Tops: T-Shirts, Polo T-Shirts, Shirts, Button-Down Shirts, Flannel Shirts, Blouses, Henley, Tank Tops, Camisoles, Crop Tops, Tube Tops, Off-Shoulder Tops, Halter Tops, Bandeau, Peplum Tops, Corset Tops, Wrap Tops, Bustiers, Bodysuits, Graphic Tees, Mesh Tops, Turtlenecks, Tunics
+- Bottoms: Jeans, Trousers, Chinos, Cargo Pants, Wide-Leg Pants, Palazzo Pants, Linen Pants, Sweatpants, Joggers, Leggings, Shorts, Capris, Culottes, Skirts, Mini Skirts, Skorts
+- Mid-Layers: Hoodies, Sweatshirts, Sweaters, Cardigans, Pullovers, Fleece Jackets, Vests, Gilets, Quarter-Zips, Shrugs, Ponchos
+- Outerwear: Jackets, Leather Jackets, Denim Jackets, Bomber Jackets, Puffer Jackets, Coats, Overcoats, Trench Coats, Blazers, Parkas, Windbreakers, Raincoats, Shirt Jackets, Capes
+- One-Pieces: Dresses, Wrap Dresses, Maxi Dresses, Shirt Dresses, Gowns, Jumpsuits, Rompers, Playsuits, Dungarees, Overalls
+- Footwear: Sneakers, Boots, Ankle Boots, Chelsea Boots, Sandals, Slides, Espadrilles, Loafers, Oxford Shoes, Formal Shoes, Mules, Flats, Heels, Platform Shoes, Clogs, Slippers
+- Accessories: Hats, Scarves, Gloves, Belts, Watches, Sunglasses, Jewelry, Brooches, Ties, Bowties, Pocket Squares, Suspenders, Handbags, Tote Bags, Crossbody Bags, Backpacks, Wallets, Hair Accessories
+- Innerwear: Underwear, Boxers, Briefs, Undershirts, Bras, Bralettes, Thongs, Socks, Thermal Wear, Shapewear, Lingerie
+- Activewear: Athletic Tops, Athletic Shorts, Running Shorts, Cycling Shorts, Track Pants, Active Jackets, Compression Wear, Rashguards, Sports Bras, Active Leggings, Yoga Pants, Swim Trunks, Swimwear, Tennis Dresses
+- Ethnic Wear: Kurta, Sherwani, Nehru Jacket, Dhoti, Lungis, Mundu, Jodhpuri Suit, Pathani Suit, Bandhgala, Angrakha, Kurti, Saree, Blouse (saree), Lehenga, Choli, Dupatta, Salwar, Patiala Pants, Anarkali, Churidar, Palazzo Suit, Sharara, Ghagra
 
 Valid patterns: Solid, Stripes, Checks, Plaid, Polka Dot, Floral, Animal Print, Camouflage, Geometric, Houndstooth, Paisley, Tie-Dye
+
+Valid fits: Slim, Regular, Relaxed, Oversized, Cropped
+Valid necklines: Crew Neck, V-Neck, Scoop Neck, Boat Neck, Turtleneck, Mock Neck, Henley, Collared, Hooded, Off-Shoulder, Square Neck, Halter, Strapless, Cowl Neck
+Valid sleeve lengths: Sleeveless, Cap Sleeve, Short Sleeve, 3/4 Sleeve, Long Sleeve
+Valid garment lengths: Cropped, Short, Knee-Length, Midi, Full-Length
 
 For EACH visible clothing item, return:
 - category: one of the valid categories above (exact string)
 - product: one of the valid products above (exact string)
-- colors: array of color names (MUST have at least one, e.g. [\"Blue\", \"White\"])
+- colors: array of color names (MUST have at least one)
 - pattern: one of the valid patterns above (exact string)
+- material: the fabric/material (e.g. "Cotton", "Denim", "Wool Knit", "Leather", "Silk", "Linen", "Polyester", "Fleece", "Corduroy", "Velvet", "Satin", "Chiffon", "Jersey", "Mesh", "Canvas", "Tweed", "Suede", "Nylon"). Use your best judgment.
+- fit: one of the valid fits above, or null if not applicable (footwear, accessories)
+- neckline: one of the valid necklines above, or null if not applicable (bottoms, footwear, accessories)
+- sleeveLength: one of the valid sleeve lengths above, or null if not applicable (bottoms, footwear, accessories, sleeveless dresses)
+- garmentLength: one of the valid garment lengths above, or null if not applicable (tops, footwear, accessories)
+- details: a short comma-separated string of distinctive visual features that make this specific item unique (e.g. "cable knit, ribbed cuffs", "distressed wash, raw hem", "front zip, logo on chest", "pleated, high-waisted", "patch pockets, contrast stitching"). Return "" if no notable details.
 
-Return a JSON array of objects. Use EXACT strings from the lists above.
+Return a JSON array of objects. Use EXACT strings from the lists above for enum fields.
 """
 
         let responseSchema: [String: Any] = [
@@ -375,7 +418,13 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
                         "type": "array",
                         "items": ["type": "string"]
                     ],
-                    "pattern": ["type": "string"]
+                    "pattern": ["type": "string"],
+                    "material": ["type": "string"],
+                    "fit": ["type": "string"],
+                    "neckline": ["type": "string"],
+                    "sleeveLength": ["type": "string"],
+                    "garmentLength": ["type": "string"],
+                    "details": ["type": "string"]
                 ],
                 "required": ["category", "product", "colors", "pattern"]
             ]
@@ -428,7 +477,7 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
                     let delay = UInt64(pow(2.0, Double(retryCount + 1))) * 1_000_000_000
                     print("[StyleMate] Rate limited, waiting \(delay / 1_000_000_000)s before retry...")
                     try? await Task.sleep(nanoseconds: delay)
-                    return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+                    return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1)
                 }
                 print("[StyleMate] Rate limited after all retries")
                 return []
@@ -439,15 +488,14 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
                 print("[StyleMate] API error \(httpResponse.statusCode): \(errorBody.prefix(500))")
                 if retryCount < 2 {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+                    return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1)
                 }
                 return []
             }
 
-            // Parse the Gemini response manually for robustness
             guard let responseJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 print("[StyleMate] Response is not valid JSON: \(String(data: data, encoding: .utf8)?.prefix(300) ?? "nil")")
-                return await retryOrEmpty(image: image, imageIndex: imageIndex, retryCount: retryCount)
+                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount)
             }
 
             guard let candidates = responseJson["candidates"] as? [[String: Any]],
@@ -455,28 +503,26 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
                   let content = firstCandidate["content"] as? [String: Any],
                   let parts = content["parts"] as? [[String: Any]] else {
                 print("[StyleMate] Unexpected response structure: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "nil")")
-                return await retryOrEmpty(image: image, imageIndex: imageIndex, retryCount: retryCount)
+                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount)
             }
 
-            // Find the text part (skip thinking parts if present with 2.5 Flash)
             guard let textPart = parts.first(where: { $0["text"] != nil }),
                   let text = textPart["text"] as? String else {
                 print("[StyleMate] No text part in response parts: \(parts)")
-                return await retryOrEmpty(image: image, imageIndex: imageIndex, retryCount: retryCount)
+                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount)
             }
 
-            print("[StyleMate] Response text: \(text.prefix(300))")
+            print("[StyleMate] Response text: \(text.prefix(500))")
 
             guard let textData = text.data(using: .utf8),
                   let itemsArray = try? JSONSerialization.jsonObject(with: textData) as? [[String: Any]] else {
                 print("[StyleMate] Failed to parse JSON array from response text")
-                return await retryOrEmpty(image: image, imageIndex: imageIndex, retryCount: retryCount)
+                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount)
             }
 
             print("[StyleMate] Parsed \(itemsArray.count) raw items from API")
 
-            // Parse each item with fuzzy matching
-            var validResults: [(Category?, String?, [String], Pattern?)] = []
+            var validResults: [ClassifiedItem] = []
             for (i, dict) in itemsArray.enumerated() {
                 let catStr = (dict["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let prodStr = (dict["product"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -488,19 +534,41 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
                 let colors = colorsArr.map { matchColor($0) ?? $0 }.filter { !$0.isEmpty }
                 let pattern = matchPattern(patStr)
 
+                let materialStr = dict["material"] as? String
+                let fitStr = (dict["fit"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let necklineStr = (dict["neckline"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let sleeveLengthStr = (dict["sleeveLength"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let garmentLengthStr = (dict["garmentLength"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let detailsStr = dict["details"] as? String
+
+                let fitVal = matchFit(fitStr)
+                let necklineVal = matchNeckline(necklineStr)
+                let sleeveLengthVal = matchSleeveLength(sleeveLengthStr)
+                let garmentLengthVal = matchGarmentLength(garmentLengthStr)
+
                 if let category = category, let product = product, let pattern = pattern, !colors.isEmpty {
-                    validResults.append((category, product, colors, pattern))
+                    validResults.append(ClassifiedItem(
+                        category: category,
+                        product: product,
+                        colors: colors,
+                        pattern: pattern,
+                        material: materialStr,
+                        fit: fitVal,
+                        neckline: necklineVal,
+                        sleeveLength: sleeveLengthVal,
+                        garmentLength: garmentLengthVal,
+                        details: detailsStr
+                    ))
                     print("[StyleMate] Item \(i): OK - \(category.rawValue) / \(product) / \(colors.joined(separator: ",")) / \(pattern.rawValue)")
                 } else {
                     print("[StyleMate] Item \(i): SKIP - raw(cat=\(catStr ?? "nil"), prod=\(prodStr ?? "nil"), pat=\(patStr ?? "nil"), colors=\(colorsArr)) -> matched(cat=\(category?.rawValue ?? "nil"), prod=\(product ?? "nil"), pat=\(pattern?.rawValue ?? "nil"), colors=\(colors.count))")
                 }
             }
 
-            // Retry only if the API returned items but ALL failed parsing
             if validResults.isEmpty && !itemsArray.isEmpty && retryCount < 2 {
                 print("[StyleMate] All \(itemsArray.count) items failed to parse, retrying...")
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
-                return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+                return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1)
             }
 
             print("[StyleMate] Returning \(validResults.count) valid items")
@@ -510,17 +578,17 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
             print("[StyleMate] Network error: \(error.localizedDescription)")
             if retryCount < 2 {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
-                return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+                return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1)
             }
             return []
         }
     }
 
-    private func retryOrEmpty(image: UIImage, imageIndex: Int?, retryCount: Int) async -> [(category: Category?, product: String?, colors: [String], pattern: Pattern?)] {
+    private func retryOrEmpty(image: UIImage, userGender: String?, imageIndex: Int?, retryCount: Int) async -> [ClassifiedItem] {
         if retryCount < 2 {
             print("[StyleMate] Retrying (attempt \(retryCount + 2))...")
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            return await analyzeMultiple(image: image, imageIndex: imageIndex, retryCount: retryCount + 1)
+            return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1)
         }
         print("[StyleMate] All retries exhausted, returning empty")
         return []
@@ -649,6 +717,92 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
         return color.capitalized
     }
 
+    // MARK: - Fuzzy Matching for New Attributes
+
+    func matchFit(_ raw: String?) -> Fit? {
+        guard let raw = raw, !raw.isEmpty else { return nil }
+        if let exact = Fit(rawValue: raw) { return exact }
+        let lower = raw.lowercased()
+        for f in Fit.allCases {
+            if f.rawValue.lowercased() == lower { return f }
+        }
+        let normalized = lower.replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
+        for f in Fit.allCases {
+            let fNorm = f.rawValue.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
+            if fNorm == normalized || fNorm.contains(normalized) || normalized.contains(fNorm) { return f }
+        }
+        var bestScore = Int.max
+        var bestFit: Fit? = nil
+        for f in Fit.allCases {
+            let score = Self.levenshtein(lower, f.rawValue.lowercased())
+            if score < bestScore { bestScore = score; bestFit = f }
+        }
+        return bestScore <= 2 ? bestFit : nil
+    }
+
+    func matchNeckline(_ raw: String?) -> Neckline? {
+        guard let raw = raw, !raw.isEmpty else { return nil }
+        if let exact = Neckline(rawValue: raw) { return exact }
+        let lower = raw.lowercased()
+        for n in Neckline.allCases {
+            if n.rawValue.lowercased() == lower { return n }
+        }
+        let normalized = lower.replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
+        for n in Neckline.allCases {
+            let nNorm = n.rawValue.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
+            if nNorm == normalized || nNorm.contains(normalized) || normalized.contains(nNorm) { return n }
+        }
+        var bestScore = Int.max
+        var bestNeckline: Neckline? = nil
+        for n in Neckline.allCases {
+            let score = Self.levenshtein(lower, n.rawValue.lowercased())
+            if score < bestScore { bestScore = score; bestNeckline = n }
+        }
+        return bestScore <= 3 ? bestNeckline : nil
+    }
+
+    func matchSleeveLength(_ raw: String?) -> SleeveLength? {
+        guard let raw = raw, !raw.isEmpty else { return nil }
+        if let exact = SleeveLength(rawValue: raw) { return exact }
+        let lower = raw.lowercased()
+        for s in SleeveLength.allCases {
+            if s.rawValue.lowercased() == lower { return s }
+        }
+        let normalized = lower.replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "/", with: "")
+        for s in SleeveLength.allCases {
+            let sNorm = s.rawValue.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "/", with: "")
+            if sNorm == normalized || sNorm.contains(normalized) || normalized.contains(sNorm) { return s }
+        }
+        var bestScore = Int.max
+        var bestSleeve: SleeveLength? = nil
+        for s in SleeveLength.allCases {
+            let score = Self.levenshtein(lower, s.rawValue.lowercased())
+            if score < bestScore { bestScore = score; bestSleeve = s }
+        }
+        return bestScore <= 3 ? bestSleeve : nil
+    }
+
+    func matchGarmentLength(_ raw: String?) -> GarmentLength? {
+        guard let raw = raw, !raw.isEmpty else { return nil }
+        if let exact = GarmentLength(rawValue: raw) { return exact }
+        let lower = raw.lowercased()
+        for g in GarmentLength.allCases {
+            if g.rawValue.lowercased() == lower { return g }
+        }
+        let normalized = lower.replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
+        for g in GarmentLength.allCases {
+            let gNorm = g.rawValue.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
+            if gNorm == normalized || gNorm.contains(normalized) || normalized.contains(gNorm) { return g }
+        }
+        var bestScore = Int.max
+        var bestLength: GarmentLength? = nil
+        for g in GarmentLength.allCases {
+            let score = Self.levenshtein(lower, g.rawValue.lowercased())
+            if score < bestScore { bestScore = score; bestLength = g }
+        }
+        return bestScore <= 3 ? bestLength : nil
+    }
+
     // Levenshtein distance for fuzzy matching
     private static func levenshtein(_ a: String, _ b: String) -> Int {
         let a = Array(a)
@@ -678,9 +832,14 @@ Return a JSON array of objects. Use EXACT strings from the lists above.
     }
     
     func suggestOutfitBatch(from wardrobe: [WardrobeItem], outfitType: OutfitType? = nil, customDescription: String? = nil, weather: Weather? = nil, user: User? = nil) async -> [[SuggestedOutfitItem]]? {
-        // 1. Summarize the wardrobe
         let wardrobeSummary = wardrobe.enumerated().map { (idx, item) in
-            "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+            var desc = "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+            if let m = item.material, !m.isEmpty { desc += ", Material: \(m)" }
+            if let f = item.fit { desc += ", Fit: \(f.rawValue)" }
+            if let n = item.neckline { desc += ", Neckline: \(n.rawValue)" }
+            if let s = item.sleeveLength { desc += ", Sleeve: \(s.rawValue)" }
+            if let g = item.garmentLength { desc += ", Length: \(g.rawValue)" }
+            return desc
         }.joined(separator: "\n")
         
         // 2. Create the improved prompt for 5 suggestions
@@ -795,10 +954,18 @@ Return only the JSON array, no extra text.
 
     func suggestPartialShuffleWithResult(currentOutfit: Outfit, categoryToShuffle: Category, availableItems: [WardrobeItem], user: User? = nil) async -> PartialShuffleResult {
         let outfitSummary = currentOutfit.items.map { item in
-            "Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+            var desc = "Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+            if let m = item.material, !m.isEmpty { desc += ", Material: \(m)" }
+            if let f = item.fit { desc += ", Fit: \(f.rawValue)" }
+            if let n = item.neckline { desc += ", Neckline: \(n.rawValue)" }
+            return desc
         }.joined(separator: "\n")
         let availableSummary = availableItems.enumerated().map { (idx, item) in
-            "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+            var desc = "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+            if let m = item.material, !m.isEmpty { desc += ", Material: \(m)" }
+            if let f = item.fit { desc += ", Fit: \(f.rawValue)" }
+            if let n = item.neckline { desc += ", Neckline: \(n.rawValue)" }
+            return desc
         }.joined(separator: "\n")
         let genderInstruction: String
         if let gender = user?.gender, !gender.isEmpty {
@@ -876,13 +1043,19 @@ You are an expert fashion stylist. Given the following information, suggest a ne
     /// Suggests a new outfit by adding a product of the given type (from availableItems) to the current outfit using Gemini.
     /// Returns the new suggested outfit as an array of SuggestedOutfitItem (or nil on failure).
     func suggestAddProductToOutfit(currentOutfit: Outfit, category: Category, productType: String, availableItems: [WardrobeItem], user: User? = nil) async -> [SuggestedOutfitItem]? {
-        // 1. Summarize the current outfit
         let outfitSummary = currentOutfit.items.map { item in
-            "Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+            var desc = "Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+            if let m = item.material, !m.isEmpty { desc += ", Material: \(m)" }
+            if let f = item.fit { desc += ", Fit: \(f.rawValue)" }
+            if let n = item.neckline { desc += ", Neckline: \(n.rawValue)" }
+            return desc
         }.joined(separator: "\n")
-        // 2. Summarize the available items for the product type
         let availableSummary = availableItems.enumerated().map { (idx, item) in
-            "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+            var desc = "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
+            if let m = item.material, !m.isEmpty { desc += ", Material: \(m)" }
+            if let f = item.fit { desc += ", Fit: \(f.rawValue)" }
+            if let n = item.neckline { desc += ", Neckline: \(n.rawValue)" }
+            return desc
         }.joined(separator: "\n")
         let genderInstruction: String
         if let gender = user?.gender, !gender.isEmpty {

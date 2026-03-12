@@ -4,6 +4,7 @@ struct AddItemReviewView: View {
     let images: [UIImage]
     @Binding var isPresented: Bool
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
+    @EnvironmentObject var authService: AuthService
 
     @State private var isAnalyzing = true
     @State private var progress: Double = 0.0
@@ -21,6 +22,13 @@ struct AddItemReviewView: View {
         var isSelected: Bool = true
         var isDuplicate: Bool = false
         var garmentImage: UIImage?
+
+        var material: String
+        var fit: Fit?
+        var neckline: Neckline?
+        var sleeveLength: SleeveLength?
+        var garmentLength: GarmentLength?
+        var details: String
     }
 
     var selectedCount: Int { reviewItems.filter(\.isSelected).count }
@@ -58,6 +66,25 @@ struct AddItemReviewView: View {
                     VStack(spacing: 0) {
                         ScrollView {
                             VStack(spacing: DS.Spacing.sm) {
+                                if authService.user?.gender == nil || (authService.user?.gender ?? "").isEmpty {
+                                    HStack(spacing: DS.Spacing.sm) {
+                                        Image(systemName: "sparkles")
+                                            .foregroundColor(DS.Colors.accent)
+                                        VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                                            Text("Improve detection accuracy")
+                                                .font(DS.Font.subheadline)
+                                                .foregroundColor(DS.Colors.textPrimary)
+                                            Text("Add your gender in Profile for better results")
+                                                .font(DS.Font.caption1)
+                                                .foregroundColor(DS.Colors.textSecondary)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(DS.Spacing.sm)
+                                    .background(DS.Colors.accent.opacity(0.08))
+                                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+                                }
+
                                 Text("\(selectedCount) of \(reviewItems.count) items selected")
                                     .font(DS.Font.subheadline)
                                     .foregroundColor(DS.Colors.textSecondary)
@@ -106,11 +133,15 @@ struct AddItemReviewView: View {
         isAnalyzing = true
         Task {
             var allItems: [ReviewItem] = []
+            let userGender = authService.user?.gender
 
             await withTaskGroup(of: (Int, [ImageAnalysisService.SegmentedItem]).self) { group in
                 for (idx, image) in images.enumerated() {
                     group.addTask {
-                        let results = await ImageAnalysisService.shared.analyzeAndSegment(image: image)
+                        let results = await ImageAnalysisService.shared.analyzeAndSegment(
+                            image: image,
+                            userGender: userGender
+                        )
                         return (idx, results)
                     }
                 }
@@ -125,7 +156,13 @@ struct AddItemReviewView: View {
                             colors: seg.colors,
                             pattern: pattern,
                             brand: "",
-                            garmentImage: seg.maskImage
+                            garmentImage: seg.maskImage,
+                            material: seg.material ?? "",
+                            fit: seg.fit,
+                            neckline: seg.neckline,
+                            sleeveLength: seg.sleeveLength,
+                            garmentLength: seg.garmentLength,
+                            details: seg.details ?? ""
                         )
                     }
                     let footwearIndices = items.indices.filter { items[$0].category == .footwear }
@@ -181,7 +218,13 @@ struct AddItemReviewView: View {
                 brand: item.brand,
                 pattern: item.pattern,
                 imagePath: imagePath,
-                croppedImagePath: croppedImagePath
+                croppedImagePath: croppedImagePath,
+                material: item.material.isEmpty ? nil : item.material,
+                fit: item.fit,
+                neckline: item.neckline,
+                sleeveLength: item.sleeveLength,
+                garmentLength: item.garmentLength,
+                details: item.details.isEmpty ? nil : item.details
             )
             wardrobeViewModel.items.append(wardrobeItem)
             wardrobeViewModel.syncItemToCloud(wardrobeItem)
@@ -230,10 +273,16 @@ private struct ReviewItemRow: View {
                         .font(DS.Font.headline)
                         .foregroundColor(DS.Colors.textPrimary)
                         .lineLimit(1)
-                    Text(item.colors.joined(separator: ", "))
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.textSecondary)
-                        .lineLimit(1)
+                    HStack(spacing: DS.Spacing.micro) {
+                        Text(item.colors.joined(separator: ", "))
+                        if !item.material.isEmpty {
+                            Text("·")
+                            Text(item.material)
+                        }
+                    }
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .lineLimit(1)
                 }
 
                 Spacer()
@@ -366,6 +415,96 @@ private struct ReviewItemRow: View {
                         .autocapitalization(.none)
                         .submitLabel(.done)
                 }
+            }
+
+            VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                Text("Material")
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.textSecondary)
+                TextField("e.g. Cotton, Denim, Wool", text: $item.material)
+                    .font(DS.Font.body)
+                    .textContentType(.none)
+                    .autocapitalization(.none)
+                    .submitLabel(.done)
+            }
+
+            HStack(spacing: DS.Spacing.sm) {
+                if ![.footwear, .accessories].contains(item.category) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                        Text("Fit")
+                            .font(DS.Font.caption1)
+                            .foregroundColor(DS.Colors.textSecondary)
+                        Picker("Fit", selection: Binding(
+                            get: { item.fit ?? .regular },
+                            set: { item.fit = $0 }
+                        )) {
+                            ForEach(Fit.allCases) { f in Text(f.rawValue).tag(f) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(DS.Colors.accent)
+                    }
+                }
+
+                if [.tops, .midLayers, .onePieces, .outerwear].contains(item.category) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                        Text("Neckline")
+                            .font(DS.Font.caption1)
+                            .foregroundColor(DS.Colors.textSecondary)
+                        Picker("Neckline", selection: Binding(
+                            get: { item.neckline ?? .crewNeck },
+                            set: { item.neckline = $0 }
+                        )) {
+                            ForEach(Neckline.allCases) { n in Text(n.rawValue).tag(n) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(DS.Colors.accent)
+                    }
+                }
+            }
+
+            HStack(spacing: DS.Spacing.sm) {
+                if [.tops, .midLayers, .outerwear, .onePieces, .activewear].contains(item.category) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                        Text("Sleeve Length")
+                            .font(DS.Font.caption1)
+                            .foregroundColor(DS.Colors.textSecondary)
+                        Picker("Sleeve Length", selection: Binding(
+                            get: { item.sleeveLength ?? .longSleeve },
+                            set: { item.sleeveLength = $0 }
+                        )) {
+                            ForEach(SleeveLength.allCases) { s in Text(s.rawValue).tag(s) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(DS.Colors.accent)
+                    }
+                }
+
+                if [.bottoms, .onePieces, .outerwear].contains(item.category) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                        Text("Length")
+                            .font(DS.Font.caption1)
+                            .foregroundColor(DS.Colors.textSecondary)
+                        Picker("Length", selection: Binding(
+                            get: { item.garmentLength ?? .fullLength },
+                            set: { item.garmentLength = $0 }
+                        )) {
+                            ForEach(GarmentLength.allCases) { l in Text(l.rawValue).tag(l) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(DS.Colors.accent)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                Text("Details")
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.textSecondary)
+                TextField("e.g. ribbed cuffs, front zip, logo on chest", text: $item.details)
+                    .font(DS.Font.body)
+                    .textContentType(.none)
+                    .autocapitalization(.none)
+                    .submitLabel(.done)
             }
 
             if item.isDuplicate {
