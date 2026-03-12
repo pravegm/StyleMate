@@ -53,7 +53,7 @@ class ImageAnalysisService {
 
                 group.addTask {
                     let label = "\(product) (\(category.rawValue))"
-                    let garmentImage: UIImage?
+                    var garmentImage: UIImage?
 
                     if let box = await self.getItemBoundingBox(
                         base64Image: base64Image,
