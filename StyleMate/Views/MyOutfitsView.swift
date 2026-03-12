@@ -11,88 +11,91 @@ struct MyOutfitsView: View {
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
 
     var body: some View {
-        ZStack {
-            DS.Colors.backgroundPrimary.ignoresSafeArea()
-
+        NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Spacing.lg) {
-                    // Header
-                    Text("Outfits")
-                        .font(DS.Font.largeTitle)
-                        .foregroundColor(DS.Colors.textPrimary)
-                        .padding(.top, DS.Spacing.md)
-
-                    Text("See, add, and manage your looks")
-                        .font(DS.Font.subheadline)
-                        .foregroundColor(DS.Colors.textSecondary)
-
-                    // Today's Outfits
-                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                        Text("Today's Outfits")
-                            .font(DS.Font.title3)
-                            .foregroundColor(DS.Colors.textPrimary)
-
-                        if let todaysOutfits = viewModel.outfitsByDate[Calendar.current.startOfDay(for: Date())], !todaysOutfits.isEmpty {
-                            ForEach(todaysOutfits, id: \.objectID) { outfit in
-                                OutfitCardView(outfit: outfit, viewModel: viewModel)
-                                    .environmentObject(wardrobeVM)
-                            }
-                        } else {
-                            Text("No outfit for today — add one!")
-                                .font(DS.Font.body)
-                                .foregroundColor(DS.Colors.textTertiary)
-                                .padding(.vertical, DS.Spacing.xs)
-                        }
-                    }
-
-                    // Calendar
-                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                        Text("Outfit Calendar")
-                            .font(DS.Font.title3)
-                            .foregroundColor(DS.Colors.textPrimary)
-
-                        CalendarGridView(
-                            selectedDate: $selectedDate,
-                            datesWithOutfits: Set(viewModel.outfitsByDate.keys)
-                        )
-                        .padding(DS.Spacing.md)
-                        .background(DS.Colors.backgroundCard)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-                        .dsCardShadow()
-                    }
-
-                    // Add Outfit Button
-                    Button(action: { showAddSheet = true }) {
+                    // Today indicator
+                    if Calendar.current.isDateInToday(selectedDate) {
                         HStack(spacing: DS.Spacing.xs) {
-                            Image(systemName: "plus")
-                            Text("Add Outfit to Selected Date")
+                            Circle()
+                                .fill(DS.Colors.accent)
+                                .frame(width: 8, height: 8)
+                            Text("Today")
+                                .font(DS.Font.caption1)
+                                .foregroundColor(DS.Colors.accent)
                         }
+                        .padding(.bottom, DS.Spacing.xs)
                     }
-                    .buttonStyle(DSPrimaryButton())
 
-                    // Outfits for selected date
-                    if let outfits = viewModel.outfitsByDate[selectedDate], !outfits.isEmpty {
-                        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                            Text("Outfits for \(dateFormatter.string(from: selectedDate))")
+                    // Calendar card
+                    CalendarGridView(
+                        selectedDate: $selectedDate,
+                        datesWithOutfits: Set(viewModel.outfitsByDate.keys)
+                    )
+                    .padding(DS.Spacing.md)
+                    .background(DS.Colors.backgroundCard)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+                    .dsCardShadow()
+
+                    // Selected date outfits
+                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                        HStack {
+                            Text(Calendar.current.isDateInToday(selectedDate) ? "Today's Outfits" : dateFormatter.string(from: selectedDate))
                                 .font(DS.Font.headline)
                                 .foregroundColor(DS.Colors.textPrimary)
+                            Spacer()
+                            Button(action: { showAddSheet = true }) {
+                                HStack(spacing: DS.Spacing.micro) {
+                                    Image(systemName: "plus.circle.fill")
+                                    Text("Add")
+                                        .font(DS.Font.subheadline)
+                                }
+                                .foregroundColor(DS.Colors.accent)
+                                .padding(.vertical, DS.Spacing.xs)
+                                .padding(.horizontal, DS.Spacing.sm)
+                                .contentShape(Rectangle())
+                            }
+                        }
 
+                        if let outfits = viewModel.outfitsByDate[selectedDate], !outfits.isEmpty {
                             ForEach(outfits, id: \.objectID) { outfit in
                                 OutfitCardView(outfit: outfit, viewModel: viewModel)
                                     .environmentObject(wardrobeVM)
                             }
+                        } else {
+                            HStack(spacing: DS.Spacing.sm) {
+                                Image(systemName: "hanger")
+                                    .font(DS.Font.title3)
+                                    .foregroundColor(DS.Colors.textTertiary)
+                                VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                                    Text("No outfits logged")
+                                        .font(DS.Font.subheadline)
+                                        .foregroundColor(DS.Colors.textSecondary)
+                                    Text("Generate one from Home or add manually")
+                                        .font(DS.Font.caption1)
+                                        .foregroundColor(DS.Colors.textTertiary)
+                                }
+                            }
+                            .padding(DS.Spacing.md)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(DS.Colors.backgroundCard)
+                            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+                            .dsCardShadow()
                         }
                     }
                 }
                 .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.top, DS.Spacing.md)
                 .padding(.bottom, 100)
             }
-        }
-        .sheet(isPresented: $showAddSheet) {
-            AddOutfitSheet(selectedDate: selectedDate) { items, notes in
-                viewModel.addOutfit(date: selectedDate, items: items, source: "manual", notes: notes)
+            .background(DS.Colors.backgroundPrimary)
+            .navigationTitle("Outfits")
+            .sheet(isPresented: $showAddSheet) {
+                AddOutfitSheet(selectedDate: selectedDate) { items, notes in
+                    viewModel.addOutfit(date: selectedDate, items: items, source: "manual", notes: notes)
+                }
+                .environmentObject(wardrobeVM)
             }
-            .environmentObject(wardrobeVM)
         }
     }
 }
@@ -338,9 +341,9 @@ struct CalendarGridView: View {
                                     if hasOutfit {
                                         Circle()
                                             .fill(DS.Colors.accent)
-                                            .frame(width: 5, height: 5)
+                                            .frame(width: 6, height: 6)
                                     } else {
-                                        Color.clear.frame(width: 5, height: 5)
+                                        Color.clear.frame(width: 6, height: 6)
                                     }
                                 }
                             }
@@ -426,20 +429,88 @@ struct OutfitCardView: View {
         (outfit.items as? Set<OutfitItem>)?.sorted { ($0.product ?? "") < ($1.product ?? "") } ?? []
     }
 
-    var body: some View {
-        HStack(alignment: .center, spacing: DS.Spacing.md) {
-            OutfitCardActionsColumn(
-                notes: outfit.notes,
-                showEditSheet: $showEditSheet,
-                showDeleteAlert: $showDeleteAlert,
-                onEdit: { showEditSheet = true },
-                onDelete: { showDeleteAlert = true }
-            )
+    private var sortedItems: [OutfitItem] {
+        allItems.sorted { item1, item2 in
+            let cat1 = Category(rawValue: item1.category ?? "") ?? .tops
+            let cat2 = Category(rawValue: item2.category ?? "") ?? .tops
+            return cat1.wearingOrder < cat2.wearingOrder
+        }
+    }
 
-            OutfitCardItemsScroll(
-                allItems: allItems,
-                previewImage: $previewImage
-            )
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DS.Spacing.sm) {
+                    ForEach(sortedItems, id: \.objectID) { item in
+                        Button(action: {
+                            if let img = item.croppedImage ?? item.image {
+                                previewImage = PreviewImage(image: img)
+                            }
+                        }) {
+                            VStack(spacing: DS.Spacing.micro) {
+                                if let img = item.croppedImage ?? item.image {
+                                    Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 72, height: 72)
+                                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                                } else {
+                                    RoundedRectangle(cornerRadius: DS.Radius.button)
+                                        .fill(DS.Colors.backgroundSecondary)
+                                        .frame(width: 72, height: 72)
+                                        .overlay(
+                                            Image(systemName: "photo")
+                                                .foregroundColor(DS.Colors.textTertiary)
+                                        )
+                                }
+                                Text(item.product ?? "")
+                                    .font(DS.Font.caption2)
+                                    .foregroundColor(DS.Colors.textSecondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, DS.Spacing.xs)
+            }
+
+            HStack {
+                if let source = outfit.source {
+                    HStack(spacing: DS.Spacing.micro) {
+                        Image(systemName: source == "gemini" ? "wand.and.stars" : "hand.draw")
+                            .font(DS.Font.caption2)
+                        Text(source == "gemini" ? "AI Suggested" : "Manual")
+                            .font(DS.Font.caption2)
+                    }
+                    .foregroundColor(DS.Colors.textTertiary)
+                }
+
+                if let notes = outfit.notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(DS.Font.caption1)
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Button(action: { showEditSheet = true }) {
+                    Image(systemName: "pencil.circle")
+                        .font(DS.Font.title3)
+                        .foregroundColor(DS.Colors.accent)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+
+                Button(action: { showDeleteAlert = true }) {
+                    Image(systemName: "trash.circle")
+                        .font(DS.Font.title3)
+                        .foregroundColor(DS.Colors.error)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+            }
         }
         .padding(DS.Spacing.md)
         .background(DS.Colors.backgroundCard)
@@ -497,12 +568,3 @@ extension OutfitItem {
     }
 }
 
-extension Color {
-    static var calendarHighlightGreen: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.30, green: 0.85, blue: 0.45, alpha: 0.32)
-                : UIColor(red: 0.20, green: 0.70, blue: 0.30, alpha: 0.15)
-        })
-    }
-}
