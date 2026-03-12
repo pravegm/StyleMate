@@ -90,6 +90,17 @@ class WardrobeImageFileHelper {
             return nil
         }
     }
+    static func saveImageAsPNG(_ image: UIImage) -> String? {
+        let filename = UUID().uuidString + ".png"
+        let url = folderURL.appendingPathComponent(filename)
+        guard let data = image.pngData() else { return nil }
+        do {
+            try data.write(to: url)
+            return filename
+        } catch {
+            return nil
+        }
+    }
     static func loadImage(at filename: String) -> UIImage? {
         let url = folderURL.appendingPathComponent(filename)
         guard let data = try? Data(contentsOf: url) else { return nil }

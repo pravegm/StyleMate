@@ -20,7 +20,7 @@ struct AddItemReviewView: View {
         var brand: String
         var isSelected: Bool = true
         var isDuplicate: Bool = false
-        var bgRemovedImage: UIImage?
+        var garmentImage: UIImage?
     }
 
     var selectedCount: Int { reviewItems.filter(\.isSelected).count }
@@ -107,25 +107,25 @@ struct AddItemReviewView: View {
         Task {
             var allItems: [ReviewItem] = []
 
-            await withTaskGroup(of: (Int, [(Category?, String?, [String], Pattern?)], UIImage?).self) { group in
+            await withTaskGroup(of: (Int, [ImageAnalysisService.SegmentedItem]).self) { group in
                 for (idx, image) in images.enumerated() {
                     group.addTask {
-                        let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: image)
-                        let results = await ImageAnalysisService.shared.analyzeMultiple(image: image, imageIndex: idx)
-                        return (idx, results, bgRemoved)
+                        let results = await ImageAnalysisService.shared.analyzeAndSegment(image: image)
+                        return (idx, results)
                     }
                 }
-                for await (idx, results, bgRemoved) in group {
-                    var items = results.compactMap { cat, prod, colors, pattern -> ReviewItem? in
-                        guard let cat, let prod, let pattern, !colors.isEmpty else { return nil }
+                for await (idx, results) in group {
+                    var items = results.compactMap { seg -> ReviewItem? in
+                        guard let cat = seg.category, let prod = seg.product,
+                              let pattern = seg.pattern, !seg.colors.isEmpty else { return nil }
                         return ReviewItem(
                             sourceImageIndex: idx,
                             category: cat,
                             product: prod,
-                            colors: colors,
+                            colors: seg.colors,
                             pattern: pattern,
                             brand: "",
-                            bgRemovedImage: bgRemoved
+                            garmentImage: seg.maskImage
                         )
                     }
                     let footwearIndices = items.indices.filter { items[$0].category == .footwear }
@@ -170,10 +170,9 @@ struct AddItemReviewView: View {
         Haptics.success()
 
         for item in selected {
-            let fullImage = item.bgRemovedImage ?? images[item.sourceImageIndex]
-            let imagePath = WardrobeImageFileHelper.saveImage(fullImage) ?? ""
-            let zoneCrop = BodyZone.cropToZone(image: fullImage, category: item.category)
-            let croppedImagePath = zoneCrop != nil ? WardrobeImageFileHelper.saveImage(zoneCrop!) : nil
+            let fullImage = item.garmentImage ?? images[item.sourceImageIndex]
+            let imagePath = WardrobeImageFileHelper.saveImageAsPNG(fullImage) ?? WardrobeImageFileHelper.saveImage(fullImage) ?? ""
+            let croppedImagePath = imagePath
 
             let wardrobeItem = WardrobeItem(
                 category: item.category,
@@ -215,7 +214,7 @@ private struct ReviewItemRow: View {
                 }
                 .buttonStyle(.plain)
 
-                if let img = item.bgRemovedImage {
+                if let img = item.garmentImage {
                     Image(uiImage: img)
                         .resizable()
                         .scaledToFit()
