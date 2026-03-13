@@ -7,6 +7,9 @@ class ImageAnalysisService {
     
     private let geminiAPIKey = Secrets.geminiAPIKey
     private let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key="
+    private var geminiProEndpoint: String {
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key="
+    }
     
     struct BoundingBox: Codable {
         let x: CGFloat
@@ -63,8 +66,8 @@ class ImageAnalysisService {
 
         // Use the ORIGINAL image (with background) for bbox detection -- it has full context
         // (floor for shoes, face for glasses, background) that bg-removed images lack.
-        let originalForBBox = resizedForAPI(normalizedImage)
-        guard let originalData = originalForBBox.jpegData(compressionQuality: 0.7) else { return [] }
+        let originalForBBox = resizedForAPI(normalizedImage, maxDimension: 1536)
+        guard let originalData = originalForBBox.jpegData(compressionQuality: 0.8) else { return [] }
         let originalBase64 = originalData.base64EncodedString()
         print("[StyleMate] Segmentation: Original image for bboxes: \(originalData.count) bytes, \(Int(originalForBBox.size.width))x\(Int(originalForBBox.size.height))")
 
@@ -169,22 +172,19 @@ class ImageAnalysisService {
         let itemList = itemLabels.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
 
         let prompt = """
-Detect ALL of the following items in this image and return their bounding boxes:
+Detect the 2D bounding boxes of the following clothing items in this image:
 \(itemList)
 
+The box_2d should be [ymin, xmin, ymax, xmax] normalized to 0-1000.
+
 Output a JSON list where each entry contains:
-- "box_2d": bounding box as [y0, x0, y1, x1] normalized to 0-1000
+- "box_2d": bounding box as [ymin, xmin, ymax, xmax] normalized to 0-1000
 - "label": the EXACT label from the list above
 
-CRITICAL RULES:
-- Each item MUST have its own DISTINCT bounding box at the correct location in the image.
-- Do NOT return the same bounding box coordinates for multiple items.
-- For footwear: the box should be at the BOTTOM of the image around the feet/shoes.
-- For eyewear/glasses: the box should be around the eyes/face area.
-- For watches: the box should be around the wrist.
-- For hats/caps: the box should be at the TOP of the image around the head.
-- For necklaces: the box should be around the neck/chest area.
-- If you cannot find a specific item, do NOT include it in the response. Do NOT guess or return a box for a different region.
+RULES:
+- Each item MUST have its own DISTINCT bounding box at the correct location.
+- Do NOT return the same coordinates for multiple items.
+- If you cannot find a specific item, do NOT include it. Do NOT guess.
 """
 
         let requestBody: [String: Any] = [
@@ -377,8 +377,9 @@ Return a bounding box tightly around this item ONLY.
 
         let prompt = """
 \(spatialHint)
-Output a JSON list with ONE entry containing the 2D bounding box in the key "box_2d" as [y0, x0, y1, x1] normalized to 0-1000, and the text label in the key "label".
-If you absolutely cannot find this item in the image, return an empty JSON list [].
+Detect the 2D bounding box of ONLY this specific item. The box_2d should be [ymin, xmin, ymax, xmax] normalized to 0-1000.
+Output a JSON list with exactly ONE entry: [{"box_2d": [ymin, xmin, ymax, xmax], "label": "ITEM_NAME"}]
+If you absolutely cannot find this item, return an empty list: []
 """
 
         let requestBody: [String: Any] = [
@@ -401,7 +402,7 @@ If you absolutely cannot find this item in the image, return an empty JSON list 
             ]
         ]
 
-        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+        guard let url = URL(string: geminiProEndpoint + geminiAPIKey),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
             return nil
         }
