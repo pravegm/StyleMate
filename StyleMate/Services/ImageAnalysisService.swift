@@ -61,76 +61,86 @@ class ImageAnalysisService {
         let bgRemoved = trimWhitespace(bgRemovedRaw)
         print("[StyleMate] Segmentation: BG removed and trimmed: \(Int(bgRemovedRaw.size.width))x\(Int(bgRemovedRaw.size.height)) -> \(Int(bgRemoved.size.width))x\(Int(bgRemoved.size.height))")
 
-        let apiImage = resizedForAPI(bgRemoved)
-        guard let imageData = apiImage.jpegData(compressionQuality: 0.7) else { return [] }
-        let base64Image = imageData.base64EncodedString()
-        print("[StyleMate] Segmentation: Image for bboxes: \(imageData.count) bytes, sent: \(Int(apiImage.size.width))x\(Int(apiImage.size.height))")
+        // Use the ORIGINAL image (with background) for bbox detection -- it has full context
+        // (floor for shoes, face for glasses, background) that bg-removed images lack.
+        let originalForBBox = resizedForAPI(normalizedImage)
+        guard let originalData = originalForBBox.jpegData(compressionQuality: 0.7) else { return [] }
+        let originalBase64 = originalData.base64EncodedString()
+        print("[StyleMate] Segmentation: Original image for bboxes: \(originalData.count) bytes, \(Int(originalForBBox.size.width))x\(Int(originalForBBox.size.height))")
 
-        let results = await withTaskGroup(of: SegmentedItem?.self) { group in
-            for item in classifications {
-                guard let category = item.category, let product = item.product,
-                      let pattern = item.pattern, !item.colors.isEmpty else { continue }
+        let validItems = classifications.filter { $0.category != nil && $0.product != nil && $0.pattern != nil && !$0.colors.isEmpty }
+        let itemLabels = validItems.map { "\($0.product!) (\($0.category!.rawValue))" }
 
-                group.addTask {
-                    let label = "\(product) (\(category.rawValue))"
-                    var garmentImage: UIImage?
+        let allBoxes = await getAllBoundingBoxes(originalBase64: originalBase64, itemLabels: itemLabels)
 
-                    if let box = await self.getItemBoundingBox(
-                        base64Image: base64Image,
-                        itemLabel: label
-                    ) {
-                        garmentImage = self.extractGarment(from: bgRemoved, boxNormalized: box)
-                        if garmentImage != nil {
-                            print("[StyleMate] Segmentation: Extracted \(label) via bounding box")
-                        } else {
-                            let cropped = BodyZone.cropToZone(image: bgRemoved, category: category) ?? bgRemoved
-                            garmentImage = self.padToSquare(cropped)
-                            print("[StyleMate] Segmentation: Fallback zone crop for \(label)")
-                        }
-                    } else {
-                        let cropped = BodyZone.cropToZone(image: bgRemoved, category: category) ?? bgRemoved
-                        garmentImage = self.padToSquare(cropped)
-                        print("[StyleMate] Segmentation: Fallback zone crop for \(label)")
-                    }
+        // Apply each box to bgRemovedRaw (same dimensions as original, before trimming)
+        // so that Gemini's normalized coordinates align correctly.
+        var results: [SegmentedItem] = []
+        for item in validItems {
+            guard let category = item.category, let product = item.product,
+                  let pattern = item.pattern else { continue }
 
-                    return SegmentedItem(
-                        category: category,
-                        product: product,
-                        colors: item.colors,
-                        pattern: pattern,
-                        material: item.material,
-                        fit: item.fit,
-                        neckline: item.neckline,
-                        sleeveLength: item.sleeveLength,
-                        garmentLength: item.garmentLength,
-                        details: item.details,
-                        maskImage: garmentImage
-                    )
+            let label = "\(product) (\(category.rawValue))"
+            var garmentImage: UIImage?
+
+            if let box = allBoxes[label] {
+                garmentImage = extractGarment(from: bgRemovedRaw, boxNormalized: box)
+                if garmentImage != nil {
+                    print("[StyleMate] Segmentation: Extracted \(label) via bounding box")
+                } else {
+                    let cropped = BodyZone.cropToZone(image: bgRemoved, category: category) ?? bgRemoved
+                    garmentImage = padToSquare(cropped)
+                    print("[StyleMate] Segmentation: BBox extraction failed, fallback for \(label)")
                 }
+            } else {
+                let cropped = BodyZone.cropToZone(image: bgRemoved, category: category) ?? bgRemoved
+                garmentImage = padToSquare(cropped)
+                print("[StyleMate] Segmentation: No bbox returned, fallback for \(label)")
             }
 
-            var collected: [SegmentedItem] = []
-            for await result in group {
-                if let item = result { collected.append(item) }
-            }
-            return collected
+            results.append(SegmentedItem(
+                category: category,
+                product: product,
+                colors: item.colors,
+                pattern: pattern,
+                material: item.material,
+                fit: item.fit,
+                neckline: item.neckline,
+                sleeveLength: item.sleeveLength,
+                garmentLength: item.garmentLength,
+                details: item.details,
+                maskImage: garmentImage
+            ))
         }
 
         print("[StyleMate] Segmentation: Returning \(results.count) items")
         return results
     }
 
-    private func getItemBoundingBox(base64Image: String, itemLabel: String) async -> [Int]? {
+    /// Gets bounding boxes for ALL classified items in a single Gemini call using the original image.
+    private func getAllBoundingBoxes(
+        originalBase64: String,
+        itemLabels: [String]
+    ) async -> [String: [Int]] {
+        let itemList = itemLabels.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+
         let prompt = """
-Detect the \(itemLabel) in this image.
-Output a JSON list with ONE entry containing the 2D bounding box in the key "box_2d" and the text label in the key "label".
-The box_2d should tightly surround ONLY this item, not the person's body.
-For a watch: box the watch face and strap only, not the entire wrist or arm.
-For earrings: box just the earring, not the ear or face.
-For a ring: box just the ring, not the entire hand.
-For glasses/sunglasses: box the frames and lenses only, not the entire face.
-For a necklace: box just the necklace, not the neck and chest.
-For a hat/cap: box just the hat, not the entire head.
+Detect ALL of the following items in this image and return their bounding boxes:
+\(itemList)
+
+Output a JSON list where each entry contains:
+- "box_2d": bounding box as [y0, x0, y1, x1] normalized to 0-1000
+- "label": the EXACT label from the list above
+
+CRITICAL RULES:
+- Each item MUST have its own DISTINCT bounding box at the correct location in the image.
+- Do NOT return the same bounding box coordinates for multiple items.
+- For footwear: the box should be at the BOTTOM of the image around the feet/shoes.
+- For eyewear/glasses: the box should be around the eyes/face area.
+- For watches: the box should be around the wrist.
+- For hats/caps: the box should be at the TOP of the image around the head.
+- For necklaces: the box should be around the neck/chest area.
+- If you cannot find a specific item, do NOT include it in the response. Do NOT guess or return a box for a different region.
 """
 
         let requestBody: [String: Any] = [
@@ -140,7 +150,7 @@ For a hat/cap: box just the hat, not the entire head.
                         ["text": prompt],
                         ["inlineData": [
                             "mimeType": "image/jpeg",
-                            "data": base64Image
+                            "data": originalBase64
                         ]]
                     ]
                 ]
@@ -155,22 +165,22 @@ For a hat/cap: box just the hat, not the entire head.
 
         guard let url = URL(string: geminiEndpoint + geminiAPIKey),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
-            return nil
+            return [:]
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = httpBody
-        request.timeoutInterval = 15
+        request.timeoutInterval = 30
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
-                print("[StyleMate] BBox failed for \(itemLabel): HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
-                return nil
+                print("[StyleMate] AllBBox: HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                return [:]
             }
 
             guard let responseJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -180,30 +190,44 @@ For a hat/cap: box just the hat, not the entire head.
                   let parts = content["parts"] as? [[String: Any]],
                   let textPart = parts.first(where: { $0["text"] != nil }),
                   let text = textPart["text"] as? String else {
-                print("[StyleMate] BBox: bad response for \(itemLabel)")
-                return nil
+                print("[StyleMate] AllBBox: bad response structure")
+                return [:]
             }
 
-            guard let items = parseSegmentationJSON(text), let first = items.first else {
-                print("[StyleMate] BBox: JSON parse failed for \(itemLabel)")
-                return nil
+            guard let items = parseSegmentationJSON(text) else {
+                print("[StyleMate] AllBBox: JSON parse failed")
+                return [:]
             }
 
-            if let boxInts = first["box_2d"] as? [Int], boxInts.count == 4 {
-                print("[StyleMate] BBox: success for \(itemLabel): \(boxInts)")
-                return boxInts
-            } else if let boxDoubles = first["box_2d"] as? [Double], boxDoubles.count == 4 {
-                let boxInts = boxDoubles.map { Int($0) }
-                print("[StyleMate] BBox: success for \(itemLabel): \(boxInts)")
-                return boxInts
+            var result: [String: [Int]] = [:]
+            for item in items {
+                guard let label = item["label"] as? String else { continue }
+
+                let box: [Int]?
+                if let boxInts = item["box_2d"] as? [Int], boxInts.count == 4 {
+                    box = boxInts
+                } else if let boxDoubles = item["box_2d"] as? [Double], boxDoubles.count == 4 {
+                    box = boxDoubles.map { Int($0) }
+                } else {
+                    box = nil
+                }
+
+                if let box = box {
+                    let matchedLabel = itemLabels.first { requestedLabel in
+                        label.lowercased().contains(requestedLabel.lowercased())
+                        || requestedLabel.lowercased().contains(label.lowercased())
+                    } ?? label
+                    result[matchedLabel] = box
+                    print("[StyleMate] AllBBox: \(matchedLabel) -> \(box)")
+                }
             }
 
-            print("[StyleMate] BBox: no valid box for \(itemLabel)")
-            return nil
+            print("[StyleMate] AllBBox: got \(result.count) boxes for \(itemLabels.count) items")
+            return result
 
         } catch {
-            print("[StyleMate] BBox: network error for \(itemLabel): \(error.localizedDescription)")
-            return nil
+            print("[StyleMate] AllBBox: network error: \(error.localizedDescription)")
+            return [:]
         }
     }
 
