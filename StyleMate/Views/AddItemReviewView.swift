@@ -20,7 +20,7 @@ struct AddItemReviewView: View {
         var pattern: Pattern
         var brand: String
         var isSelected: Bool = true
-        var isDuplicate: Bool = false
+        var duplicateMatch: DuplicateMatch?
         var garmentImage: UIImage?
 
         var material: String
@@ -29,6 +29,8 @@ struct AddItemReviewView: View {
         var sleeveLength: SleeveLength?
         var garmentLength: GarmentLength?
         var details: String
+
+        var isDuplicate: Bool { duplicateMatch != nil }
     }
 
     var selectedCount: Int { reviewItems.filter(\.isSelected).count }
@@ -188,13 +190,17 @@ struct AddItemReviewView: View {
 
     private func markDuplicates(_ items: inout [ReviewItem]) {
         for i in items.indices {
-            items[i].isDuplicate = wardrobeViewModel.items.contains { existing in
-                existing.category == items[i].category &&
-                existing.product.caseInsensitiveCompare(items[i].product) == .orderedSame &&
-                existing.pattern == items[i].pattern &&
-                Set(existing.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }) ==
-                    Set(items[i].colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) })
-            }
+            items[i].duplicateMatch = DuplicateDetector.shared.findBestMatch(
+                category: items[i].category,
+                product: items[i].product,
+                colors: items[i].colors,
+                pattern: items[i].pattern,
+                material: items[i].material.isEmpty ? nil : items[i].material,
+                fit: items[i].fit,
+                neckline: items[i].neckline,
+                sleeveLength: items[i].sleeveLength,
+                existingItems: wardrobeViewModel.items
+            )
         }
     }
 
@@ -287,10 +293,24 @@ private struct ReviewItemRow: View {
 
                 Spacer()
 
-                if item.isDuplicate {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.warning)
+                if let match = item.duplicateMatch {
+                    HStack(spacing: DS.Spacing.xs) {
+                        if let existingImage = match.existingItem.croppedImage ?? match.existingItem.image {
+                            Image(uiImage: existingImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 32, height: 32)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(DS.Colors.warning.opacity(0.4), lineWidth: 1)
+                                )
+                        }
+
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(DS.Font.caption1)
+                            .foregroundColor(DS.Colors.warning)
+                    }
                 }
 
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
@@ -319,6 +339,47 @@ private struct ReviewItemRow: View {
     @ViewBuilder
     private var expandedFields: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+
+            if let match = item.duplicateMatch {
+                VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                    HStack(spacing: DS.Spacing.xs) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(DS.Colors.warning)
+                        Text("Similar item already in your wardrobe")
+                            .font(DS.Font.subheadline)
+                            .foregroundColor(DS.Colors.warning)
+                    }
+
+                    HStack(spacing: DS.Spacing.sm) {
+                        if let existingImage = match.existingItem.croppedImage ?? match.existingItem.image {
+                            Image(uiImage: existingImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 48, height: 48)
+                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                        }
+
+                        VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                            Text(match.existingItem.name)
+                                .font(DS.Font.caption1)
+                                .foregroundColor(DS.Colors.textPrimary)
+                                .lineLimit(2)
+                            if let details = match.existingItem.detailsSubtitle {
+                                Text(details)
+                                    .font(DS.Font.caption2)
+                                    .foregroundColor(DS.Colors.textTertiary)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Spacer()
+                    }
+                    .padding(DS.Spacing.sm)
+                    .background(DS.Colors.warning.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                }
+            }
+
             HStack(spacing: DS.Spacing.sm) {
                 VStack(alignment: .leading, spacing: DS.Spacing.micro) {
                     Text("Category")
@@ -507,15 +568,6 @@ private struct ReviewItemRow: View {
                     .submitLabel(.done)
             }
 
-            if item.isDuplicate {
-                HStack(spacing: DS.Spacing.xs) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(DS.Colors.warning)
-                    Text("This item may already be in your wardrobe")
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.warning)
-                }
-            }
         }
     }
 
