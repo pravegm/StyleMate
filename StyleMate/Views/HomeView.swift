@@ -167,9 +167,9 @@ struct HomeView: View {
                 }
 
                 if homeVM.isLoading {
-                    OutfitLoadingOverlay(
+                    StylingLoadingView(
                         progress: loadingProgress,
-                        message: "Finding your perfect outfit…"
+                        weather: homeVM.weather
                     )
                 }
             }
@@ -217,9 +217,15 @@ struct HomeView: View {
                 if isLoading {
                     loadingProgress = 0.0
                     loadingTimer?.invalidate()
-                    loadingTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
-                        if loadingProgress < 0.9 {
-                            loadingProgress += 0.005
+                    loadingTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { timer in
+                        if loadingProgress < 0.20 {
+                            loadingProgress += 0.008
+                        } else if loadingProgress < 0.40 {
+                            loadingProgress += 0.006
+                        } else if loadingProgress < 0.70 {
+                            loadingProgress += 0.003
+                        } else if loadingProgress < 0.90 {
+                            loadingProgress += 0.004
                         } else {
                             timer.invalidate()
                         }

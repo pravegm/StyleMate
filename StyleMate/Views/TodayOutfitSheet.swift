@@ -9,7 +9,6 @@ struct TodayOutfitSheet: View {
     @EnvironmentObject var authService: AuthService
 
     @State private var previewImage: PreviewImage? = nil
-    @State private var showSaveActionSheet = false
     @State private var showDatePickerSheet = false
     @State private var selectedDate = Calendar.current.startOfDay(for: Date())
     @State private var showSavedOverlay = false
@@ -23,6 +22,7 @@ struct TodayOutfitSheet: View {
     @State private var cardRotation: Double = 0
     @State private var cardOpacity: Double = 1
     @State private var dismissDirection: DismissDirection? = nil
+    @State private var hasTriggeredSwipeHaptic = false
 
     private let swipeThreshold: CGFloat = 100
 
@@ -106,18 +106,6 @@ struct TodayOutfitSheet: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("You're shuffling too fast! Please wait a moment and try again.")
-        }
-        .actionSheet(isPresented: $showSaveActionSheet) {
-            ActionSheet(title: Text("Save Outfit"), message: Text("How would you like to save this outfit?"), buttons: [
-                .default(Text("Save for today")) {
-                    saveOutfitForDate(Calendar.current.startOfDay(for: Date()))
-                },
-                .default(Text("Choose a date")) {
-                    selectedDate = Calendar.current.startOfDay(for: Date())
-                    showDatePickerSheet = true
-                },
-                .cancel()
-            ])
         }
         .sheet(isPresented: $showDatePickerSheet) {
             NavigationView {
@@ -212,48 +200,77 @@ struct TodayOutfitSheet: View {
     private func outfitCard(for outfit: Outfit) -> some View {
         let sortedItems = outfit.items.sorted { $0.category.wearingOrder < $1.category.wearingOrder }
 
-        ScrollView {
-            VStack(spacing: DS.Spacing.sm) {
-                ForEach(sortedItems, id: \.id) { item in
-                    OutfitItemRow(
-                        item: item,
-                        onTap: {
-                            if let img = item.croppedImage ?? item.image {
-                                previewImage = PreviewImage(image: img)
-                            }
-                        },
-                        onShuffle: {
-                            Haptics.light()
-                            homeVM.shuffleItemInOutfit(
-                                itemToShuffle: item,
-                                wardrobe: wardrobeViewModel.items,
-                                user: authService.user
-                            )
-                        },
-                        isLoading: homeVM.isLoading
-                    )
-                }
+        ZStack {
+            ScrollView {
+                VStack(spacing: DS.Spacing.sm) {
+                    // Explanation at the top
+                    if !outfit.explanation.isEmpty {
+                        HStack(alignment: .top, spacing: DS.Spacing.xs) {
+                            Image(systemName: "sparkles")
+                                .font(DS.Font.caption1)
+                                .foregroundColor(DS.Colors.accent)
+                                .padding(.top, 2)
 
-                if !outfit.explanation.isEmpty {
-                    HStack(alignment: .top, spacing: DS.Spacing.xs) {
-                        Image(systemName: "sparkles")
-                            .font(DS.Font.caption1)
-                            .foregroundColor(DS.Colors.accent)
-                            .padding(.top, 2)
-
-                        Text(outfit.explanation)
-                            .font(DS.Font.subheadline)
-                            .foregroundColor(DS.Colors.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            Text(outfit.explanation)
+                                .font(DS.Font.subheadline)
+                                .foregroundColor(DS.Colors.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(DS.Spacing.md)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(DS.Colors.accent.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
                     }
-                    .padding(DS.Spacing.md)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(DS.Colors.accent.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+
+                    ForEach(sortedItems, id: \.id) { item in
+                        OutfitItemRow(
+                            item: item,
+                            onTap: {
+                                if let img = item.croppedImage ?? item.image {
+                                    previewImage = PreviewImage(image: img)
+                                }
+                            },
+                            onShuffle: {
+                                Haptics.light()
+                                homeVM.shuffleItemInOutfit(
+                                    itemToShuffle: item,
+                                    wardrobe: wardrobeViewModel.items,
+                                    user: authService.user
+                                )
+                            },
+                            isLoading: homeVM.isLoading
+                        )
+                    }
+                }
+                .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.bottom, DS.Spacing.xxxl + DS.Spacing.xxl)
+            }
+
+            // Swipe direction indicators
+            if dragOffset.width > 30 {
+                VStack {
+                    HStack {
+                        Spacer()
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(DS.Colors.success.opacity(min(Double(dragOffset.width - 30) / 70, 1.0)))
+                            .padding(DS.Spacing.lg)
+                    }
+                    Spacer()
                 }
             }
-            .padding(.horizontal, DS.Spacing.screenH)
-            .padding(.bottom, DS.Spacing.xxxl + DS.Spacing.xxl)
+            if dragOffset.width < -30 {
+                VStack {
+                    HStack {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(DS.Colors.error.opacity(min(Double(abs(dragOffset.width) - 30) / 70, 1.0)))
+                            .padding(DS.Spacing.lg)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+            }
         }
         .offset(x: dragOffset.width)
         .rotationEffect(.degrees(cardRotation))
@@ -273,8 +290,17 @@ struct TodayOutfitSheet: View {
                 cardRotation = Double(value.translation.width / 20)
                 let progress = min(abs(value.translation.width) / swipeThreshold, 1.0)
                 cardOpacity = 1.0 - (progress * 0.3)
+
+                if abs(value.translation.width) > swipeThreshold && !hasTriggeredSwipeHaptic {
+                    Haptics.light()
+                    hasTriggeredSwipeHaptic = true
+                }
+                if abs(value.translation.width) <= swipeThreshold {
+                    hasTriggeredSwipeHaptic = false
+                }
             }
             .onEnded { value in
+                hasTriggeredSwipeHaptic = false
                 if value.translation.width > swipeThreshold {
                     dismissCard(direction: .right)
                 } else if value.translation.width < -swipeThreshold {
@@ -297,9 +323,9 @@ struct TodayOutfitSheet: View {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             if direction == .right {
-                showSaveActionSheet = true
-                homeVM.saveCurrentOutfit()
+                saveOutfitForToday()
             } else {
+                Haptics.medium()
                 homeVM.skipCurrentOutfit()
             }
             resetCardPosition()
@@ -317,45 +343,53 @@ struct TodayOutfitSheet: View {
     // MARK: - Bottom Action Bar
 
     private var bottomActionBar: some View {
-        HStack(spacing: DS.Spacing.sm) {
+        HStack(spacing: DS.Spacing.xs) {
+            // Skip button
             Button(action: {
                 Haptics.light()
                 dismissCard(direction: .left)
             }) {
-                HStack(spacing: DS.Spacing.xs) {
+                HStack(spacing: DS.Spacing.micro) {
                     Image(systemName: "xmark")
                     Text("Skip")
                 }
             }
             .buttonStyle(DSSecondaryButton())
 
-            Menu {
-                Button(action: {
-                    Haptics.light()
-                    showAddProductSheet = true
-                }) {
-                    Label("Add Item", systemImage: "plus.circle")
+            // Add item button
+            Button(action: {
+                Haptics.light()
+                showAddProductSheet = true
+            }) {
+                HStack(spacing: DS.Spacing.micro) {
+                    Image(systemName: "plus")
+                    Text("Add")
                 }
-            } label: {
-                HStack(spacing: DS.Spacing.xs) {
-                    Image(systemName: "ellipsis.circle")
-                    Text("More")
-                }
-                .font(DS.Font.headline)
-                .foregroundColor(DS.Colors.accent)
-                .frame(maxWidth: .infinity)
-                .frame(height: DS.ButtonSize.height)
-                .overlay(
-                    RoundedRectangle(cornerRadius: DS.Radius.card)
-                        .stroke(DS.Colors.accent, lineWidth: 1.5)
-                )
+            }
+            .buttonStyle(DSSecondaryButton())
+
+            // Calendar button (save for specific date)
+            Button(action: {
+                Haptics.light()
+                selectedDate = Calendar.current.startOfDay(for: Date())
+                showDatePickerSheet = true
+            }) {
+                Image(systemName: "calendar")
+                    .font(DS.Font.headline)
+                    .foregroundColor(DS.Colors.accent)
+                    .frame(width: DS.ButtonSize.height, height: DS.ButtonSize.height)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DS.Radius.card)
+                            .stroke(DS.Colors.accent, lineWidth: 1.5)
+                    )
             }
 
+            // Save button
             Button(action: {
-                Haptics.medium()
+                Haptics.light()
                 dismissCard(direction: .right)
             }) {
-                HStack(spacing: DS.Spacing.xs) {
+                HStack(spacing: DS.Spacing.micro) {
                     Image(systemName: "checkmark")
                     Text("Save")
                 }
@@ -383,15 +417,32 @@ struct TodayOutfitSheet: View {
 
             VStack(spacing: DS.Spacing.xs) {
                 if homeVM.savedCount > 0 {
-                    Label("\(homeVM.savedCount) outfit\(homeVM.savedCount == 1 ? "" : "s") saved", systemImage: "heart.fill")
-                        .font(DS.Font.subheadline)
-                        .foregroundColor(DS.Colors.success)
+                    Label(
+                        "\(homeVM.savedCount) outfit\(homeVM.savedCount == 1 ? "" : "s") saved for today",
+                        systemImage: "heart.fill"
+                    )
+                    .font(DS.Font.subheadline)
+                    .foregroundColor(DS.Colors.success)
                 }
                 if homeVM.skippedCount > 0 {
                     Label("\(homeVM.skippedCount) skipped", systemImage: "arrow.right")
                         .font(DS.Font.subheadline)
                         .foregroundColor(DS.Colors.textTertiary)
                 }
+            }
+
+            if homeVM.savedCount > 0 {
+                Button(action: {
+                    Haptics.light()
+                    isPresented = false
+                }) {
+                    HStack(spacing: DS.Spacing.xs) {
+                        Image(systemName: "calendar")
+                        Text("View in Calendar")
+                    }
+                }
+                .buttonStyle(DSSecondaryButton())
+                .padding(.horizontal, DS.Spacing.xl)
             }
 
             Text("Want more suggestions?")
@@ -475,11 +526,16 @@ struct TodayOutfitSheet: View {
         }
     }
 
-    // MARK: - Save Helper
+    // MARK: - Save Helpers
+
+    private func saveOutfitForToday() {
+        saveOutfitForDate(Calendar.current.startOfDay(for: Date()))
+    }
 
     private func saveOutfitForDate(_ date: Date) {
         guard let outfit = currentOutfit else { return }
         outfitsVM.addOutfit(date: date, items: outfit.items, source: "gemini")
+        homeVM.saveCurrentOutfit()
         Haptics.success()
         showSavedOverlay = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -504,12 +560,12 @@ private struct OutfitItemRow: View {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 100, height: 100)
+                        .frame(width: 80, height: 80)
                         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
                 } else {
                     RoundedRectangle(cornerRadius: DS.Radius.button)
                         .fill(DS.Colors.backgroundSecondary)
-                        .frame(width: 100, height: 100)
+                        .frame(width: 80, height: 80)
                         .overlay(
                             Image(systemName: "photo")
                                 .foregroundColor(DS.Colors.textTertiary)
@@ -533,6 +589,13 @@ private struct OutfitItemRow: View {
                     .foregroundColor(DS.Colors.textSecondary)
                     .lineLimit(1)
 
+                if let material = item.material, !material.isEmpty {
+                    Text(material)
+                        .font(DS.Font.caption1)
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .lineLimit(1)
+                }
+
                 if !item.brand.isEmpty {
                     Text(item.brand)
                         .font(DS.Font.caption1)
@@ -544,20 +607,16 @@ private struct OutfitItemRow: View {
             Spacer()
 
             Button(action: onShuffle) {
-                VStack(spacing: DS.Spacing.micro) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(DS.Font.body)
-                        .foregroundColor(DS.Colors.accent)
-                    Text("Swap")
-                        .font(DS.Font.caption2)
-                        .foregroundColor(DS.Colors.accent)
-                }
-                .padding(DS.Spacing.sm)
-                .background(DS.Colors.accent.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(DS.Font.body)
+                    .foregroundColor(DS.Colors.accent)
+                    .padding(DS.Spacing.sm)
+                    .background(DS.Colors.accent.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
             }
             .disabled(isLoading)
             .opacity(isLoading ? 0.4 : 1.0)
+            .accessibilityLabel("Swap item")
         }
         .padding(DS.Spacing.sm)
         .background(DS.Colors.backgroundCard)

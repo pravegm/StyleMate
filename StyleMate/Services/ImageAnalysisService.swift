@@ -1282,9 +1282,39 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             return desc
         }.joined(separator: "\n")
 
+        let isEthnicRequest = outfitType == .ethnic
+            || (customDescription?.lowercased().contains("ethnic") == true)
+            || (customDescription?.lowercased().contains("indian") == true)
+            || (customDescription?.lowercased().contains("traditional") == true)
+            || (customDescription?.lowercased().contains("kurta") == true)
+            || (customDescription?.lowercased().contains("saree") == true)
+            || (customDescription?.lowercased().contains("wedding") == true)
+            || (customDescription?.lowercased().contains("puja") == true)
+            || (customDescription?.lowercased().contains("diwali") == true)
+            || (customDescription?.lowercased().contains("festival") == true)
+
+        let isActiveRequest = outfitType == .sports
+            || (customDescription?.lowercased().contains("gym") == true)
+            || (customDescription?.lowercased().contains("workout") == true)
+            || (customDescription?.lowercased().contains("run") == true)
+            || (customDescription?.lowercased().contains("sport") == true)
+            || (customDescription?.lowercased().contains("athletic") == true)
+            || (customDescription?.lowercased().contains("yoga") == true)
+            || (customDescription?.lowercased().contains("hike") == true)
+            || (customDescription?.lowercased().contains("active") == true)
+
         let typeInstruction: String
         if let custom = customDescription, !custom.isEmpty {
-            typeInstruction = "The user described their event or outfit as: \"\(custom)\". Tailor suggestions for this context."
+            typeInstruction = """
+            PRIORITY INSTRUCTION: The user has specifically described what they need: "\(custom)"
+            This is the MOST IMPORTANT context for your suggestions. Every outfit must be appropriate for this specific scenario. Interpret the user's words carefully:
+            - If they mention a place (e.g., "beach", "office", "wedding"), dress for that venue's dress code.
+            - If they mention an activity (e.g., "hiking", "dinner", "interview"), dress for that activity's requirements.
+            - If they mention a mood or style (e.g., "edgy", "cozy", "minimalist"), reflect that aesthetic.
+            - If they mention weather or season (e.g., "cold evening", "summer"), layer accordingly even if it contradicts the current weather data.
+            - If they mention people or formality (e.g., "meeting parents", "casual hangout"), match the social formality.
+            All 5 outfit suggestions must directly serve this description. Do not suggest generic everyday outfits that ignore what the user typed.
+            """
         } else if let outfitType = outfitType {
             typeInstruction = "The user wants an outfit for: \(outfitType.rawValue). Tailor suggestions for this context."
         } else if let user = user {
@@ -1292,6 +1322,14 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             typeInstruction = "The user prefers these styles: \(styles). Suggest outfits that fit one of these styles."
         } else {
             typeInstruction = "The user wants an everyday casual outfit."
+        }
+
+        var categoryIsolationNote = ""
+        if !isEthnicRequest {
+            categoryIsolationNote += "\nNOTE: Items from the \"Ethnic Wear\" category are included in the wardrobe list but should NOT be used for this request type. Ignore all Ethnic Wear items."
+        }
+        if !isActiveRequest {
+            categoryIsolationNote += "\nNOTE: Items from the \"Activewear\" category are included in the wardrobe list but should NOT be used for this request type. Ignore all Activewear items."
         }
 
         let genderInstruction: String
@@ -1324,6 +1362,7 @@ You are an expert fashion stylist creating outfits from a real person's wardrobe
 
 WARDROBE:
 \(wardrobeSummary)
+\(categoryIsolationNote)
 
 CONTEXT:
 \(typeInstruction)
@@ -1356,11 +1395,41 @@ FORMALITY COHERENCE:
 - Activewear: Athletic tops, track pants, running shorts, sports bras, active leggings. Keep activewear together; don't mix with non-active items.
 - Ethnic wear: Kurta with churidar/salwar/jeans, saree with blouse, lehenga with choli and dupatta. Ensure culturally complete combinations.
 
+BAD FORMALITY COMBINATIONS (never suggest these):
+- Blazer + joggers/sweatpants
+- Formal shoes (Oxford, formal) + graphic tee + shorts
+- Tie/bowtie + hoodie
+- Athletic shorts + button-down shirt
+- Flip-flops/slides + trousers/blazer
+
 LAYERING LOGIC:
-- Layers must make physical sense: undershirt < shirt < sweater/cardigan < jacket/coat.
-- Don't layer a thick hoodie under a slim-fit blazer.
-- Mid-layers (sweaters, cardigans, hoodies) go OVER tops and UNDER outerwear.
-- A top + mid-layer + outerwear combination is the maximum layering depth.
+- An outfit's upper body should have at most ONE item from each layer tier:
+  * Base layer (tier 1): T-Shirts, Tank Tops, Camisoles, Bodysuits, Henley, Undershirts, Turtlenecks, Graphic Tees
+  * Shirts layer (tier 2): Shirts, Button-Down Shirts, Flannel Shirts, Blouses, Polo T-Shirts
+  * Mid-layer (tier 3): Sweaters, Cardigans, Hoodies, Sweatshirts, Pullovers, Vests, Quarter-Zips, Fleece Jackets
+  * Outerwear (tier 4): Jackets, Blazers, Coats, Overcoats, Parkas, Windbreakers, Bomber Jackets, Puffer Jackets, Leather Jackets, Denim Jackets, Trench Coats
+- You may include at most ONE item per tier. You CANNOT have two mid-layers (e.g., a sweater AND a hoodie) or two base layers (e.g., a turtleneck AND a T-shirt).
+- A turtleneck is a BASE LAYER, not a mid-layer. It goes UNDER a sweater or jacket, never over one.
+- A shirt (button-down) can go UNDER a sweater/cardigan (the collar peeks out), but NOT under another shirt.
+- Typical valid layering combinations:
+  * T-shirt + jeans + sneakers (minimal, warm weather)
+  * Shirt + sweater + chinos + loafers (smart casual, cool weather)
+  * T-shirt + hoodie + jacket + jeans + boots (cold weather, casual)
+  * Turtleneck + blazer + trousers + formal shoes (smart, cold weather)
+- Invalid layering (NEVER do these):
+  * Two sweaters/pullovers/hoodies in one outfit
+  * A turtleneck + a shirt + a sweater (three upper body layers from base/shirt/mid is the maximum; adding all three plus outerwear is too much and physically uncomfortable)
+  * A hoodie under a slim blazer (fabric bulk doesn't fit)
+
+ETHNIC WEAR ISOLATION:
+- Items from the "Ethnic Wear" category (kurta, kurti, saree, lehenga, sherwani, nehru jacket, dhoti, etc.) should ONLY be included in outfits when the user has explicitly requested ethnic wear, cultural outfits, or a specific ethnic occasion (e.g., "Indian wedding", "puja", "Diwali party", "ethnic wear").
+- For "Everyday Casual", "Business Casual", "Formal Wear", "Date Night", "Streetwear", "Party", "Loungewear", "Vacation", or "Sports / Active" requests, do NOT include any ethnic wear items unless the user's custom description specifically mentions ethnic or cultural context.
+- The only exception is a Nehru jacket, which can be styled as a smart-casual layering piece in non-ethnic outfits if the wardrobe is limited.
+
+ACTIVEWEAR ISOLATION:
+- Items from the "Activewear" category (athletic tops, track pants, running shorts, sports bras, active leggings, yoga pants, etc.) should primarily be used for "Sports / Active" outfit requests.
+- For non-athletic outfit types, do NOT include activewear items unless the user's description specifically mentions gym, workout, athleisure, or similar.
+- The exception is athleisure-friendly pieces like joggers or hoodies from the Mid-Layers category, which CAN cross over into casual outfits.
 
 WEATHER APPROPRIATENESS:
 - Cold (<10°C): Long sleeves, sweaters, coats, boots, scarves. No shorts, sandals, tank tops.
@@ -1375,10 +1444,13 @@ MATERIAL COMPATIBILITY:
 - Leather accessories (belt, shoes, bag) should ideally be the same shade family (all brown or all black, not mixed).
 - Wool, cashmere, and knits form a natural textural family for cold weather.
 
-COMPLETENESS:
-- Every outfit MUST include: a top (or one-piece) + a bottom (or one-piece) + footwear at minimum.
-- Outerwear, mid-layers, and accessories are optional but encouraged when weather-appropriate.
-- A one-piece (dress, jumpsuit, romper) replaces both top and bottom.
+HARD RULE - MINIMUM OUTFIT COMPOSITION:
+Every single outfit MUST contain ALL of these:
+1. Exactly ONE base top OR one-piece (from Tops, or One-Pieces category)
+2. Exactly ONE bottom (from Bottoms category) - UNLESS a one-piece is used
+3. Exactly ONE footwear item (from Footwear category)
+If any outfit is missing any of these three, it is INVALID. Do not return it.
+Mid-layers, outerwear, and accessories are OPTIONAL additions on top of these required items.
 - For ethnic wear, ensure the combination is culturally complete (e.g., kurta needs a bottom like churidar, jeans, or salwar).
 - Never suggest just accessories + outerwear without a core outfit underneath.
 
@@ -1390,12 +1462,16 @@ VARIETY:
 OUTPUT FORMAT:
 Return a JSON array of 5 outfit objects. Each object has:
 - "items": array of integer indices referencing the wardrobe items above (e.g., [0, 5, 12, 23])
-- "explanation": a 1-2 sentence explanation of why this outfit works (mention the color scheme, texture play, occasion fit, or styling principle used). Keep it conversational and useful.
+- "explanation": a 1-2 sentence explanation of why this outfit works. MUST include:
+  * The color or styling principle used (e.g., "monochromatic navy", "earth-tone layers", "complementary contrast").
+  * A reference to the weather/location context if weather was provided (e.g., "Light layers perfect for the 22°C mild afternoon in London", "Cozy wool layers to handle the 5°C chill in Delhi").
+  * A reference to the occasion/vibe if one was specified (e.g., "polished enough for a date night", "relaxed for an everyday weekend").
+  Keep it conversational, specific, and useful. The user should feel that the AI understood their situation.
 
 Return ONLY the JSON array. Example format:
 [
-  {"items": [0, 5, 12], "explanation": "Monochromatic navy palette with textural contrast..."},
-  {"items": [3, 7, 15, 22], "explanation": "Earth-tone layers built around the olive chinos..."}
+  {"items": [0, 5, 12], "explanation": "Monochromatic navy palette with textural contrast — light cotton layers ideal for the 20°C afternoon in Mumbai..."},
+  {"items": [3, 7, 15, 22], "explanation": "Earth-tone layers built around the olive chinos, perfect for a relaxed weekend outing..."}
 ]
 """
 
@@ -1548,7 +1624,18 @@ AVAILABLE REPLACEMENTS:
 
 \(genderInstruction)
 
-Choose the replacement that best harmonizes with the remaining items. Follow standard color harmony (3-color rule, neutrals pair with everything), pattern mixing (max one statement pattern), and formality coherence rules.
+Choose the replacement that best harmonizes with the remaining items. Follow these rules:
+- Color harmony: 3-color rule, neutrals pair with everything. Monochromatic and analogous palettes preferred.
+- Pattern mixing: max one statement pattern per outfit.
+- Formality coherence: don't mix formal and casual extremes.
+- Layering compatibility: the replacement must not violate layering tiers:
+  * Base layer (tier 1): T-Shirts, Tank Tops, Camisoles, Bodysuits, Henley, Turtlenecks, Graphic Tees
+  * Shirts layer (tier 2): Shirts, Button-Down Shirts, Flannel Shirts, Blouses, Polo T-Shirts
+  * Mid-layer (tier 3): Sweaters, Cardigans, Hoodies, Sweatshirts, Pullovers, Vests
+  * Outerwear (tier 4): Jackets, Blazers, Coats, Overcoats, Parkas, Windbreakers
+  Only one item per tier. A turtleneck is tier 1 (base), not tier 3. No two mid-layers, no two base layers.
+- Do NOT pick ethnic wear items (kurta, saree, etc.) unless the outfit already contains ethnic wear.
+- Do NOT pick activewear items unless the outfit already contains activewear.
 
 Return a JSON object: {"index": N, "explanation": "brief reason"}
 where N is the index number from the AVAILABLE REPLACEMENTS list above.
@@ -1664,7 +1751,16 @@ AVAILABLE \(productType.uppercased()) OPTIONS:
 
 \(genderInstruction)
 
-Choose the option that best complements the existing outfit. Follow standard styling rules for color harmony, pattern mixing, and formality coherence.
+Choose the option that best complements the existing outfit. Follow these rules:
+- Color harmony: must fit the outfit's existing color palette (3-color rule, neutrals pair with everything).
+- Pattern mixing: max one statement pattern per outfit. If the outfit already has a bold pattern, pick solid.
+- Formality coherence: match the outfit's existing formality level.
+- Layering compatibility: ensure the added item doesn't violate layering tiers:
+  * Base layer (tier 1): T-Shirts, Tank Tops, Camisoles, Bodysuits, Henley, Turtlenecks, Graphic Tees
+  * Shirts layer (tier 2): Shirts, Button-Down Shirts, Flannel Shirts, Blouses, Polo T-Shirts
+  * Mid-layer (tier 3): Sweaters, Cardigans, Hoodies, Sweatshirts, Pullovers, Vests
+  * Outerwear (tier 4): Jackets, Blazers, Coats, Overcoats, Parkas, Windbreakers
+  Only one item per tier. Do not add a second mid-layer if one already exists.
 
 Return a JSON object: {"index": N}
 where N is the index number from the AVAILABLE OPTIONS list above.
