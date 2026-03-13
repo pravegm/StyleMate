@@ -173,6 +173,7 @@ struct AddItemReviewView: View {
                             item.category != .footwear || i == footwearIndices.first
                         }.map(\.element)
                     }
+                    items = deduplicateAccessories(items)
                     allItems.append(contentsOf: items)
                 }
             }
@@ -202,6 +203,58 @@ struct AddItemReviewView: View {
                 existingItems: wardrobeViewModel.items
             )
         }
+    }
+
+    private func deduplicateAccessories(_ items: [ReviewItem]) -> [ReviewItem] {
+        var result = items
+        let imageGroups = Dictionary(grouping: result.indices.filter { result[$0].category == .accessories },
+                                      by: { result[$0].sourceImageIndex })
+
+        var indicesToRemove: Set<Int> = []
+
+        for (_, indices) in imageGroups {
+            let accessoryItems = indices.map { (index: $0, item: result[$0]) }
+
+            // Rule 1: If both "Watches" and a wrist jewelry item exist, drop the jewelry if colors overlap
+            let watchIndices = accessoryItems.filter { $0.item.product == "Watches" }
+            let wristJewelry = accessoryItems.filter { ["Bracelets", "Jewelry", "Chains"].contains($0.item.product) }
+            if !watchIndices.isEmpty && !wristJewelry.isEmpty {
+                for wj in wristJewelry {
+                    let watchColors = Set(watchIndices.first!.item.colors.map { $0.lowercased() })
+                    let jewelryColors = Set(wj.item.colors.map { $0.lowercased() })
+                    if !watchColors.intersection(jewelryColors).isEmpty {
+                        indicesToRemove.insert(wj.index)
+                    }
+                }
+            }
+
+            // Rule 2: Same product type with overlapping colors = duplicate (e.g., two "Earrings" with "Gold")
+            let productGroups = Dictionary(grouping: accessoryItems, by: { $0.item.product })
+            for (_, productItems) in productGroups where productItems.count > 1 {
+                let colorSets = productItems.map { Set($0.item.colors.map { $0.lowercased() }) }
+                for i in 1..<productItems.count {
+                    let overlap = colorSets[0].intersection(colorSets[i])
+                    if !overlap.isEmpty {
+                        indicesToRemove.insert(productItems[i].index)
+                    }
+                }
+            }
+
+            // Rule 3: If multiple glasses types exist from same image, keep only the first
+            let glassesProducts = ["Sunglasses", "Eyeglasses", "Reading Glasses"]
+            let glassesItems = accessoryItems.filter { glassesProducts.contains($0.item.product) }
+            if glassesItems.count > 1 {
+                for item in glassesItems.dropFirst() {
+                    indicesToRemove.insert(item.index)
+                }
+            }
+        }
+
+        for idx in indicesToRemove.sorted(by: >) {
+            result.remove(at: idx)
+        }
+
+        return result
     }
 
     // MARK: - Save
@@ -398,8 +451,12 @@ private struct ReviewItemRow: View {
                     Text("Product")
                         .font(DS.Font.caption1)
                         .foregroundColor(DS.Colors.textSecondary)
+                    let standardProducts = productTypesByCategory[item.category] ?? []
                     Picker("Product", selection: $item.product) {
-                        ForEach(productTypesByCategory[item.category] ?? [], id: \.self) { prod in
+                        if !standardProducts.contains(item.product) && !item.product.isEmpty {
+                            Text(item.product).tag(item.product)
+                        }
+                        ForEach(standardProducts, id: \.self) { prod in
                             Text(prod).tag(prod)
                         }
                     }

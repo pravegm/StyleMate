@@ -102,11 +102,17 @@ class DuplicateDetector {
             ["dresses", "wrap dresses", "maxi dresses", "shirt dresses"],
             ["jackets", "leather jackets", "denim jackets", "bomber jackets", "shirt jackets"],
             ["coats", "overcoats", "trench coats"],
-            ["handbags", "tote bags", "crossbody bags"],
+            ["handbags", "tote bags", "crossbody bags", "clutches"],
+            ["backpacks", "messenger bags", "briefcases"],
             ["underwear", "boxers", "briefs"],
             ["bras", "bralettes"],
             ["kurta", "kurti"],
             ["shorts", "athletic shorts", "running shorts", "cycling shorts"],
+            ["sunglasses", "eyeglasses", "reading glasses"],
+            ["baseball caps", "beanies", "fedoras", "bucket hats", "sun hats", "visors", "berets"],
+            ["rings", "necklaces", "earrings", "pendants", "chains", "bracelets", "anklets", "cufflinks", "brooches"],
+            ["scarves", "bandanas"],
+            ["fanny packs"],
         ]
 
         for group in equivalenceGroups {

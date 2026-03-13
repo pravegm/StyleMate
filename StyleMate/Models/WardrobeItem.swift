@@ -83,7 +83,11 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
     var croppedImage: UIImage? { croppedImagePath != nil ? WardrobeImageFileHelper.loadImage(at: croppedImagePath!) : nil }
     
     var displayProduct: String {
-        let exceptions = ["Jeans", "Shorts", "Trousers", "Sunglasses", "Chinos", "Capris", "Culottes", "Slides", "Flats", "Heels"]
+        let exceptions = [
+            "Jeans", "Shorts", "Trousers", "Sunglasses", "Eyeglasses",
+            "Chinos", "Capris", "Culottes", "Slides", "Flats", "Heels",
+            "Reading Glasses"
+        ]
         if exceptions.contains(product) {
             return product
         }

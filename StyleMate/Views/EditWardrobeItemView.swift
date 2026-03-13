@@ -79,6 +79,9 @@ struct EditWardrobeItemView: View {
                 .tint(DS.Colors.accent)
 
                 Picker("Product", selection: $product) {
+                    if !productOptions.contains(product) && !product.isEmpty {
+                        Text(product).tag(product)
+                    }
                     ForEach(productOptions, id: \.self) { prod in
                         Text(prod).tag(prod)
                     }

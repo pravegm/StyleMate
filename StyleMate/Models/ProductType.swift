@@ -37,10 +37,23 @@ let productTypesByCategory: [Category: [String]] = [
         "Flats", "Heels", "Platform Shoes", "Clogs", "Slippers"
     ],
     .accessories: [
-        "Hats", "Scarves", "Gloves", "Belts", "Watches", "Sunglasses",
-        "Jewelry", "Brooches", "Ties", "Bowties", "Pocket Squares", "Suspenders",
-        "Handbags", "Tote Bags", "Crossbody Bags", "Backpacks", "Wallets",
-        "Hair Accessories"
+        // Eyewear
+        "Sunglasses", "Eyeglasses", "Reading Glasses",
+        // Headwear
+        "Baseball Caps", "Beanies", "Fedoras", "Bucket Hats", "Sun Hats",
+        "Visors", "Bandanas", "Turbans", "Headbands", "Berets",
+        // Wristwear
+        "Watches", "Bracelets",
+        // Jewelry
+        "Rings", "Necklaces", "Earrings", "Pendants", "Chains",
+        "Anklets", "Cufflinks", "Brooches",
+        // Neckwear
+        "Scarves", "Ties", "Bowties",
+        // Other
+        "Gloves", "Belts", "Suspenders", "Pocket Squares", "Hair Accessories",
+        // Bags
+        "Handbags", "Tote Bags", "Crossbody Bags", "Backpacks",
+        "Wallets", "Clutches", "Fanny Packs", "Briefcases", "Messenger Bags"
     ],
     .innerwear: [
         "Underwear", "Boxers", "Briefs", "Undershirts",

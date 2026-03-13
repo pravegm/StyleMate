@@ -123,7 +123,13 @@ class ImageAnalysisService {
         let prompt = """
 Detect the \(itemLabel) in this image.
 Output a JSON list with ONE entry containing the 2D bounding box in the key "box_2d" and the text label in the key "label".
-The box_2d should tightly surround ONLY this garment, not the person's body.
+The box_2d should tightly surround ONLY this item, not the person's body.
+For a watch: box the watch face and strap only, not the entire wrist or arm.
+For earrings: box just the earring, not the ear or face.
+For a ring: box just the ring, not the entire hand.
+For glasses/sunglasses: box the frames and lenses only, not the entire face.
+For a necklace: box just the necklace, not the neck and chest.
+For a hat/cap: box just the hat, not the entire head.
 """
 
         let requestBody: [String: Any] = [
@@ -380,7 +386,7 @@ Valid products per category:
 - Outerwear: Jackets, Leather Jackets, Denim Jackets, Bomber Jackets, Puffer Jackets, Coats, Overcoats, Trench Coats, Blazers, Parkas, Windbreakers, Raincoats, Shirt Jackets, Capes
 - One-Pieces: Dresses, Wrap Dresses, Maxi Dresses, Shirt Dresses, Gowns, Jumpsuits, Rompers, Playsuits, Dungarees, Overalls
 - Footwear: Sneakers, Boots, Ankle Boots, Chelsea Boots, Sandals, Slides, Espadrilles, Loafers, Oxford Shoes, Formal Shoes, Mules, Flats, Heels, Platform Shoes, Clogs, Slippers
-- Accessories: Hats, Scarves, Gloves, Belts, Watches, Sunglasses, Jewelry, Brooches, Ties, Bowties, Pocket Squares, Suspenders, Handbags, Tote Bags, Crossbody Bags, Backpacks, Wallets, Hair Accessories
+- Accessories: Sunglasses, Eyeglasses, Reading Glasses, Baseball Caps, Beanies, Fedoras, Bucket Hats, Sun Hats, Visors, Bandanas, Turbans, Headbands, Berets, Watches, Bracelets, Rings, Necklaces, Earrings, Pendants, Chains, Anklets, Cufflinks, Brooches, Scarves, Ties, Bowties, Gloves, Belts, Suspenders, Pocket Squares, Hair Accessories, Handbags, Tote Bags, Crossbody Bags, Backpacks, Wallets, Clutches, Fanny Packs, Briefcases, Messenger Bags
 - Innerwear: Underwear, Boxers, Briefs, Undershirts, Bras, Bralettes, Thongs, Socks, Thermal Wear, Shapewear, Lingerie
 - Activewear: Athletic Tops, Athletic Shorts, Running Shorts, Cycling Shorts, Track Pants, Active Jackets, Compression Wear, Rashguards, Sports Bras, Active Leggings, Yoga Pants, Swim Trunks, Swimwear, Tennis Dresses
 - Ethnic Wear: Kurta, Sherwani, Nehru Jacket, Dhoti, Lungis, Mundu, Jodhpuri Suit, Pathani Suit, Bandhgala, Angrakha, Kurti, Saree, Blouse (saree), Lehenga, Choli, Dupatta, Salwar, Patiala Pants, Anarkali, Churidar, Palazzo Suit, Sharara, Ghagra
@@ -403,6 +409,22 @@ For EACH visible clothing item, return:
 - sleeveLength: one of the valid sleeve lengths above, or null if not applicable (bottoms, footwear, accessories, sleeveless dresses)
 - garmentLength: one of the valid garment lengths above, or null if not applicable (tops, footwear, accessories)
 - details: a short comma-separated string of distinctive visual features that make this specific item unique (e.g. "cable knit, ribbed cuffs", "distressed wash, raw hem", "front zip, logo on chest", "pleated, high-waisted", "patch pockets, contrast stitching"). Return "" if no notable details.
+
+DEDUPLICATION RULES:
+- Each distinct physical item should appear EXACTLY ONCE in your response.
+- Do NOT detect the same item under multiple categories or product types.
+- Paired items (two shoes, two earrings, two gloves) count as ONE item, not two.
+
+CRITICAL RULES FOR ACCESSORIES:
+- A watch is ALWAYS "Watches", never "Jewelry", "Bracelets", or "Rings". A watch has a dial/face and tells time.
+- Prescription glasses and clear-lens glasses are "Eyeglasses", NOT "Sunglasses". Only classify as "Sunglasses" if the lenses are visibly tinted or dark.
+- Do NOT return the same physical item twice under different product types. Each physical item in the image should appear exactly once.
+- If someone wears a PAIR of earrings, return ONE entry for "Earrings", not two separate entries.
+- If someone wears a PAIR of sunglasses or eyeglasses, return ONE entry, not two.
+- Prefer the most specific product type available. Use "Rings" not "Jewelry" for a ring. Use "Baseball Caps" not "Hats" for a baseball cap. Use "Necklaces" not "Jewelry" for a necklace.
+- For eyewear, ALWAYS include the frame shape in the details field (e.g., "aviator frame", "round frame, tortoiseshell", "wayfarer frame, mirrored lens", "cat eye frame", "rectangular frame, thin metal").
+- For watches, ALWAYS include the face shape and strap type in details (e.g., "round face, leather strap", "square face, metal bracelet", "digital display, rubber strap", "round face, rose gold case, mesh strap").
+- For headwear, ALWAYS include distinguishing style details (e.g., "flat brim, snapback closure", "ribbed knit, folded cuff", "wide brim, straw weave", "structured crown, grosgrain ribbon").
 
 Return a JSON array of objects. Use EXACT strings from the lists above for enum fields.
 """
