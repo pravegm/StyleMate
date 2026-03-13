@@ -47,7 +47,8 @@ class ImageAnalysisService {
     // MARK: - Segmentation Pipeline
 
     func analyzeAndSegment(image: UIImage, userGender: String? = nil, retryCount: Int = 0) async -> [SegmentedItem] {
-        let classifications = await analyzeMultiple(image: image, userGender: userGender)
+        let normalizedImage = normalizeOrientation(image)
+        let classifications = await analyzeMultiple(image: normalizedImage, userGender: userGender)
 
         guard !classifications.isEmpty else {
             print("[StyleMate] Segmentation: No items classified, returning empty")
@@ -56,7 +57,7 @@ class ImageAnalysisService {
 
         print("[StyleMate] Segmentation: Pass 1 classified \(classifications.count) items")
 
-        let bgRemovedRaw = await BackgroundRemovalService.shared.removeBackground(from: image) ?? image
+        let bgRemovedRaw = await BackgroundRemovalService.shared.removeBackground(from: normalizedImage) ?? normalizedImage
         let bgRemoved = trimWhitespace(bgRemovedRaw)
         print("[StyleMate] Segmentation: BG removed and trimmed: \(Int(bgRemovedRaw.size.width))x\(Int(bgRemovedRaw.size.height)) -> \(Int(bgRemoved.size.width))x\(Int(bgRemoved.size.height))")
 
@@ -274,6 +275,17 @@ For a hat/cap: box just the hat, not the entire head.
         UIGraphicsEndImageContext()
 
         return result
+    }
+
+    /// Renders the UIImage into a new context, applying the orientation transform.
+    /// After this, cgImage.width/height matches the visual display dimensions.
+    private func normalizeOrientation(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+        image.draw(in: CGRect(origin: .zero, size: image.size))
+        let normalized = UIGraphicsGetImageFromCurrentImageContext() ?? image
+        UIGraphicsEndImageContext()
+        return normalized
     }
 
     private func resizedForAPI(_ image: UIImage, maxDimension: CGFloat = 1024) -> UIImage {
