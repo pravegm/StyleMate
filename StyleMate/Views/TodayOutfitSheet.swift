@@ -24,7 +24,16 @@ struct TodayOutfitSheet: View {
     @State private var dismissDirection: DismissDirection? = nil
     @State private var hasTriggeredSwipeHaptic = false
 
+    // Card entry animation state
+    @State private var cardScale: CGFloat = 1.0
+    @State private var cardYOffset: CGFloat = 0
+
+    // First-time hint state
+    @State private var showSwipeTooltip = false
+    @State private var isPlayingHint = false
+
     private let swipeThreshold: CGFloat = 100
+    private let cardCornerRadius: CGFloat = 20
 
     enum AddProductStep: Identifiable {
         case category
@@ -53,6 +62,14 @@ struct TodayOutfitSheet: View {
         return homeVM.outfitBatch[homeVM.batchIndex]
     }
 
+    private var saveProgress: Double {
+        dragOffset.width > 20 ? min((dragOffset.width - 20) / (swipeThreshold - 20), 1.0) : 0
+    }
+
+    private var skipProgress: Double {
+        dragOffset.width < -20 ? min((abs(dragOffset.width) - 20) / (swipeThreshold - 20), 1.0) : 0
+    }
+
     var body: some View {
         ZStack {
             DS.Colors.backgroundPrimary.ignoresSafeArea()
@@ -62,7 +79,26 @@ struct TodayOutfitSheet: View {
             } else if let outfit = currentOutfit {
                 VStack(spacing: 0) {
                     headerView
-                    outfitCard(for: outfit)
+
+                    ZStack {
+                        ghostCards
+                        outfitCard(for: outfit)
+                            .scaleEffect(cardScale)
+                            .offset(y: cardYOffset)
+                    }
+                    .padding(.horizontal, DS.Spacing.screenH)
+
+                    if showSwipeTooltip {
+                        Text("Swipe right to save, left to skip")
+                            .font(DS.Font.subheadline)
+                            .foregroundColor(DS.Colors.textSecondary)
+                            .padding(.horizontal, DS.Spacing.md)
+                            .padding(.vertical, DS.Spacing.xs)
+                            .background(DS.Colors.backgroundSecondary)
+                            .clipShape(Capsule())
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            .padding(.top, DS.Spacing.xs)
+                    }
                 }
                 .offset(x: dragOffset.width)
                 .rotationEffect(.degrees(cardRotation))
@@ -71,6 +107,7 @@ struct TodayOutfitSheet: View {
                     DragGesture(minimumDistance: 30)
                         .onChanged { value in
                             guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            guard !isPlayingHint else { return }
                             dragOffset = value.translation
                             cardRotation = Double(value.translation.width / 20)
                             let progress = min(abs(value.translation.width) / swipeThreshold, 1.0)
@@ -86,6 +123,7 @@ struct TodayOutfitSheet: View {
                         }
                         .onEnded { value in
                             hasTriggeredSwipeHaptic = false
+                            guard !isPlayingHint else { return }
                             guard abs(value.translation.width) > abs(value.translation.height) else {
                                 resetCardPosition()
                                 return
@@ -125,6 +163,7 @@ struct TodayOutfitSheet: View {
                 .zIndex(10)
             }
         }
+        .onAppear { playSwipeHintIfNeeded() }
         .sheet(item: $previewImage) { wrapper in
             VStack {
                 Spacer()
@@ -234,6 +273,28 @@ struct TodayOutfitSheet: View {
         }
     }
 
+    // MARK: - Ghost (Stacked) Cards
+
+    @ViewBuilder
+    private var ghostCards: some View {
+        if homeVM.batchIndex + 2 < homeVM.outfitBatch.count {
+            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                .fill(DS.Colors.backgroundCard.opacity(0.5))
+                .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+                .padding(.horizontal, 16)
+                .offset(y: 14)
+                .scaleEffect(0.92)
+        }
+        if homeVM.batchIndex + 1 < homeVM.outfitBatch.count {
+            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                .fill(DS.Colors.backgroundCard)
+                .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+                .padding(.horizontal, 8)
+                .offset(y: 8)
+                .scaleEffect(0.96)
+        }
+    }
+
     // MARK: - Outfit Card
 
     @ViewBuilder
@@ -241,88 +302,124 @@ struct TodayOutfitSheet: View {
         let sortedItems = outfit.items.sorted { $0.category.wearingOrder < $1.category.wearingOrder }
 
         ZStack {
-            ScrollView {
-                VStack(spacing: DS.Spacing.sm) {
-                    // Explanation at the top
-                    if !outfit.explanation.isEmpty {
-                        HStack(alignment: .top, spacing: DS.Spacing.xs) {
-                            Image(systemName: "sparkles")
-                                .font(DS.Font.caption1)
-                                .foregroundColor(DS.Colors.accent)
-                                .padding(.top, 2)
+            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                .fill(DS.Colors.backgroundCard)
+                .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 4)
 
-                            Text(outfit.explanation)
-                                .font(DS.Font.subheadline)
-                                .foregroundColor(DS.Colors.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        if !outfit.explanation.isEmpty {
+                            HStack(alignment: .top, spacing: DS.Spacing.xs) {
+                                Image(systemName: "sparkles")
+                                    .font(DS.Font.caption1)
+                                    .foregroundColor(DS.Colors.accent)
+                                    .padding(.top, 2)
+
+                                Text(outfit.explanation)
+                                    .font(DS.Font.subheadline)
+                                    .foregroundColor(DS.Colors.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(DS.Spacing.md)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(DS.Colors.accent.opacity(0.06))
                         }
-                        .padding(DS.Spacing.md)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(DS.Colors.accent.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-                    }
 
-                    ForEach(sortedItems, id: \.id) { item in
-                        OutfitItemRow(
-                            item: item,
-                            onTap: {
-                                if let img = item.croppedImage ?? item.image {
-                                    previewImage = PreviewImage(image: img)
-                                }
-                            },
-                            onShuffle: {
-                                Haptics.light()
-                                homeVM.shuffleItemInOutfit(
-                                    itemToShuffle: item,
-                                    wardrobe: wardrobeViewModel.items,
-                                    user: authService.user
-                                )
-                            },
-                            isLoading: homeVM.isLoading
-                        )
-                    }
-                }
-                .padding(.horizontal, DS.Spacing.screenH)
-                .padding(.bottom, DS.Spacing.xxxl + DS.Spacing.xxl)
-            }
+                        ForEach(Array(sortedItems.enumerated()), id: \.element.id) { index, item in
+                            OutfitItemRow(
+                                item: item,
+                                onTap: {
+                                    if let img = item.croppedImage ?? item.image {
+                                        previewImage = PreviewImage(image: img)
+                                    }
+                                },
+                                onShuffle: {
+                                    Haptics.light()
+                                    homeVM.shuffleItemInOutfit(
+                                        itemToShuffle: item,
+                                        wardrobe: wardrobeViewModel.items,
+                                        user: authService.user
+                                    )
+                                },
+                                isLoading: homeVM.isLoading
+                            )
 
-            // Swipe direction indicators
-            if dragOffset.width > 30 {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 60))
-                            .foregroundColor(DS.Colors.success.opacity(min(Double(dragOffset.width - 30) / 70, 1.0)))
-                            .padding(DS.Spacing.lg)
+                            if index < sortedItems.count - 1 {
+                                Divider()
+                                    .padding(.leading, 70 + DS.Spacing.md + DS.Spacing.md)
+                                    .padding(.trailing, DS.Spacing.md)
+                            }
+                        }
                     }
-                    Spacer()
+                    .padding(.bottom, 80)
                 }
             }
-            if dragOffset.width < -30 {
+            .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+
+            // SAVE stamp (upper-left, visible when dragging right)
+            if saveProgress > 0 {
                 VStack {
                     HStack {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 60))
-                            .foregroundColor(DS.Colors.error.opacity(min(Double(abs(dragOffset.width) - 30) / 70, 1.0)))
-                            .padding(DS.Spacing.lg)
+                        Text("SAVE")
+                            .font(.system(size: 48, weight: .black))
+                            .foregroundColor(DS.Colors.success)
+                            .opacity(saveProgress)
+                            .rotationEffect(.degrees(-15))
+                            .padding(.top, DS.Spacing.xl)
+                            .padding(.leading, DS.Spacing.lg)
                         Spacer()
                     }
                     Spacer()
                 }
+                .allowsHitTesting(false)
+            }
+
+            // SKIP stamp (upper-right, visible when dragging left)
+            if skipProgress > 0 {
+                VStack {
+                    HStack {
+                        Spacer()
+                        Text("SKIP")
+                            .font(.system(size: 48, weight: .black))
+                            .foregroundColor(DS.Colors.error)
+                            .opacity(skipProgress)
+                            .rotationEffect(.degrees(15))
+                            .padding(.top, DS.Spacing.xl)
+                            .padding(.trailing, DS.Spacing.lg)
+                    }
+                    Spacer()
+                }
+                .allowsHitTesting(false)
             }
         }
+        .overlay(
+            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                .stroke(
+                    saveProgress > 0
+                        ? DS.Colors.success.opacity(saveProgress * 0.8)
+                        : (skipProgress > 0
+                            ? DS.Colors.error.opacity(skipProgress * 0.8)
+                            : Color.clear),
+                    lineWidth: 3
+                )
+        )
         .overlay(alignment: .bottom) {
             bottomActionBar
+                .padding(.horizontal, DS.Spacing.sm)
+                .padding(.bottom, DS.Spacing.sm)
         }
     }
 
+    // MARK: - Dismiss & Reset
+
     private func dismissCard(direction: DismissDirection) {
-        let offscreenX: CGFloat = direction == .right ? 500 : -500
+        let screenWidth = UIScreen.main.bounds.width
+        let offscreenX: CGFloat = direction == .right ? screenWidth + 100 : -(screenWidth + 100)
         let rotation: Double = direction == .right ? 15 : -15
 
         withAnimation(.easeIn(duration: 0.3)) {
-            dragOffset = CGSize(width: offscreenX, height: 0)
+            dragOffset = CGSize(width: offscreenX, height: -30)
             cardRotation = rotation
             cardOpacity = 0
         }
@@ -339,10 +436,65 @@ struct TodayOutfitSheet: View {
     }
 
     private func resetCardPosition() {
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-            dragOffset = .zero
-            cardRotation = 0
-            cardOpacity = 1
+        dragOffset = .zero
+        cardRotation = 0
+        cardOpacity = 1
+        cardScale = 0.96
+        cardYOffset = 8
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+            cardScale = 1.0
+            cardYOffset = 0
+        }
+    }
+
+    // MARK: - First-Time Swipe Hint
+
+    private func playSwipeHintIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: "hasSeenSwipeHint") else { return }
+        guard !isPlayingHint else { return }
+
+        isPlayingHint = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                dragOffset = CGSize(width: 60, height: 0)
+                cardRotation = 3
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                dragOffset = .zero
+                cardRotation = 0
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                dragOffset = CGSize(width: -60, height: 0)
+                cardRotation = -3
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                dragOffset = .zero
+                cardRotation = 0
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showSwipeTooltip = true
+            }
+            isPlayingHint = false
+            UserDefaults.standard.set(true, forKey: "hasSeenSwipeHint")
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.2) {
+            withAnimation(.easeOut(duration: 0.4)) {
+                showSwipeTooltip = false
+            }
         }
     }
 
@@ -350,19 +502,21 @@ struct TodayOutfitSheet: View {
 
     private var bottomActionBar: some View {
         HStack(spacing: DS.Spacing.xs) {
-            // Skip button
             Button(action: {
                 Haptics.light()
                 dismissCard(direction: .left)
             }) {
                 HStack(spacing: DS.Spacing.micro) {
-                    Image(systemName: "xmark")
+                    Image(systemName: "arrow.left")
                     Text("Skip")
                 }
             }
             .buttonStyle(DSSecondaryButton())
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.card)
+                    .stroke(DS.Colors.error.opacity(skipProgress * 0.6), lineWidth: 2)
+            )
 
-            // Add item button
             Button(action: {
                 Haptics.light()
                 showAddProductSheet = true
@@ -374,7 +528,6 @@ struct TodayOutfitSheet: View {
             }
             .buttonStyle(DSSecondaryButton())
 
-            // Calendar button (save for specific date)
             Button(action: {
                 Haptics.light()
                 selectedDate = Calendar.current.startOfDay(for: Date())
@@ -390,20 +543,23 @@ struct TodayOutfitSheet: View {
                     )
             }
 
-            // Save button
             Button(action: {
                 Haptics.light()
                 dismissCard(direction: .right)
             }) {
                 HStack(spacing: DS.Spacing.micro) {
-                    Image(systemName: "checkmark")
                     Text("Save")
+                    Image(systemName: "arrow.right")
                 }
             }
             .buttonStyle(DSPrimaryButton())
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.card)
+                    .stroke(DS.Colors.success.opacity(saveProgress * 0.6), lineWidth: 2)
+            )
         }
-        .padding(.horizontal, DS.Spacing.screenH)
-        .padding(.vertical, DS.Spacing.md)
+        .padding(.horizontal, DS.Spacing.xs)
+        .padding(.vertical, DS.Spacing.sm)
         .dsGlassBar(cornerRadius: DS.Spacing.md)
     }
 
@@ -560,18 +716,18 @@ private struct OutfitItemRow: View {
     let isLoading: Bool
 
     var body: some View {
-        HStack(spacing: DS.Spacing.md) {
+        HStack(spacing: DS.Spacing.sm) {
             Button(action: onTap) {
                 if let uiImage = item.thumbnailImage ?? item.croppedImage ?? item.image {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 80, height: 80)
+                        .frame(width: 70, height: 70)
                         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
                 } else {
                     RoundedRectangle(cornerRadius: DS.Radius.button)
                         .fill(DS.Colors.backgroundSecondary)
-                        .frame(width: 80, height: 80)
+                        .frame(width: 70, height: 70)
                         .overlay(
                             Image(systemName: "photo")
                                 .foregroundColor(DS.Colors.textTertiary)
@@ -595,18 +751,25 @@ private struct OutfitItemRow: View {
                     .foregroundColor(DS.Colors.textSecondary)
                     .lineLimit(1)
 
-                if let material = item.material, !material.isEmpty {
-                    Text(material)
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.textTertiary)
-                        .lineLimit(1)
-                }
+                HStack(spacing: DS.Spacing.micro) {
+                    if let material = item.material, !material.isEmpty {
+                        Text(material)
+                            .font(DS.Font.caption1)
+                            .foregroundColor(DS.Colors.textTertiary)
+                            .lineLimit(1)
+                    }
 
-                if !item.brand.isEmpty {
-                    Text(item.brand)
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.textTertiary)
-                        .lineLimit(1)
+                    if !item.brand.isEmpty {
+                        if item.material != nil && !(item.material?.isEmpty ?? true) {
+                            Text("·")
+                                .font(DS.Font.caption1)
+                                .foregroundColor(DS.Colors.textTertiary)
+                        }
+                        Text(item.brand)
+                            .font(DS.Font.caption1)
+                            .foregroundColor(DS.Colors.textTertiary)
+                            .lineLimit(1)
+                    }
                 }
             }
 
@@ -614,9 +777,9 @@ private struct OutfitItemRow: View {
 
             Button(action: onShuffle) {
                 Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(DS.Font.body)
+                    .font(DS.Font.subheadline)
                     .foregroundColor(DS.Colors.accent)
-                    .padding(DS.Spacing.sm)
+                    .padding(DS.Spacing.xs)
                     .background(DS.Colors.accent.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
             }
@@ -624,9 +787,7 @@ private struct OutfitItemRow: View {
             .opacity(isLoading ? 0.4 : 1.0)
             .accessibilityLabel("Swap item")
         }
-        .padding(DS.Spacing.sm)
-        .background(DS.Colors.backgroundCard)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-        .dsCardShadow()
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.vertical, DS.Spacing.sm)
     }
 }
