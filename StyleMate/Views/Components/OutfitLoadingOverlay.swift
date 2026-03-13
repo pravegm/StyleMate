@@ -8,9 +8,9 @@ struct StylingLoadingView: View {
 
     private var stage: (icon: String, message: String, accent: Bool) {
         switch progress {
-        case ..<0.20:
-            return ("hanger", "Scanning your wardrobe...", false)
-        case 0.20..<0.40:
+        case ..<0.15:
+            return ("hanger", "Opening your wardrobe...", false)
+        case 0.15..<0.30:
             let weatherText: String
             if let w = weather, let city = w.city, !city.isEmpty {
                 weatherText = "\(Int(w.temperature2m))°C in \(city)"
@@ -19,14 +19,16 @@ struct StylingLoadingView: View {
             } else {
                 weatherText = ""
             }
-            let msg = weatherText.isEmpty ? "Checking today's weather..." : "Checking weather: \(weatherText)"
+            let msg = weatherText.isEmpty ? "Checking today's weather..." : "It's \(weatherText) today"
             return ("cloud.sun.fill", msg, false)
-        case 0.40..<0.70:
-            return ("paintpalette.fill", "Mixing colors and textures...", false)
-        case 0.70..<0.90:
-            return ("wand.and.stars", "Styling 5 outfits for you...", true)
+        case 0.30..<0.50:
+            return ("paintpalette.fill", "Matching colors and patterns...", false)
+        case 0.50..<0.70:
+            return ("ruler.fill", "Checking fits and layers...", false)
+        case 0.70..<0.85:
+            return ("wand.and.stars", "Putting together 5 looks...", true)
         default:
-            return ("checkmark.circle.fill", "Almost ready...", true)
+            return ("sparkles", "Adding the finishing touches...", true)
         }
     }
 
@@ -58,8 +60,8 @@ struct StylingLoadingView: View {
                     .frame(width: 220)
 
                 HStack(spacing: DS.Spacing.xs) {
-                    let thresholds = [0.0, 0.20, 0.40, 0.70, 0.90]
-                    ForEach(0..<5, id: \.self) { idx in
+                    let thresholds = [0.0, 0.15, 0.30, 0.50, 0.70, 0.85]
+                    ForEach(0..<6, id: \.self) { idx in
                         Circle()
                             .fill(progress >= thresholds[idx] ? DS.Colors.accent : DS.Colors.textTertiary.opacity(0.3))
                             .frame(width: 6, height: 6)

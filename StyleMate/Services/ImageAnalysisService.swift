@@ -1519,7 +1519,10 @@ Return ONLY the JSON array. Example format:
             ],
             "generationConfig": [
                 "responseMimeType": "application/json",
-                "responseSchema": responseSchema
+                "responseSchema": responseSchema,
+                "thinkingConfig": [
+                    "thinkingBudget": 0
+                ]
             ]
         ]
 
@@ -1694,7 +1697,10 @@ where N is the index number from the AVAILABLE REPLACEMENTS list above.
             ],
             "generationConfig": [
                 "responseMimeType": "application/json",
-                "responseSchema": responseSchema
+                "responseSchema": responseSchema,
+                "thinkingConfig": [
+                    "thinkingBudget": 0
+                ]
             ]
         ]
 
@@ -1833,7 +1839,10 @@ where N is the index number from the AVAILABLE OPTIONS list above.
             ],
             "generationConfig": [
                 "responseMimeType": "application/json",
-                "responseSchema": responseSchema
+                "responseSchema": responseSchema,
+                "thinkingConfig": [
+                    "thinkingBudget": 0
+                ]
             ]
         ]
 

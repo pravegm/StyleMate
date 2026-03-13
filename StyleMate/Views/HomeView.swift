@@ -217,23 +217,17 @@ struct HomeView: View {
                 if isLoading {
                     loadingProgress = 0.0
                     loadingTimer?.invalidate()
-                    loadingTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { timer in
-                        if loadingProgress < 0.20 {
-                            loadingProgress += 0.008
-                        } else if loadingProgress < 0.40 {
-                            loadingProgress += 0.006
-                        } else if loadingProgress < 0.70 {
-                            loadingProgress += 0.003
-                        } else if loadingProgress < 0.90 {
-                            loadingProgress += 0.004
-                        } else {
-                            timer.invalidate()
-                        }
+                    let startTime = Date()
+                    loadingTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { _ in
+                        let elapsed = Date().timeIntervalSince(startTime)
+                        let target = 1.0 - (1.0 / (1.0 + elapsed / 4.0))
+                        loadingProgress = min(target, 0.97)
                     }
                 } else {
                     loadingTimer?.invalidate()
-                    withAnimation(.linear(duration: 0.2)) { loadingProgress = 1.0 }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { loadingProgress = 0.0 }
+                    loadingTimer = nil
+                    withAnimation(.easeOut(duration: 0.25)) { loadingProgress = 1.0 }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { loadingProgress = 0.0 }
                 }
             }
             .navigationDestination(isPresented: Binding(
