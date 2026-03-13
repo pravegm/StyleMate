@@ -397,7 +397,7 @@ If you absolutely cannot find this item, return an empty list: []
             "generationConfig": [
                 "temperature": 0.5,
                 "thinkingConfig": [
-                    "thinkingBudget": 0
+                    "thinkingBudget": 128
                 ]
             ]
         ]
