@@ -182,10 +182,19 @@ struct HomeView: View {
                         .environmentObject(authService)
                 }
             }
-            .alert("No valid outfit found", isPresented: $homeVM.showNoOutfitAlert) {
+            .alert("Outfit Suggestion", isPresented: $homeVM.showOutfitErrorAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("Try adding more items or adjusting colors/patterns.")
+                switch homeVM.outfitError {
+                case .emptyWardrobe:
+                    Text("Add more items to your wardrobe to get outfit suggestions. You need at least a top, bottom, and shoes.")
+                case .networkError:
+                    Text("Couldn't connect to the styling engine. Please check your connection and try again.")
+                case .parseError:
+                    Text("Something went wrong matching the suggestions. Please try again.")
+                case .none:
+                    Text("Try adding more items or adjusting colors/patterns.")
+                }
             }
             .alert("Weather unavailable", isPresented: $showWeatherWarning) {
                 Button("Yes", role: .destructive) {

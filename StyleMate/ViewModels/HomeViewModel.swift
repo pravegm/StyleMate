@@ -7,8 +7,6 @@ class HomeViewModel: ObservableObject {
     @Published var todayOutfit: Outfit?
     @Published var isLoading = false
     @Published var showOutfitSheet = false
-    @Published var showNoOutfitAlert = false
-    @Published var showNoMoreSuggestions = false
     @Published var showRateLimitAlert = false
     @Published var selectedOutfitType: OutfitType? = .everyday
     @Published var customOutfitDescription: String? = nil
@@ -22,21 +20,38 @@ class HomeViewModel: ObservableObject {
     @Published var displayFahrenheit: Bool = false
     @Published var lastCelsius: Double? = nil
     @Published var lastFahrenheit: Double? = nil
-    private var outfitBatch: [Outfit] = []
-    private var batchIndex: Int = 0
+
+    // Error handling
+    enum OutfitError: Equatable {
+        case emptyWardrobe
+        case networkError
+        case parseError
+    }
+    @Published var outfitError: OutfitError?
+    @Published var showOutfitErrorAlert = false
+
+    // Batch state for swipe UI
+    @Published var outfitBatch: [Outfit] = []
+    @Published var batchIndex: Int = 0
+    @Published var savedCount: Int = 0
+    @Published var skippedCount: Int = 0
+
     private var locationService = LocationService.shared
     private var cancellables = Set<AnyCancellable>()
-    
+
     var isCustomDescriptionValid: Bool {
         guard let desc = customOutfitDescription else { return false }
         let trimmed = desc.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Split into words with at least one letter or digit
         let words = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { word in
             word.range(of: "[A-Za-z0-9]", options: .regularExpression) != nil
         }
         return words.count >= 2
     }
-    
+
+    var allOutfitsSeen: Bool {
+        batchIndex >= outfitBatch.count && !outfitBatch.isEmpty
+    }
+
     init() {
         locationService.$location
             .receive(on: DispatchQueue.main)
@@ -63,76 +78,96 @@ class HomeViewModel: ObservableObject {
             }
             .store(in: &cancellables)
     }
-    
+
+    // MARK: - Suggest Today Outfit (Index-Based)
+
     func suggestTodayOutfit(from items: [WardrobeItem], user: User?) {
         Task {
             isLoading = true
             defer { isLoading = false }
+
+            outfitError = nil
+            savedCount = 0
+            skippedCount = 0
+
             let typeToUse = selectedOutfitType
             let customDescription = customOutfitDescription
             let weather = self.weather
-            if let user = user, let type = typeToUse, !user.preferredStyles.contains(type) {
-                todayOutfit = nil
-                showNoOutfitAlert = true
-                outfitBatch = []
-                batchIndex = 0
-                return
-            }
-            guard let suggestions = await ImageAnalysisService.shared.suggestOutfitBatch(from: items, outfitType: typeToUse, customDescription: customDescription, weather: weather, user: user), !suggestions.isEmpty else {
-                todayOutfit = nil
-                showNoOutfitAlert = true
-                outfitBatch = []
-                batchIndex = 0
-                return
-            }
-            // Convert Gemini's suggestions to [Outfit]
-            let batch: [Outfit] = suggestions.compactMap { suggestion in
-                // Try to match Gemini's suggestions to actual WardrobeItem objects
-                func match(_ suggestion: ImageAnalysisService.SuggestedOutfitItem) -> WardrobeItem? {
-                    for item in items {
-                        let categoryMatch = ImageAnalysisService.shared.matchCategory(suggestion.category) == item.category
-                        let productMatch = ImageAnalysisService.shared.matchProduct(suggestion.product)?.caseInsensitiveCompare(item.product) == .orderedSame
-                        let colorMatch = Set(item.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }) == Set(suggestion.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) })
-                        let patternMatch = item.pattern.rawValue.caseInsensitiveCompare(suggestion.pattern) == .orderedSame
-                        let brandMatch = (suggestion.brand == nil || item.brand.caseInsensitiveCompare(suggestion.brand ?? "") == .orderedSame || item.brand.isEmpty)
-                        if categoryMatch && productMatch && colorMatch && patternMatch && brandMatch {
-                            return item
+
+            let result = await ImageAnalysisService.shared.suggestOutfitBatch(
+                from: items,
+                outfitType: typeToUse,
+                customDescription: customDescription,
+                weather: weather,
+                user: user
+            )
+
+            switch result {
+            case .success(let suggestions):
+                let batch: [Outfit] = suggestions.compactMap { suggestion in
+                    let wardrobeItems = suggestion.items.compactMap { index -> WardrobeItem? in
+                        guard index >= 0, index < items.count else {
+                            print("[StyleMate] suggestTodayOutfit: index \(index) out of range (0..<\(items.count))")
+                            return nil
                         }
+                        return items[index]
                     }
-                    return nil
+                    guard !wardrobeItems.isEmpty else { return nil }
+                    return Outfit(items: wardrobeItems, explanation: suggestion.explanation)
                 }
-                let matchedItems = suggestion.compactMap { match($0) }
-                // Remove the requirement for top, bottom, and footwear. Use whatever Gemini returns.
-                let items = matchedItems // Use all matched items as the outfit
-                return Outfit(items: items)
-            }
-            outfitBatch = batch
-            batchIndex = 0
-            if let first = outfitBatch.first {
-                todayOutfit = first
-                showOutfitSheet = true
-            } else {
+
+                outfitBatch = batch
+                batchIndex = 0
+
+                if let first = batch.first {
+                    todayOutfit = first
+                    showOutfitSheet = true
+                } else {
+                    todayOutfit = nil
+                    outfitError = .parseError
+                    showOutfitErrorAlert = true
+                }
+
+            case .failure(let error):
                 todayOutfit = nil
-                showNoOutfitAlert = true
+                outfitBatch = []
+                batchIndex = 0
+                switch error {
+                case .emptyWardrobe:
+                    outfitError = .emptyWardrobe
+                case .rateLimited:
+                    showRateLimitAlert = true
+                    return
+                case .networkError:
+                    outfitError = .networkError
+                case .parseError:
+                    outfitError = .parseError
+                }
+                showOutfitErrorAlert = true
             }
         }
     }
 
-    func shuffleOutfit() {
-        guard !outfitBatch.isEmpty else { return }
+    // MARK: - Swipe Navigation
+
+    func advanceToNextOutfit() {
         batchIndex += 1
-        if batchIndex >= outfitBatch.count {
-            showNoMoreSuggestions = true
-            batchIndex = 0 // Reset to allow cycling
+        if batchIndex < outfitBatch.count {
+            todayOutfit = outfitBatch[batchIndex]
         }
-        todayOutfit = outfitBatch[batchIndex]
     }
 
-    func resetShufflePopup() {
-        showNoMoreSuggestions = false
+    func skipCurrentOutfit() {
+        skippedCount += 1
+        advanceToNextOutfit()
     }
 
-    // Shuffle a single item in the current outfit for a given item (not just category)
+    func saveCurrentOutfit() {
+        savedCount += 1
+    }
+
+    // MARK: - Shuffle Single Item (Index-Based)
+
     func shuffleItemInOutfit(itemToShuffle: WardrobeItem, wardrobe: [WardrobeItem], user: User?) {
         guard let currentOutfit = todayOutfit else { return }
         let category = itemToShuffle.category
@@ -141,22 +176,24 @@ class HomeViewModel: ObservableObject {
             defer { isLoading = false }
             let availableItems = wardrobe.filter { $0.category == category && $0.id != itemToShuffle.id }
             guard !availableItems.isEmpty else { return }
-            let result = await ImageAnalysisService.shared.suggestPartialShuffleWithResult(currentOutfit: currentOutfit, categoryToShuffle: category, availableItems: availableItems, user: user)
+            let result = await ImageAnalysisService.shared.suggestPartialShuffleWithResult(
+                currentOutfit: currentOutfit,
+                categoryToShuffle: category,
+                availableItems: availableItems,
+                user: user
+            )
             switch result {
-            case .success(let newItem):
-                // Find the matching WardrobeItem in the wardrobe
-                let matched = availableItems.first(where: { item in
-                    item.product.caseInsensitiveCompare(newItem.product) == .orderedSame &&
-                    Set(item.colors.map { $0.lowercased() }) == Set(newItem.colors.map { $0.lowercased() }) &&
-                    item.pattern.rawValue.caseInsensitiveCompare(newItem.pattern) == .orderedSame &&
-                    (newItem.brand == nil || item.brand.caseInsensitiveCompare(newItem.brand ?? "") == .orderedSame || item.brand.isEmpty)
-                })
-                guard let replacement = matched else { return }
-                // Build new outfit: replace only the specific item
+            case .success(let index, let explanation):
+                guard index >= 0, index < availableItems.count else { return }
+                let replacement = availableItems[index]
                 var updatedItems = currentOutfit.items.filter { $0.id != itemToShuffle.id }
                 updatedItems.append(replacement)
-                let updatedOutfit = Outfit(items: updatedItems)
+                let updatedExplanation = explanation.isEmpty ? currentOutfit.explanation : explanation
+                let updatedOutfit = Outfit(items: updatedItems, explanation: updatedExplanation)
                 todayOutfit = updatedOutfit
+                if batchIndex < outfitBatch.count {
+                    outfitBatch[batchIndex] = updatedOutfit
+                }
             case .rateLimited:
                 showRateLimitAlert = true
             case .failure:
@@ -164,6 +201,37 @@ class HomeViewModel: ObservableObject {
             }
         }
     }
+
+    // MARK: - Add Product to Outfit (Index-Based)
+
+    func addProductToOutfit(category: Category, productType: String, wardrobe: [WardrobeItem], user: User?) {
+        guard let currentOutfit = todayOutfit else { return }
+        Task {
+            isLoading = true
+            defer { isLoading = false }
+            let availableItems = wardrobe.filter { $0.category == category && $0.product.caseInsensitiveCompare(productType) == .orderedSame }
+            guard !availableItems.isEmpty else { return }
+            if let selectedIndex = await ImageAnalysisService.shared.suggestAddProductToOutfit(
+                currentOutfit: currentOutfit,
+                category: category,
+                productType: productType,
+                availableItems: availableItems,
+                user: user
+            ) {
+                guard selectedIndex >= 0, selectedIndex < availableItems.count else { return }
+                let newItem = availableItems[selectedIndex]
+                var updatedItems = currentOutfit.items
+                updatedItems.append(newItem)
+                let updatedOutfit = Outfit(items: updatedItems, explanation: currentOutfit.explanation)
+                todayOutfit = updatedOutfit
+                if batchIndex < outfitBatch.count {
+                    outfitBatch[batchIndex] = updatedOutfit
+                }
+            }
+        }
+    }
+
+    // MARK: - Weather
 
     func requestWeatherForCurrentLocation() {
         isWeatherLoading = true
@@ -194,34 +262,4 @@ class HomeViewModel: ObservableObject {
             }
         }
     }
-
-    /// Adds a product type to the current outfit using Gemini and updates todayOutfit.
-    func addProductToOutfit(category: Category, productType: String, wardrobe: [WardrobeItem], user: User?) {
-        guard let currentOutfit = todayOutfit else { return }
-        Task {
-            isLoading = true
-            defer { isLoading = false }
-            let availableItems = wardrobe.filter { $0.category == category && $0.product.caseInsensitiveCompare(productType) == .orderedSame }
-            guard !availableItems.isEmpty else { return }
-            if let suggestion = await ImageAnalysisService.shared.suggestAddProductToOutfit(currentOutfit: currentOutfit, category: category, productType: productType, availableItems: availableItems, user: user) {
-                // Try to match Gemini's suggestions to actual WardrobeItem objects
-                func match(_ suggestion: ImageAnalysisService.SuggestedOutfitItem) -> WardrobeItem? {
-                    for item in wardrobe {
-                        let categoryMatch = ImageAnalysisService.shared.matchCategory(suggestion.category) == item.category
-                        let productMatch = ImageAnalysisService.shared.matchProduct(suggestion.product)?.caseInsensitiveCompare(item.product) == .orderedSame
-                        let colorMatch = Set(item.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }) == Set(suggestion.colors.map { $0.lowercased().trimmingCharacters(in: .whitespaces) })
-                        let patternMatch = item.pattern.rawValue.caseInsensitiveCompare(suggestion.pattern) == .orderedSame
-                        let brandMatch = (suggestion.brand == nil || item.brand.caseInsensitiveCompare(suggestion.brand ?? "") == .orderedSame || item.brand.isEmpty)
-                        if categoryMatch && productMatch && colorMatch && patternMatch && brandMatch {
-                            return item
-                        }
-                    }
-                    return nil
-                }
-                let matchedItems = suggestion.compactMap { match($0) }
-                let newOutfit = Outfit(items: matchedItems)
-                todayOutfit = newOutfit
-            }
-        }
-    }
-} 
+}

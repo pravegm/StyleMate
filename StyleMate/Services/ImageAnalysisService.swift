@@ -1239,46 +1239,68 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
         return dist[a.count][b.count]
     }
 
-    // Suggest an outfit using Gemini based on the current wardrobe
-    struct SuggestedOutfitItem: Codable {
-        let category: String
-        let product: String
-        let colors: [String]
-        let pattern: String
-        let brand: String?
+    // MARK: - Index-Based Outfit Suggestion Structs
+
+    struct SuggestedOutfit: Codable {
+        let items: [Int]
+        let explanation: String
     }
-    
-    func suggestOutfitBatch(from wardrobe: [WardrobeItem], outfitType: OutfitType? = nil, customDescription: String? = nil, weather: Weather? = nil, user: User? = nil) async -> [[SuggestedOutfitItem]]? {
+
+    struct ShuffleResponse: Codable {
+        let index: Int
+        let explanation: String
+    }
+
+    struct AddProductResponse: Codable {
+        let index: Int
+    }
+
+    enum OutfitSuggestError: Error {
+        case networkError
+        case rateLimited
+        case parseError
+        case emptyWardrobe
+    }
+
+    // MARK: - Suggest Outfit Batch (Index-Based)
+
+    func suggestOutfitBatch(from wardrobe: [WardrobeItem], outfitType: OutfitType? = nil, customDescription: String? = nil, weather: Weather? = nil, user: User? = nil, retryCount: Int = 0) async -> Result<[SuggestedOutfit], OutfitSuggestError> {
+        guard wardrobe.count >= 3 else {
+            print("[StyleMate] suggestOutfitBatch: wardrobe too small (\(wardrobe.count) items)")
+            return .failure(.emptyWardrobe)
+        }
+
         let wardrobeSummary = wardrobe.enumerated().map { (idx, item) in
-            var desc = "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
-            if let m = item.material, !m.isEmpty { desc += ", Material: \(m)" }
-            if let f = item.fit { desc += ", Fit: \(f.rawValue)" }
-            if let n = item.neckline { desc += ", Neckline: \(n.rawValue)" }
-            if let s = item.sleeveLength { desc += ", Sleeve: \(s.rawValue)" }
-            if let g = item.garmentLength { desc += ", Length: \(g.rawValue)" }
+            var desc = "[\(idx)] \(item.category.rawValue) | \(item.product) | \(item.colors.joined(separator: ", ")) | \(item.pattern.rawValue)"
+            if !item.brand.isEmpty { desc += " | \(item.brand)" }
+            if let m = item.material, !m.isEmpty { desc += " | \(m)" }
+            if let f = item.fit { desc += " | \(f.rawValue)" }
+            if let n = item.neckline { desc += " | \(n.rawValue)" }
+            if let s = item.sleeveLength { desc += " | \(s.rawValue)" }
+            if let g = item.garmentLength { desc += " | \(g.rawValue)" }
+            if let d = item.details, !d.isEmpty { desc += " | \(d)" }
             return desc
         }.joined(separator: "\n")
-        
-        // 2. Create the improved prompt for 5 suggestions
+
         let typeInstruction: String
         if let custom = customDescription, !custom.isEmpty {
-            typeInstruction = "The user described their event or outfit as: \"\(custom)\". Please tailor your suggestions for this context."
+            typeInstruction = "The user described their event or outfit as: \"\(custom)\". Tailor suggestions for this context."
         } else if let outfitType = outfitType {
-            typeInstruction = "The user wants an outfit for: \(outfitType.rawValue). Please tailor your suggestions for this context."
+            typeInstruction = "The user wants an outfit for: \(outfitType.rawValue). Tailor suggestions for this context."
         } else if let user = user {
             let styles = user.preferredStyles.map { $0.rawValue }.joined(separator: ", ")
             typeInstruction = "The user prefers these styles: \(styles). Suggest outfits that fit one of these styles."
         } else {
             typeInstruction = "The user wants an everyday casual outfit."
         }
-        // Add gender context if available
+
         let genderInstruction: String
         if let gender = user?.gender, !gender.isEmpty {
-            genderInstruction = "The user's gender is: \(gender). Please ensure your suggestions are appropriate for this gender."
+            genderInstruction = "The user's gender is: \(gender). Ensure suggestions are appropriate for this gender."
         } else {
             genderInstruction = ""
         }
-        // Add weather context if available
+
         let weatherInstruction: String
         if let weather = weather {
             let temp = Int(weather.temperature2m)
@@ -1286,41 +1308,112 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             let city = weather.city ?? "their location"
             let seasonHint: String
             switch temp {
-            case ..<5: seasonHint = "It is very cold (winter-like). Suggest warm, layered, insulated outfits. Avoid summer wear." // <5°C
-            case 5..<15: seasonHint = "It is cool (spring/fall-like). Suggest light jackets, sweaters, or layers. Avoid heavy winter or summer-only outfits."
-            case 15..<25: seasonHint = "It is mild and pleasant. Suggest comfortable, breathable outfits. Avoid heavy winter clothing."
-            case 25...: seasonHint = "It is hot (summer-like). Suggest light, breathable, sun-protective outfits. Avoid heavy or warm clothing."
+            case ..<10: seasonHint = "Cold weather. Include long sleeves, sweaters, coats, boots. No shorts, sandals, or tank tops."
+            case 10..<18: seasonHint = "Cool weather. Light jackets, sweaters, long pants. Layering is ideal."
+            case 18..<25: seasonHint = "Mild weather. T-shirts, light shirts, jeans, sneakers. Light layers optional."
+            case 25...: seasonHint = "Hot weather. Short sleeves, shorts, sandals, light fabrics. No jackets, sweaters, or boots."
             default: seasonHint = ""
             }
-            weatherInstruction = "The current weather in \(city) is: \(desc), temperature: \(temp)°C. \(seasonHint)"
+            weatherInstruction = "Weather in \(city): \(desc), \(temp)°C. \(seasonHint)"
         } else {
-            weatherInstruction = "No weather information is available. Suggest outfits suitable for a typical day."
+            weatherInstruction = "No weather information available. Suggest outfits suitable for a typical day."
         }
+
         let prompt = """
-You are an expert fashion stylist. Given the following wardrobe items, suggest 5 different, stylish, harmonious, and practical outfits for today. Each outfit should:
-- Follow established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).
-- Only combine items that make sense together (e.g., appropriate layering, no duplicate product types unless it makes sense, etc.).
-- Avoid clashing colors, too many patterns, or inappropriate combinations (e.g., no sandals with winter coats, no more than one statement pattern).
-- Prefer color harmony: neutrals go with anything, but bold colors should be paired thoughtfully.
-- Be distinct from each other (no duplicate combinations).
-- Only use items from the provided list. Do not invent or hallucinate new items.
-- For each item in the outfit, specify: category, product, colors (array), pattern, and brand (optional).
-- Each outfit must be a complete, wearable look for going out in public, using items from the wardrobe. Do not suggest incomplete outfits (e.g., just outerwear and accessories).
-- If a one-piece item (like a dress, jumpsuit, or ethnic set) is used, a separate top or bottom is not needed.
-- For ethnic or cultural outfits, ensure the look is complete and appropriate as per cultural norms (e.g., a kurta with a bottom, a sari with a blouse and petticoat, etc.).
-- Never suggest an outfit that would leave the wearer inappropriately dressed (e.g., only a cardigan, shoes, and sunglasses).
-- Use your knowledge of fashion to ensure every outfit is practical, stylish, and something a person could actually wear outside.
-- Ensure each outfit is appropriate for the weather context provided.
+You are an expert fashion stylist creating outfits from a real person's wardrobe. Each item is identified by an index number in square brackets. You MUST reference items ONLY by their index number.
+
+WARDROBE:
+\(wardrobeSummary)
+
+CONTEXT:
 \(typeInstruction)
 \(genderInstruction)
 \(weatherInstruction)
-Return your answer as a JSON array of 5 arrays, where each inner array is an outfit (array of objects with: category, product, colors, pattern, and brand).
 
-Here is the wardrobe:
-\n\(wardrobeSummary)\n
-Return only the JSON array, no extra text.
+STYLING RULES (follow ALL of these):
+
+COLOR HARMONY:
+- Follow the 3-color rule: each outfit should use at most 3 main color families (excluding black, white, and gray which are neutral and don't count toward the limit).
+- Monochromatic outfits (varying shades of one color) are sophisticated and always work.
+- Analogous colors (neighbors on the color wheel, e.g., blue + teal, red + orange) create harmonious, easy outfits.
+- Complementary colors (opposites on the wheel, e.g., navy + burnt orange, burgundy + forest green) create intentional contrast. Use sparingly and balance with neutrals.
+- Neutrals (black, white, gray, beige, cream, navy, brown, tan, khaki, olive, camel) pair with everything and with each other. A full-neutral outfit is perfectly valid.
+- Avoid combining more than one bold/saturated non-neutral color unless the overall palette is intentionally triadic.
+- Earth tones (brown, olive, rust, tan, beige, terracotta) form their own harmonious family.
+- Denim blue is effectively a neutral and pairs with almost everything.
+
+PATTERN MIXING:
+- Maximum one statement pattern per outfit. If one item has a strong pattern (floral, animal print, geometric, plaid), the rest should be solid or very subtle.
+- Stripes are semi-neutral and can pair with other patterns IF the scale differs (e.g., thin pinstripes with a bold floral).
+- Two items with the same pattern type (e.g., two florals, two plaids) should generally be avoided unless they are clearly different scales.
+- Solid items are always safe to combine with any pattern.
+
+FORMALITY COHERENCE:
+- All items in an outfit should be at a similar formality level. Don't pair a blazer with athletic shorts, or formal shoes with a graphic tee and sweatpants.
+- Casual items: T-shirts, graphic tees, hoodies, joggers, sneakers, slides, shorts, tank tops.
+- Smart casual: Polo shirts, chinos, button-down shirts, loafers, clean sneakers, cardigans, blazers over casual bottoms.
+- Formal: Dress shirts, trousers, blazers, formal shoes, overcoats, ties.
+- Activewear: Athletic tops, track pants, running shorts, sports bras, active leggings. Keep activewear together; don't mix with non-active items.
+- Ethnic wear: Kurta with churidar/salwar/jeans, saree with blouse, lehenga with choli and dupatta. Ensure culturally complete combinations.
+
+LAYERING LOGIC:
+- Layers must make physical sense: undershirt < shirt < sweater/cardigan < jacket/coat.
+- Don't layer a thick hoodie under a slim-fit blazer.
+- Mid-layers (sweaters, cardigans, hoodies) go OVER tops and UNDER outerwear.
+- A top + mid-layer + outerwear combination is the maximum layering depth.
+
+WEATHER APPROPRIATENESS:
+- Cold (<10°C): Long sleeves, sweaters, coats, boots, scarves. No shorts, sandals, tank tops.
+- Cool (10-18°C): Light jackets, sweaters, long pants. Layering is ideal.
+- Mild (18-25°C): T-shirts, light shirts, jeans, sneakers. Light layers optional.
+- Hot (>25°C): Short sleeves, shorts, sandals, light fabrics. No jackets, sweaters, or boots.
+- Rain: Avoid suede shoes. Prefer waterproof outerwear if available.
+
+MATERIAL COMPATIBILITY:
+- Don't combine very different textures without intention (e.g., silk blouse with cargo pants).
+- Denim pairs well with cotton, leather, and knits.
+- Leather accessories (belt, shoes, bag) should ideally be the same shade family (all brown or all black, not mixed).
+- Wool, cashmere, and knits form a natural textural family for cold weather.
+
+COMPLETENESS:
+- Every outfit MUST include: a top (or one-piece) + a bottom (or one-piece) + footwear at minimum.
+- Outerwear, mid-layers, and accessories are optional but encouraged when weather-appropriate.
+- A one-piece (dress, jumpsuit, romper) replaces both top and bottom.
+- For ethnic wear, ensure the combination is culturally complete (e.g., kurta needs a bottom like churidar, jeans, or salwar).
+- Never suggest just accessories + outerwear without a core outfit underneath.
+
+VARIETY:
+- Each of the 5 outfits must be meaningfully different from the others: different color palette, different vibe, or different key pieces.
+- Try to use a wide range of the wardrobe. Don't reuse the same item in more than 2 outfits.
+- If the wardrobe supports it, vary the style across outfits (one casual, one smart casual, etc.) unless the user specified a single occasion.
+
+OUTPUT FORMAT:
+Return a JSON array of 5 outfit objects. Each object has:
+- "items": array of integer indices referencing the wardrobe items above (e.g., [0, 5, 12, 23])
+- "explanation": a 1-2 sentence explanation of why this outfit works (mention the color scheme, texture play, occasion fit, or styling principle used). Keep it conversational and useful.
+
+Return ONLY the JSON array. Example format:
+[
+  {"items": [0, 5, 12], "explanation": "Monochromatic navy palette with textural contrast..."},
+  {"items": [3, 7, 15, 22], "explanation": "Earth-tone layers built around the olive chinos..."}
+]
 """
-        // Prepare Gemini API request
+
+        let responseSchema: [String: Any] = [
+            "type": "array",
+            "items": [
+                "type": "object",
+                "properties": [
+                    "items": [
+                        "type": "array",
+                        "items": ["type": "integer"]
+                    ],
+                    "explanation": ["type": "string"]
+                ],
+                "required": ["items", "explanation"]
+            ]
+        ]
+
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -1330,69 +1423,146 @@ Return only the JSON array, no extra text.
                 ]
             ],
             "generationConfig": [
-                "responseMimeType": "application/json"
+                "responseMimeType": "application/json",
+                "responseSchema": responseSchema
             ]
         ]
+
         guard let url = URL(string: geminiEndpoint + geminiAPIKey),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
-            return nil
+            print("[StyleMate] suggestOutfitBatch: failed to build request")
+            return .failure(.networkError)
         }
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = httpBody
+        request.timeoutInterval = 60
+
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                return nil
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("[StyleMate] suggestOutfitBatch: no HTTP response")
+                return .failure(.networkError)
             }
-            if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
-               let text = result.candidates.first?.content.parts.first?.text,
-               let arrData = text.data(using: .utf8) {
-                let decoder = JSONDecoder()
-                if let arr = try? decoder.decode([[SuggestedOutfitItem]].self, from: arrData) {
-                    return arr
-                } else {
-                    return nil
+
+            if httpResponse.statusCode == 429 {
+                if retryCount < 3 {
+                    let delay = UInt64(pow(2.0, Double(retryCount + 1))) * 1_000_000_000
+                    print("[StyleMate] suggestOutfitBatch: rate limited, waiting \(delay / 1_000_000_000)s (attempt \(retryCount + 1))")
+                    try? await Task.sleep(nanoseconds: delay)
+                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, retryCount: retryCount + 1)
                 }
-            } else {
-                return nil
+                print("[StyleMate] suggestOutfitBatch: rate limited after all retries")
+                return .failure(.rateLimited)
             }
+
+            guard httpResponse.statusCode == 200 else {
+                print("[StyleMate] suggestOutfitBatch: HTTP \(httpResponse.statusCode)")
+                if retryCount < 1 {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, retryCount: retryCount + 1)
+                }
+                return .failure(.networkError)
+            }
+
+            guard let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
+                  let text = result.candidates.first?.content.parts.first?.text,
+                  let arrData = text.data(using: .utf8) else {
+                print("[StyleMate] suggestOutfitBatch: failed to extract text from response")
+                if retryCount < 1 {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, retryCount: retryCount + 1)
+                }
+                return .failure(.parseError)
+            }
+
+            guard let outfits = try? JSONDecoder().decode([SuggestedOutfit].self, from: arrData) else {
+                print("[StyleMate] suggestOutfitBatch: JSON decode failed for SuggestedOutfit array")
+                if retryCount < 1 {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, retryCount: retryCount + 1)
+                }
+                return .failure(.parseError)
+            }
+
+            print("[StyleMate] suggestOutfitBatch: decoded \(outfits.count) outfits")
+            return .success(outfits)
+
         } catch {
-            return nil
+            print("[StyleMate] suggestOutfitBatch: network error: \(error.localizedDescription)")
+            if retryCount < 1 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, retryCount: retryCount + 1)
+            }
+            return .failure(.networkError)
         }
     }
 
+    // MARK: - Partial Shuffle (Index-Based)
+
     enum PartialShuffleResult {
-        case success(ImageAnalysisService.SuggestedOutfitItem)
+        case success(index: Int, explanation: String)
         case rateLimited
         case failure
     }
 
     func suggestPartialShuffleWithResult(currentOutfit: Outfit, categoryToShuffle: Category, availableItems: [WardrobeItem], user: User? = nil) async -> PartialShuffleResult {
         let outfitSummary = currentOutfit.items.map { item in
-            var desc = "Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
-            if let m = item.material, !m.isEmpty { desc += ", Material: \(m)" }
-            if let f = item.fit { desc += ", Fit: \(f.rawValue)" }
-            if let n = item.neckline { desc += ", Neckline: \(n.rawValue)" }
+            var desc = "\(item.category.rawValue) | \(item.product) | \(item.colors.joined(separator: ", ")) | \(item.pattern.rawValue)"
+            if !item.brand.isEmpty { desc += " | \(item.brand)" }
+            if let m = item.material, !m.isEmpty { desc += " | \(m)" }
+            if let f = item.fit { desc += " | \(f.rawValue)" }
+            if let n = item.neckline { desc += " | \(n.rawValue)" }
             return desc
         }.joined(separator: "\n")
+
         let availableSummary = availableItems.enumerated().map { (idx, item) in
-            var desc = "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
-            if let m = item.material, !m.isEmpty { desc += ", Material: \(m)" }
-            if let f = item.fit { desc += ", Fit: \(f.rawValue)" }
-            if let n = item.neckline { desc += ", Neckline: \(n.rawValue)" }
+            var desc = "[\(idx)] \(item.category.rawValue) | \(item.product) | \(item.colors.joined(separator: ", ")) | \(item.pattern.rawValue)"
+            if !item.brand.isEmpty { desc += " | \(item.brand)" }
+            if let m = item.material, !m.isEmpty { desc += " | \(m)" }
+            if let f = item.fit { desc += " | \(f.rawValue)" }
+            if let n = item.neckline { desc += " | \(n.rawValue)" }
             return desc
         }.joined(separator: "\n")
+
         let genderInstruction: String
         if let gender = user?.gender, !gender.isEmpty {
-            genderInstruction = "The user's gender is: \(gender). Please ensure your suggestions are appropriate for this gender."
+            genderInstruction = "The user's gender is: \(gender). Ensure suggestions are appropriate for this gender."
         } else {
             genderInstruction = ""
         }
+
         let prompt = """
-You are an expert fashion stylist. Given the following information, suggest a new item for a specific category to improve today's outfit, while keeping all other items unchanged.\n\n**Current Outfit:**\n\(outfitSummary)\n\n**Category to Shuffle:** \(categoryToShuffle.rawValue)\n\n**Available Items in This Category:**\n\(availableSummary)\n\n\(genderInstruction)\n**Instructions:**\n- Suggest a new item for the category \"\(categoryToShuffle.rawValue)\" from the available items in that category.\n- The new item must be different from the current one in the outfit.\n- The new item must harmonize with the rest of the outfit, following established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).\n- Only combine items that make sense together (e.g., seasonally appropriate, no clashing colors, no more than one statement pattern, no sandals with winter coats, etc.).\n- Prefer color harmony: neutrals go with anything, but bold colors should be paired thoughtfully.\n- Avoid inappropriate combinations (e.g., no sandals with winter coats, no more than one statement pattern).\n- Do not repeat the same product type (e.g., two tops).\n- Only use items from the provided list. Do not invent or hallucinate new items.\n- Do not change any other items in the outfit.\n- If you cannot find a perfect match, return the closest possible match from the available items. You must always return a result.\n- Return your answer as a JSON object with the following fields: category, product, colors (array), pattern, brand.\n- Return only the JSON object, no extra text.\n"
+You are an expert fashion stylist. Replace one item in an outfit while maintaining harmony.
+
+CURRENT OUTFIT:
+\(outfitSummary)
+
+ITEM TO REPLACE: The \(categoryToShuffle.rawValue) item.
+
+AVAILABLE REPLACEMENTS:
+\(availableSummary)
+
+\(genderInstruction)
+
+Choose the replacement that best harmonizes with the remaining items. Follow standard color harmony (3-color rule, neutrals pair with everything), pattern mixing (max one statement pattern), and formality coherence rules.
+
+Return a JSON object: {"index": N, "explanation": "brief reason"}
+where N is the index number from the AVAILABLE REPLACEMENTS list above.
 """
+
+        let responseSchema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "index": ["type": "integer"],
+                "explanation": ["type": "string"]
+            ],
+            "required": ["index", "explanation"]
+        ]
+
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -1402,108 +1572,112 @@ You are an expert fashion stylist. Given the following information, suggest a ne
                 ]
             ],
             "generationConfig": [
-                "responseMimeType": "application/json"
+                "responseMimeType": "application/json",
+                "responseSchema": responseSchema
             ]
         ]
+
         guard let url = URL(string: geminiEndpoint + geminiAPIKey),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
             return .failure
         }
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = httpBody
+        request.timeoutInterval = 30
+
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
+
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 429 {
                     return .rateLimited
                 }
                 if httpResponse.statusCode != 200 {
+                    print("[StyleMate] suggestPartialShuffle: HTTP \(httpResponse.statusCode)")
                     return .failure
                 }
             }
+
             if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
                let text = result.candidates.first?.content.parts.first?.text,
-               let objData = text.data(using: .utf8) {
-                let decoder = JSONDecoder()
-                if let item = try? decoder.decode(SuggestedOutfitItem.self, from: objData) {
-                    return .success(item)
+               let objData = text.data(using: .utf8),
+               let shuffleResp = try? JSONDecoder().decode(ShuffleResponse.self, from: objData) {
+                guard shuffleResp.index >= 0, shuffleResp.index < availableItems.count else {
+                    print("[StyleMate] suggestPartialShuffle: index \(shuffleResp.index) out of range (0..<\(availableItems.count))")
+                    return .failure
                 }
+                print("[StyleMate] suggestPartialShuffle: selected index \(shuffleResp.index)")
+                return .success(index: shuffleResp.index, explanation: shuffleResp.explanation)
             }
         } catch {
-            // No print, just fail
+            print("[StyleMate] suggestPartialShuffle: error: \(error.localizedDescription)")
         }
-        // Fallback: return the first available item that is not the current one
+
+        // Fallback: pick the first available item that isn't the current one
         let currentItem = currentOutfit.items.first { $0.category == categoryToShuffle }
-        if let currentItem = currentItem {
-            if let fallback = availableItems.first(where: { $0.id != currentItem.id }) {
-                return .success(SuggestedOutfitItem(
-                    category: fallback.category.rawValue,
-                    product: fallback.product,
-                    colors: fallback.colors,
-                    pattern: fallback.pattern.rawValue,
-                    brand: fallback.brand
-                ))
-            }
-            return .success(SuggestedOutfitItem(
-                category: currentItem.category.rawValue,
-                product: currentItem.product,
-                colors: currentItem.colors,
-                pattern: currentItem.pattern.rawValue,
-                brand: currentItem.brand
-            ))
+        if let currentItem = currentItem,
+           let fallbackIdx = availableItems.firstIndex(where: { $0.id != currentItem.id }) {
+            return .success(index: fallbackIdx, explanation: "")
         }
         return .failure
     }
 
-    /// Suggests a new outfit by adding a product of the given type (from availableItems) to the current outfit using Gemini.
-    /// Returns the new suggested outfit as an array of SuggestedOutfitItem (or nil on failure).
-    func suggestAddProductToOutfit(currentOutfit: Outfit, category: Category, productType: String, availableItems: [WardrobeItem], user: User? = nil) async -> [SuggestedOutfitItem]? {
+    // MARK: - Add Product to Outfit (Index-Based)
+
+    func suggestAddProductToOutfit(currentOutfit: Outfit, category: Category, productType: String, availableItems: [WardrobeItem], user: User? = nil) async -> Int? {
         let outfitSummary = currentOutfit.items.map { item in
-            var desc = "Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
-            if let m = item.material, !m.isEmpty { desc += ", Material: \(m)" }
-            if let f = item.fit { desc += ", Fit: \(f.rawValue)" }
-            if let n = item.neckline { desc += ", Neckline: \(n.rawValue)" }
+            var desc = "\(item.category.rawValue) | \(item.product) | \(item.colors.joined(separator: ", ")) | \(item.pattern.rawValue)"
+            if !item.brand.isEmpty { desc += " | \(item.brand)" }
+            if let m = item.material, !m.isEmpty { desc += " | \(m)" }
+            if let f = item.fit { desc += " | \(f.rawValue)" }
+            if let n = item.neckline { desc += " | \(n.rawValue)" }
             return desc
         }.joined(separator: "\n")
+
         let availableSummary = availableItems.enumerated().map { (idx, item) in
-            var desc = "\(idx+1). Category: \(item.category.rawValue), Product: \(item.product), Colors: \(item.colors.joined(separator: ", ")), Pattern: \(item.pattern.rawValue), Brand: \(item.brand)"
-            if let m = item.material, !m.isEmpty { desc += ", Material: \(m)" }
-            if let f = item.fit { desc += ", Fit: \(f.rawValue)" }
-            if let n = item.neckline { desc += ", Neckline: \(n.rawValue)" }
+            var desc = "[\(idx)] \(item.category.rawValue) | \(item.product) | \(item.colors.joined(separator: ", ")) | \(item.pattern.rawValue)"
+            if !item.brand.isEmpty { desc += " | \(item.brand)" }
+            if let m = item.material, !m.isEmpty { desc += " | \(m)" }
+            if let f = item.fit { desc += " | \(f.rawValue)" }
+            if let n = item.neckline { desc += " | \(n.rawValue)" }
             return desc
         }.joined(separator: "\n")
+
         let genderInstruction: String
         if let gender = user?.gender, !gender.isEmpty {
-            genderInstruction = "The user's gender is: \(gender). Please ensure your suggestions are appropriate for this gender."
+            genderInstruction = "The user's gender is: \(gender). Ensure suggestions are appropriate for this gender."
         } else {
             genderInstruction = ""
         }
-        // 3. Build the prompt
-        let prompt = """
-You are an expert fashion stylist. The user has an outfit and wants to add a \(productType) (category: \(category.rawValue)) to it.
 
-Here is the current outfit:
+        let prompt = """
+You are an expert fashion stylist. Add one item to an existing outfit.
+
+CURRENT OUTFIT:
 \(outfitSummary)
 
-Here are the \(productType) options from the user's wardrobe (choose only from these):
+AVAILABLE \(productType.uppercased()) OPTIONS:
 \(availableSummary)
 
 \(genderInstruction)
-Guidelines:
-- Follow established fashion rules and color theory (complementary, analogous, neutral, and triadic color schemes).
-- Only combine items that make sense together (e.g., appropriate layering, no duplicate product types unless it makes sense, seasonally appropriate, etc.).
-- Avoid clashing colors, too many patterns, or inappropriate combinations (e.g., no sandals with winter coats, no more than one statement pattern).
-- Prefer color harmony: neutrals go with anything, but bold colors should be paired thoughtfully.
-- Be distinct and practical.
-- Only use items from the provided lists. Do not invent or hallucinate new items.
-- Do not remove any existing items unless absolutely necessary for style or practicality.
 
-Please update the outfit by adding the best \(productType) from the list above, ensuring the new outfit is stylish, harmonious, and practical.
+Choose the option that best complements the existing outfit. Follow standard styling rules for color harmony, pattern mixing, and formality coherence.
 
-Return the new outfit as a JSON array of objects, where each object has: category, product, colors (array), pattern, and brand. Return only the JSON array, no extra text.
+Return a JSON object: {"index": N}
+where N is the index number from the AVAILABLE OPTIONS list above.
 """
+
+        let responseSchema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "index": ["type": "integer"]
+            ],
+            "required": ["index"]
+        ]
+
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -1513,37 +1687,45 @@ Return the new outfit as a JSON array of objects, where each object has: categor
                 ]
             ],
             "generationConfig": [
-                "responseMimeType": "application/json"
+                "responseMimeType": "application/json",
+                "responseSchema": responseSchema
             ]
         ]
+
         guard let url = URL(string: geminiEndpoint + geminiAPIKey),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
             return nil
         }
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = httpBody
+        request.timeoutInterval = 30
+
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
+
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                print("[StyleMate] suggestAddProduct: HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
                 return nil
             }
+
             if let result = try? JSONDecoder().decode(GeminiResponse.self, from: data),
                let text = result.candidates.first?.content.parts.first?.text,
-               let arrData = text.data(using: .utf8) {
-                let decoder = JSONDecoder()
-                if let arr = try? decoder.decode([SuggestedOutfitItem].self, from: arrData) {
-                    return arr
-                } else {
+               let objData = text.data(using: .utf8),
+               let addResp = try? JSONDecoder().decode(AddProductResponse.self, from: objData) {
+                guard addResp.index >= 0, addResp.index < availableItems.count else {
+                    print("[StyleMate] suggestAddProduct: index \(addResp.index) out of range")
                     return nil
                 }
-            } else {
-                return nil
+                print("[StyleMate] suggestAddProduct: selected index \(addResp.index)")
+                return addResp.index
             }
         } catch {
-            return nil
+            print("[StyleMate] suggestAddProduct: error: \(error.localizedDescription)")
         }
+        return nil
     }
 }
 
