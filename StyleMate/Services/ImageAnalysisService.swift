@@ -69,12 +69,55 @@ class ImageAnalysisService {
         print("[StyleMate] Segmentation: Original image for bboxes: \(originalData.count) bytes, \(Int(originalForBBox.size.width))x\(Int(originalForBBox.size.height))")
 
         let validItems = classifications.filter { $0.category != nil && $0.product != nil && $0.pattern != nil && !$0.colors.isEmpty }
-        let itemLabels = validItems.map { "\($0.product!) (\($0.category!.rawValue))" }
 
-        let allBoxes = await getAllBoundingBoxes(originalBase64: originalBase64, itemLabels: itemLabels)
+        // Split into clothing (batch) vs footwear/accessories (individual focused)
+        let clothingCategories: Set<Category> = [.tops, .bottoms, .midLayers, .outerwear, .onePieces, .activewear, .ethnicWear, .innerwear]
+        let clothingItems = validItems.filter { clothingCategories.contains($0.category!) }
+        let smallItems = validItems.filter { !clothingCategories.contains($0.category!) }
 
-        // Apply each box to bgRemovedRaw (same dimensions as original, before trimming)
-        // so that Gemini's normalized coordinates align correctly.
+        // Run batch and focused calls in parallel
+        async let clothingBoxesTask: [String: [Int]] = {
+            let labels = clothingItems.map { "\($0.product!) (\($0.category!.rawValue))" }
+            guard !labels.isEmpty else { return [:] }
+            return await getAllBoundingBoxes(originalBase64: originalBase64, itemLabels: labels)
+        }()
+
+        async let smallItemBoxesTask: [String: [Int]] = {
+            guard !smallItems.isEmpty else { return [:] }
+            return await withTaskGroup(of: (String, [Int]?).self) { group in
+                for item in smallItems {
+                    guard let category = item.category, let product = item.product else { continue }
+                    let label = "\(product) (\(category.rawValue))"
+
+                    group.addTask {
+                        let box = await self.getItemBoundingBoxFocused(
+                            originalBase64: originalBase64,
+                            product: product,
+                            category: category,
+                            colors: item.colors,
+                            material: item.material,
+                            details: item.details
+                        )
+                        return (label, box)
+                    }
+                }
+
+                var collected: [String: [Int]] = [:]
+                for await (label, box) in group {
+                    if let box = box { collected[label] = box }
+                }
+                return collected
+            }
+        }()
+
+        let clothingBoxes = await clothingBoxesTask
+        let smallItemBoxes = await smallItemBoxesTask
+
+        var allBoxes = clothingBoxes
+        allBoxes.merge(smallItemBoxes) { _, new in new }
+        print("[StyleMate] Segmentation: Batch got \(clothingBoxes.count) clothing boxes, Focused got \(smallItemBoxes.count) small item boxes")
+
+        // Apply boxes to bgRemovedRaw (same dimensions as original)
         var results: [SegmentedItem] = []
         for item in validItems {
             guard let category = item.category, let product = item.product,
@@ -228,6 +271,186 @@ CRITICAL RULES:
         } catch {
             print("[StyleMate] AllBBox: network error: \(error.localizedDescription)")
             return [:]
+        }
+    }
+
+    /// Gets a bounding box for a single small/peripheral item using hyper-specific spatial hints.
+    /// Much more accurate than the batch call for footwear and accessories.
+    private func getItemBoundingBoxFocused(
+        originalBase64: String,
+        product: String,
+        category: Category,
+        colors: [String],
+        material: String?,
+        details: String?
+    ) async -> [Int]? {
+        let colorDesc = colors.isEmpty ? "" : colors.joined(separator: " and ") + " "
+        let materialDesc = (material ?? "").isEmpty ? "" : (material ?? "") + " "
+        let detailDesc = (details ?? "").isEmpty ? "" : " with \(details!)"
+        let itemDesc = "\(colorDesc)\(materialDesc)\(product)\(detailDesc)"
+
+        let spatialHint: String
+        switch category {
+        case .footwear:
+            spatialHint = """
+This person is wearing \(itemDesc) on their feet. The shoes/footwear are located at the VERY BOTTOM of the image, on or near the ground level.
+Return a bounding box that is in the LOWEST portion of the image, around the feet and shoes ONLY.
+The top of the box should be around ankle height. The bottom of the box should be at or near the bottom edge of the image.
+Do NOT include the legs, pants, or any clothing above the ankles.
+"""
+        case .accessories:
+            switch product {
+            case "Sunglasses", "Eyeglasses", "Reading Glasses":
+                spatialHint = """
+This person is wearing \(itemDesc) on their face. The glasses sit on the nose bridge across both eyes.
+Return a bounding box that is a WIDE HORIZONTAL rectangle across the eye region of the face ONLY.
+The box should be in the UPPER portion of the image (head area).
+Do NOT include the phone, hands, hair, forehead, or chin. ONLY the glasses frames and lenses on the face.
+"""
+            case "Watches":
+                spatialHint = """
+This person is wearing a \(itemDesc) on their wrist. The watch has a dial/face and a strap wrapped around the wrist.
+Return a bounding box tightly around the watch face and strap ONLY.
+Look carefully at both wrists to find the watch. The watch is a small circular or square object on the wrist.
+Do NOT include the phone, hand, fingers, or forearm. ONLY the watch itself.
+"""
+            case "Rings":
+                spatialHint = """
+This person is wearing a \(itemDesc) on their finger.
+Return a bounding box tightly around the ring ONLY.
+Do NOT include the entire hand or fingers. Just the ring.
+"""
+            case "Necklaces", "Pendants", "Chains":
+                spatialHint = """
+This person is wearing a \(itemDesc) around their neck.
+Return a bounding box around the necklace/chain/pendant on the neck and upper chest area ONLY.
+Do NOT include the full torso or face. Just the jewelry around the neck.
+"""
+            case "Earrings":
+                spatialHint = """
+This person is wearing \(itemDesc).
+Return a bounding box around ONE earring near the ear ONLY.
+Do NOT include the full face or head. Just the earring.
+"""
+            case "Bracelets", "Anklets":
+                spatialHint = """
+This person is wearing a \(itemDesc).
+Return a bounding box tightly around the \(product) ONLY.
+Do NOT include the arm or leg. Just the jewelry item.
+"""
+            case "Belts":
+                spatialHint = """
+This person is wearing a \(itemDesc) around their waist.
+Return a bounding box around the belt at the waistline ONLY.
+The belt is a narrow horizontal strip at the waist between the top and bottom garments.
+Do NOT include the shirt or pants. Just the belt.
+"""
+            default:
+                if ["Baseball Caps", "Beanies", "Fedoras", "Bucket Hats", "Sun Hats", "Visors", "Bandanas", "Turbans", "Headbands", "Berets"].contains(product) {
+                    spatialHint = """
+This person is wearing a \(itemDesc) on their head.
+Return a bounding box around the hat/headwear at the TOP of the image ONLY.
+The box should be in the uppermost portion of the image, around the head.
+Do NOT include the face, body, or anything below the forehead.
+"""
+                } else if ["Handbags", "Tote Bags", "Crossbody Bags", "Backpacks", "Clutches", "Fanny Packs", "Briefcases", "Messenger Bags", "Wallets"].contains(product) {
+                    spatialHint = """
+This person is carrying a \(itemDesc).
+Return a bounding box around the bag ONLY.
+Do NOT include the person's body. Just the bag.
+"""
+                } else {
+                    spatialHint = """
+This person has a \(itemDesc).
+Return a bounding box tightly around this specific accessory ONLY.
+Do NOT include the person's body. Just the accessory item.
+"""
+                }
+            }
+        default:
+            spatialHint = """
+Find the \(itemDesc) in this image.
+Return a bounding box tightly around this item ONLY.
+"""
+        }
+
+        let prompt = """
+\(spatialHint)
+Output a JSON list with ONE entry containing the 2D bounding box in the key "box_2d" as [y0, x0, y1, x1] normalized to 0-1000, and the text label in the key "label".
+If you absolutely cannot find this item in the image, return an empty JSON list [].
+"""
+
+        let requestBody: [String: Any] = [
+            "contents": [
+                [
+                    "parts": [
+                        ["text": prompt],
+                        ["inlineData": [
+                            "mimeType": "image/jpeg",
+                            "data": originalBase64
+                        ]]
+                    ]
+                ]
+            ],
+            "generationConfig": [
+                "temperature": 0.5,
+                "thinkingConfig": [
+                    "thinkingBudget": 0
+                ]
+            ]
+        ]
+
+        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+              let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = httpBody
+        request.timeoutInterval = 15
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                print("[StyleMate] FocusedBBox: HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0) for \(product)")
+                return nil
+            }
+
+            guard let responseJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let candidates = responseJson["candidates"] as? [[String: Any]],
+                  let firstCandidate = candidates.first,
+                  let content = firstCandidate["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]],
+                  let textPart = parts.first(where: { $0["text"] != nil }),
+                  let text = textPart["text"] as? String else {
+                print("[StyleMate] FocusedBBox: bad response for \(product)")
+                return nil
+            }
+
+            guard let items = parseSegmentationJSON(text), let first = items.first else {
+                print("[StyleMate] FocusedBBox: item not found or parse failed for \(product)")
+                return nil
+            }
+
+            if let boxInts = first["box_2d"] as? [Int], boxInts.count == 4 {
+                print("[StyleMate] FocusedBBox: success for \(product): \(boxInts)")
+                return boxInts
+            } else if let boxDoubles = first["box_2d"] as? [Double], boxDoubles.count == 4 {
+                let boxInts = boxDoubles.map { Int($0) }
+                print("[StyleMate] FocusedBBox: success for \(product): \(boxInts)")
+                return boxInts
+            }
+
+            print("[StyleMate] FocusedBBox: no valid box for \(product)")
+            return nil
+
+        } catch {
+            print("[StyleMate] FocusedBBox: network error for \(product): \(error.localizedDescription)")
+            return nil
         }
     }
 
