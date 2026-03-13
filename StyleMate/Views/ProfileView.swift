@@ -228,6 +228,7 @@ struct ProfileView: View {
                         wardrobeViewModel.deleteItemFromCloud(item)
                         WardrobeImageFileHelper.deleteImage(at: item.imagePath)
                         WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+                        WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
                     }
                     wardrobeViewModel.items.removeAll()
                 }

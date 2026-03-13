@@ -108,6 +108,7 @@ struct RootView: View {
                 wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
                 wardrobeVM.migrateBackgroundRemoval()
+                wardrobeVM.migrateThumbnails()
 
                 Task {
                     await CloudKitService.shared.setupZone()
@@ -127,6 +128,7 @@ struct RootView: View {
                 wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
                 wardrobeVM.migrateBackgroundRemoval()
+                wardrobeVM.migrateThumbnails()
 
                 Task {
                     await CloudKitService.shared.setupZone()

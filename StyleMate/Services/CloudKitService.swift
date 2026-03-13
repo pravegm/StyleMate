@@ -59,6 +59,7 @@ class CloudKitService: ObservableObject {
         record["sleeveLength"] = item.sleeveLength?.rawValue
         record["garmentLength"] = item.garmentLength?.rawValue
         record["details"] = item.details
+        record["thumbnailPath"] = item.thumbnailPath
 
         if let imageURL = imageFileURL(for: item.imagePath) {
             record["imageAsset"] = CKAsset(fileURL: imageURL)
@@ -110,6 +111,7 @@ class CloudKitService: ObservableObject {
                 record["sleeveLength"] = item.sleeveLength?.rawValue
                 record["garmentLength"] = item.garmentLength?.rawValue
                 record["details"] = item.details
+                record["thumbnailPath"] = item.thumbnailPath
 
                 if let imageURL = imageFileURL(for: item.imagePath) {
                     record["imageAsset"] = CKAsset(fileURL: imageURL)
@@ -260,6 +262,7 @@ class CloudKitService: ObservableObject {
             }
         }
 
+        let thumbnailPath = record["thumbnailPath"] as? String
         let material = record["material"] as? String
         let fitStr = record["fit"] as? String
         let necklineStr = record["neckline"] as? String
@@ -276,6 +279,7 @@ class CloudKitService: ObservableObject {
             pattern: pattern,
             imagePath: imagePath,
             croppedImagePath: croppedImagePath,
+            thumbnailPath: thumbnailPath,
             material: material,
             fit: fitStr != nil ? Fit(rawValue: fitStr!) : nil,
             neckline: necklineStr != nil ? Neckline(rawValue: necklineStr!) : nil,

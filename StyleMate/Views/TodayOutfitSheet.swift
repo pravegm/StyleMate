@@ -298,7 +298,7 @@ private struct OutfitItemRow: View {
     var body: some View {
         HStack(spacing: DS.Spacing.md) {
             Button(action: onTap) {
-                if let uiImage = item.croppedImage ?? item.image {
+                if let uiImage = item.thumbnailImage ?? item.croppedImage ?? item.image {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()

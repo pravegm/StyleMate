@@ -27,7 +27,7 @@ struct ItemRowView: View {
                     previewImage = PreviewImage(image: img)
                 }
             }) {
-                if let img = item.croppedImage ?? item.image {
+                if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
                     Image(uiImage: img)
                         .resizable()
                         .frame(width: 44, height: 44)

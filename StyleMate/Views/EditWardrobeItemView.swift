@@ -10,6 +10,7 @@ struct EditWardrobeItemView: View {
     @State private var pattern: Pattern
     @State private var imagePath: String
     @State private var croppedImagePath: String?
+    @State private var thumbnailPath: String?
     @State private var material: String
     @State private var fit: Fit?
     @State private var neckline: Neckline?
@@ -32,6 +33,7 @@ struct EditWardrobeItemView: View {
         _pattern = State(initialValue: item.pattern)
         _imagePath = State(initialValue: item.imagePath)
         _croppedImagePath = State(initialValue: item.croppedImagePath)
+        _thumbnailPath = State(initialValue: item.thumbnailPath)
         _material = State(initialValue: item.material ?? "")
         _fit = State(initialValue: item.fit)
         _neckline = State(initialValue: item.neckline)
@@ -194,6 +196,7 @@ struct EditWardrobeItemView: View {
                             pattern: pattern,
                             imagePath: imagePath,
                             croppedImagePath: croppedImagePath,
+                            thumbnailPath: thumbnailPath,
                             material: material.isEmpty ? nil : material,
                             fit: fit,
                             neckline: neckline,
@@ -255,12 +258,16 @@ struct EditWardrobeItemView: View {
 
             let oldImagePath = self.imagePath
             let oldCroppedPath = self.croppedImagePath
+            let oldThumbPath = self.thumbnailPath
+            let newThumbPath = WardrobeImageFileHelper.saveThumbnail(zoneCrop ?? bgRemoved)
 
             await MainActor.run {
                 WardrobeImageFileHelper.deleteImage(at: oldImagePath)
                 WardrobeImageFileHelper.deleteImage(at: oldCroppedPath)
+                WardrobeImageFileHelper.deleteImage(at: oldThumbPath)
                 self.imagePath = newImagePath
                 self.croppedImagePath = newCroppedPath
+                self.thumbnailPath = newThumbPath
                 isReplacingPhoto = false
                 Haptics.success()
             }

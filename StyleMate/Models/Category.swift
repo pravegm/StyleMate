@@ -144,6 +144,7 @@ class WardrobeViewModel: ObservableObject {
                             pattern: cloudItem.pattern,
                             imagePath: finalImagePath,
                             croppedImagePath: finalCroppedPath,
+                            thumbnailPath: localItem.thumbnailPath ?? cloudItem.thumbnailPath,
                             material: cloudItem.material,
                             fit: cloudItem.fit,
                             neckline: cloudItem.neckline,
@@ -165,6 +166,7 @@ class WardrobeViewModel: ObservableObject {
             for item in toRemove {
                 WardrobeImageFileHelper.deleteImage(at: item.imagePath)
                 WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+                WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
                 changed = true
             }
             items.removeAll { !cloudIDs.contains($0.id) }
@@ -172,6 +174,56 @@ class WardrobeViewModel: ObservableObject {
             suspendSaving = false
             if changed {
                 save(forUser: currentUserEmail)
+            }
+        }
+    }
+
+    func migrateThumbnails() {
+        let thumbnailKey = "thumbnailMigrationComplete_\(currentUserEmail)"
+        guard !UserDefaults.standard.bool(forKey: thumbnailKey) else { return }
+        guard !items.isEmpty else {
+            UserDefaults.standard.set(true, forKey: thumbnailKey)
+            return
+        }
+
+        Task {
+            var updated = false
+            for (index, item) in items.enumerated() {
+                guard item.thumbnailPath == nil else { continue }
+
+                guard let sourceImage = WardrobeImageFileHelper.loadImage(at: item.croppedImagePath ?? item.imagePath) else { continue }
+
+                let thumbPath = WardrobeImageFileHelper.saveThumbnail(sourceImage)
+
+                let updatedItem = WardrobeItem(
+                    id: item.id,
+                    category: item.category,
+                    product: item.product,
+                    colors: item.colors,
+                    brand: item.brand,
+                    pattern: item.pattern,
+                    imagePath: item.imagePath,
+                    croppedImagePath: item.croppedImagePath,
+                    thumbnailPath: thumbPath,
+                    material: item.material,
+                    fit: item.fit,
+                    neckline: item.neckline,
+                    sleeveLength: item.sleeveLength,
+                    garmentLength: item.garmentLength,
+                    details: item.details
+                )
+
+                await MainActor.run {
+                    self.items[index] = updatedItem
+                }
+                updated = true
+            }
+
+            await MainActor.run {
+                if updated {
+                    self.save(forUser: self.currentUserEmail)
+                }
+                UserDefaults.standard.set(true, forKey: thumbnailKey)
             }
         }
     }
@@ -209,6 +261,7 @@ class WardrobeViewModel: ObservableObject {
                         pattern: item.pattern,
                         imagePath: result.newImagePath,
                         croppedImagePath: result.newCroppedPath ?? item.croppedImagePath,
+                        thumbnailPath: item.thumbnailPath,
                         material: item.material,
                         fit: item.fit,
                         neckline: item.neckline,
@@ -264,6 +317,7 @@ class WardrobeViewModel: ObservableObject {
                     pattern: item.pattern,
                     imagePath: item.imagePath,
                     croppedImagePath: newCroppedPath,
+                    thumbnailPath: item.thumbnailPath,
                     material: item.material,
                     fit: item.fit,
                     neckline: item.neckline,
@@ -298,6 +352,7 @@ struct WardrobeItemCodable: Codable {
     let pattern: String
     let imagePath: String
     let croppedImagePath: String?
+    let thumbnailPath: String?
 
     let material: String?
     let fit: String?
@@ -307,7 +362,7 @@ struct WardrobeItemCodable: Codable {
     let details: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, category, product, colors, brand, pattern, imagePath, croppedImagePath
+        case id, category, product, colors, brand, pattern, imagePath, croppedImagePath, thumbnailPath
         case material, fit, neckline, sleeveLength, garmentLength, details
     }
 
@@ -320,6 +375,7 @@ struct WardrobeItemCodable: Codable {
         self.pattern = item.pattern.rawValue
         self.imagePath = item.imagePath
         self.croppedImagePath = item.croppedImagePath
+        self.thumbnailPath = item.thumbnailPath
         self.material = item.material
         self.fit = item.fit?.rawValue
         self.neckline = item.neckline?.rawValue
@@ -338,6 +394,7 @@ struct WardrobeItemCodable: Codable {
         pattern = try container.decode(String.self, forKey: .pattern)
         imagePath = try container.decode(String.self, forKey: .imagePath)
         croppedImagePath = try container.decodeIfPresent(String.self, forKey: .croppedImagePath)
+        thumbnailPath = try container.decodeIfPresent(String.self, forKey: .thumbnailPath)
         material = try container.decodeIfPresent(String.self, forKey: .material)
         fit = try container.decodeIfPresent(String.self, forKey: .fit)
         neckline = try container.decodeIfPresent(String.self, forKey: .neckline)
@@ -358,6 +415,7 @@ struct WardrobeItemCodable: Codable {
             pattern: pat,
             imagePath: imagePath,
             croppedImagePath: croppedImagePath,
+            thumbnailPath: thumbnailPath,
             material: material,
             fit: fit != nil ? Fit(rawValue: fit!) : nil,
             neckline: neckline != nil ? Neckline(rawValue: neckline!) : nil,

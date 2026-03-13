@@ -180,6 +180,7 @@ struct CategoryDetailView: View {
     @State private var showReplaceGallery = false
     @State private var replaceGallerySelection: [PhotosPickerItem] = []
     @State private var isReplacingPhoto = false
+    @State private var selectedDetailItem: WardrobeItem? = nil
 
     private func normalizedProduct(_ product: String) -> String {
         let lower = product.lowercased().trimmingCharacters(in: .whitespaces)
@@ -241,12 +242,10 @@ struct CategoryDetailView: View {
                                 LazyVGrid(columns: photoColumns, spacing: DS.Spacing.sm) {
                                     ForEach(group.items) { item in
                                         Button {
-                                            if let img = item.croppedImage ?? item.image {
-                                                previewImage = PreviewImage(image: img)
-                                            }
+                                            selectedDetailItem = item
                                         } label: {
                                             VStack(spacing: DS.Spacing.xs) {
-                                                if let img = item.croppedImage ?? item.image {
+                                                if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
                                                     Image(uiImage: img)
                                                         .resizable()
                                                         .scaledToFill()
@@ -271,24 +270,6 @@ struct CategoryDetailView: View {
                                             }
                                         }
                                         .buttonStyle(.plain)
-                                        .contextMenu {
-                                            Button { editingItem = item } label: {
-                                                Label("Edit", systemImage: "pencil")
-                                            }
-                                            Button { replacePhotoItem = item } label: {
-                                                Label("Replace Photo", systemImage: "camera")
-                                            }
-                                            Button(role: .destructive) {
-                                                if let idx = wardrobeViewModel.items.firstIndex(of: item) {
-                                                    wardrobeViewModel.deleteItemFromCloud(item)
-                                                    WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-                                                    WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
-                                                    wardrobeViewModel.items.remove(at: idx)
-                                                }
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -313,6 +294,31 @@ struct CategoryDetailView: View {
                     .padding(.horizontal, DS.Spacing.screenH)
                     .padding(.bottom, DS.Spacing.lg)
             }
+        }
+        .sheet(item: $selectedDetailItem) { item in
+            ItemDetailSheet(
+                item: item,
+                onEdit: { editingItem = item; selectedDetailItem = nil },
+                onReplacePhoto: { replacePhotoItem = item; selectedDetailItem = nil },
+                onDelete: {
+                    if let idx = wardrobeViewModel.items.firstIndex(of: item) {
+                        wardrobeViewModel.deleteItemFromCloud(item)
+                        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+                        WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+                        WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
+                        wardrobeViewModel.items.remove(at: idx)
+                    }
+                    selectedDetailItem = nil
+                },
+                onImageTap: { img in
+                    selectedDetailItem = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        previewImage = PreviewImage(image: img)
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingItem) { item in
             EditWardrobeItemView(item: item) { updatedItem in
@@ -376,6 +382,9 @@ struct CategoryDetailView: View {
 
             WardrobeImageFileHelper.deleteImage(at: item.imagePath)
             WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+            WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
+
+            let newThumbPath = WardrobeImageFileHelper.saveThumbnail(zoneCrop ?? bgRemoved)
 
             let updatedItem = WardrobeItem(
                 id: item.id,
@@ -386,6 +395,7 @@ struct CategoryDetailView: View {
                 pattern: item.pattern,
                 imagePath: newImagePath,
                 croppedImagePath: newCroppedPath ?? item.croppedImagePath,
+                thumbnailPath: newThumbPath,
                 material: item.material,
                 fit: item.fit,
                 neckline: item.neckline,

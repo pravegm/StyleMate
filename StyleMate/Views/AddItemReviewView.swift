@@ -263,7 +263,7 @@ struct AddItemReviewView: View {
                                 product: prod,
                                 colors: seg.colors,
                                 pattern: pattern,
-                                brand: "",
+                                brand: seg.brand,
                                 garmentImage: seg.maskImage,
                                 material: seg.material ?? "",
                                 fit: seg.fit,
@@ -322,7 +322,7 @@ struct AddItemReviewView: View {
                     product: prod,
                     colors: seg.colors,
                     pattern: pattern,
-                    brand: "",
+                    brand: seg.brand,
                     garmentImage: seg.maskImage,
                     material: seg.material ?? "",
                     fit: seg.fit,
@@ -434,6 +434,7 @@ struct AddItemReviewView: View {
             let fullImage = item.garmentImage ?? images[item.sourceImageIndex]
             let imagePath = WardrobeImageFileHelper.saveImageAsPNG(fullImage) ?? WardrobeImageFileHelper.saveImage(fullImage) ?? ""
             let croppedImagePath = imagePath
+            let thumbnailPath = WardrobeImageFileHelper.saveThumbnail(fullImage)
 
             let wardrobeItem = WardrobeItem(
                 category: item.category,
@@ -443,6 +444,7 @@ struct AddItemReviewView: View {
                 pattern: item.pattern,
                 imagePath: imagePath,
                 croppedImagePath: croppedImagePath,
+                thumbnailPath: thumbnailPath,
                 material: item.material.isEmpty ? nil : item.material,
                 fit: item.fit,
                 neckline: item.neckline,

@@ -71,6 +71,7 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
     let pattern: Pattern
     let imagePath: String
     let croppedImagePath: String?
+    let thumbnailPath: String?
 
     let material: String?
     let fit: Fit?
@@ -81,6 +82,7 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
     
     var image: UIImage? { WardrobeImageFileHelper.loadImage(at: imagePath) }
     var croppedImage: UIImage? { croppedImagePath != nil ? WardrobeImageFileHelper.loadImage(at: croppedImagePath!) : nil }
+    var thumbnailImage: UIImage? { thumbnailPath != nil ? WardrobeImageFileHelper.loadImage(at: thumbnailPath!) : nil }
     
     var displayProduct: String {
         let exceptions = [
@@ -132,7 +134,7 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
         return details
     }
     
-    init(id: UUID = UUID(), category: Category, product: String, colors: [String], brand: String, pattern: Pattern, imagePath: String, croppedImagePath: String? = nil, material: String? = nil, fit: Fit? = nil, neckline: Neckline? = nil, sleeveLength: SleeveLength? = nil, garmentLength: GarmentLength? = nil, details: String? = nil) {
+    init(id: UUID = UUID(), category: Category, product: String, colors: [String], brand: String, pattern: Pattern, imagePath: String, croppedImagePath: String? = nil, thumbnailPath: String? = nil, material: String? = nil, fit: Fit? = nil, neckline: Neckline? = nil, sleeveLength: SleeveLength? = nil, garmentLength: GarmentLength? = nil, details: String? = nil) {
         self.id = id
         self.category = category
         self.product = product
@@ -141,6 +143,7 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
         self.pattern = pattern
         self.imagePath = imagePath
         self.croppedImagePath = croppedImagePath
+        self.thumbnailPath = thumbnailPath
         self.material = material
         self.fit = fit
         self.neckline = neckline
@@ -199,5 +202,29 @@ class WardrobeImageFileHelper {
         guard let filename = filename else { return }
         let url = folderURL.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: url)
+    }
+
+    static func saveThumbnail(_ image: UIImage, maxDimension: CGFloat = 200) -> String? {
+        let size = image.size
+        let scale: CGFloat
+        if size.width > size.height {
+            scale = min(maxDimension / size.width, 1.0)
+        } else {
+            scale = min(maxDimension / size.height, 1.0)
+        }
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let thumbnailImage = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        let filename = "thumb_" + UUID().uuidString + ".jpg"
+        let url = folderURL.appendingPathComponent(filename)
+        guard let data = thumbnailImage.jpegData(compressionQuality: 0.7) else { return nil }
+        do {
+            try data.write(to: url)
+            return filename
+        } catch {
+            return nil
+        }
     }
 } 

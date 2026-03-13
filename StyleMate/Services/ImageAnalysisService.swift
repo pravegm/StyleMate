@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import Vision
 
 class ImageAnalysisService {
     static let shared = ImageAnalysisService()
@@ -31,6 +32,7 @@ class ImageAnalysisService {
         let sleeveLength: SleeveLength?
         let garmentLength: GarmentLength?
         let details: String?
+        let brand: String
     }
 
     struct SegmentedItem {
@@ -44,13 +46,58 @@ class ImageAnalysisService {
         let sleeveLength: SleeveLength?
         let garmentLength: GarmentLength?
         let details: String?
+        let brand: String
         let maskImage: UIImage?
+    }
+
+    // MARK: - Photo Mode Detection
+
+    enum PhotoMode {
+        case wornOnPerson
+        case productPhoto
+    }
+
+    private func detectPhotoMode(_ image: UIImage) async -> PhotoMode {
+        guard let cgImage = image.cgImage else { return .productPhoto }
+
+        return await withCheckedContinuation { continuation in
+            let request = VNDetectHumanRectanglesRequest { request, error in
+                if let results = request.results as? [VNHumanObservation],
+                   !results.isEmpty {
+                    continuation.resume(returning: .wornOnPerson)
+                } else {
+                    continuation.resume(returning: .productPhoto)
+                }
+            }
+            request.upperBodyOnly = false
+
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            do {
+                try handler.perform([request])
+            } catch {
+                print("[StyleMate] Person detection failed: \(error.localizedDescription)")
+                continuation.resume(returning: .productPhoto)
+            }
+        }
     }
 
     // MARK: - Segmentation Pipeline
 
     func analyzeAndSegment(image: UIImage, userGender: String? = nil, retryCount: Int = 0) async -> [SegmentedItem] {
         let normalizedImage = normalizeOrientation(image)
+
+        let photoMode = await detectPhotoMode(normalizedImage)
+        print("[StyleMate] Segmentation: Photo mode = \(photoMode)")
+
+        switch photoMode {
+        case .wornOnPerson:
+            return await analyzeWornOnPerson(normalizedImage: normalizedImage, userGender: userGender)
+        case .productPhoto:
+            return await analyzeProductPhoto(normalizedImage: normalizedImage, userGender: userGender)
+        }
+    }
+
+    private func analyzeWornOnPerson(normalizedImage: UIImage, userGender: String?) async -> [SegmentedItem] {
         let classifications = await analyzeMultiple(image: normalizedImage, userGender: userGender)
 
         guard !classifications.isEmpty else {
@@ -64,8 +111,6 @@ class ImageAnalysisService {
         let bgRemoved = trimWhitespace(bgRemovedRaw)
         print("[StyleMate] Segmentation: BG removed and trimmed: \(Int(bgRemovedRaw.size.width))x\(Int(bgRemovedRaw.size.height)) -> \(Int(bgRemoved.size.width))x\(Int(bgRemoved.size.height))")
 
-        // Use the ORIGINAL image (with background) for bbox detection -- it has full context
-        // (floor for shoes, face for glasses, background) that bg-removed images lack.
         let originalForBBox = resizedForAPI(normalizedImage, maxDimension: 1536)
         guard let originalData = originalForBBox.jpegData(compressionQuality: 0.8) else { return [] }
         let originalBase64 = originalData.base64EncodedString()
@@ -73,12 +118,10 @@ class ImageAnalysisService {
 
         let validItems = classifications.filter { $0.category != nil && $0.product != nil && $0.pattern != nil && !$0.colors.isEmpty }
 
-        // Split into clothing (batch) vs footwear/accessories (individual focused)
         let clothingCategories: Set<Category> = [.tops, .bottoms, .midLayers, .outerwear, .onePieces, .activewear, .ethnicWear, .innerwear]
         let clothingItems = validItems.filter { clothingCategories.contains($0.category!) }
         let smallItems = validItems.filter { !clothingCategories.contains($0.category!) }
 
-        // Run batch and focused calls in parallel
         async let clothingBoxesTask: [String: [Int]] = {
             let labels = clothingItems.map { "\($0.product!) (\($0.category!.rawValue))" }
             guard !labels.isEmpty else { return [:] }
@@ -120,7 +163,6 @@ class ImageAnalysisService {
         allBoxes.merge(smallItemBoxes) { _, new in new }
         print("[StyleMate] Segmentation: Batch got \(clothingBoxes.count) clothing boxes, Focused got \(smallItemBoxes.count) small item boxes")
 
-        // Apply boxes to bgRemovedRaw (same dimensions as original)
         var results: [SegmentedItem] = []
         for item in validItems {
             guard let category = item.category, let product = item.product,
@@ -156,11 +198,86 @@ class ImageAnalysisService {
                 sleeveLength: item.sleeveLength,
                 garmentLength: item.garmentLength,
                 details: item.details,
+                brand: item.brand,
                 maskImage: garmentImage
             ))
         }
 
         print("[StyleMate] Segmentation: Returning \(results.count) items")
+        return results
+    }
+
+    private func analyzeProductPhoto(normalizedImage: UIImage, userGender: String?) async -> [SegmentedItem] {
+        let classifications = await analyzeMultiple(image: normalizedImage, userGender: userGender, isProductPhoto: true)
+        guard !classifications.isEmpty else {
+            print("[StyleMate] ProductPhoto: No items classified, returning empty")
+            return []
+        }
+
+        print("[StyleMate] ProductPhoto: Classified \(classifications.count) items")
+
+        let trimmed = trimWhitespace(normalizedImage)
+
+        if classifications.count == 1, let item = classifications.first,
+           let category = item.category, let product = item.product,
+           let pattern = item.pattern, !item.colors.isEmpty {
+            let finalImage = padToSquare(trimmed)
+            return [SegmentedItem(
+                category: category,
+                product: product,
+                colors: item.colors,
+                pattern: pattern,
+                material: item.material,
+                fit: item.fit,
+                neckline: item.neckline,
+                sleeveLength: item.sleeveLength,
+                garmentLength: item.garmentLength,
+                details: item.details,
+                brand: item.brand,
+                maskImage: finalImage
+            )]
+        }
+
+        let validItems = classifications.filter { $0.category != nil && $0.product != nil && $0.pattern != nil && !$0.colors.isEmpty }
+        let resizedForBBox = resizedForAPI(normalizedImage, maxDimension: 1536)
+        guard let bboxData = resizedForBBox.jpegData(compressionQuality: 0.8) else { return [] }
+        let bboxBase64 = bboxData.base64EncodedString()
+
+        let labels = validItems.map { "\($0.product!) (\($0.category!.rawValue))" }
+        let boxes = await getAllBoundingBoxes(originalBase64: bboxBase64, itemLabels: labels)
+
+        var results: [SegmentedItem] = []
+        for item in validItems {
+            guard let category = item.category, let product = item.product,
+                  let pattern = item.pattern else { continue }
+            let label = "\(product) (\(category.rawValue))"
+            var garmentImage: UIImage?
+
+            if let box = boxes[label] {
+                garmentImage = extractGarment(from: normalizedImage, boxNormalized: box)
+            }
+
+            if garmentImage == nil {
+                garmentImage = padToSquare(trimmed)
+            }
+
+            results.append(SegmentedItem(
+                category: category,
+                product: product,
+                colors: item.colors,
+                pattern: pattern,
+                material: item.material,
+                fit: item.fit,
+                neckline: item.neckline,
+                sleeveLength: item.sleeveLength,
+                garmentLength: item.garmentLength,
+                details: item.details,
+                brand: item.brand,
+                maskImage: garmentImage
+            ))
+        }
+
+        print("[StyleMate] ProductPhoto: Returning \(results.count) items")
         return results
     }
 
@@ -627,7 +744,7 @@ If you absolutely cannot find this item, return an empty list: []
 
     // MARK: - Classification Pipeline
 
-    func analyzeMultiple(image: UIImage, userGender: String? = nil, imageIndex: Int? = nil, retryCount: Int = 0) async -> [ClassifiedItem] {
+    func analyzeMultiple(image: UIImage, userGender: String? = nil, imageIndex: Int? = nil, retryCount: Int = 0, isProductPhoto: Bool = false) async -> [ClassifiedItem] {
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
             print("[StyleMate] Failed to convert image to JPEG")
             return []
@@ -636,14 +753,20 @@ If you absolutely cannot find this item, return an empty list: []
         print("[StyleMate] Image encoded: \(imageData.count) bytes (attempt \(retryCount + 1))")
 
         let genderContext: String
-        if let gender = userGender, !gender.isEmpty {
+        if isProductPhoto {
+            genderContext = ""
+        } else if let gender = userGender, !gender.isEmpty {
             genderContext = "\nThe user is \(gender). Use this to better identify garment types (e.g., distinguish men's kurta vs women's kurti, men's tank top vs camisole)."
         } else {
             genderContext = ""
         }
 
+        let openingLine = isProductPhoto
+            ? "You are an expert fashion assistant. Analyze the clothing items visible in this product/flat-lay photo. The items are NOT being worn by a person — they may be laid flat, hung on a rack, displayed on a mannequin, or shown as an e-commerce product shot."
+            : "You are an expert fashion assistant. Analyze the clothing items worn by the person in this image."
+
         let prompt = """
-You are an expert fashion assistant. Analyze the clothing items worn by the person in this image.\(genderContext)
+\(openingLine)\(genderContext)
 
 Valid categories: Tops, Bottoms, Mid-Layers, Outerwear, One-Pieces, Footwear, Accessories, Innerwear, Activewear, Ethnic Wear
 
@@ -677,6 +800,7 @@ For EACH visible clothing item, return:
 - sleeveLength: one of the valid sleeve lengths above, or null if not applicable (bottoms, footwear, accessories, sleeveless dresses)
 - garmentLength: one of the valid garment lengths above, or null if not applicable (tops, footwear, accessories)
 - details: a short comma-separated string of distinctive visual features that make this specific item unique (e.g. "cable knit, ribbed cuffs", "distressed wash, raw hem", "front zip, logo on chest", "pleated, high-waisted", "patch pockets, contrast stitching"). Return "" if no notable details.
+- brand: If a brand logo, wordmark, or brand name is CLEARLY visible on the garment (e.g. Nike swoosh, Adidas three stripes, visible text like "ZARA", "H&M", a Ralph Lauren polo horse, Lacoste crocodile), return the brand name as a string. If no brand is clearly identifiable, return "". Do NOT guess the brand from the style or cut alone — only return a brand if you can actually SEE a logo, wordmark, emblem, or brand text on the item.
 
 DEDUPLICATION RULES:
 - Each distinct physical item should appear EXACTLY ONCE in your response.
@@ -714,9 +838,10 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
                     "neckline": ["type": "string"],
                     "sleeveLength": ["type": "string"],
                     "garmentLength": ["type": "string"],
-                    "details": ["type": "string"]
+                    "details": ["type": "string"],
+                    "brand": ["type": "string"]
                 ],
-                "required": ["category", "product", "colors", "pattern"]
+                "required": ["category", "product", "colors", "pattern", "brand"]
             ]
         ]
 
@@ -767,7 +892,7 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
                     let delay = UInt64(pow(2.0, Double(retryCount + 1))) * 1_000_000_000
                     print("[StyleMate] Rate limited, waiting \(delay / 1_000_000_000)s before retry...")
                     try? await Task.sleep(nanoseconds: delay)
-                    return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1)
+                    return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1, isProductPhoto: isProductPhoto)
                 }
                 print("[StyleMate] Rate limited after all retries")
                 return []
@@ -778,14 +903,14 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
                 print("[StyleMate] API error \(httpResponse.statusCode): \(errorBody.prefix(500))")
                 if retryCount < 2 {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1)
+                    return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1, isProductPhoto: isProductPhoto)
                 }
                 return []
             }
 
             guard let responseJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 print("[StyleMate] Response is not valid JSON: \(String(data: data, encoding: .utf8)?.prefix(300) ?? "nil")")
-                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount)
+                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount, isProductPhoto: isProductPhoto)
             }
 
             guard let candidates = responseJson["candidates"] as? [[String: Any]],
@@ -793,13 +918,13 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
                   let content = firstCandidate["content"] as? [String: Any],
                   let parts = content["parts"] as? [[String: Any]] else {
                 print("[StyleMate] Unexpected response structure: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "nil")")
-                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount)
+                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount, isProductPhoto: isProductPhoto)
             }
 
             guard let textPart = parts.first(where: { $0["text"] != nil }),
                   let text = textPart["text"] as? String else {
                 print("[StyleMate] No text part in response parts: \(parts)")
-                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount)
+                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount, isProductPhoto: isProductPhoto)
             }
 
             print("[StyleMate] Response text: \(text.prefix(500))")
@@ -807,7 +932,7 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             guard let textData = text.data(using: .utf8),
                   let itemsArray = try? JSONSerialization.jsonObject(with: textData) as? [[String: Any]] else {
                 print("[StyleMate] Failed to parse JSON array from response text")
-                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount)
+                return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount, isProductPhoto: isProductPhoto)
             }
 
             print("[StyleMate] Parsed \(itemsArray.count) raw items from API")
@@ -830,6 +955,7 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
                 let sleeveLengthStr = (dict["sleeveLength"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let garmentLengthStr = (dict["garmentLength"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let detailsStr = dict["details"] as? String
+                let brandStr = (dict["brand"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
                 let fitVal = matchFit(fitStr)
                 let necklineVal = matchNeckline(necklineStr)
@@ -847,7 +973,8 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
                         neckline: necklineVal,
                         sleeveLength: sleeveLengthVal,
                         garmentLength: garmentLengthVal,
-                        details: detailsStr
+                        details: detailsStr,
+                        brand: brandStr
                     ))
                     print("[StyleMate] Item \(i): OK - \(category.rawValue) / \(product) / \(colors.joined(separator: ",")) / \(pattern.rawValue)")
                 } else {
@@ -858,7 +985,7 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             if validResults.isEmpty && !itemsArray.isEmpty && retryCount < 2 {
                 print("[StyleMate] All \(itemsArray.count) items failed to parse, retrying...")
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
-                return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1)
+                return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1, isProductPhoto: isProductPhoto)
             }
 
             print("[StyleMate] Returning \(validResults.count) valid items")
@@ -868,17 +995,17 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             print("[StyleMate] Network error: \(error.localizedDescription)")
             if retryCount < 2 {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
-                return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1)
+                return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1, isProductPhoto: isProductPhoto)
             }
             return []
         }
     }
 
-    private func retryOrEmpty(image: UIImage, userGender: String?, imageIndex: Int?, retryCount: Int) async -> [ClassifiedItem] {
+    private func retryOrEmpty(image: UIImage, userGender: String?, imageIndex: Int?, retryCount: Int, isProductPhoto: Bool = false) async -> [ClassifiedItem] {
         if retryCount < 2 {
             print("[StyleMate] Retrying (attempt \(retryCount + 2))...")
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1)
+            return await analyzeMultiple(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount + 1, isProductPhoto: isProductPhoto)
         }
         print("[StyleMate] All retries exhausted, returning empty")
         return []
