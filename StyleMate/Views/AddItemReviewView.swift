@@ -7,9 +7,16 @@ struct AddItemReviewView: View {
     @EnvironmentObject var authService: AuthService
 
     @State private var isAnalyzing = true
-    @State private var progress: Double = 0.0
-    @State private var progressTimer: Timer? = nil
-    @State private var reviewItems: [ReviewItem] = []
+    @State private var photoSections: [PhotoSection] = []
+    @State private var expandedImage: UIImage? = nil
+
+    struct PhotoSection: Identifiable {
+        let id = UUID()
+        let imageIndex: Int
+        let sourceImage: UIImage
+        var items: [ReviewItem]
+        var isLoading: Bool
+    }
 
     struct ReviewItem: Identifiable {
         let id = UUID()
@@ -33,24 +40,26 @@ struct AddItemReviewView: View {
         var isDuplicate: Bool { duplicateMatch != nil }
     }
 
-    var selectedCount: Int { reviewItems.filter(\.isSelected).count }
+    private var allReviewItems: [ReviewItem] {
+        photoSections.flatMap(\.items)
+    }
+
+    private var selectedCount: Int {
+        allReviewItems.filter(\.isSelected).count
+    }
+
+    private var allDoneNoItems: Bool {
+        !photoSections.isEmpty
+        && photoSections.allSatisfy { !$0.isLoading }
+        && allReviewItems.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 DS.Colors.backgroundPrimary.ignoresSafeArea()
 
-                if isAnalyzing {
-                    OutfitLoadingOverlay(progress: progress, message: "Analyzing your items…")
-                        .onAppear {
-                            progress = 0.0
-                            progressTimer?.invalidate()
-                            progressTimer = Timer.scheduledTimer(withTimeInterval: 0.035, repeats: true) { timer in
-                                if progress < 0.98 { progress += 0.006 } else { timer.invalidate() }
-                            }
-                        }
-                        .onDisappear { progressTimer?.invalidate() }
-                } else if reviewItems.isEmpty {
+                if allDoneNoItems {
                     VStack(spacing: DS.Spacing.md) {
                         Image(systemName: "eye.slash")
                             .font(.system(size: 40))
@@ -67,7 +76,7 @@ struct AddItemReviewView: View {
                 } else {
                     VStack(spacing: 0) {
                         ScrollView {
-                            VStack(spacing: DS.Spacing.sm) {
+                            VStack(spacing: DS.Spacing.md) {
                                 if authService.user?.gender == nil || (authService.user?.gender ?? "").isEmpty {
                                     HStack(spacing: DS.Spacing.sm) {
                                         Image(systemName: "sparkles")
@@ -87,13 +96,83 @@ struct AddItemReviewView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
                                 }
 
-                                Text("\(selectedCount) of \(reviewItems.count) items selected")
-                                    .font(DS.Font.subheadline)
-                                    .foregroundColor(DS.Colors.textSecondary)
-                                    .padding(.top, DS.Spacing.sm)
+                                if !allReviewItems.isEmpty {
+                                    Text("\(selectedCount) of \(allReviewItems.count) items selected")
+                                        .font(DS.Font.subheadline)
+                                        .foregroundColor(DS.Colors.textSecondary)
+                                        .padding(.top, DS.Spacing.sm)
+                                }
 
-                                ForEach($reviewItems) { $item in
-                                    ReviewItemRow(item: $item, wardrobeItems: wardrobeViewModel.items)
+                                ForEach($photoSections) { $section in
+                                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+
+                                        // Photo header
+                                        HStack(spacing: DS.Spacing.sm) {
+                                            Image(uiImage: section.sourceImage)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 40, height: 40)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                            VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                                                Text("Photo \(section.imageIndex + 1)")
+                                                    .font(DS.Font.headline)
+                                                    .foregroundColor(DS.Colors.textPrimary)
+                                                Text(section.isLoading
+                                                     ? "Analyzing..."
+                                                     : "\(section.items.count) item\(section.items.count == 1 ? "" : "s") detected")
+                                                    .font(DS.Font.caption1)
+                                                    .foregroundColor(DS.Colors.textSecondary)
+                                            }
+
+                                            Spacer()
+
+                                            if !section.isLoading {
+                                                Button(action: {
+                                                    reanalyzePhoto(sectionIndex: section.imageIndex)
+                                                }) {
+                                                    HStack(spacing: DS.Spacing.micro) {
+                                                        Image(systemName: "arrow.clockwise")
+                                                        Text("Retry")
+                                                    }
+                                                    .font(DS.Font.caption1)
+                                                    .foregroundColor(DS.Colors.accent)
+                                                    .padding(.horizontal, DS.Spacing.sm)
+                                                    .padding(.vertical, DS.Spacing.xs)
+                                                    .background(DS.Colors.accent.opacity(0.08))
+                                                    .clipShape(Capsule())
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                        .padding(.horizontal, DS.Spacing.sm)
+
+                                        if section.isLoading {
+                                            ForEach(0..<2, id: \.self) { _ in
+                                                SkeletonItemRow()
+                                            }
+                                        } else if section.items.isEmpty {
+                                            HStack(spacing: DS.Spacing.sm) {
+                                                Image(systemName: "eye.slash")
+                                                    .foregroundColor(DS.Colors.textTertiary)
+                                                Text("No items detected")
+                                                    .font(DS.Font.subheadline)
+                                                    .foregroundColor(DS.Colors.textSecondary)
+                                            }
+                                            .padding(DS.Spacing.md)
+                                            .frame(maxWidth: .infinity)
+                                            .background(DS.Colors.backgroundCard)
+                                            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+                                        } else {
+                                            ForEach($section.items) { $item in
+                                                ReviewItemRow(
+                                                    item: $item,
+                                                    wardrobeItems: wardrobeViewModel.items,
+                                                    onExpandImage: { img in expandedImage = img }
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             .padding(.horizontal, DS.Spacing.screenH)
@@ -108,8 +187,8 @@ struct AddItemReviewView: View {
                                     Text("Add \(selectedCount) Items to Wardrobe")
                                 }
                             }
-                            .buttonStyle(DSPrimaryButton(isDisabled: selectedCount == 0))
-                            .disabled(selectedCount == 0)
+                            .buttonStyle(DSPrimaryButton(isDisabled: selectedCount == 0 || photoSections.allSatisfy(\.isLoading)))
+                            .disabled(selectedCount == 0 || photoSections.allSatisfy(\.isLoading))
                             .padding(.horizontal, DS.Spacing.screenH)
                             .padding(.vertical, DS.Spacing.md)
                         }
@@ -117,6 +196,30 @@ struct AddItemReviewView: View {
                     }
                 }
             }
+            .overlay {
+                if let expandedImg = expandedImage {
+                    ZStack {
+                        Color.black.opacity(0.7)
+                            .ignoresSafeArea()
+                            .onTapGesture { expandedImage = nil }
+
+                        VStack(spacing: DS.Spacing.md) {
+                            Image(uiImage: expandedImg)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: 300, maxHeight: 300)
+                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+                                .shadow(radius: 10)
+
+                            Text("Tap anywhere to close")
+                                .font(DS.Font.caption1)
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: expandedImage != nil)
             .navigationTitle("Review Items")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -133,75 +236,137 @@ struct AddItemReviewView: View {
 
     private func analyzeAllImages() {
         isAnalyzing = true
+
         Task {
-            var allItems: [ReviewItem] = []
+            await MainActor.run {
+                photoSections = images.enumerated().map { idx, img in
+                    PhotoSection(imageIndex: idx, sourceImage: img, items: [], isLoading: true)
+                }
+                isAnalyzing = false
+            }
+
             let userGender = authService.user?.gender
 
-            await withTaskGroup(of: (Int, [ImageAnalysisService.SegmentedItem]).self) { group in
+            await withTaskGroup(of: (Int, [ReviewItem]).self) { group in
                 for (idx, image) in images.enumerated() {
                     group.addTask {
                         let results = await ImageAnalysisService.shared.analyzeAndSegment(
                             image: image,
                             userGender: userGender
                         )
-                        return (idx, results)
+                        var items = results.compactMap { seg -> ReviewItem? in
+                            guard let cat = seg.category, let prod = seg.product,
+                                  let pattern = seg.pattern, !seg.colors.isEmpty else { return nil }
+                            return ReviewItem(
+                                sourceImageIndex: idx,
+                                category: cat,
+                                product: prod,
+                                colors: seg.colors,
+                                pattern: pattern,
+                                brand: "",
+                                garmentImage: seg.maskImage,
+                                material: seg.material ?? "",
+                                fit: seg.fit,
+                                neckline: seg.neckline,
+                                sleeveLength: seg.sleeveLength,
+                                garmentLength: seg.garmentLength,
+                                details: seg.details ?? ""
+                            )
+                        }
+
+                        let footwearIndices = items.indices.filter { items[$0].category == .footwear }
+                        if footwearIndices.count > 1 {
+                            items = items.enumerated().filter { i, item in
+                                item.category != .footwear || i == footwearIndices.first
+                            }.map(\.element)
+                        }
+
+                        items = self.deduplicateAccessories(items)
+                        return (idx, items)
                     }
                 }
-                for await (idx, results) in group {
-                    var items = results.compactMap { seg -> ReviewItem? in
-                        guard let cat = seg.category, let prod = seg.product,
-                              let pattern = seg.pattern, !seg.colors.isEmpty else { return nil }
-                        return ReviewItem(
-                            sourceImageIndex: idx,
-                            category: cat,
-                            product: prod,
-                            colors: seg.colors,
-                            pattern: pattern,
-                            brand: "",
-                            garmentImage: seg.maskImage,
-                            material: seg.material ?? "",
-                            fit: seg.fit,
-                            neckline: seg.neckline,
-                            sleeveLength: seg.sleeveLength,
-                            garmentLength: seg.garmentLength,
-                            details: seg.details ?? ""
-                        )
+
+                for await (idx, items) in group {
+                    await MainActor.run {
+                        if idx < photoSections.count {
+                            photoSections[idx].items = items
+                            photoSections[idx].isLoading = false
+                            markAllDuplicates()
+                        }
                     }
-                    let footwearIndices = items.indices.filter { items[$0].category == .footwear }
-                    if footwearIndices.count > 1 {
-                        items = items.enumerated().filter { i, item in
-                            item.category != .footwear || i == footwearIndices.first
-                        }.map(\.element)
-                    }
-                    items = deduplicateAccessories(items)
-                    allItems.append(contentsOf: items)
                 }
-            }
-
-            allItems.sort { $0.sourceImageIndex < $1.sourceImageIndex }
-            markDuplicates(&allItems)
-
-            await MainActor.run {
-                reviewItems = allItems
-                isAnalyzing = false
-                progress = 1.0
             }
         }
     }
 
-    private func markDuplicates(_ items: inout [ReviewItem]) {
-        for i in items.indices {
-            items[i].duplicateMatch = DuplicateDetector.shared.findBestMatch(
-                category: items[i].category,
-                product: items[i].product,
-                colors: items[i].colors,
-                pattern: items[i].pattern,
-                material: items[i].material.isEmpty ? nil : items[i].material,
-                fit: items[i].fit,
-                neckline: items[i].neckline,
-                sleeveLength: items[i].sleeveLength,
-                existingItems: wardrobeViewModel.items
+    private func reanalyzePhoto(sectionIndex: Int) {
+        guard sectionIndex < photoSections.count else { return }
+        Haptics.light()
+
+        photoSections[sectionIndex].isLoading = true
+        photoSections[sectionIndex].items = []
+
+        Task {
+            let image = images[sectionIndex]
+            let results = await ImageAnalysisService.shared.analyzeAndSegment(
+                image: image,
+                userGender: authService.user?.gender
             )
+
+            var items = results.compactMap { seg -> ReviewItem? in
+                guard let cat = seg.category, let prod = seg.product,
+                      let pattern = seg.pattern, !seg.colors.isEmpty else { return nil }
+                return ReviewItem(
+                    sourceImageIndex: sectionIndex,
+                    category: cat,
+                    product: prod,
+                    colors: seg.colors,
+                    pattern: pattern,
+                    brand: "",
+                    garmentImage: seg.maskImage,
+                    material: seg.material ?? "",
+                    fit: seg.fit,
+                    neckline: seg.neckline,
+                    sleeveLength: seg.sleeveLength,
+                    garmentLength: seg.garmentLength,
+                    details: seg.details ?? ""
+                )
+            }
+
+            let footwearIndices = items.indices.filter { items[$0].category == .footwear }
+            if footwearIndices.count > 1 {
+                items = items.enumerated().filter { i, item in
+                    item.category != .footwear || i == footwearIndices.first
+                }.map(\.element)
+            }
+            items = deduplicateAccessories(items)
+
+            await MainActor.run {
+                photoSections[sectionIndex].items = items
+                photoSections[sectionIndex].isLoading = false
+                markAllDuplicates()
+            }
+        }
+    }
+
+    private func markAllDuplicates() {
+        let existingItems = wardrobeViewModel.items
+        for sectionIdx in photoSections.indices {
+            for itemIdx in photoSections[sectionIdx].items.indices {
+                let item = photoSections[sectionIdx].items[itemIdx]
+                photoSections[sectionIdx].items[itemIdx].duplicateMatch =
+                    DuplicateDetector.shared.findBestMatch(
+                        category: item.category,
+                        product: item.product,
+                        colors: item.colors,
+                        pattern: item.pattern,
+                        material: item.material.isEmpty ? nil : item.material,
+                        fit: item.fit,
+                        neckline: item.neckline,
+                        sleeveLength: item.sleeveLength,
+                        existingItems: existingItems
+                    )
+            }
         }
     }
 
@@ -260,7 +425,7 @@ struct AddItemReviewView: View {
     // MARK: - Save
 
     private func addSelectedItems() {
-        let selected = reviewItems.filter(\.isSelected)
+        let selected = allReviewItems.filter(\.isSelected)
         guard !selected.isEmpty else { return }
 
         Haptics.success()
@@ -298,6 +463,7 @@ struct AddItemReviewView: View {
 private struct ReviewItemRow: View {
     @Binding var item: AddItemReviewView.ReviewItem
     let wardrobeItems: [WardrobeItem]
+    var onExpandImage: ((UIImage) -> Void)? = nil
 
     @State private var isExpanded = false
 
@@ -322,6 +488,10 @@ private struct ReviewItemRow: View {
                         .scaledToFit()
                         .frame(width: 60, height: 60)
                         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onExpandImage?(img)
+                        }
                 }
 
                 VStack(alignment: .leading, spacing: DS.Spacing.micro) {
@@ -358,6 +528,10 @@ private struct ReviewItemRow: View {
                                     RoundedRectangle(cornerRadius: 6)
                                         .stroke(DS.Colors.warning.opacity(0.4), lineWidth: 1)
                                 )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    onExpandImage?(existingImage)
+                                }
                         }
 
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -410,6 +584,10 @@ private struct ReviewItemRow: View {
                                 .scaledToFit()
                                 .frame(width: 48, height: 48)
                                 .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    onExpandImage?(existingImage)
+                                }
                         }
 
                         VStack(alignment: .leading, spacing: DS.Spacing.micro) {
@@ -658,5 +836,44 @@ private struct ReviewItemRow: View {
             .fill(color)
             .frame(width: 18, height: 18)
             .overlay(Circle().stroke(Color.black.opacity(0.1), lineWidth: 1))
+    }
+}
+
+// MARK: - Skeleton Placeholder
+
+private struct SkeletonItemRow: View {
+    @State private var shimmer = false
+
+    var body: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            Circle()
+                .fill(DS.Colors.backgroundSecondary)
+                .frame(width: 24, height: 24)
+                .padding(.leading, 10)
+
+            RoundedRectangle(cornerRadius: DS.Radius.button)
+                .fill(DS.Colors.backgroundSecondary)
+                .frame(width: 60, height: 60)
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(DS.Colors.backgroundSecondary)
+                    .frame(width: 60, height: 12)
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(DS.Colors.backgroundSecondary)
+                    .frame(width: 100, height: 14)
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(DS.Colors.backgroundSecondary)
+                    .frame(width: 80, height: 12)
+            }
+
+            Spacer()
+        }
+        .padding(DS.Spacing.sm)
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+        .opacity(shimmer ? 0.6 : 1.0)
+        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: shimmer)
+        .onAppear { shimmer = true }
     }
 }
