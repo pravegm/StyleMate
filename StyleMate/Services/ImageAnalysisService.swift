@@ -1339,7 +1339,18 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             genderInstruction = ""
         }
 
-        let weatherInstruction: String
+        let hour = Calendar.current.component(.hour, from: Date())
+        let timeOfDay: String
+        switch hour {
+        case 5..<12: timeOfDay = "morning"
+        case 12..<17: timeOfDay = "afternoon"
+        case 17..<21: timeOfDay = "evening"
+        default: timeOfDay = "night"
+        }
+        let isNight = hour >= 21 || hour < 5
+        let isDark = weather?.isDay == 0 || isNight
+
+        var weatherInstruction: String
         if let weather = weather {
             let temp = Int(weather.temperature2m)
             let desc = WeatherService.weatherDescription(for: weather.weathercode)
@@ -1355,6 +1366,10 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             weatherInstruction = "Weather in \(city): \(desc), \(temp)°C. \(seasonHint)"
         } else {
             weatherInstruction = "No weather information available. Suggest outfits suitable for a typical day."
+        }
+        weatherInstruction += " Time of day: \(timeOfDay)."
+        if isDark {
+            weatherInstruction += " It is dark outside. Do NOT suggest sunglasses."
         }
 
         let prompt = """
@@ -1437,6 +1452,10 @@ WEATHER APPROPRIATENESS:
 - Mild (18-25°C): T-shirts, light shirts, jeans, sneakers. Light layers optional.
 - Hot (>25°C): Short sleeves, shorts, sandals, light fabrics. No jackets, sweaters, or boots.
 - Rain: Avoid suede shoes. Prefer waterproof outerwear if available.
+
+TIME-OF-DAY AWARENESS:
+- Sunglasses should ONLY be suggested during daytime (morning or afternoon when it's sunny). NEVER suggest sunglasses for evening or night outfits.
+- For evening/night outfits, consider that the user may be going somewhere indoors (restaurants, events) where lighter layers might suffice even in cold weather.
 
 MATERIAL COMPATIBILITY:
 - Don't combine very different textures without intention (e.g., silk blouse with cargo pants).
@@ -1611,6 +1630,20 @@ Return ONLY the JSON array. Example format:
             genderInstruction = ""
         }
 
+        let shuffleHour = Calendar.current.component(.hour, from: Date())
+        let shuffleTimeOfDay: String
+        switch shuffleHour {
+        case 5..<12: shuffleTimeOfDay = "morning"
+        case 12..<17: shuffleTimeOfDay = "afternoon"
+        case 17..<21: shuffleTimeOfDay = "evening"
+        default: shuffleTimeOfDay = "night"
+        }
+        let shuffleIsDark = shuffleHour >= 21 || shuffleHour < 5
+        var timeContext = "Time of day: \(shuffleTimeOfDay)."
+        if shuffleIsDark {
+            timeContext += " It is dark outside. Do NOT suggest sunglasses."
+        }
+
         let prompt = """
 You are an expert fashion stylist. Replace one item in an outfit while maintaining harmony.
 
@@ -1623,6 +1656,7 @@ AVAILABLE REPLACEMENTS:
 \(availableSummary)
 
 \(genderInstruction)
+\(timeContext)
 
 Choose the replacement that best harmonizes with the remaining items. Follow these rules:
 - Color harmony: 3-color rule, neutrals pair with everything. Monochromatic and analogous palettes preferred.
@@ -1740,6 +1774,20 @@ where N is the index number from the AVAILABLE REPLACEMENTS list above.
             genderInstruction = ""
         }
 
+        let addHour = Calendar.current.component(.hour, from: Date())
+        let addTimeOfDay: String
+        switch addHour {
+        case 5..<12: addTimeOfDay = "morning"
+        case 12..<17: addTimeOfDay = "afternoon"
+        case 17..<21: addTimeOfDay = "evening"
+        default: addTimeOfDay = "night"
+        }
+        let addIsDark = addHour >= 21 || addHour < 5
+        var addTimeContext = "Time of day: \(addTimeOfDay)."
+        if addIsDark {
+            addTimeContext += " It is dark outside. Do NOT suggest sunglasses."
+        }
+
         let prompt = """
 You are an expert fashion stylist. Add one item to an existing outfit.
 
@@ -1750,6 +1798,7 @@ AVAILABLE \(productType.uppercased()) OPTIONS:
 \(availableSummary)
 
 \(genderInstruction)
+\(addTimeContext)
 
 Choose the option that best complements the existing outfit. Follow these rules:
 - Color harmony: must fit the outfit's existing color palette (3-color rule, neutrals pair with everything).

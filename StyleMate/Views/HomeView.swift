@@ -173,7 +173,7 @@ struct HomeView: View {
                     )
                 }
             }
-            .sheet(isPresented: $homeVM.showOutfitSheet) {
+            .fullScreenCover(isPresented: $homeVM.showOutfitSheet) {
                 if let outfit = homeVM.todayOutfit {
                     TodayOutfitSheet(outfit: outfit, isPresented: $homeVM.showOutfitSheet)
                         .environmentObject(homeVM)

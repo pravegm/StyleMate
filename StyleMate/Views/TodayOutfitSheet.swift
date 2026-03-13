@@ -64,6 +64,41 @@ struct TodayOutfitSheet: View {
                     headerView
                     outfitCard(for: outfit)
                 }
+                .offset(x: dragOffset.width)
+                .rotationEffect(.degrees(cardRotation))
+                .opacity(cardOpacity)
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 30)
+                        .onChanged { value in
+                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            dragOffset = value.translation
+                            cardRotation = Double(value.translation.width / 20)
+                            let progress = min(abs(value.translation.width) / swipeThreshold, 1.0)
+                            cardOpacity = 1.0 - (progress * 0.3)
+
+                            if abs(value.translation.width) > swipeThreshold && !hasTriggeredSwipeHaptic {
+                                Haptics.light()
+                                hasTriggeredSwipeHaptic = true
+                            }
+                            if abs(value.translation.width) <= swipeThreshold {
+                                hasTriggeredSwipeHaptic = false
+                            }
+                        }
+                        .onEnded { value in
+                            hasTriggeredSwipeHaptic = false
+                            guard abs(value.translation.width) > abs(value.translation.height) else {
+                                resetCardPosition()
+                                return
+                            }
+                            if value.translation.width > swipeThreshold {
+                                dismissCard(direction: .right)
+                            } else if value.translation.width < -swipeThreshold {
+                                dismissCard(direction: .left)
+                            } else {
+                                resetCardPosition()
+                            }
+                        }
+                )
             }
 
             if homeVM.isLoading {
@@ -90,7 +125,6 @@ struct TodayOutfitSheet: View {
                 .zIndex(10)
             }
         }
-        .presentationDragIndicator(.visible)
         .sheet(item: $previewImage) { wrapper in
             VStack {
                 Spacer()
@@ -171,6 +205,12 @@ struct TodayOutfitSheet: View {
                         .padding(.vertical, DS.Spacing.micro)
                         .background(DS.Colors.backgroundSecondary)
                         .clipShape(Capsule())
+                }
+
+                Button(action: { isPresented = false }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundColor(DS.Colors.textTertiary)
                 }
             }
 
@@ -272,43 +312,9 @@ struct TodayOutfitSheet: View {
                 }
             }
         }
-        .offset(x: dragOffset.width)
-        .rotationEffect(.degrees(cardRotation))
-        .opacity(cardOpacity)
-        .gesture(swipeGesture)
         .overlay(alignment: .bottom) {
             bottomActionBar
         }
-    }
-
-    // MARK: - Swipe Gesture
-
-    private var swipeGesture: some Gesture {
-        DragGesture()
-            .onChanged { value in
-                dragOffset = value.translation
-                cardRotation = Double(value.translation.width / 20)
-                let progress = min(abs(value.translation.width) / swipeThreshold, 1.0)
-                cardOpacity = 1.0 - (progress * 0.3)
-
-                if abs(value.translation.width) > swipeThreshold && !hasTriggeredSwipeHaptic {
-                    Haptics.light()
-                    hasTriggeredSwipeHaptic = true
-                }
-                if abs(value.translation.width) <= swipeThreshold {
-                    hasTriggeredSwipeHaptic = false
-                }
-            }
-            .onEnded { value in
-                hasTriggeredSwipeHaptic = false
-                if value.translation.width > swipeThreshold {
-                    dismissCard(direction: .right)
-                } else if value.translation.width < -swipeThreshold {
-                    dismissCard(direction: .left)
-                } else {
-                    resetCardPosition()
-                }
-            }
     }
 
     private func dismissCard(direction: DismissDirection) {
