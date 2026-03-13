@@ -127,6 +127,7 @@ class ImageAnalysisService {
             var garmentImage: UIImage?
 
             if let box = allBoxes[label] {
+                print("[StyleMate] Segmentation: Applying box \(box) for \(label) to bgRemovedRaw \(Int(bgRemovedRaw.size.width))x\(Int(bgRemovedRaw.size.height))")
                 garmentImage = extractGarment(from: bgRemovedRaw, boxNormalized: box)
                 if garmentImage != nil {
                     print("[StyleMate] Segmentation: Extracted \(label) via bounding box")
@@ -476,6 +477,11 @@ If you absolutely cannot find this item in the image, return an empty JSON list 
 
     private func extractGarment(from bgRemovedImage: UIImage, boxNormalized: [Int]) -> UIImage? {
         guard let cgImage = bgRemovedImage.cgImage else { return nil }
+
+        print("[StyleMate] extractGarment: UIImage size=\(Int(bgRemovedImage.size.width))x\(Int(bgRemovedImage.size.height)), scale=\(bgRemovedImage.scale), orientation=\(bgRemovedImage.imageOrientation.rawValue)")
+        print("[StyleMate] extractGarment: CGImage width=\(cgImage.width), height=\(cgImage.height)")
+        print("[StyleMate] extractGarment: box=\(boxNormalized)")
+
         let imgWidth = CGFloat(cgImage.width)
         let imgHeight = CGFloat(cgImage.height)
 
@@ -483,6 +489,8 @@ If you absolutely cannot find this item in the image, return an empty JSON list 
         let x0 = CGFloat(boxNormalized[1]) / 1000.0 * imgWidth
         let y1 = CGFloat(boxNormalized[2]) / 1000.0 * imgHeight
         let x1 = CGFloat(boxNormalized[3]) / 1000.0 * imgWidth
+
+        print("[StyleMate] extractGarment: mapped to pixels x0=\(Int(x0)), y0=\(Int(y0)), x1=\(Int(x1)), y1=\(Int(y1)) in \(Int(imgWidth))x\(Int(imgHeight)) image")
 
         let boxWidth = x1 - x0
         let boxHeight = y1 - y0
