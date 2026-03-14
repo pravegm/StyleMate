@@ -35,6 +35,7 @@ struct MainTabView: View {
                 .tag(3)
         }
         .tint(DS.Colors.accent)
+        .animation(.easeInOut(duration: 0.2), value: selectedTab)
     }
 }
 

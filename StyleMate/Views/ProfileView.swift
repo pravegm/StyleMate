@@ -12,18 +12,47 @@ struct ProfileView: View {
     @State private var editGender: String = ""
     @State private var editAge: String = ""
     @State private var iCloudAvailable = true
+    @State private var syncRotation: Double = 0
     let genderOptions = ["", "Male", "Female"]
 
     private let maxStyles = 6
     private let allStyles = OutfitType.allCases
 
+    private var initials: String {
+        guard let name = authService.user?.name else { return "?" }
+        let parts = name.components(separatedBy: " ").filter { !$0.isEmpty }
+        if parts.count >= 2 {
+            return String(parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
+        }
+        return String(name.prefix(2)).uppercased()
+    }
+
+    private var categoryCount: Int {
+        Set(wardrobeViewModel.items.map { $0.category }).count
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                // Profile header
                 if let user = authService.user {
                     Section {
-                        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                        VStack(spacing: DS.Spacing.sm) {
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [DS.Colors.accent, DS.Colors.accent.opacity(0.7)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 72, height: 72)
+
+                                Text(initials)
+                                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                            }
+
                             Text(user.name)
                                 .font(DS.Font.title2)
                                 .foregroundColor(DS.Colors.textPrimary)
@@ -34,12 +63,15 @@ struct ProfileView: View {
                                     .foregroundColor(DS.Colors.textSecondary)
                             }
 
-                            Text("\(wardrobeViewModel.items.count) items")
-                                .font(DS.Font.caption1)
-                                .foregroundColor(DS.Colors.textTertiary)
-                                .padding(.top, DS.Spacing.micro)
+                            HStack(spacing: DS.Spacing.xl) {
+                                statBadge(value: "\(wardrobeViewModel.items.count)", label: "Items")
+                                statBadge(value: "\(categoryCount)", label: "Categories")
+                            }
+                            .padding(.top, DS.Spacing.xs)
                         }
-                        .padding(.vertical, DS.Spacing.xs)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, DS.Spacing.sm)
+                        .listRowBackground(Color.clear)
                     }
 
                     Section("Personal Information") {
@@ -76,19 +108,25 @@ struct ProfileView: View {
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: DS.Spacing.xs) {
                                         ForEach(user.preferredStyles, id: \.self) { style in
-                                            Text(style.rawValue)
-                                                .font(DS.Font.caption1)
-                                                .foregroundColor(DS.Colors.accent)
-                                                .padding(.horizontal, DS.Spacing.sm)
-                                                .padding(.vertical, DS.Spacing.xs)
-                                                .background(DS.Colors.accent.opacity(0.12))
-                                                .clipShape(Capsule())
+                                            HStack(spacing: DS.Spacing.micro) {
+                                                Image(systemName: style.icon)
+                                                    .font(DS.Font.caption2)
+                                                Text(style.rawValue)
+                                                    .font(DS.Font.caption1)
+                                            }
+                                            .foregroundColor(DS.Colors.accent)
+                                            .padding(.horizontal, DS.Spacing.sm)
+                                            .padding(.vertical, DS.Spacing.xs)
+                                            .background(DS.Colors.accent.opacity(0.12))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(DS.Colors.accent.opacity(0.2), lineWidth: 0.5))
                                         }
                                     }
                                 }
                             }
 
                             Button(action: {
+                                Haptics.light()
                                 if let user = authService.user {
                                     tempSelectedStyles = user.preferredStyles
                                     showStyleSheet = true
@@ -128,18 +166,7 @@ struct ProfileView: View {
                                 }
                             }
                             Spacer()
-                            switch cloudKitService.syncStatus {
-                            case .syncing:
-                                ProgressView()
-                            case .success:
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(DS.Colors.success)
-                            case .error:
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundColor(DS.Colors.warning)
-                            case .idle:
-                                EmptyView()
-                            }
+                            syncStatusIndicator
                         }
 
                         Button("Backup Now") {
@@ -194,7 +221,6 @@ struct ProfileView: View {
                     }
                 }
 
-                // Destructive section
                 Section {
                     Button(role: .destructive) {
                         showEmptyConfirmation = true
@@ -241,6 +267,7 @@ struct ProfileView: View {
                     showStyleError: $showStyleError,
                     onApply: {
                         if tempSelectedStyles.count == maxStyles {
+                            Haptics.success()
                             if var user = authService.user {
                                 user.preferredStyles = tempSelectedStyles
                                 authService.user = user
@@ -258,6 +285,46 @@ struct ProfileView: View {
                 )
                 .environmentObject(authService)
             }
+        }
+    }
+
+    // MARK: - Stat Badge
+
+    private func statBadge(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(DS.Font.title3)
+                .foregroundColor(DS.Colors.textPrimary)
+            Text(label)
+                .font(DS.Font.caption2)
+                .foregroundColor(DS.Colors.textTertiary)
+        }
+    }
+
+    // MARK: - Sync Status Indicator
+
+    @ViewBuilder
+    private var syncStatusIndicator: some View {
+        switch cloudKitService.syncStatus {
+        case .syncing:
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .foregroundColor(DS.Colors.accent)
+                .rotationEffect(.degrees(syncRotation))
+                .onAppear {
+                    withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
+                        syncRotation = 360
+                    }
+                }
+                .onDisappear { syncRotation = 0 }
+        case .success:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(DS.Colors.success)
+                .transition(.scale.combined(with: .opacity))
+        case .error:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(DS.Colors.warning)
+        case .idle:
+            EmptyView()
         }
     }
 }
@@ -298,19 +365,22 @@ struct StylePreferencesSheet: View {
 
                 LazyVGrid(columns: columns, spacing: DS.Spacing.md) {
                     ForEach(Array(allStyles.enumerated()), id: \.element) { _, style in
+                        let isStyleSelected = selectedStyles.contains(style)
                         Button(action: {
                             Haptics.light()
-                            if selectedStyles.contains(style) {
-                                selectedStyles.removeAll { $0 == style }
-                            } else if selectedStyles.count < maxStyles {
-                                selectedStyles.append(style)
-                            } else {
-                                showStyleError = true
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                if isStyleSelected {
+                                    selectedStyles.removeAll { $0 == style }
+                                } else if selectedStyles.count < maxStyles {
+                                    selectedStyles.append(style)
+                                } else {
+                                    showStyleError = true
+                                }
                             }
                         }) {
                             HStack(spacing: DS.Spacing.sm) {
-                                Image(systemName: selectedStyles.contains(style) ? "checkmark.square.fill" : "square")
-                                    .foregroundColor(selectedStyles.contains(style) ? DS.Colors.accent : DS.Colors.textTertiary)
+                                Image(systemName: isStyleSelected ? "checkmark.square.fill" : "square")
+                                    .foregroundColor(isStyleSelected ? DS.Colors.accent : DS.Colors.textTertiary)
                                     .font(DS.Font.title3)
 
                                 Text(style.rawValue)
@@ -324,10 +394,16 @@ struct StylePreferencesSheet: View {
                             .frame(maxWidth: .infinity, minHeight: cellHeight, maxHeight: cellHeight, alignment: .leading)
                             .background(
                                 RoundedRectangle(cornerRadius: DS.Radius.card)
-                                    .fill(selectedStyles.contains(style) ? DS.Colors.accent.opacity(0.1) : DS.Colors.backgroundSecondary)
+                                    .fill(isStyleSelected ? DS.Colors.accent.opacity(0.1) : DS.Colors.backgroundSecondary)
                             )
+                            .overlay(
+                                isStyleSelected
+                                    ? RoundedRectangle(cornerRadius: DS.Radius.card).stroke(DS.Colors.accent.opacity(0.3), lineWidth: 1)
+                                    : nil
+                            )
+                            .scaleEffect(isStyleSelected ? 1.02 : 1.0)
                         }
-                        .buttonStyle(PlainButtonStyle())
+                        .buttonStyle(DSTapBounce())
                     }
                 }
                 .padding(.horizontal, DS.Spacing.xs)

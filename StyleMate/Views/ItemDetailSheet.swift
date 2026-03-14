@@ -8,6 +8,7 @@ struct ItemDetailSheet: View {
     var onImageTap: (UIImage) -> Void
 
     @State private var showDeleteConfirmation = false
+    @State private var sheetAppeared = false
 
     var body: some View {
         ScrollView {
@@ -24,6 +25,10 @@ struct ItemDetailSheet: View {
             .padding(.bottom, DS.Spacing.xl)
         }
         .background(DS.Colors.backgroundPrimary)
+        .opacity(sheetAppeared ? 1 : 0)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.25).delay(0.15)) { sheetAppeared = true }
+        }
         .alert("Delete Item?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) { onDelete() }
             Button("Cancel", role: .cancel) {}

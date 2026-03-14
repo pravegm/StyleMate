@@ -9,12 +9,12 @@ struct MyOutfitsView: View {
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var showAddSheet = false
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
+    @State private var appeared = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Spacing.lg) {
-                    // Today indicator
                     if Calendar.current.isDateInToday(selectedDate) {
                         HStack(spacing: DS.Spacing.xs) {
                             Circle()
@@ -27,7 +27,6 @@ struct MyOutfitsView: View {
                         .padding(.bottom, DS.Spacing.xs)
                     }
 
-                    // Calendar card
                     CalendarGridView(
                         selectedDate: $selectedDate,
                         datesWithOutfits: Set(viewModel.outfitsByDate.keys)
@@ -37,14 +36,16 @@ struct MyOutfitsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
                     .dsCardShadow()
 
-                    // Selected date outfits
                     VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                         HStack {
                             Text(Calendar.current.isDateInToday(selectedDate) ? "Today's Outfits" : dateFormatter.string(from: selectedDate))
-                                .font(DS.Font.headline)
+                                .font(DS.Font.title3)
                                 .foregroundColor(DS.Colors.textPrimary)
                             Spacer()
-                            Button(action: { showAddSheet = true }) {
+                            Button(action: {
+                                Haptics.light()
+                                showAddSheet = true
+                            }) {
                                 HStack(spacing: DS.Spacing.micro) {
                                     Image(systemName: "plus.circle.fill")
                                     Text("Add")
@@ -55,12 +56,16 @@ struct MyOutfitsView: View {
                                 .padding(.horizontal, DS.Spacing.sm)
                                 .contentShape(Rectangle())
                             }
+                            .buttonStyle(DSTapBounce())
                         }
 
                         if let outfits = viewModel.outfitsByDate[selectedDate], !outfits.isEmpty {
-                            ForEach(outfits, id: \.objectID) { outfit in
+                            ForEach(Array(outfits.enumerated()), id: \.element.objectID) { index, outfit in
                                 OutfitCardView(outfit: outfit, viewModel: viewModel)
                                     .environmentObject(wardrobeVM)
+                                    .opacity(appeared ? 1 : 0)
+                                    .offset(y: appeared ? 0 : 10)
+                                    .animation(.easeOut(duration: 0.3).delay(Double(min(index, 10)) * 0.06), value: appeared)
                             }
                         } else {
                             HStack(spacing: DS.Spacing.sm) {
@@ -81,6 +86,9 @@ struct MyOutfitsView: View {
                             .background(DS.Colors.backgroundCard)
                             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
                             .dsCardShadow()
+                            .opacity(appeared ? 1 : 0)
+                            .offset(y: appeared ? 0 : 10)
+                            .animation(.easeOut(duration: 0.4).delay(0.1), value: appeared)
                         }
                     }
                 }
@@ -90,6 +98,7 @@ struct MyOutfitsView: View {
             }
             .background(DS.Colors.backgroundPrimary)
             .navigationTitle("Outfits")
+            .onAppear { withAnimation { appeared = true } }
             .sheet(isPresented: $showAddSheet) {
                 AddOutfitSheet(selectedDate: selectedDate) { items, notes in
                     viewModel.addOutfit(date: selectedDate, items: items, source: "manual", notes: notes)
@@ -115,6 +124,7 @@ struct AddOutfitSheet: View {
     @State private var expandedCategories: Set<Category> = []
     @State private var expandedProducts: Set<String> = []
     @State private var previewImage: PreviewImage? = nil
+    @State private var sheetAppeared = false
 
     private var groupedItems: [(category: Category, products: [(product: String, items: [WardrobeItem])])] {
         let itemsByCategory = Dictionary(grouping: wardrobeVM.items, by: { $0.category })
@@ -152,7 +162,10 @@ struct AddOutfitSheet: View {
                                 .foregroundColor(DS.Colors.textTertiary)
                             TextField("Add any notes for this outfit…", text: $notes)
                                 .font(DS.Font.body)
-                                .textFieldStyle(.roundedBorder)
+                                .padding(DS.Spacing.sm)
+                                .background(DS.Colors.backgroundSecondary)
+                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                                .foregroundColor(DS.Colors.textPrimary)
                         }
 
                         OutfitItemSelectionList(
@@ -170,7 +183,6 @@ struct AddOutfitSheet: View {
                     .padding(.bottom, 100)
                 }
 
-                // Bottom bar
                 HStack {
                     Button("Cancel") { dismiss() }
                         .buttonStyle(DSSecondaryButton())
@@ -208,7 +220,7 @@ struct AddOutfitSheet: View {
                             .clipShape(Capsule())
                         Spacer()
                     }
-                    .transition(.opacity)
+                    .transition(.scale.combined(with: .opacity))
                     .zIndex(10)
                 }
             }
@@ -233,7 +245,9 @@ struct AddOutfitSheet: View {
                     selectedItems = Set(wardrobeItems)
                 }
                 if let initialNotes = initialNotes { notes = initialNotes }
+                withAnimation(.easeOut(duration: 0.25).delay(0.15)) { sheetAppeared = true }
             }
+            .opacity(sheetAppeared ? 1 : 0)
         }
     }
 }
@@ -246,6 +260,8 @@ struct CalendarGridView: View {
     var onDateWithOutfitsTapped: ((Date) -> Void)? = nil
     @State private var currentMonth: Date = Calendar.current.startOfDay(for: Date())
     @State private var showYearPicker = false
+    @State private var pulseScale: CGFloat = 1.0
+    @State private var slideDirection: Edge = .trailing
 
     var body: some View {
         calendarContent
@@ -268,13 +284,17 @@ struct CalendarGridView: View {
             VStack(spacing: DS.Spacing.xs) {
                 HStack {
                     Button(action: {
-                        if let prev = calendar.date(byAdding: .month, value: -1, to: currentMonth) { currentMonth = prev }
+                        slideDirection = .leading
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            if let prev = calendar.date(byAdding: .month, value: -1, to: currentMonth) { currentMonth = prev }
+                        }
                     }) {
                         Image(systemName: "chevron.left")
                             .font(DS.Font.headline)
                             .foregroundColor(DS.Colors.accent)
                             .padding(DS.Spacing.xs)
                     }
+                    .buttonStyle(DSTapBounce())
 
                     Spacer()
 
@@ -290,13 +310,17 @@ struct CalendarGridView: View {
                     Spacer()
 
                     Button(action: {
-                        if let next = calendar.date(byAdding: .month, value: 1, to: currentMonth) { currentMonth = next }
+                        slideDirection = .trailing
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            if let next = calendar.date(byAdding: .month, value: 1, to: currentMonth) { currentMonth = next }
+                        }
                     }) {
                         Image(systemName: "chevron.right")
                             .font(DS.Font.headline)
                             .foregroundColor(DS.Colors.accent)
                             .padding(DS.Spacing.xs)
                     }
+                    .buttonStyle(DSTapBounce())
                 }
 
                 HStack {
@@ -323,7 +347,9 @@ struct CalendarGridView: View {
 
                             Button(action: {
                                 Haptics.selection()
-                                selectedDate = calendar.startOfDay(for: date)
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                    selectedDate = calendar.startOfDay(for: date)
+                                }
                                 if hasOutfit { onDateWithOutfitsTapped?(calendar.startOfDay(for: date)) }
                             }) {
                                 VStack(spacing: 2) {
@@ -337,13 +363,16 @@ struct CalendarGridView: View {
                                                 : (isToday ? AnyShapeStyle(DS.Colors.accent.opacity(0.15)) : AnyShapeStyle(Color.clear))
                                             , in: Circle()
                                         )
+                                        .scaleEffect(isSelected ? 1.0 : 0.85)
+                                        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isSelected)
 
                                     if hasOutfit {
                                         Circle()
                                             .fill(DS.Colors.accent)
-                                            .frame(width: 6, height: 6)
+                                            .frame(width: 7, height: 7)
+                                            .scaleEffect(hasOutfit && isToday ? pulseScale : 1.0)
                                     } else {
-                                        Color.clear.frame(width: 6, height: 6)
+                                        Color.clear.frame(width: 7, height: 7)
                                     }
                                 }
                             }
@@ -351,9 +380,17 @@ struct CalendarGridView: View {
                         }
                     }
                 }
+                .id(currentMonth)
+                .transition(.asymmetric(
+                    insertion: .move(edge: slideDirection),
+                    removal: .move(edge: slideDirection == .trailing ? .leading : .trailing)
+                ))
             }
             .onAppear {
                 currentMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: selectedDate)) ?? Calendar.current.startOfDay(for: Date())
+                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                    pulseScale = 1.3
+                }
             }
             .onChange(of: selectedDate) { newDate in
                 let newMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: newDate)) ?? currentMonth
@@ -394,6 +431,7 @@ struct YearMonthPicker: View {
                 Spacer()
 
                 Button("Select") {
+                    Haptics.light()
                     if let newDate = Calendar.current.date(from: DateComponents(year: selectedYear, month: selectedMonth, day: 1)) {
                         selectedDate = newDate
                     }
@@ -443,6 +481,7 @@ struct OutfitCardView: View {
                 HStack(spacing: DS.Spacing.sm) {
                     ForEach(sortedItems, id: \.objectID) { item in
                         Button(action: {
+                            Haptics.light()
                             if let img = item.croppedImage ?? item.image {
                                 previewImage = PreviewImage(image: img)
                             }
@@ -469,7 +508,7 @@ struct OutfitCardView: View {
                                     .lineLimit(1)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(DSTapBounce())
                     }
                 }
                 .padding(.vertical, DS.Spacing.xs)
@@ -480,10 +519,18 @@ struct OutfitCardView: View {
                     HStack(spacing: DS.Spacing.micro) {
                         Image(systemName: source == "gemini" ? "wand.and.stars" : "hand.draw")
                             .font(DS.Font.caption2)
-                        Text(source == "gemini" ? "AI Suggested" : "Manual")
+                        Text(source == "gemini" ? "AI Styled" : "Manual")
                             .font(DS.Font.caption2)
                     }
-                    .foregroundColor(DS.Colors.textTertiary)
+                    .foregroundColor(source == "gemini" ? DS.Colors.accent : DS.Colors.textTertiary)
+                    .padding(.horizontal, DS.Spacing.sm)
+                    .padding(.vertical, DS.Spacing.micro)
+                    .background(
+                        source == "gemini"
+                            ? DS.Colors.accent.opacity(0.1)
+                            : DS.Colors.backgroundSecondary
+                        , in: Capsule()
+                    )
                 }
 
                 if let notes = outfit.notes, !notes.isEmpty {
@@ -495,21 +542,29 @@ struct OutfitCardView: View {
 
                 Spacer()
 
-                Button(action: { showEditSheet = true }) {
+                Button(action: {
+                    Haptics.light()
+                    showEditSheet = true
+                }) {
                     Image(systemName: "pencil.circle")
                         .font(DS.Font.title3)
                         .foregroundColor(DS.Colors.accent)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
+                .buttonStyle(DSTapBounce())
 
-                Button(action: { showDeleteAlert = true }) {
+                Button(action: {
+                    Haptics.medium()
+                    showDeleteAlert = true
+                }) {
                     Image(systemName: "trash.circle")
                         .font(DS.Font.title3)
                         .foregroundColor(DS.Colors.error)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
+                .buttonStyle(DSTapBounce())
             }
         }
         .padding(DS.Spacing.md)
@@ -567,4 +622,3 @@ extension OutfitItem {
         return nil
     }
 }
-

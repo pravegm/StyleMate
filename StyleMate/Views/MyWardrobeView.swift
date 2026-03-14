@@ -9,6 +9,7 @@ struct MyWardrobeView: View {
     @State private var editingItem: WardrobeItem? = nil
     @State private var showEditSheet = false
     @State private var activeFilter: WardrobeFilter = .all
+    @State private var appeared = false
 
     private enum WardrobeFilter: Hashable {
         case all
@@ -75,7 +76,7 @@ struct MyWardrobeView: View {
                             .padding(.horizontal, DS.Spacing.screenH)
 
                         LazyVGrid(columns: columns, spacing: DS.Spacing.sm) {
-                            ForEach(filteredCategories) { category in
+                            ForEach(Array(filteredCategories.enumerated()), id: \.element) { index, category in
                                 let categoryItems = wardrobeViewModel.items.filter { $0.category == category }
                                 Button {
                                     selectedCategory = category
@@ -83,6 +84,9 @@ struct MyWardrobeView: View {
                                     CategoryTile(category: category, count: categoryItems.count, items: categoryItems)
                                 }
                                 .buttonStyle(DSTapBounce())
+                                .opacity(appeared ? 1 : 0)
+                                .offset(y: appeared ? 0 : 15)
+                                .animation(.easeOut(duration: 0.35).delay(Double(min(index, 10)) * 0.04), value: appeared)
                             }
                         }
                         .padding(.horizontal, DS.Spacing.screenH)
@@ -114,6 +118,7 @@ struct MyWardrobeView: View {
                 .padding(.bottom, DS.Spacing.lg)
             }
             .navigationTitle("Wardrobe")
+            .onAppear { withAnimation { appeared = true } }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Text("\(wardrobeViewModel.items.count) items")
@@ -333,6 +338,7 @@ struct CategoryDetailView: View {
     @State private var replaceGallerySelection: [PhotosPickerItem] = []
     @State private var isReplacingPhoto = false
     @State private var selectedDetailItem: WardrobeItem? = nil
+    @State private var detailAppeared = false
 
     private func normalizedProduct(_ product: String) -> String {
         let lower = product.lowercased().trimmingCharacters(in: .whitespaces)
@@ -411,6 +417,8 @@ struct CategoryDetailView: View {
             }
         }
         .background(DS.Colors.backgroundPrimary)
+        .opacity(detailAppeared ? 1 : 0)
+        .onAppear { withAnimation(.easeOut(duration: 0.3)) { detailAppeared = true } }
         .navigationTitle(category.rawValue)
         .sheet(item: $previewImage) { wrapper in
             VStack {
