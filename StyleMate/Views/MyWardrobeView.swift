@@ -8,6 +8,36 @@ struct MyWardrobeView: View {
     @State private var selectedCategory: Category?
     @State private var editingItem: WardrobeItem? = nil
     @State private var showEditSheet = false
+    @State private var activeFilter: WardrobeFilter = .all
+
+    private enum WardrobeFilter: Hashable {
+        case all
+        case hasItems
+        case category(Category)
+    }
+
+    private var sortedCategories: [Category] {
+        Category.allCases.sorted { cat1, cat2 in
+            let count1 = wardrobeViewModel.items.filter { $0.category == cat1 }.count
+            let count2 = wardrobeViewModel.items.filter { $0.category == cat2 }.count
+            if count1 == 0 && count2 > 0 { return false }
+            if count1 > 0 && count2 == 0 { return true }
+            return count1 > count2
+        }
+    }
+
+    private var filteredCategories: [Category] {
+        switch activeFilter {
+        case .all:
+            return sortedCategories
+        case .hasItems:
+            return sortedCategories.filter { cat in
+                wardrobeViewModel.items.contains { $0.category == cat }
+            }
+        case .category(let cat):
+            return [cat]
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -41,34 +71,45 @@ struct MyWardrobeView: View {
                             .frame(maxWidth: .infinity)
                         }
 
+                        filterChips
+                            .padding(.horizontal, DS.Spacing.screenH)
+
                         LazyVGrid(columns: columns, spacing: DS.Spacing.sm) {
-                            ForEach(Category.allCases) { category in
-                                let count = wardrobeViewModel.items.filter { $0.category == category }.count
-                                Button { selectedCategory = category } label: {
-                                    CategoryTile(category: category, count: count)
+                            ForEach(filteredCategories) { category in
+                                let categoryItems = wardrobeViewModel.items.filter { $0.category == category }
+                                Button {
+                                    selectedCategory = category
+                                } label: {
+                                    CategoryTile(category: category, count: categoryItems.count, items: categoryItems)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(DSTapBounce())
                             }
                         }
+                        .padding(.horizontal, DS.Spacing.screenH)
                     }
-                    .padding(.horizontal, DS.Spacing.screenH)
                     .padding(.top, DS.Spacing.md)
                     .padding(.bottom, 100)
                 }
 
-                // Floating Add Button
                 Button {
                     Haptics.medium()
                     showAddSheet = true
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundColor(.white)
-                        .frame(width: 56, height: 56)
-                        .background(DS.Colors.accent)
+                        .frame(width: 58, height: 58)
+                        .background(
+                            LinearGradient(
+                                colors: [DS.Colors.accent, DS.Colors.accent.opacity(0.85)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
                         .clipShape(Circle())
-                        .shadow(color: DS.Colors.accent.opacity(0.3), radius: 8, x: 0, y: 4)
+                        .shadow(color: DS.Colors.accent.opacity(0.35), radius: 12, x: 0, y: 6)
                 }
+                .buttonStyle(DSTapBounce())
                 .padding(.trailing, DS.Spacing.screenH)
                 .padding(.bottom, DS.Spacing.lg)
             }
@@ -103,6 +144,69 @@ struct MyWardrobeView: View {
             }
         }
     }
+
+    // MARK: - Filter Chips
+
+    @ViewBuilder
+    private var filterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: DS.Spacing.xs) {
+                filterChip("All", isSelected: activeFilter == .all) {
+                    activeFilter = .all
+                }
+
+                let hasPopulated = wardrobeViewModel.items.count > 0
+                if hasPopulated {
+                    filterChip("Has Items", isSelected: activeFilter == .hasItems) {
+                        activeFilter = .hasItems
+                    }
+                }
+
+                ForEach(sortedCategories.filter { cat in
+                    wardrobeViewModel.items.contains { $0.category == cat }
+                }) { category in
+                    filterChip(category.rawValue, icon: category.iconName, isSelected: {
+                        if case .category(let c) = activeFilter { return c == category }
+                        return false
+                    }()) {
+                        selectedCategory = category
+                    }
+                }
+            }
+            .padding(.horizontal, DS.Spacing.micro)
+        }
+    }
+
+    private func filterChip(_ label: String, icon: String? = nil, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: {
+            Haptics.light()
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { action() }
+        }) {
+            HStack(spacing: DS.Spacing.micro) {
+                if let icon = icon {
+                    Image(systemName: icon)
+                        .font(DS.Font.caption2)
+                }
+                Text(label)
+                    .font(DS.Font.subheadline)
+            }
+            .foregroundColor(isSelected ? DS.Colors.accent : DS.Colors.textPrimary)
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.vertical, DS.Spacing.xs)
+        }
+        .buttonStyle(.plain)
+        .background(
+            isSelected
+                ? DS.Colors.accent.opacity(0.15)
+                : DS.Colors.backgroundSecondary,
+            in: Capsule()
+        )
+        .overlay(
+            isSelected
+                ? Capsule().stroke(DS.Colors.accent, lineWidth: 1)
+                : nil
+        )
+    }
 }
 
 // MARK: - Category Icon Mapping
@@ -129,28 +233,76 @@ extension Category {
 struct CategoryTile: View {
     let category: Category
     let count: Int
+    let items: [WardrobeItem]
+
+    private var thumbnails: [UIImage] {
+        items.shuffled().compactMap { $0.thumbnailImage ?? $0.croppedImage ?? $0.image }.prefix(4).map { $0 }
+    }
 
     var body: some View {
-        VStack(spacing: DS.Spacing.sm) {
-            Image(systemName: category.iconName)
-                .font(.system(size: 32, weight: .semibold))
-                .foregroundColor(DS.Colors.accent)
+        VStack(spacing: DS.Spacing.xs) {
+            let thumbs = thumbnails
+            if thumbs.isEmpty {
+                Image(systemName: category.iconName)
+                    .font(.system(size: 28))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .background(DS.Colors.backgroundSecondary)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+            } else if thumbs.count < 4 {
+                Image(uiImage: thumbs[0])
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+            } else {
+                let gridSize: CGFloat = 120
+                let halfSize = (gridSize - 2) / 2
+                VStack(spacing: 2) {
+                    HStack(spacing: 2) {
+                        thumbnailCell(thumbs[0], size: halfSize)
+                        thumbnailCell(thumbs[1], size: halfSize)
+                    }
+                    HStack(spacing: 2) {
+                        thumbnailCell(thumbs[2], size: halfSize)
+                        thumbnailCell(thumbs[3], size: halfSize)
+                    }
+                }
+                .frame(height: gridSize)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+            }
 
-            Text(category.rawValue)
-                .font(DS.Font.headline)
-                .foregroundColor(DS.Colors.textPrimary)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-
-            Text("\(count) item\(count == 1 ? "" : "s")")
-                .font(DS.Font.subheadline)
-                .foregroundColor(DS.Colors.textSecondary)
+            HStack {
+                Text(category.rawValue)
+                    .font(DS.Font.subheadline)
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
+                Spacer()
+                Text("\(count)")
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .padding(.horizontal, DS.Spacing.xs)
+                    .padding(.vertical, 2)
+                    .background(DS.Colors.backgroundSecondary)
+                    .clipShape(Capsule())
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(DS.Spacing.md)
-        .background(count > 0 ? DS.Colors.accent.opacity(0.04) : DS.Colors.backgroundCard)
+        .padding(DS.Spacing.xs)
+        .background(DS.Colors.backgroundCard)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
         .dsCardShadow()
+        .opacity(count > 0 ? 1.0 : 0.5)
+    }
+
+    @ViewBuilder
+    private func thumbnailCell(_ image: UIImage, size: CGFloat) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+            .frame(width: size, height: size)
+            .clipped()
     }
 }
 
@@ -225,17 +377,17 @@ struct CategoryDetailView: View {
                     VStack(alignment: .leading, spacing: DS.Spacing.lg) {
                         ForEach(groupedItems, id: \.product) { group in
                             VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                                HStack {
+                                HStack(alignment: .firstTextBaseline) {
                                     Text(group.product)
-                                        .font(DS.Font.headline)
+                                        .font(DS.Font.title3)
                                         .foregroundColor(DS.Colors.textPrimary)
 
                                     Text("\(group.items.count)")
-                                        .font(DS.Font.caption1)
-                                        .foregroundColor(DS.Colors.textSecondary)
+                                        .font(DS.Font.caption2)
+                                        .foregroundColor(DS.Colors.accent)
                                         .padding(.horizontal, DS.Spacing.xs)
-                                        .padding(.vertical, DS.Spacing.micro)
-                                        .background(DS.Colors.backgroundSecondary)
+                                        .padding(.vertical, 2)
+                                        .background(DS.Colors.accent.opacity(0.12))
                                         .clipShape(Capsule())
                                 }
 
@@ -244,32 +396,9 @@ struct CategoryDetailView: View {
                                         Button {
                                             selectedDetailItem = item
                                         } label: {
-                                            VStack(spacing: DS.Spacing.xs) {
-                                                if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
-                                                    Image(uiImage: img)
-                                                        .resizable()
-                                                        .scaledToFill()
-                                                        .frame(height: 140)
-                                                        .clipped()
-                                                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-                                                } else {
-                                                    RoundedRectangle(cornerRadius: DS.Radius.button)
-                                                        .fill(DS.Colors.backgroundSecondary)
-                                                        .frame(height: 140)
-                                                        .overlay(
-                                                            Image(systemName: "photo")
-                                                                .foregroundColor(DS.Colors.textTertiary)
-                                                        )
-                                                }
-
-                                                Text(item.name)
-                                                    .font(DS.Font.caption1)
-                                                    .foregroundColor(DS.Colors.textSecondary)
-                                                    .lineLimit(2)
-                                                    .multilineTextAlignment(.center)
-                                            }
+                                            itemCardView(item)
                                         }
-                                        .buttonStyle(.plain)
+                                        .buttonStyle(DSTapBounce())
                                     }
                                 }
                             }
@@ -366,6 +495,53 @@ struct CategoryDetailView: View {
                 OutfitLoadingOverlay(progress: 0.5, message: "Processing photo…")
             }
         }
+    }
+
+    // MARK: - Item Card
+
+    @ViewBuilder
+    private func itemCardView(_ item: WardrobeItem) -> some View {
+        VStack(spacing: 0) {
+            if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(height: 150)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(DS.Colors.backgroundSecondary)
+                    .frame(height: 150)
+                    .overlay(
+                        Image(systemName: "photo")
+                            .foregroundColor(DS.Colors.textTertiary)
+                    )
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.product)
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
+
+                if !item.colors.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(item.colors.prefix(3), id: \.self) { color in
+                            Circle()
+                                .fill(ColorMapping.color(for: color))
+                                .frame(width: 8, height: 8)
+                                .overlay(Circle().stroke(Color.black.opacity(0.1), lineWidth: 0.5))
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, DS.Spacing.xs)
+            .padding(.vertical, DS.Spacing.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+        .dsCardShadow()
     }
 
     private func replacePhoto(for item: WardrobeItem, with newImage: UIImage) {

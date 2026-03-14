@@ -47,7 +47,7 @@ struct ItemDetailSheet: View {
                         .resizable()
                         .scaledToFit()
                 } else {
-                    RoundedRectangle(cornerRadius: DS.Radius.card)
+                    RoundedRectangle(cornerRadius: DS.Radius.hero)
                         .fill(DS.Colors.backgroundSecondary)
                         .overlay(
                             Image(systemName: "photo")
@@ -56,8 +56,8 @@ struct ItemDetailSheet: View {
                         )
                 }
             }
-            .frame(maxHeight: 220)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+            .frame(maxHeight: 260)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero))
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
@@ -69,13 +69,18 @@ struct ItemDetailSheet: View {
     private var itemHeader: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.micro) {
             Text(item.name)
-                .font(DS.Font.headline)
+                .font(DS.Font.title3)
                 .foregroundColor(DS.Colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text(item.category.rawValue)
-                .font(DS.Font.caption1)
-                .foregroundColor(DS.Colors.accent)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(DS.Colors.accent)
+                    .frame(width: 6, height: 6)
+                Text(item.category.rawValue)
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.accent)
+            }
 
             if !item.brand.isEmpty {
                 Text(item.brand)
@@ -101,6 +106,7 @@ struct ItemDetailSheet: View {
                         .padding(.vertical, DS.Spacing.xs)
                         .background(DS.Colors.backgroundSecondary)
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(DS.Colors.textTertiary.opacity(0.2), lineWidth: 0.5))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -145,7 +151,10 @@ struct ItemDetailSheet: View {
                 HStack(spacing: DS.Spacing.sm) {
                     ForEach(item.colors, id: \.self) { colorName in
                         HStack(spacing: DS.Spacing.micro) {
-                            colorSwatch(for: colorName)
+                            Circle()
+                                .fill(ColorMapping.color(for: colorName))
+                                .frame(width: 16, height: 16)
+                                .overlay(Circle().stroke(Color.black.opacity(0.1), lineWidth: 1))
                             Text(colorName)
                                 .font(DS.Font.subheadline)
                                 .foregroundColor(DS.Colors.textPrimary)
@@ -204,44 +213,14 @@ struct ItemDetailSheet: View {
                     Text("Delete")
                 }
                 .foregroundColor(DS.Colors.error)
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.vertical, DS.Spacing.xs)
+                .background(DS.Colors.error.opacity(0.08))
+                .clipShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(DSTapBounce())
             .frame(height: 44)
         }
         .padding(.top, DS.Spacing.xs)
-    }
-
-    // MARK: - Color Swatch
-
-    @ViewBuilder
-    private func colorSwatch(for colorName: String) -> some View {
-        let name = colorName.lowercased().trimmingCharacters(in: .whitespaces)
-        let color: Color = {
-            switch name {
-            case "black":  return .black
-            case "white":  return .white
-            case "red":    return .red
-            case "blue":   return .blue
-            case "green":  return .green
-            case "yellow": return .yellow
-            case "orange": return .orange
-            case "pink":   return .pink
-            case "purple": return .purple
-            case "brown":  return .brown
-            case "gray", "grey": return .gray
-            case "navy":   return Color(red: 0, green: 0, blue: 0.5)
-            case "beige":  return Color(red: 0.96, green: 0.96, blue: 0.86)
-            case "cream":  return Color(red: 1, green: 0.99, blue: 0.82)
-            case "maroon": return Color(red: 0.5, green: 0, blue: 0)
-            case "teal":   return .teal
-            case "olive":  return Color(red: 0.5, green: 0.5, blue: 0)
-            default:       return DS.Colors.backgroundSecondary
-            }
-        }()
-
-        Circle()
-            .fill(color)
-            .frame(width: 16, height: 16)
-            .overlay(Circle().stroke(Color.black.opacity(0.1), lineWidth: 1))
     }
 }

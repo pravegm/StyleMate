@@ -239,6 +239,41 @@ enum Haptics {
     static func selection() { UISelectionFeedbackGenerator().selectionChanged() }
 }
 
+// MARK: - Color Name Mapping
+
+enum ColorMapping {
+    static func color(for name: String) -> Color {
+        let n = name.lowercased().trimmingCharacters(in: .whitespaces)
+        switch n {
+        case "black": return .black
+        case "white": return .white
+        case "red": return .red
+        case "blue": return .blue
+        case "green": return .green
+        case "yellow": return .yellow
+        case "orange": return .orange
+        case "pink": return .pink
+        case "purple": return .purple
+        case "brown": return .brown
+        case "gray", "grey": return .gray
+        case "navy": return Color(red: 0, green: 0, blue: 0.5)
+        case "beige": return Color(red: 0.96, green: 0.96, blue: 0.86)
+        case "cream": return Color(red: 1, green: 0.99, blue: 0.82)
+        case "maroon": return Color(red: 0.5, green: 0, blue: 0)
+        case "teal": return .teal
+        case "olive": return Color(red: 0.5, green: 0.5, blue: 0)
+        case "tan", "khaki": return Color(red: 0.82, green: 0.71, blue: 0.55)
+        case "burgundy": return Color(red: 0.5, green: 0.0, blue: 0.13)
+        case "coral": return Color(red: 1.0, green: 0.5, blue: 0.31)
+        case "rust": return Color(red: 0.72, green: 0.25, blue: 0.05)
+        case "lavender": return Color(red: 0.71, green: 0.49, blue: 0.86)
+        case "mint": return Color(red: 0.6, green: 0.88, blue: 0.7)
+        case "charcoal": return Color(red: 0.21, green: 0.27, blue: 0.31)
+        default: return DS.Colors.backgroundSecondary
+        }
+    }
+}
+
 // MARK: - Glass Effect Helpers
 // Stand-ins using system materials. When iOS 26 SDK is available,
 // swap with .glassEffect(.regular), .glassEffect(.clear), etc.
