@@ -52,19 +52,21 @@ struct WeatherInlineRow: View {
                         .foregroundColor(DS.Colors.accent)
 
                     Text("\(Int(displayFahrenheit ? tempF : tempC))°")
-                        .font(DS.Font.title3)
+                        .font(DS.Font.display)
                         .foregroundColor(DS.Colors.textPrimary)
 
-                    Text(WeatherService.weatherDescription(for: weather.weathercode))
-                        .font(DS.Font.subheadline)
-                        .foregroundColor(DS.Colors.textSecondary)
-                        .lineLimit(1)
-
-                    if let city = city {
-                        Text("· \(city)")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(WeatherService.weatherDescription(for: weather.weathercode))
                             .font(DS.Font.subheadline)
-                            .foregroundColor(DS.Colors.textTertiary)
+                            .foregroundColor(DS.Colors.textSecondary)
                             .lineLimit(1)
+
+                        if let city = city {
+                            Text(city)
+                                .font(DS.Font.subheadline)
+                                .foregroundColor(DS.Colors.textTertiary)
+                                .lineLimit(1)
+                        }
                     }
 
                     Spacer()

@@ -11,6 +11,8 @@ struct HomeView: View {
     @State private var selectedCategory: Category? = nil
     @State private var selectedProduct: String? = nil
     @State private var showWeatherWarning = false
+    @State private var appeared = false
+    @State private var sparkleScale: CGFloat = 1.0
 
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
@@ -29,138 +31,26 @@ struct HomeView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        // MARK: - Greeting
-                        VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                            Text(greeting + ",")
-                                .font(DS.Font.title2)
-                                .foregroundColor(DS.Colors.textSecondary)
-
-                            if let firstName = authService.user?.name.components(separatedBy: " ").first, !firstName.isEmpty {
-                                Text(firstName)
-                                    .font(DS.Font.largeTitle)
-                                    .foregroundColor(DS.Colors.textPrimary)
-                            }
-                        }
-                        .padding(.top, DS.Spacing.md)
-
-                        // MARK: - Weather Card
-                        Group {
-                            if homeVM.isWeatherLoading {
-                                HStack(spacing: DS.Spacing.xs) {
-                                    ProgressView()
-                                    Text("Loading weather...")
-                                        .font(DS.Font.subheadline)
-                                        .foregroundColor(DS.Colors.textSecondary)
-                                }
-                                .padding(DS.Spacing.md)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(DS.Colors.backgroundCard)
-                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-                                .dsCardShadow()
-                            } else if let error = homeVM.weatherError {
-                                HStack(spacing: DS.Spacing.xs) {
-                                    Image(systemName: "exclamationmark.triangle")
-                                        .foregroundColor(DS.Colors.warning)
-                                    Text(error)
-                                        .font(DS.Font.caption1)
-                                        .foregroundColor(DS.Colors.textSecondary)
-                                        .lineLimit(1)
-                                    Spacer()
-                                    Button("Retry") { homeVM.requestWeatherForCurrentLocation() }
-                                        .font(DS.Font.caption1)
-                                        .foregroundColor(DS.Colors.accent)
-                                }
-                                .padding(DS.Spacing.md)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(DS.Colors.backgroundCard)
-                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-                                .dsCardShadow()
-                            } else if homeVM.locationStatus == .denied || homeVM.locationStatus == .restricted {
-                                HStack(spacing: DS.Spacing.xs) {
-                                    Image(systemName: "location.slash")
-                                        .foregroundColor(DS.Colors.textTertiary)
-                                    Text("Location access needed for weather")
-                                        .font(DS.Font.subheadline)
-                                        .foregroundColor(DS.Colors.textSecondary)
-                                    Spacer()
-                                    Button("Settings") {
-                                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                                            UIApplication.shared.open(url)
-                                        }
-                                    }
-                                    .font(DS.Font.caption1)
-                                    .foregroundColor(DS.Colors.accent)
-                                }
-                                .padding(DS.Spacing.md)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(DS.Colors.backgroundCard)
-                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-                                .dsCardShadow()
-                            } else if let weather = homeVM.weather, let tempC = homeVM.lastCelsius {
-                                let tempF = homeVM.lastFahrenheit ?? (tempC * 9.0 / 5.0 + 32)
-                                let displayTemp = homeVM.displayFahrenheit ? Int(tempF) : Int(tempC)
-                                let unit = homeVM.displayFahrenheit ? "F" : "C"
-
-                                HStack(spacing: DS.Spacing.md) {
-                                    Image(systemName: WeatherService.weatherIconName(for: weather.weathercode, isDay: weather.isDay == 1))
-                                        .font(.system(size: 36))
-                                        .foregroundColor(DS.Colors.accent)
-
-                                    VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                                        Text("\(displayTemp)°\(unit)")
-                                            .font(DS.Font.title1)
-                                            .foregroundColor(DS.Colors.textPrimary)
-                                        Text(WeatherService.weatherDescription(for: weather.weathercode))
-                                            .font(DS.Font.subheadline)
-                                            .foregroundColor(DS.Colors.textSecondary)
-                                    }
-
-                                    Spacer()
-
-                                    VStack(alignment: .trailing, spacing: DS.Spacing.micro) {
-                                        if let city = homeVM.lastCity {
-                                            Text(city)
-                                                .font(DS.Font.caption1)
-                                                .foregroundColor(DS.Colors.textTertiary)
-                                        }
-                                        Button(action: { Haptics.light(); homeVM.toggleTemperatureUnit() }) {
-                                            Text(homeVM.displayFahrenheit ? "°F" : "°C")
-                                                .font(DS.Font.caption1)
-                                                .foregroundColor(DS.Colors.accent)
-                                                .padding(.horizontal, DS.Spacing.xs)
-                                                .padding(.vertical, DS.Spacing.micro)
-                                                .dsGlassChipUnselected()
-                                        }
-                                    }
-                                }
-                                .padding(DS.Spacing.md)
-                                .background(DS.Colors.backgroundCard)
-                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-                                .dsCardShadow()
-                            }
-                        }
-                        .padding(.top, DS.Spacing.md)
-
-                        // MARK: - Outfit Type Selector
-                        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                            Text("What's the vibe today?")
-                                .font(DS.Font.headline)
-                                .foregroundColor(DS.Colors.textPrimary)
-
-                            OutfitTypeChipRow(
-                                selectedOutfitType: $homeVM.selectedOutfitType,
-                                customOutfitDescription: $homeVM.customOutfitDescription
-                            )
-                        }
-                        .padding(.top, DS.Spacing.lg)
-
-                        // MARK: - Get Outfit CTA
-                        ctaButton
+                        // MARK: - Hero Greeting + Weather
+                        heroGreetingSection
                             .padding(.top, DS.Spacing.md)
+                            .opacity(appeared ? 1 : 0)
+                            .offset(y: appeared ? 0 : 20)
+                            .animation(.easeOut(duration: 0.5), value: appeared)
 
-                        // MARK: - Wardrobe at a Glance
-                        wardrobeAtAGlance
+                        // MARK: - Style Me Hero Card
+                        styleMeHeroCard
+                            .padding(.top, DS.Spacing.lg)
+                            .opacity(appeared ? 1 : 0)
+                            .offset(y: appeared ? 0 : 20)
+                            .animation(.easeOut(duration: 0.5).delay(0.1), value: appeared)
+
+                        // MARK: - Your Wardrobe
+                        wardrobeSection
                             .padding(.top, DS.Spacing.xl)
+                            .opacity(appeared ? 1 : 0)
+                            .offset(y: appeared ? 0 : 20)
+                            .animation(.easeOut(duration: 0.5).delay(0.2), value: appeared)
                     }
                     .padding(.horizontal, DS.Spacing.screenH)
                     .padding(.bottom, DS.Spacing.xxxl)
@@ -212,6 +102,7 @@ struct HomeView: View {
                 if homeVM.weather == nil && !homeVM.isWeatherLoading {
                     homeVM.requestWeatherForCurrentLocation()
                 }
+                withAnimation { appeared = true }
             }
             .onChange(of: homeVM.isLoading) { isLoading in
                 if isLoading {
@@ -242,94 +133,130 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - CTA Button
+    // MARK: - Hero Greeting + Inline Weather
 
     @ViewBuilder
-    private var ctaButton: some View {
-        let ctaDisabled = homeVM.isLoading || (homeVM.selectedOutfitType == nil && !homeVM.isCustomDescriptionValid)
+    private var heroGreetingSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Text(greeting + ",")
+                .font(DS.Font.title2)
+                .foregroundColor(DS.Colors.textSecondary)
 
-        Button(action: {
-            Haptics.medium()
-            if homeVM.isWeatherLoading || homeVM.weather == nil || homeVM.weatherError != nil {
-                showWeatherWarning = true
-            } else {
-                homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
+            if let firstName = authService.user?.name.components(separatedBy: " ").first, !firstName.isEmpty {
+                Text(firstName)
+                    .font(DS.Font.display)
+                    .foregroundColor(DS.Colors.textPrimary)
             }
-        }) {
-            HStack(spacing: DS.Spacing.sm) {
-                Image(systemName: "wand.and.stars")
-                    .font(DS.Font.title3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Get Today's Outfit")
-                        .font(DS.Font.headline)
-                    if let type = homeVM.selectedOutfitType {
-                        Text(type.rawValue)
-                            .font(DS.Font.caption1)
-                            .opacity(0.8)
-                    }
-                }
-                Spacer()
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(DS.Font.title2)
-            }
-            .foregroundColor(.white)
-            .padding(DS.Spacing.md)
-            .frame(maxWidth: .infinity)
-            .background(
-                LinearGradient(
-                    colors: [DS.Colors.accent, DS.Colors.accent.opacity(0.8)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
+
+            WeatherInlineRow(
+                weather: homeVM.weather,
+                isLoading: homeVM.isWeatherLoading,
+                error: homeVM.weatherError,
+                locationStatus: homeVM.locationStatus,
+                onRequest: { homeVM.requestWeatherForCurrentLocation() },
+                city: homeVM.lastCity,
+                temperatureC: homeVM.lastCelsius,
+                temperatureF: homeVM.lastFahrenheit,
+                displayFahrenheit: homeVM.displayFahrenheit,
+                onToggleUnit: { homeVM.toggleTemperatureUnit() }
             )
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-            .dsCardShadow()
+            .padding(.top, DS.Spacing.micro)
         }
-        .disabled(ctaDisabled)
-        .opacity(ctaDisabled ? 0.5 : 1.0)
     }
 
-    // MARK: - Wardrobe at a Glance
+    // MARK: - Style Me Hero Card
 
     @ViewBuilder
-    private var wardrobeAtAGlance: some View {
-        if !wardrobeViewModel.items.isEmpty {
-            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                HStack {
-                    Text("Your Wardrobe")
-                        .font(DS.Font.headline)
-                        .foregroundColor(DS.Colors.textPrimary)
-                    Spacer()
-                    Text("\(wardrobeViewModel.items.count) items")
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.textTertiary)
+    private var styleMeHeroCard: some View {
+        let ctaDisabled = homeVM.isLoading || (homeVM.selectedOutfitType == nil && !homeVM.isCustomDescriptionValid)
+
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            HStack(spacing: DS.Spacing.xs) {
+                Image(systemName: "sparkles")
+                    .font(DS.Font.title3)
+                    .foregroundColor(DS.Colors.accent)
+                    .scaleEffect(sparkleScale)
+                    .onAppear {
+                        withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+                            sparkleScale = 1.1
+                        }
+                    }
+
+                Text("Style me for today")
+                    .font(DS.Font.title2)
+                    .foregroundColor(DS.Colors.textPrimary)
+            }
+
+            OutfitTypeChipRow(
+                selectedOutfitType: $homeVM.selectedOutfitType,
+                customOutfitDescription: $homeVM.customOutfitDescription
+            )
+
+            Button(action: {
+                Haptics.medium()
+                if homeVM.isWeatherLoading || homeVM.weather == nil || homeVM.weatherError != nil {
+                    showWeatherWarning = true
+                } else {
+                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
                 }
+            }) {
+                HStack(spacing: DS.Spacing.sm) {
+                    Image(systemName: "sparkles")
+                        .font(DS.Font.headline)
+                    Text("Generate 5 Outfits")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                        .font(DS.Font.headline)
+                }
+            }
+            .buttonStyle(DSPrimaryButton(isDisabled: ctaDisabled))
+            .disabled(ctaDisabled)
+            .opacity(ctaDisabled ? 0.5 : 1.0)
+        }
+        .padding(DS.Spacing.lg)
+        .background(
+            ZStack {
+                DS.Colors.backgroundCard
+                LinearGradient(
+                    colors: [DS.Colors.accent.opacity(0.04), DS.Colors.accentSecondary.opacity(0.03)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
+        .dsElevatedShadow(cornerRadius: DS.Radius.hero)
+    }
+
+    // MARK: - Wardrobe Section
+
+    @ViewBuilder
+    private var wardrobeSection: some View {
+        if !wardrobeViewModel.items.isEmpty {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                sectionHeader("Your Wardrobe", trailing: "\(wardrobeViewModel.items.count) items")
 
                 let categoryCounts = Dictionary(grouping: wardrobeViewModel.items, by: { $0.category })
-                    .map { (category: $0.key, count: $0.value.count) }
+                    .map { (category: $0.key, items: $0.value, count: $0.value.count) }
                     .sorted { $0.count > $1.count }
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: DS.Spacing.xs)], spacing: DS.Spacing.xs) {
-                    ForEach(categoryCounts.prefix(6), id: \.category) { item in
-                        HStack(spacing: DS.Spacing.xs) {
-                            Image(systemName: item.category.iconName)
-                                .font(DS.Font.caption1)
-                                .foregroundColor(DS.Colors.accent)
-                            Text("\(item.count)")
-                                .font(DS.Font.headline)
-                                .foregroundColor(DS.Colors.textPrimary)
-                            Text(item.category.rawValue)
-                                .font(DS.Font.caption1)
-                                .foregroundColor(DS.Colors.textSecondary)
-                                .lineLimit(1)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: DS.Spacing.sm) {
+                        ForEach(categoryCounts.prefix(6), id: \.category) { entry in
+                            Button(action: {
+                                Haptics.light()
+                                selectedCategory = entry.category
+                            }) {
+                                WardrobeCategoryCard(
+                                    category: entry.category,
+                                    items: entry.items,
+                                    count: entry.count
+                                )
+                            }
+                            .buttonStyle(DSTapBounce())
                         }
-                        .padding(.horizontal, DS.Spacing.sm)
-                        .padding(.vertical, DS.Spacing.xs)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(DS.Colors.backgroundCard)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-                        .dsCardShadow()
                     }
+                    .padding(.horizontal, DS.Spacing.micro)
                 }
             }
         } else {
@@ -348,9 +275,87 @@ struct HomeView: View {
             .frame(maxWidth: .infinity)
             .padding(DS.Spacing.xl)
             .background(DS.Colors.backgroundCard)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-            .dsCardShadow()
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero))
+            .dsCardShadow(cornerRadius: DS.Radius.hero)
         }
+    }
+
+    // MARK: - Section Header
+
+    private func sectionHeader(_ title: String, trailing: String? = nil) -> some View {
+        HStack {
+            Text(title)
+                .font(DS.Font.title3)
+                .foregroundColor(DS.Colors.textPrimary)
+            Spacer()
+            if let trailing = trailing {
+                Text(trailing)
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+        }
+    }
+}
+
+// MARK: - Wardrobe Category Card
+
+private struct WardrobeCategoryCard: View {
+    let category: Category
+    let items: [WardrobeItem]
+    let count: Int
+
+    private var thumbnails: [UIImage] {
+        let shuffled = items.shuffled()
+        var result: [UIImage] = []
+        for item in shuffled {
+            if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
+                result.append(img)
+                if result.count >= 2 { break }
+            }
+        }
+        return result
+    }
+
+    var body: some View {
+        VStack(spacing: DS.Spacing.xs) {
+            let thumbs = thumbnails
+            if thumbs.count >= 2 {
+                HStack(spacing: DS.Spacing.micro) {
+                    ForEach(0..<2, id: \.self) { i in
+                        Image(uiImage: thumbs[i])
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 56, height: 56)
+                            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                    }
+                }
+            } else if thumbs.count == 1 {
+                Image(uiImage: thumbs[0])
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 80, height: 80)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+            } else {
+                Image(systemName: category.iconName)
+                    .font(.system(size: 32))
+                    .foregroundColor(DS.Colors.accent)
+                    .frame(width: 80, height: 80)
+            }
+
+            Text(category.rawValue)
+                .font(DS.Font.headline)
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(1)
+
+            Text("\(count) items")
+                .font(DS.Font.caption1)
+                .foregroundColor(DS.Colors.textSecondary)
+        }
+        .frame(width: 130)
+        .padding(.vertical, DS.Spacing.sm)
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+        .dsCardShadow()
     }
 }
 
@@ -411,7 +416,10 @@ private struct OutfitTypeChipRow: View {
                     set: { customOutfitDescription = $0 }
                 ))
                 .font(DS.Font.body)
-                .textFieldStyle(.roundedBorder)
+                .padding(DS.Spacing.sm)
+                .background(DS.Colors.backgroundSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                .foregroundColor(DS.Colors.textPrimary)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -437,9 +445,15 @@ private struct ChipButton: View {
             .foregroundColor(isSelected ? DS.Colors.accent : DS.Colors.textPrimary)
             .padding(.horizontal, DS.Spacing.md)
             .padding(.vertical, DS.Spacing.xs)
+            .scaleEffect(isSelected ? 1.02 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
         }
         .buttonStyle(.plain)
-        .if(isSelected) { $0.dsGlassChipSelected() }
+        .if(isSelected) { view in
+            view
+                .background(DS.Colors.accent.opacity(0.15), in: Capsule())
+                .overlay(Capsule().stroke(DS.Colors.accent, lineWidth: 1))
+        }
         .if(!isSelected) { $0.dsGlassChipUnselected() }
     }
 }
