@@ -3,9 +3,11 @@ import SwiftUI
 struct ProfileView: View {
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
+    @EnvironmentObject var onboardingManager: OnboardingManager
     @ObservedObject private var cloudKitService = CloudKitService.shared
     @State private var showingSignOutAlert = false
     @State private var showEmptyConfirmation = false
+    @State private var showDeleteProfileAlert = false
     @State private var showStyleSheet = false
     @State private var tempSelectedStyles: [OutfitType] = []
     @State private var showStyleError = false
@@ -235,6 +237,20 @@ struct ProfileView: View {
                     Text("This permanently removes all items from your wardrobe.")
                         .font(DS.Font.caption2)
                 }
+
+                Section {
+                    Button(role: .destructive) {
+                        showDeleteProfileAlert = true
+                    } label: {
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image(systemName: "person.crop.circle.badge.xmark")
+                            Text("Delete Profile & All Data")
+                        }
+                        .font(DS.Font.body)
+                        .foregroundColor(DS.Colors.error)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
             }
             .tint(DS.Colors.accent)
             .navigationTitle("Profile")
@@ -285,7 +301,66 @@ struct ProfileView: View {
                 )
                 .environmentObject(authService)
             }
+            .alert("Delete Everything?", isPresented: $showDeleteProfileAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete Everything", role: .destructive) {
+                    deleteProfile()
+                }
+            } message: {
+                Text("This will permanently delete your profile, wardrobe items, saved outfits, selfie data, and sign you out. You'll go through onboarding again on next sign-in. This cannot be undone.")
+            }
         }
+    }
+
+    // MARK: - Delete Profile
+
+    private func deleteProfile() {
+        guard let userId = authService.user?.id else { return }
+
+        Haptics.medium()
+
+        wardrobeViewModel.clear()
+
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        if let files = try? FileManager.default.contentsOfDirectory(atPath: documentsPath.path) {
+            for file in files {
+                let filePath = documentsPath.appendingPathComponent(file)
+                try? FileManager.default.removeItem(at: filePath)
+            }
+        }
+
+        let keysToRemove = [
+            "hasCompletedOnboarding_\(userId)",
+            "selfieReferencePath_\(userId)",
+            "wardrobeData_\(userId)",
+            "hasSeenSwipeHint",
+            "hasMigratedBackgroundRemoval_\(userId)",
+            "hasMigratedThumbnails_\(userId)",
+            "hasMigratedZoneCrop_\(userId)",
+            "scanProgress_\(userId)",
+            "hasConsentedToGeminiScan_\(userId)",
+            "bgRemovalMigrationComplete_\(userId)",
+            "thumbnailMigrationComplete_\(userId)",
+            "zoneCropMigrationComplete_\(userId)",
+        ]
+        for key in keysToRemove {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        UserDefaults.standard.removeObject(forKey: "wardrobe_\(userId)")
+
+        Task {
+            await CloudKitService.shared.deleteAllData()
+        }
+
+        var profiles = AuthService.loadUserProfiles()
+        profiles.removeValue(forKey: userId)
+        AuthService.saveUserProfiles(profiles)
+
+        onboardingManager.reset(forUser: userId)
+
+        authService.signOut()
+
+        print("[StyleMate] Profile deleted for user: \(userId)")
     }
 
     // MARK: - Stat Badge
@@ -446,4 +521,5 @@ struct StylePreferencesSheet: View {
     ProfileView()
         .environmentObject(AuthService())
         .environmentObject(WardrobeViewModel())
+        .environmentObject(OnboardingManager())
 }

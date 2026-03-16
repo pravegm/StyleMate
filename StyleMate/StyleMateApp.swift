@@ -6,6 +6,7 @@ import GoogleSignIn
 struct StyleMateApp: App {
     @StateObject private var authService = AuthService()
     @StateObject private var wardrobeVM = WardrobeViewModel()
+    @StateObject private var onboardingManager = OnboardingManager()
     let persistenceController = PersistenceController.shared
 
     var body: some Scene {
@@ -13,6 +14,7 @@ struct StyleMateApp: App {
             RootView()
                 .environmentObject(authService)
                 .environmentObject(wardrobeVM)
+                .environmentObject(onboardingManager)
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .onOpenURL { url in
                     GIDSignIn.sharedInstance.handle(url)
@@ -24,6 +26,7 @@ struct StyleMateApp: App {
 struct RootView: View {
     @EnvironmentObject var authService: AuthService
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
+    @EnvironmentObject var onboardingManager: OnboardingManager
     @StateObject private var outfitsVM = MyOutfitsViewModel()
     @State private var lastUserKey: String = ""
     @State private var showSourcePicker = false
@@ -43,13 +46,17 @@ struct RootView: View {
     var body: some View {
         ZStack {
             Group {
-                if authService.isAuthenticated {
+                if !authService.isAuthenticated {
+                    LoginView()
+                } else if !onboardingManager.hasCompletedOnboarding {
+                    OnboardingView()
+                } else {
                     MainTabView(showAddSheet: $showSourcePicker)
                         .environmentObject(outfitsVM)
-                } else {
-                    LoginView()
                 }
             }
+            .animation(.easeInOut(duration: 0.4), value: authService.isAuthenticated)
+            .animation(.easeInOut(duration: 0.4), value: onboardingManager.hasCompletedOnboarding)
         }
         .confirmationDialog("Add New Item", isPresented: $showSourcePicker, titleVisibility: .visible) {
             Button("Choose from Gallery") { showPhotoPicker = true }
@@ -107,6 +114,7 @@ struct RootView: View {
             if isAuthenticated, let id = authService.user?.id {
                 wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
+                onboardingManager.check(forUser: id)
                 wardrobeVM.migrateBackgroundRemoval()
                 wardrobeVM.migrateThumbnails()
 
@@ -127,6 +135,7 @@ struct RootView: View {
             if authService.isAuthenticated, let id = authService.user?.id {
                 wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
+                onboardingManager.check(forUser: id)
                 wardrobeVM.migrateBackgroundRemoval()
                 wardrobeVM.migrateThumbnails()
 

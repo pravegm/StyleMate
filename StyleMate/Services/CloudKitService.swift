@@ -200,6 +200,20 @@ class CloudKitService: ObservableObject {
         }
     }
 
+    // MARK: - Delete All Data
+
+    func deleteAllData() async {
+        print("[StyleMate] CloudKit: Deleting all data")
+        do {
+            try await privateDB.deleteRecordZone(withID: zoneID)
+            print("[StyleMate] CloudKit: Zone deleted successfully")
+            await setupZone()
+            print("[StyleMate] CloudKit: Zone recreated")
+        } catch {
+            print("[StyleMate] CloudKit: Delete all data error: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Check iCloud Status
 
     func checkAccountStatus() async -> Bool {

@@ -44,4 +44,5 @@ struct MainTabView: View {
         .environmentObject(WardrobeViewModel())
         .environmentObject(AuthService())
         .environmentObject(MyOutfitsViewModel())
+        .environmentObject(OnboardingManager())
 }

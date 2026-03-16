@@ -17,5 +17,9 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>StyleMate uses your camera to capture clothing items and take a reference selfie for finding your outfit photos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>StyleMate scans your photo library to automatically find and catalog your clothing items. Face matching happens entirely on your device.</string>
 </dict>
 </plist>
