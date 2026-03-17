@@ -38,26 +38,28 @@ struct OnboardingWelcomeView: View {
 
     var body: some View {
         GeometryReader { geo in
+            let compact = geo.size.height < 700
+
             ZStack {
                 backgroundGlow(in: geo)
 
                 VStack(spacing: 0) {
-                    Spacer().frame(minHeight: DS.Spacing.xl)
+                    Spacer().frame(minHeight: compact ? DS.Spacing.sm : DS.Spacing.lg)
 
                     cardFan
-                        .frame(height: geo.size.height * 0.38)
+                        .frame(height: compact ? 140 : geo.size.height * 0.3)
 
                     textContent
-                        .padding(.top, DS.Spacing.lg)
+                        .padding(.top, compact ? DS.Spacing.sm : DS.Spacing.lg)
 
                     featurePills
-                        .padding(.top, DS.Spacing.lg)
+                        .padding(.top, compact ? DS.Spacing.sm : DS.Spacing.lg)
 
-                    Spacer()
+                    Spacer(minLength: DS.Spacing.md)
 
                     ctaButton(screenWidth: geo.size.width)
                         .padding(.horizontal, DS.Spacing.lg)
-                        .padding(.bottom, DS.Spacing.xl)
+                        .padding(.bottom, DS.Spacing.lg)
                 }
             }
         }
@@ -116,7 +118,7 @@ struct OnboardingWelcomeView: View {
     private var textContent: some View {
         VStack(spacing: DS.Spacing.sm) {
             Text("Never wonder what to wear")
-                .font(DS.Font.display)
+                .font(DS.Font.title1)
                 .foregroundColor(DS.Colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, DS.Spacing.lg)

@@ -65,32 +65,24 @@ class AuthService: ObservableObject {
     private func processAppleCredential(_ credential: ASAuthorizationAppleIDCredential) -> String? {
         let userID = credential.user
 
+        let freshName = buildAppleName(from: credential.fullName)
+        let freshEmail = credential.email
+
         let profiles = Self.loadUserProfiles()
         if let existingUser = profiles[userID] {
             var updatedUser = existingUser
-            if let givenName = credential.fullName?.givenName,
-               let familyName = credential.fullName?.familyName,
-               !givenName.isEmpty {
-                updatedUser.name = "\(givenName) \(familyName)".trimmingCharacters(in: .whitespaces)
+            if let name = freshName {
+                updatedUser.name = name
             }
-            if let email = credential.email, !email.isEmpty {
+            if let email = freshEmail, !email.isEmpty {
                 updatedUser.email = email
             }
             self.user = updatedUser
         } else {
-            var name = "User"
-            if let givenName = credential.fullName?.givenName {
-                name = givenName
-                if let familyName = credential.fullName?.familyName {
-                    name += " \(familyName)"
-                }
-                name = name.trimmingCharacters(in: .whitespaces)
-            }
-
             let newUser = User(
                 id: userID,
-                email: credential.email,
-                name: name.isEmpty ? "User" : name,
+                email: freshEmail,
+                name: freshName ?? "User",
                 preferredStyles: [.everyday, .formal, .date, .sports, .party, .business],
                 notificationsEnabled: true,
                 dateCreated: Date()
@@ -101,7 +93,17 @@ class AuthService: ObservableObject {
         self.isAuthenticated = true
         persistAuthSession(provider: .apple, userID: userID)
         saveCurrentUser()
+        print("[StyleMate] Apple sign-in: name=\(self.user?.name ?? "nil"), email=\(self.user?.email ?? "nil")")
         return nil
+    }
+
+    private func buildAppleName(from nameComponents: PersonNameComponents?) -> String? {
+        guard let components = nameComponents else { return nil }
+        var parts: [String] = []
+        if let given = components.givenName, !given.isEmpty { parts.append(given) }
+        if let family = components.familyName, !family.isEmpty { parts.append(family) }
+        let name = parts.joined(separator: " ")
+        return name.isEmpty ? nil : name
     }
 
     // MARK: - Sign in with Google
