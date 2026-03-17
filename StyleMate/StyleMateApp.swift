@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import Photos
 import GoogleSignIn
 
 @main
@@ -158,6 +159,27 @@ struct RootView: View {
                         await wardrobeVM.restoreFromCloud()
                     }
                 }
+            }
+        }
+        .onChange(of: onboardingManager.hasCompletedOnboarding) { completed in
+            if completed,
+               authService.isAuthenticated,
+               PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
+               PhotoScanService.shared.scanState == .idle {
+
+                let userId = authService.user?.id ?? ""
+                let gender = authService.user?.gender
+                let existingItems = wardrobeVM.items
+
+                Task {
+                    await PhotoScanService.shared.startScan(
+                        forUser: userId,
+                        dateRange: .lastSixMonths,
+                        userGender: gender,
+                        existingItems: existingItems
+                    )
+                }
+                print("[StyleMate] Auto-scan triggered after onboarding completion")
             }
         }
     }

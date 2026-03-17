@@ -3,6 +3,7 @@ import CoreLocation
 
 struct HomeView: View {
     @StateObject private var homeVM = HomeViewModel()
+    @ObservedObject var photoScanService = PhotoScanService.shared
     @EnvironmentObject var outfitsVM: MyOutfitsViewModel
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var authService: AuthService
@@ -11,6 +12,7 @@ struct HomeView: View {
     @State private var selectedCategory: Category? = nil
     @State private var selectedProduct: String? = nil
     @State private var showWeatherWarning = false
+    @State private var showScanReview = false
     @State private var appeared = false
     @State private var sparkleScale: CGFloat = 1.0
 
@@ -37,6 +39,17 @@ struct HomeView: View {
                             .opacity(appeared ? 1 : 0)
                             .offset(y: appeared ? 0 : 20)
                             .animation(.easeOut(duration: 0.5), value: appeared)
+
+                        // MARK: - Scan Progress Banner
+                        if photoScanService.scanState != .idle {
+                            ScanProgressBanner(
+                                scanService: photoScanService,
+                                showReview: $showScanReview
+                            )
+                            .padding(.top, DS.Spacing.md)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: photoScanService.scanState)
+                        }
 
                         // MARK: - Style Me Hero Card
                         styleMeHeroCard
@@ -97,6 +110,13 @@ struct HomeView: View {
                 } else {
                     Text("Weather information could not be retrieved. Outfit suggestions may not be seasonally appropriate. Would you like to continue?")
                 }
+            }
+            .sheet(isPresented: $showScanReview) {
+                ScanReviewView(
+                    scanService: photoScanService,
+                    isPresented: $showScanReview
+                )
+                .environmentObject(wardrobeViewModel)
             }
             .onAppear {
                 if homeVM.weather == nil && !homeVM.isWeatherLoading {
