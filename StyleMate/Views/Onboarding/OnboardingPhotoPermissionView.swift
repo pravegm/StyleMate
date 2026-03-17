@@ -4,12 +4,19 @@ import Photos
 struct OnboardingPhotoPermissionView: View {
     let onComplete: () -> Void
 
-    @State private var appeared = false
-    @State private var permissionState: PermissionState = .checking
-    @State private var showCompletion = false
-    @State private var completionScale: CGFloat = 0
+    // MARK: - State
 
-    private enum PermissionState {
+    @State private var permissionState: PermissionPhase = .checking
+    @State private var iconVisible = false
+    @State private var titleVisible = false
+    @State private var subtitleVisible = false
+    @State private var showCompletion = false
+    @State private var checkmarkScale: CGFloat = 0
+    @State private var completionTextVisible = false
+    @State private var completionSubtitleVisible = false
+    @State private var requestContentFade: Double = 1.0
+
+    private enum PermissionPhase {
         case checking
         case notDetermined
         case authorized
@@ -23,10 +30,10 @@ struct OnboardingPhotoPermissionView: View {
                 completionCelebration
             } else {
                 permissionContent
+                    .opacity(requestContentFade)
             }
         }
         .onAppear {
-            appeared = true
             checkCurrentStatus()
         }
     }
@@ -44,8 +51,7 @@ struct OnboardingPhotoPermissionView: View {
             notDeterminedView
 
         case .authorized:
-            EmptyView()
-                .onAppear { triggerCompletion() }
+            Color.clear.onAppear { triggerCompletion() }
 
         case .limited:
             limitedAccessView
@@ -55,7 +61,7 @@ struct OnboardingPhotoPermissionView: View {
         }
     }
 
-    // MARK: - Not Determined (Request Permission)
+    // MARK: - Not Determined
 
     private var notDeterminedView: some View {
         VStack(spacing: DS.Spacing.lg) {
@@ -70,35 +76,44 @@ struct OnboardingPhotoPermissionView: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 100, height: 100)
+                    .frame(width: 90, height: 90)
 
                 Image(systemName: "photo.stack.fill")
-                    .font(.system(size: 50))
+                    .font(.system(size: 44))
                     .foregroundColor(.white)
             }
-            .scaleEffect(appeared ? 1 : 0.5)
-            .opacity(appeared ? 1 : 0)
-            .animation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.1), value: appeared)
+            .scaleEffect(iconVisible ? 1 : 0.3)
+            .opacity(iconVisible ? 1 : 0)
+            .animation(.spring(response: 0.5, dampingFraction: 0.6), value: iconVisible)
 
-            Text("One last thing...")
+            Text("Almost there...")
                 .font(DS.Font.title2)
                 .foregroundColor(DS.Colors.textPrimary)
-                .offset(y: appeared ? 0 : 15)
-                .opacity(appeared ? 1 : 0)
-                .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.3), value: appeared)
+                .offset(y: titleVisible ? 0 : 15)
+                .opacity(titleVisible ? 1 : 0)
+                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: titleVisible)
 
-            Text("Allow photo access so we can find your clothes automatically.")
+            Text("Allow photo access to start building your wardrobe automatically.")
                 .font(DS.Font.body)
                 .foregroundColor(DS.Colors.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, DS.Spacing.xl)
-                .offset(y: appeared ? 0 : 10)
-                .opacity(appeared ? 1 : 0)
-                .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.45), value: appeared)
+                .offset(y: subtitleVisible ? 0 : 10)
+                .opacity(subtitleVisible ? 1 : 0)
+                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: subtitleVisible)
 
             Spacer()
         }
         .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                iconVisible = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                titleVisible = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+                subtitleVisible = true
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 requestPhotoAccess()
             }
@@ -111,15 +126,15 @@ struct OnboardingPhotoPermissionView: View {
         VStack(spacing: DS.Spacing.lg) {
             Spacer()
 
-            Image(systemName: "photo.badge.exclamationmark")
-                .font(.system(size: 50))
+            Image(systemName: "photo.badge.exclamationmark.fill")
+                .font(.system(size: 40))
                 .foregroundColor(DS.Colors.warning)
 
             Text("Limited Access")
-                .font(DS.Font.title1)
+                .font(DS.Font.title2)
                 .foregroundColor(DS.Colors.textPrimary)
 
-            Text("Auto-scan works best with full photo access. You can change this anytime in Settings.")
+            Text("Auto-scan needs full photo access to find your clothing. You can change this in Settings anytime.")
                 .font(DS.Font.body)
                 .foregroundColor(DS.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -155,16 +170,16 @@ struct OnboardingPhotoPermissionView: View {
         VStack(spacing: DS.Spacing.lg) {
             Spacer()
 
-            Image(systemName: "photo.badge.exclamationmark")
-                .font(.system(size: 50))
+            Image(systemName: "photo.badge.exclamationmark.fill")
+                .font(.system(size: 40))
                 .foregroundColor(DS.Colors.textTertiary)
 
-            Text("Photo Access Not Granted")
-                .font(DS.Font.title1)
+            Text("Photo Access Needed")
+                .font(DS.Font.title2)
                 .foregroundColor(DS.Colors.textPrimary)
                 .multilineTextAlignment(.center)
 
-            Text("You can still add clothes manually by taking photos or choosing from your gallery. Enable photo access anytime in Settings to unlock auto-scanning.")
+            Text("You can still add clothes manually using your camera. Enable photo access in Settings to unlock auto-scan later.")
                 .font(DS.Font.body)
                 .foregroundColor(DS.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -186,8 +201,10 @@ struct OnboardingPhotoPermissionView: View {
                     triggerCompletion()
                 } label: {
                     Text("Continue Without Scanning")
+                        .font(DS.Font.callout)
+                        .foregroundColor(DS.Colors.accent)
                 }
-                .buttonStyle(DSSecondaryButton())
+                .padding(.top, DS.Spacing.micro)
             }
             .padding(.horizontal, DS.Spacing.lg)
             .padding(.bottom, DS.Spacing.xl)
@@ -201,22 +218,21 @@ struct OnboardingPhotoPermissionView: View {
             Spacer()
 
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 80))
+                .font(.system(size: 70))
                 .foregroundColor(DS.Colors.success)
-                .scaleEffect(completionScale)
-                .animation(.spring(response: 0.5, dampingFraction: 0.55), value: completionScale)
+                .scaleEffect(checkmarkScale)
 
             Text("You're all set!")
                 .font(DS.Font.title1)
                 .foregroundColor(DS.Colors.textPrimary)
-                .opacity(completionScale > 0.5 ? 1 : 0)
-                .animation(.spring(response: 0.45, dampingFraction: 0.8).delay(0.2), value: completionScale)
+                .opacity(completionTextVisible ? 1 : 0)
+                .animation(.spring(response: 0.45, dampingFraction: 0.8), value: completionTextVisible)
 
             Text("Let's build your wardrobe")
                 .font(DS.Font.callout)
                 .foregroundColor(DS.Colors.textSecondary)
-                .opacity(completionScale > 0.5 ? 1 : 0)
-                .animation(.spring(response: 0.45, dampingFraction: 0.8).delay(0.35), value: completionScale)
+                .opacity(completionSubtitleVisible ? 1 : 0)
+                .animation(.spring(response: 0.45, dampingFraction: 0.8), value: completionSubtitleVisible)
 
             Spacer()
         }
@@ -261,17 +277,26 @@ struct OnboardingPhotoPermissionView: View {
     }
 
     private func triggerCompletion() {
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            requestContentFade = 0
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             showCompletion = true
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.55)) {
+                checkmarkScale = 1.0
+            }
         }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            completionScale = 1.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            completionTextVisible = true
         }
-
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            completionSubtitleVisible = true
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             onComplete()
         }
+        print("[StyleMate] Photo permission: triggering completion celebration")
     }
 
     private func openSettings() {

@@ -3,236 +3,234 @@ import SwiftUI
 struct OnboardingWelcomeView: View {
     let onAdvance: () -> Void
 
-    @State private var appeared = false
-    @State private var shimmerOffset: CGFloat = -200
+    // MARK: - Animation State (Rule 1: separate triggers)
 
-    private struct OrbitIcon: Identifiable {
-        let id = UUID()
-        let systemName: String
-        let angle: Double
-        let distance: CGFloat
+    @State private var glowVisible = false
+    @State private var centerCardVisible = false
+    @State private var innerCardsVisible = false
+    @State private var outerCardsVisible = false
+    @State private var breatheActive = false
+    @State private var titleVisible = false
+    @State private var subtitleVisible = false
+    @State private var pill1Visible = false
+    @State private var pill2Visible = false
+    @State private var pill3Visible = false
+    @State private var buttonVisible = false
+
+    // Shimmer (Rule 5: Timer-driven)
+    @State private var shimmerX: CGFloat = -100
+    private let shimmerTimer = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
+
+    private struct CardSpec: Identifiable {
+        let id: Int
+        let icon: String
+        let rotation: Double
+        let yLift: CGFloat
     }
 
-    private let orbitIcons: [OrbitIcon] = [
-        OrbitIcon(systemName: "shoe.fill", angle: -60, distance: 95),
-        OrbitIcon(systemName: "eyeglasses", angle: -20, distance: 100),
-        OrbitIcon(systemName: "bag.fill", angle: 20, distance: 95),
-        OrbitIcon(systemName: "crown.fill", angle: 60, distance: 100),
-        OrbitIcon(systemName: "heart.fill", angle: 100, distance: 90),
+    private let cards: [CardSpec] = [
+        CardSpec(id: 0, icon: "tshirt.fill", rotation: -20, yLift: 0),
+        CardSpec(id: 1, icon: "shoe.fill", rotation: -10, yLift: -6),
+        CardSpec(id: 2, icon: "bag.fill", rotation: 0, yLift: -12),
+        CardSpec(id: 3, icon: "eyeglasses", rotation: 10, yLift: -6),
+        CardSpec(id: 4, icon: "wind", rotation: 20, yLift: 0),
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        GeometryReader { geo in
+            ZStack {
+                backgroundGlow(in: geo)
 
-            heroAnimation
-                .frame(height: 260)
+                VStack(spacing: 0) {
+                    Spacer().frame(minHeight: DS.Spacing.xl)
 
-            Spacer().frame(height: DS.Spacing.xl)
+                    cardFan
+                        .frame(height: geo.size.height * 0.38)
 
-            VStack(spacing: DS.Spacing.sm) {
-                Text("Your wardrobe, organized by AI")
-                    .font(DS.Font.display)
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .padding(.horizontal, DS.Spacing.lg)
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.4), value: appeared)
+                    textContent
+                        .padding(.top, DS.Spacing.lg)
 
-                Text("Snap your clothes. Get styled every morning.")
-                    .font(DS.Font.callout)
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, DS.Spacing.xl)
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.55), value: appeared)
-            }
+                    featurePills
+                        .padding(.top, DS.Spacing.lg)
 
-            valuePillars
-                .padding(.top, DS.Spacing.xl)
+                    Spacer()
 
-            Spacer()
-
-            ctaButton
-                .padding(.horizontal, DS.Spacing.lg)
-                .padding(.bottom, DS.Spacing.xl)
-        }
-        .onAppear { appeared = true }
-    }
-
-    // MARK: - Hero Animation
-
-    private var heroAnimation: some View {
-        ZStack {
-            ForEach(Array(orbitIcons.enumerated()), id: \.element.id) { index, icon in
-                let radians = icon.angle * .pi / 180
-                let x = cos(radians) * icon.distance
-                let y = sin(radians) * icon.distance - 20
-
-                ZStack {
-                    Circle()
-                        .fill(DS.Colors.backgroundSecondary)
-                        .frame(width: 44, height: 44)
-
-                    Image(systemName: icon.systemName)
-                        .font(.system(size: 24))
-                        .foregroundColor(DS.Colors.textSecondary.opacity(0.6))
+                    ctaButton(screenWidth: geo.size.width)
+                        .padding(.horizontal, DS.Spacing.lg)
+                        .padding(.bottom, DS.Spacing.xl)
                 }
-                .offset(x: appeared ? x : 0, y: appeared ? y : 0)
-                .scaleEffect(appeared ? 1 : 0)
-                .opacity(appeared ? 1 : 0)
-                .animation(
-                    .spring(response: 0.5, dampingFraction: 0.65)
-                        .delay(0.3 + Double(index) * 0.05),
-                    value: appeared
-                )
-                .modifier(FloatingModifier(
-                    amplitude: 2,
-                    period: 3,
-                    phase: Double(index) * 0.4,
-                    active: appeared
-                ))
             }
+        }
+        .onAppear { choreographEntrance() }
+    }
 
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [DS.Colors.accent, DS.Colors.accent.opacity(0.6)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+    // MARK: - Background Glow
+
+    private func backgroundGlow(in geo: GeometryProxy) -> some View {
+        Circle()
+            .fill(DS.Colors.accent.opacity(0.05))
+            .frame(width: geo.size.width * 1.2)
+            .blur(radius: 100)
+            .offset(y: -geo.size.height * 0.15)
+            .opacity(glowVisible ? 1 : 0)
+            .animation(.easeIn(duration: 0.5), value: glowVisible)
+    }
+
+    // MARK: - Card Fan
+
+    private var cardFan: some View {
+        ZStack {
+            ForEach(cards) { card in
+                let isCenter = card.id == 2
+                let isInner = card.id == 1 || card.id == 3
+                let visible = isCenter ? centerCardVisible : (isInner ? innerCardsVisible : outerCardsVisible)
+
+                outfitCard(icon: card.icon)
+                    .rotationEffect(.degrees(visible ? card.rotation : 0), anchor: .bottom)
+                    .offset(y: visible ? card.yLift : 0)
+                    .scaleEffect(visible ? 1.0 : 0.4)
+                    .opacity(visible ? 1 : 0)
+                    .animation(
+                        .spring(response: 0.6, dampingFraction: 0.7),
+                        value: visible
                     )
-                    .frame(width: 130, height: 130)
-
-                Image(systemName: "tshirt.fill")
-                    .font(.system(size: 60))
-                    .foregroundColor(.white)
             }
-            .scaleEffect(appeared ? 1 : 0.5)
-            .opacity(appeared ? 1 : 0)
-            .animation(.spring(response: 0.45, dampingFraction: 0.7).delay(0.1), value: appeared)
         }
+        .scaleEffect(breatheActive ? 1.015 : 1.0)
     }
 
-    // MARK: - Value Pillars
-
-    private var valuePillars: some View {
-        VStack(spacing: DS.Spacing.md) {
-            valuePillarRow(icon: "camera.viewfinder", text: "AI detects your clothing automatically", delay: 0.65)
-            valuePillarRow(icon: "sparkles", text: "Daily outfit suggestions, styled for your day", delay: 0.75)
-            valuePillarRow(icon: "icloud.fill", text: "Synced safely to iCloud across devices", delay: 0.85)
-        }
-        .padding(.horizontal, DS.Spacing.xl)
-    }
-
-    private func valuePillarRow(icon: String, text: String, delay: Double) -> some View {
-        HStack(spacing: DS.Spacing.sm) {
-            ZStack {
-                Circle()
-                    .fill(DS.Colors.accent.opacity(0.12))
-                    .frame(width: 36, height: 36)
-
+    private func outfitCard(icon: String) -> some View {
+        RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+            .fill(DS.Colors.backgroundCard)
+            .frame(width: 70, height: 90)
+            .overlay(
                 Image(systemName: icon)
-                    .font(.system(size: 20))
-                    .foregroundColor(DS.Colors.accent)
-            }
+                    .font(.system(size: 28))
+                    .foregroundColor(DS.Colors.accent.opacity(0.7))
+            )
+            .dsCardShadow()
+    }
 
-            Text(text)
-                .font(DS.Font.subheadline)
+    // MARK: - Text Content
+
+    private var textContent: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            Text("Never wonder what to wear")
+                .font(DS.Font.display)
                 .foregroundColor(DS.Colors.textPrimary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, DS.Spacing.lg)
+                .offset(y: titleVisible ? 0 : 20)
+                .opacity(titleVisible ? 1 : 0)
+                .animation(.spring(response: 0.55, dampingFraction: 0.8), value: titleVisible)
 
-            Spacer()
+            Text("AI-powered outfit suggestions from your own wardrobe")
+                .font(DS.Font.callout)
+                .foregroundColor(DS.Colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, DS.Spacing.xl)
+                .offset(y: subtitleVisible ? 0 : 20)
+                .opacity(subtitleVisible ? 1 : 0)
+                .animation(.spring(response: 0.55, dampingFraction: 0.8), value: subtitleVisible)
         }
-        .offset(x: appeared ? 0 : -30)
-        .opacity(appeared ? 1 : 0)
-        .animation(.spring(response: 0.45, dampingFraction: 0.75).delay(delay), value: appeared)
+    }
+
+    // MARK: - Feature Pills
+
+    private var featurePills: some View {
+        HStack(spacing: DS.Spacing.xs) {
+            featurePill(icon: "camera.viewfinder", label: "Auto-detect", visible: pill1Visible)
+            featurePill(icon: "sparkles", label: "AI styling", visible: pill2Visible)
+            featurePill(icon: "icloud.fill", label: "iCloud sync", visible: pill3Visible)
+        }
+    }
+
+    private func featurePill(icon: String, label: String, visible: Bool) -> some View {
+        HStack(spacing: DS.Spacing.micro) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundColor(DS.Colors.accent)
+            Text(label)
+                .font(DS.Font.caption1)
+                .foregroundColor(DS.Colors.textSecondary)
+        }
+        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.vertical, DS.Spacing.xs)
+        .background(DS.Colors.backgroundSecondary, in: Capsule())
+        .offset(y: visible ? 0 : 15)
+        .opacity(visible ? 1 : 0)
+        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: visible)
     }
 
     // MARK: - CTA Button
 
-    private var ctaButton: some View {
+    private func ctaButton(screenWidth: CGFloat) -> some View {
         Button {
             Haptics.medium()
             onAdvance()
         } label: {
-            Text("Let's Go")
-                .overlay(shimmerOverlay)
+            Text("Get Started")
+                .overlay(
+                    LinearGradient(
+                        colors: [.clear, Color.white.opacity(0.08), .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 30)
+                    .offset(x: shimmerX)
+                    .clipped()
+                )
+                .clipped()
         }
         .buttonStyle(DSPrimaryButton())
-        .offset(y: appeared ? 0 : 30)
-        .opacity(appeared ? 1 : 0)
-        .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.8), value: appeared)
-        .onAppear { startShimmer() }
-    }
-
-    private var shimmerOverlay: some View {
-        GeometryReader { geometry in
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0),
-                    Color.white.opacity(0.1),
-                    Color.white.opacity(0),
-                ],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            .frame(width: 60)
-            .offset(x: shimmerOffset)
-            .frame(width: geometry.size.width, alignment: .leading)
+        .offset(y: buttonVisible ? 0 : 20)
+        .opacity(buttonVisible ? 1 : 0)
+        .animation(.spring(response: 0.55, dampingFraction: 0.8), value: buttonVisible)
+        .onReceive(shimmerTimer) { _ in
+            shimmerX = -100
+            withAnimation(.linear(duration: 0.6)) {
+                shimmerX = screenWidth + 100
+            }
         }
-        .allowsHitTesting(false)
-        .clipped()
     }
 
-    private func startShimmer() {
+    // MARK: - Choreography
+
+    private func choreographEntrance() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.0) {
+            glowVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            centerCardVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            innerCardsVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+            outerCardsVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
+            titleVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.80) {
+            subtitleVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
+            pill1Visible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.03) {
+            pill2Visible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.11) {
+            pill3Visible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            buttonVisible = true
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation(.linear(duration: 0.8)) {
-                shimmerOffset = 400
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                shimmerOffset = -200
-                startShimmer()
+            withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) {
+                breatheActive = true
             }
         }
-    }
-}
-
-// MARK: - Floating Animation Modifier
-
-private struct FloatingModifier: ViewModifier {
-    let amplitude: CGFloat
-    let period: Double
-    let phase: Double
-    let active: Bool
-
-    @State private var floating = false
-
-    func body(content: Content) -> some View {
-        content
-            .offset(y: active && floating ? -amplitude : amplitude)
-            .animation(
-                active
-                    ? .easeInOut(duration: period).repeatForever(autoreverses: true).delay(phase)
-                    : .default,
-                value: floating
-            )
-            .onAppear {
-                if active {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 + phase) {
-                        floating = true
-                    }
-                }
-            }
-            .onChange(of: active) { isActive in
-                if isActive {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 + phase) {
-                        floating = true
-                    }
-                }
-            }
     }
 }

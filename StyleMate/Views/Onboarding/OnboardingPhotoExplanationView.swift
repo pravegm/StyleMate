@@ -4,187 +4,276 @@ struct OnboardingPhotoExplanationView: View {
     let onAdvance: () -> Void
     let onSkip: () -> Void
 
-    @State private var appeared = false
-    @State private var dotPhase: CGFloat = 0
+    // MARK: - Animation State
+
+    @State private var leftGroupVisible = false
+    @State private var rightGroupVisible = false
+    @State private var headlineVisible = false
+    @State private var bodyVisible = false
+    @State private var trust1Visible = false
+    @State private var trust2Visible = false
+    @State private var trust3Visible = false
+    @State private var ctaVisible = false
+    @State private var flowPhase: CGFloat = 0
+
+    private let photoIcons = ["photo.fill", "photo.fill", "photo.fill",
+                              "photo.fill", "photo.fill", "photo.fill",
+                              "photo.fill", "photo.fill", "photo.fill"]
+    private let wardrobeIcons = ["tshirt.fill", "shoe.fill", "bag.fill",
+                                 "eyeglasses", "crown.fill", "heart.fill"]
+    private let photoRotations: [Double] = [-2, 1, -1, 3, -2, 2, -1, 0, 1]
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer()
+            Spacer().frame(minHeight: DS.Spacing.md)
 
-            illustrationArea
-                .frame(height: 200)
-                .padding(.bottom, DS.Spacing.xl)
+            illustration
+                .frame(height: 240)
+                .padding(.bottom, DS.Spacing.lg)
 
-            VStack(spacing: DS.Spacing.sm) {
-                Text("Build your wardrobe in minutes")
-                    .font(DS.Font.title1)
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, DS.Spacing.lg)
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.3), value: appeared)
-
-                Text("We'll scan your recent photos to find your clothes automatically. Just take a quick selfie first so we know which photos are yours.")
-                    .font(DS.Font.body)
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, DS.Spacing.xl)
-                    .offset(y: appeared ? 0 : 15)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.45), value: appeared)
-            }
+            headline
+            bodyText
+                .padding(.top, DS.Spacing.xs)
 
             trustSignals
                 .padding(.top, DS.Spacing.xl)
 
             Spacer()
 
-            VStack(spacing: DS.Spacing.sm) {
-                Button {
-                    Haptics.medium()
-                    onAdvance()
-                } label: {
-                    Text("Continue")
-                }
-                .buttonStyle(DSPrimaryButton())
-
-                Button {
-                    Haptics.light()
-                    onSkip()
-                } label: {
-                    Text("I'll add items manually")
-                        .font(DS.Font.callout)
-                        .foregroundColor(DS.Colors.accent)
-                }
-                .padding(.top, DS.Spacing.xs)
-            }
-            .padding(.horizontal, DS.Spacing.lg)
-            .padding(.bottom, DS.Spacing.xl)
-            .offset(y: appeared ? 0 : 20)
-            .opacity(appeared ? 1 : 0)
-            .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.9), value: appeared)
+            ctaArea
+                .padding(.horizontal, DS.Spacing.lg)
+                .padding(.bottom, DS.Spacing.xl)
         }
-        .onAppear {
-            appeared = true
-            startDotAnimation()
-        }
+        .onAppear { choreographEntrance() }
     }
 
     // MARK: - Illustration
 
-    private var illustrationArea: some View {
-        HStack(spacing: DS.Spacing.xl) {
-            photoStack
-                .offset(x: appeared ? 0 : -30)
-                .opacity(appeared ? 1 : 0)
-                .animation(.spring(response: 0.5, dampingFraction: 0.75).delay(0.1), value: appeared)
+    private var illustration: some View {
+        HStack(spacing: 0) {
+            Spacer()
 
-            flowDots
-                .frame(width: 60)
+            VStack(spacing: DS.Spacing.micro) {
+                photoGrid
+                Text("Your photos")
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+            .offset(x: leftGroupVisible ? 0 : -20)
+            .opacity(leftGroupVisible ? 1 : 0)
+            .animation(.spring(response: 0.5, dampingFraction: 0.75), value: leftGroupVisible)
 
-            wardrobeGrid
-                .offset(x: appeared ? 0 : 30)
-                .opacity(appeared ? 1 : 0)
-                .animation(.spring(response: 0.5, dampingFraction: 0.75).delay(0.2), value: appeared)
+            ZStack {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundColor(DS.Colors.textTertiary.opacity(0.3))
+
+                flowingDots
+            }
+            .frame(width: 70)
+
+            VStack(spacing: DS.Spacing.micro) {
+                wardrobeGrid
+                Text("Your wardrobe")
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.accent)
+            }
+            .offset(x: rightGroupVisible ? 0 : 20)
+            .opacity(rightGroupVisible ? 1 : 0)
+            .animation(.spring(response: 0.5, dampingFraction: 0.75), value: rightGroupVisible)
+
+            Spacer()
         }
     }
 
-    private var photoStack: some View {
-        ZStack {
-            ForEach(0..<3, id: \.self) { index in
-                RoundedRectangle(cornerRadius: DS.Radius.card)
+    private var photoGrid: some View {
+        let columns = Array(repeating: GridItem(.fixed(28), spacing: 3), count: 3)
+        return LazyVGrid(columns: columns, spacing: 3) {
+            ForEach(0..<9, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 5)
                     .fill(DS.Colors.backgroundSecondary)
-                    .frame(width: 60, height: 80)
+                    .frame(width: 28, height: 28)
                     .overlay(
-                        Image(systemName: "photo")
-                            .font(.system(size: 20))
+                        Image(systemName: photoIcons[i])
+                            .font(.system(size: 10))
                             .foregroundColor(DS.Colors.textTertiary)
                     )
-                    .rotationEffect(.degrees(Double(index - 1) * 5))
-                    .offset(x: CGFloat(index - 1) * 3, y: CGFloat(index - 1) * -2)
+                    .rotationEffect(.degrees(photoRotations[i]))
             }
         }
-    }
-
-    private var flowDots: some View {
-        ZStack {
-            ForEach(0..<4, id: \.self) { index in
-                Circle()
-                    .fill(DS.Colors.accent)
-                    .frame(width: 6, height: 6)
-                    .offset(x: flowDotOffset(for: index))
-                    .opacity(flowDotOpacity(for: index))
-            }
-        }
-    }
-
-    private func flowDotOffset(for index: Int) -> CGFloat {
-        let progress = (dotPhase + CGFloat(index) * 0.25).truncatingRemainder(dividingBy: 1.0)
-        return -25 + progress * 50
-    }
-
-    private func flowDotOpacity(for index: Int) -> Double {
-        let progress = (dotPhase + CGFloat(index) * 0.25).truncatingRemainder(dividingBy: 1.0)
-        let fade = 1.0 - abs(progress - 0.5) * 2.0
-        return appeared ? fade : 0
-    }
-
-    private func startDotAnimation() {
-        withAnimation(.linear(duration: 2.5).repeatForever(autoreverses: false)) {
-            dotPhase = 1.0
-        }
+        .padding(DS.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: DS.Radius.card)
+                .stroke(DS.Colors.textTertiary.opacity(0.15), lineWidth: 1)
+        )
     }
 
     private var wardrobeGrid: some View {
-        let icons = ["tshirt.fill", "shoe.fill", "eyeglasses", "bag.fill", "crown.fill", "heart.fill"]
-        let columns = [GridItem(.fixed(30), spacing: 4), GridItem(.fixed(30), spacing: 4)]
-
+        let columns = Array(repeating: GridItem(.fixed(28), spacing: 4), count: 2)
         return LazyVGrid(columns: columns, spacing: 4) {
-            ForEach(0..<6, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 6)
+            ForEach(0..<6, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 5)
                     .fill(DS.Colors.backgroundCard)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 28, height: 28)
                     .overlay(
-                        Image(systemName: icons[index])
+                        Image(systemName: wardrobeIcons[i])
                             .font(.system(size: 12))
-                            .foregroundColor(DS.Colors.textTertiary)
+                            .foregroundColor(DS.Colors.accent)
                     )
             }
         }
+        .padding(DS.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: DS.Radius.card)
+                .stroke(DS.Colors.accent.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Flowing Dots
+
+    private var flowingDots: some View {
+        Canvas { context, size in
+            let midY = size.height / 2
+            let startX: CGFloat = 0
+            let endX = size.width
+            let curveHeight: CGFloat = 12
+
+            for i in 0..<3 {
+                let offset = CGFloat(i) * 0.33
+                let t = (flowPhase + offset).truncatingRemainder(dividingBy: 1.0)
+                let x = startX + t * (endX - startX)
+                let y = midY - sin(t * .pi) * curveHeight
+                let fade = 1.0 - abs(t - 0.5) * 2.0
+
+                context.fill(
+                    Path(ellipseIn: CGRect(x: x - 4, y: y - 4, width: 8, height: 8)),
+                    with: .color(DS.Colors.accent.opacity(fade * 0.8))
+                )
+                context.fill(
+                    Path(ellipseIn: CGRect(x: x - 6, y: y - 6, width: 12, height: 12)),
+                    with: .color(DS.Colors.accent.opacity(fade * 0.15))
+                )
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    // MARK: - Text
+
+    private var headline: some View {
+        Text("Build your wardrobe in minutes")
+            .font(DS.Font.title1)
+            .foregroundColor(DS.Colors.textPrimary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, DS.Spacing.lg)
+            .offset(y: headlineVisible ? 0 : 20)
+            .opacity(headlineVisible ? 1 : 0)
+            .animation(.spring(response: 0.55, dampingFraction: 0.8), value: headlineVisible)
+    }
+
+    private var bodyText: some View {
+        Text("We'll scan your recent photos to find clothing items automatically. A quick selfie helps us find photos of you.")
+            .font(DS.Font.body)
+            .foregroundColor(DS.Colors.textSecondary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, DS.Spacing.xl)
+            .offset(y: bodyVisible ? 0 : 15)
+            .opacity(bodyVisible ? 1 : 0)
+            .animation(.spring(response: 0.55, dampingFraction: 0.8), value: bodyVisible)
     }
 
     // MARK: - Trust Signals
 
     private var trustSignals: some View {
-        VStack(spacing: DS.Spacing.md) {
-            trustRow(icon: "faceid", text: "Quick selfie to match your photos", emphasized: false, delay: 0.6)
-            trustRow(icon: "clock.fill", text: "Scans your last 6 months", emphasized: false, delay: 0.7)
-            trustRow(icon: "lock.shield.fill", text: "Everything stays on your device", emphasized: true, delay: 0.8)
+        VStack(spacing: DS.Spacing.sm) {
+            trustRow(icon: "faceid", text: "Quick selfie to find your photos",
+                     emphasized: false, visible: trust1Visible)
+            trustRow(icon: "clock.fill", text: "Scans your last 6 months",
+                     emphasized: false, visible: trust2Visible)
+            trustRow(icon: "lock.shield.fill", text: "Everything stays on your device",
+                     emphasized: true, visible: trust3Visible)
         }
         .padding(.horizontal, DS.Spacing.xl)
     }
 
-    private func trustRow(icon: String, text: String, emphasized: Bool, delay: Double) -> some View {
+    private func trustRow(icon: String, text: String, emphasized: Bool, visible: Bool) -> some View {
         HStack(spacing: DS.Spacing.sm) {
             ZStack {
                 Circle()
-                    .fill(DS.Colors.accent.opacity(0.12))
+                    .fill(DS.Colors.accent.opacity(0.1))
                     .frame(width: 28, height: 28)
-
                 Image(systemName: icon)
-                    .font(.system(size: 16))
+                    .font(.system(size: 14))
                     .foregroundColor(DS.Colors.accent)
             }
-
             Text(text)
                 .font(emphasized ? DS.Font.headline : DS.Font.subheadline)
                 .foregroundColor(emphasized ? DS.Colors.textPrimary : DS.Colors.textSecondary)
-
             Spacer()
         }
-        .offset(y: appeared ? 0 : 15)
-        .opacity(appeared ? 1 : 0)
-        .animation(.spring(response: 0.45, dampingFraction: 0.75).delay(delay), value: appeared)
+        .offset(y: visible ? 0 : 12)
+        .opacity(visible ? 1 : 0)
+        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: visible)
+    }
+
+    // MARK: - CTAs
+
+    private var ctaArea: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            Button {
+                Haptics.medium()
+                onAdvance()
+            } label: {
+                Text("Continue")
+            }
+            .buttonStyle(DSPrimaryButton())
+
+            Button {
+                Haptics.light()
+                onSkip()
+            } label: {
+                Text("I'll add items manually")
+                    .font(DS.Font.callout)
+                    .foregroundColor(DS.Colors.accent)
+            }
+            .padding(.top, DS.Spacing.micro)
+        }
+        .offset(y: ctaVisible ? 0 : 20)
+        .opacity(ctaVisible ? 1 : 0)
+        .animation(.spring(response: 0.55, dampingFraction: 0.8), value: ctaVisible)
+    }
+
+    // MARK: - Choreography
+
+    private func choreographEntrance() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            leftGroupVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            rightGroupVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            headlineVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            bodyVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            trust1Visible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.78) {
+            trust2Visible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.86) {
+            trust3Visible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            ctaVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            withAnimation(.linear(duration: 2.0).repeatForever(autoreverses: false)) {
+                flowPhase = 1.0
+            }
+        }
     }
 }

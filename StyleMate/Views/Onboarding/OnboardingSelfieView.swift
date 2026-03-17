@@ -8,13 +8,18 @@ struct OnboardingSelfieView: View {
 
     @EnvironmentObject var authService: AuthService
     @StateObject private var cameraService = SelfieCameraService()
-    @State private var appeared = false
+
+    // MARK: - Animation State
+
+    @State private var cameraBlackout: Double = 1.0
+    @State private var titleVisible = false
+    @State private var searchPulse = false
     @State private var faceProgress: CGFloat = 0
     @State private var showCapturedState = false
     @State private var capturedBounce: CGFloat = 1.0
+    @State private var searchDotPhase = 0
 
-    private let ovalWidth: CGFloat = 220
-    private let ovalHeight: CGFloat = 280
+    private let searchDotTimer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
@@ -25,129 +30,178 @@ struct OnboardingSelfieView: View {
             }
         }
         .onAppear {
-            appeared = true
             cameraService.configure()
+            withAnimation(.easeOut(duration: 0.6).delay(0.3)) {
+                cameraBlackout = 0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                titleVisible = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
+                    searchPulse = true
+                }
+            }
         }
         .onDisappear {
             cameraService.stop()
         }
         .onChange(of: cameraService.captureState) { state in
-            switch state {
-            case .detected:
-                withAnimation(.linear(duration: cameraService.captureState == .detected ? 1.5 : 0)) {
-                    faceProgress = 1.0
-                }
-            case .searching:
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    faceProgress = 0
-                }
-            case .captured:
-                handleCapture()
-            case .denied:
-                break
-            }
+            handleStateChange(state)
         }
     }
 
     // MARK: - Camera View
 
     private var cameraView: some View {
-        ZStack {
-            CameraPreviewView(session: cameraService.captureSession)
-                .ignoresSafeArea()
-
-            cameraOverlay
-
-            VStack {
-                Spacer()
-                    .frame(height: 100 + ovalHeight + DS.Spacing.xl)
-
-                instructionText
-                    .padding(.horizontal, DS.Spacing.lg)
-
-                Spacer()
-
-                privacyText
-                    .padding(.bottom, DS.Spacing.sm)
-
-                Button {
-                    Haptics.light()
-                    onSkip()
-                } label: {
-                    Text("Skip")
-                        .font(DS.Font.callout)
-                        .foregroundColor(.white.opacity(0.7))
-                }
-                .padding(.bottom, DS.Spacing.xl)
-            }
-        }
-    }
-
-    // MARK: - Camera Overlay with Oval Cutout
-
-    private var cameraOverlay: some View {
-        GeometryReader { geometry in
-            let ovalCenter = CGPoint(
-                x: geometry.size.width / 2,
-                y: 100 + ovalHeight / 2
-            )
+        GeometryReader { geo in
+            let ovalW = geo.size.width * 0.58
+            let ovalH = ovalW * 1.3
+            let ovalCenterY = geo.safeAreaInsets.top + 80 + ovalH / 2
+            let ovalCenter = CGPoint(x: geo.size.width / 2, y: ovalCenterY)
 
             ZStack {
+                CameraPreviewView(session: cameraService.captureSession)
+                    .ignoresSafeArea()
+
+                Color.black.opacity(cameraBlackout)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+
                 OvalCutoutView(
                     center: ovalCenter,
-                    ovalSize: CGSize(width: ovalWidth, height: ovalHeight),
-                    fillColor: Color.black.opacity(0.55)
+                    ovalSize: CGSize(width: ovalW, height: ovalH),
+                    fillColor: Color.black.opacity(0.6)
                 )
                 .ignoresSafeArea()
+                .allowsHitTesting(false)
 
-                ovalBorder(center: ovalCenter)
+                ovalBorder(center: ovalCenter, ovalW: ovalW, ovalH: ovalH)
+                cornerTicks(center: ovalCenter, ovalW: ovalW, ovalH: ovalH)
 
                 if showCapturedState, let image = cameraService.capturedImage {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: ovalWidth - 5, height: ovalHeight - 5)
+                        .frame(width: ovalW - 6, height: ovalH - 6)
                         .clipShape(Ellipse())
                         .position(ovalCenter)
                         .transition(.opacity)
+                }
+
+                VStack {
+                    titleArea
+                        .padding(.top, geo.safeAreaInsets.top + DS.Spacing.md)
+
+                    Spacer()
+                        .frame(height: ovalCenterY + ovalH / 2 - geo.safeAreaInsets.top - 60 + DS.Spacing.xl)
+
+                    instructionText
+                        .padding(.horizontal, DS.Spacing.lg)
+
+                    Spacer()
+
+                    bottomArea
+                        .padding(.bottom, DS.Spacing.xl)
                 }
             }
         }
     }
 
+    // MARK: - Title
+
+    private var titleArea: some View {
+        VStack(spacing: DS.Spacing.micro) {
+            Text("Take a Quick Selfie")
+                .font(DS.Font.title2)
+                .foregroundColor(.white)
+            Text("to find your outfit photos")
+                .font(DS.Font.subheadline)
+                .foregroundColor(.white.opacity(0.6))
+        }
+        .opacity(titleVisible ? 1 : 0)
+        .animation(.easeOut(duration: 0.4), value: titleVisible)
+    }
+
+    // MARK: - Oval Border
+
     @ViewBuilder
-    private func ovalBorder(center: CGPoint) -> some View {
+    private func ovalBorder(center: CGPoint, ovalW: CGFloat, ovalH: CGFloat) -> some View {
         switch cameraService.captureState {
         case .searching:
             Ellipse()
-                .stroke(Color.white.opacity(appeared ? 0.5 : 0.3), lineWidth: 2.5)
-                .frame(width: ovalWidth, height: ovalHeight)
+                .stroke(Color.white.opacity(searchPulse ? 0.5 : 0.25), lineWidth: 2)
+                .frame(width: ovalW, height: ovalH)
                 .position(center)
-                .animation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: appeared)
 
         case .detected:
             ZStack {
                 Ellipse()
-                    .stroke(DS.Colors.accent.opacity(0.3), lineWidth: 2.5)
-                    .frame(width: ovalWidth, height: ovalHeight)
+                    .stroke(DS.Colors.accent.opacity(0.25), lineWidth: 2)
+                    .frame(width: ovalW, height: ovalH)
 
-                Ellipse()
+                Circle()
                     .trim(from: 0, to: faceProgress)
-                    .stroke(DS.Colors.accent.opacity(0.8), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                    .frame(width: ovalWidth, height: ovalHeight)
+                    .stroke(DS.Colors.accent.opacity(0.4), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .scaleEffect(x: 1.0, y: ovalH / ovalW)
                     .rotationEffect(.degrees(-90))
+                    .frame(width: ovalW, height: ovalW)
+                    .blur(radius: 8)
+
+                Circle()
+                    .trim(from: 0, to: faceProgress)
+                    .stroke(DS.Colors.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .scaleEffect(x: 1.0, y: ovalH / ovalW)
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: ovalW, height: ovalW)
             }
             .position(center)
 
         case .captured:
             Ellipse()
                 .stroke(DS.Colors.success, lineWidth: 3)
-                .frame(width: ovalWidth, height: ovalHeight)
+                .frame(width: ovalW, height: ovalH)
                 .scaleEffect(capturedBounce)
                 .position(center)
 
         case .denied:
             EmptyView()
+        }
+    }
+
+    // MARK: - Corner Ticks
+
+    private func cornerTicks(center: CGPoint, ovalW: CGFloat, ovalH: CGFloat) -> some View {
+        let tickColor: Color = {
+            switch cameraService.captureState {
+            case .searching: return .white.opacity(0.6)
+            case .detected: return DS.Colors.accent
+            case .captured: return DS.Colors.success
+            case .denied: return .clear
+            }
+        }()
+
+        return ZStack {
+            // Top
+            RoundedRectangle(cornerRadius: 1)
+                .fill(tickColor)
+                .frame(width: 2, height: 12)
+                .position(x: center.x, y: center.y - ovalH / 2 - 8)
+            // Bottom
+            RoundedRectangle(cornerRadius: 1)
+                .fill(tickColor)
+                .frame(width: 2, height: 12)
+                .position(x: center.x, y: center.y + ovalH / 2 + 8)
+            // Left
+            RoundedRectangle(cornerRadius: 1)
+                .fill(tickColor)
+                .frame(width: 12, height: 2)
+                .position(x: center.x - ovalW / 2 - 8, y: center.y)
+            // Right
+            RoundedRectangle(cornerRadius: 1)
+                .fill(tickColor)
+                .frame(width: 12, height: 2)
+                .position(x: center.x + ovalW / 2 + 8, y: center.y)
         }
     }
 
@@ -157,12 +211,30 @@ struct OnboardingSelfieView: View {
     private var instructionText: some View {
         switch cameraService.captureState {
         case .searching:
-            Text("Position your face in the oval")
-                .font(DS.Font.headline)
-                .foregroundColor(.white)
-                .multilineTextAlignment(.center)
-                .transition(.opacity)
-                .accessibilityLabel("Position your face in the oval to take a selfie")
+            VStack(spacing: DS.Spacing.xs) {
+                Text("Position your face in the oval")
+                    .font(DS.Font.headline)
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+
+                HStack(spacing: DS.Spacing.micro) {
+                    ForEach(0..<3, id: \.self) { i in
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 5, height: 5)
+                            .scaleEffect(searchDotPhase == i ? 1.5 : 1.0)
+                            .opacity(searchDotPhase == i ? 1.0 : 0.3)
+                            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: searchDotPhase)
+                    }
+                }
+                .onReceive(searchDotTimer) { _ in
+                    if cameraService.captureState == .searching {
+                        searchDotPhase = (searchDotPhase + 1) % 3
+                    }
+                }
+            }
+            .transition(.opacity)
+            .accessibilityLabel("Position your face in the oval to take a selfie")
 
         case .detected:
             VStack(spacing: DS.Spacing.xs) {
@@ -170,30 +242,25 @@ struct OnboardingSelfieView: View {
                     .font(DS.Font.headline)
                     .foregroundColor(DS.Colors.accent)
 
-                HStack(spacing: DS.Spacing.micro) {
-                    ForEach(0..<3, id: \.self) { index in
-                        Circle()
-                            .fill(DS.Colors.accent)
-                            .frame(width: 6, height: 6)
-                            .opacity(countdownDotOpacity(for: index))
-                    }
-                }
+                Circle()
+                    .trim(from: 0, to: faceProgress)
+                    .stroke(DS.Colors.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 16, height: 16)
             }
             .transition(.opacity)
             .accessibilityLabel("Face detected, hold still")
 
         case .captured:
-            VStack(spacing: DS.Spacing.xs) {
-                HStack(spacing: DS.Spacing.xs) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(DS.Colors.success)
-                    Text("Perfect!")
-                        .font(DS.Font.headline)
-                        .foregroundColor(DS.Colors.success)
-                }
-                .scaleEffect(showCapturedState ? 1 : 0.5)
-                .animation(.spring(response: 0.4, dampingFraction: 0.6), value: showCapturedState)
+            HStack(spacing: DS.Spacing.xs) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(DS.Colors.success)
+                Text("Got it!")
+                    .font(DS.Font.headline)
+                    .foregroundColor(DS.Colors.success)
             }
+            .scaleEffect(showCapturedState ? 1 : 0)
+            .animation(.spring(response: 0.35, dampingFraction: 0.5), value: showCapturedState)
             .transition(.opacity)
             .accessibilityLabel("Photo captured successfully")
 
@@ -202,34 +269,55 @@ struct OnboardingSelfieView: View {
         }
     }
 
-    private func countdownDotOpacity(for index: Int) -> Double {
-        let progress = Double(faceProgress)
-        let threshold = Double(index + 1) / 3.0
-        return progress >= threshold ? 1.0 : 0.3
-    }
+    // MARK: - Bottom Area
 
-    // MARK: - Privacy & Skip
+    private var bottomArea: some View {
+        VStack(spacing: DS.Spacing.md) {
+            HStack(spacing: DS.Spacing.micro) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 11))
+                Text("Your selfie stays on this device")
+                    .font(DS.Font.caption1)
+            }
+            .foregroundColor(.white.opacity(0.5))
 
-    private var privacyText: some View {
-        HStack(spacing: DS.Spacing.micro) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 11))
-            Text("Your selfie never leaves this device")
-                .font(DS.Font.caption1)
+            Button {
+                Haptics.light()
+                onSkip()
+            } label: {
+                Text("Skip")
+                    .font(DS.Font.callout)
+                    .foregroundColor(.white.opacity(0.65))
+            }
         }
-        .foregroundColor(.white.opacity(0.6))
     }
 
-    // MARK: - Capture Handling
+    // MARK: - State Change Handling
+
+    private func handleStateChange(_ state: SelfieCameraService.CaptureState) {
+        switch state {
+        case .detected:
+            withAnimation(.linear(duration: 1.5)) {
+                faceProgress = 1.0
+            }
+        case .searching:
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                faceProgress = 0
+            }
+        case .captured:
+            handleCapture()
+        case .denied:
+            break
+        }
+    }
 
     private func handleCapture() {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) {
             showCapturedState = true
-            capturedBounce = 1.05
+            capturedBounce = 1.04
         }
-
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
                 capturedBounce = 1.0
             }
         }
@@ -242,9 +330,10 @@ struct OnboardingSelfieView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             onAdvance()
         }
+        print("[StyleMate] Selfie capture handled, advancing in 0.8s")
     }
 
-    // MARK: - Permission Denied View
+    // MARK: - Permission Denied Fallback
 
     private var cameraPermissionDeniedView: some View {
         VStack(spacing: DS.Spacing.lg) {
@@ -254,7 +343,6 @@ struct OnboardingSelfieView: View {
                 Circle()
                     .fill(DS.Colors.backgroundSecondary)
                     .frame(width: 100, height: 100)
-
                 Image(systemName: "camera.fill")
                     .font(.system(size: 40))
                     .foregroundColor(DS.Colors.textTertiary)
@@ -299,7 +387,7 @@ struct OnboardingSelfieView: View {
     }
 }
 
-// MARK: - Oval Cutout Shape
+// MARK: - Oval Cutout
 
 private struct OvalCutoutShape: Shape {
     let center: CGPoint
@@ -318,7 +406,7 @@ private struct OvalCutoutShape: Shape {
     }
 }
 
-private struct OvalCutoutView: View {
+struct OvalCutoutView: View {
     let center: CGPoint
     let ovalSize: CGSize
     let fillColor: Color
