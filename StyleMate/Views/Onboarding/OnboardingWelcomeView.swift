@@ -3,8 +3,6 @@ import SwiftUI
 struct OnboardingWelcomeView: View {
     let onAdvance: () -> Void
 
-    // MARK: - Animation State (Rule 1: separate triggers)
-
     @State private var glowVisible = false
     @State private var centerCardVisible = false
     @State private var innerCardsVisible = false
@@ -16,9 +14,8 @@ struct OnboardingWelcomeView: View {
     @State private var pill2Visible = false
     @State private var pill3Visible = false
     @State private var buttonVisible = false
-
-    // Shimmer (Rule 5: Timer-driven)
     @State private var shimmerX: CGFloat = -100
+
     private let shimmerTimer = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
 
     private struct CardSpec: Identifiable {
@@ -37,45 +34,34 @@ struct OnboardingWelcomeView: View {
     ]
 
     var body: some View {
-        GeometryReader { geo in
-            let compact = geo.size.height < 700
+        VStack(spacing: 0) {
+            Spacer(minLength: DS.Spacing.sm)
 
-            ZStack {
-                backgroundGlow(in: geo)
+            cardFan
+                .frame(height: 150)
 
-                VStack(spacing: 0) {
-                    Spacer().frame(minHeight: compact ? DS.Spacing.sm : DS.Spacing.lg)
+            textContent
+                .padding(.top, DS.Spacing.md)
 
-                    cardFan
-                        .frame(height: compact ? 140 : geo.size.height * 0.3)
+            featurePills
+                .padding(.top, DS.Spacing.md)
 
-                    textContent
-                        .padding(.top, compact ? DS.Spacing.sm : DS.Spacing.lg)
+            Spacer(minLength: DS.Spacing.md)
 
-                    featurePills
-                        .padding(.top, compact ? DS.Spacing.sm : DS.Spacing.lg)
-
-                    Spacer(minLength: DS.Spacing.md)
-
-                    ctaButton(screenWidth: geo.size.width)
-                        .padding(.horizontal, DS.Spacing.lg)
-                        .padding(.bottom, DS.Spacing.lg)
-                }
-            }
+            ctaButton
+                .padding(.horizontal, DS.Spacing.lg)
+                .padding(.bottom, DS.Spacing.lg)
         }
+        .background(
+            Circle()
+                .fill(DS.Colors.accent.opacity(0.05))
+                .frame(width: 500)
+                .blur(radius: 100)
+                .offset(y: -100)
+                .opacity(glowVisible ? 1 : 0)
+                .animation(.easeIn(duration: 0.5), value: glowVisible)
+        )
         .onAppear { choreographEntrance() }
-    }
-
-    // MARK: - Background Glow
-
-    private func backgroundGlow(in geo: GeometryProxy) -> some View {
-        Circle()
-            .fill(DS.Colors.accent.opacity(0.05))
-            .frame(width: geo.size.width * 1.2)
-            .blur(radius: 100)
-            .offset(y: -geo.size.height * 0.15)
-            .opacity(glowVisible ? 1 : 0)
-            .animation(.easeIn(duration: 0.5), value: glowVisible)
     }
 
     // MARK: - Card Fan
@@ -92,10 +78,7 @@ struct OnboardingWelcomeView: View {
                     .offset(y: visible ? card.yLift : 0)
                     .scaleEffect(visible ? 1.0 : 0.4)
                     .opacity(visible ? 1 : 0)
-                    .animation(
-                        .spring(response: 0.6, dampingFraction: 0.7),
-                        value: visible
-                    )
+                    .animation(.spring(response: 0.6, dampingFraction: 0.7), value: visible)
             }
         }
         .scaleEffect(breatheActive ? 1.015 : 1.0)
@@ -121,6 +104,7 @@ struct OnboardingWelcomeView: View {
                 .font(DS.Font.title1)
                 .foregroundColor(DS.Colors.textPrimary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, DS.Spacing.lg)
                 .offset(y: titleVisible ? 0 : 20)
                 .opacity(titleVisible ? 1 : 0)
@@ -130,6 +114,7 @@ struct OnboardingWelcomeView: View {
                 .font(DS.Font.callout)
                 .foregroundColor(DS.Colors.textSecondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, DS.Spacing.xl)
                 .offset(y: subtitleVisible ? 0 : 20)
                 .opacity(subtitleVisible ? 1 : 0)
@@ -166,23 +151,25 @@ struct OnboardingWelcomeView: View {
 
     // MARK: - CTA Button
 
-    private func ctaButton(screenWidth: CGFloat) -> some View {
+    private var ctaButton: some View {
         Button {
             Haptics.medium()
             onAdvance()
         } label: {
             Text("Get Started")
                 .overlay(
-                    LinearGradient(
-                        colors: [.clear, Color.white.opacity(0.08), .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: 30)
-                    .offset(x: shimmerX)
+                    GeometryReader { btnGeo in
+                        LinearGradient(
+                            colors: [.clear, Color.white.opacity(0.08), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: 30)
+                        .offset(x: shimmerX)
+                        .frame(width: btnGeo.size.width, alignment: .leading)
+                    }
                     .clipped()
                 )
-                .clipped()
         }
         .buttonStyle(DSPrimaryButton())
         .offset(y: buttonVisible ? 0 : 20)
@@ -191,7 +178,7 @@ struct OnboardingWelcomeView: View {
         .onReceive(shimmerTimer) { _ in
             shimmerX = -100
             withAnimation(.linear(duration: 0.6)) {
-                shimmerX = screenWidth + 100
+                shimmerX = 400
             }
         }
     }
@@ -199,9 +186,7 @@ struct OnboardingWelcomeView: View {
     // MARK: - Choreography
 
     private func choreographEntrance() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.0) {
-            glowVisible = true
-        }
+        glowVisible = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             centerCardVisible = true
         }
