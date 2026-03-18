@@ -8,9 +8,10 @@ class FaceMatchingService {
     private init() {}
 
     // Cosine similarity threshold for MobileFaceNet 128-dim embeddings.
-    // Same person: typically 0.5–0.9. Different person: typically -0.1–0.3.
-    // 0.4 is permissive to handle varied lighting/angles in photo libraries.
-    private static let matchThreshold: Float = 0.4
+    // Real-world scores: same person 0.25–0.7, different person -0.1–0.15.
+    // 0.2 is permissive to handle varied lighting/angles/expressions in photo libraries;
+    // false positives are acceptable since Gemini filters non-clothing downstream.
+    private static let matchThreshold: Float = 0.2
 
     private var referenceEmbedding: [Float]?
     private var mlModel: MLModel?
