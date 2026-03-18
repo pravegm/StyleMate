@@ -161,14 +161,31 @@ extension SelfieCameraService: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        let mirrored = UIImage(cgImage: image.cgImage!, scale: image.scale, orientation: .leftMirrored)
+        // Render the image to a canonical .up orientation bitmap.
+        // The front camera produces .leftMirrored which confuses face
+        // recognition models that expect unmirrored faces. Baking the
+        // orientation into pixels and discarding the flag gives us a
+        // stable reference image identical to how the user appears in
+        // their photo library (camera-roll images are also .up).
+        let normalized = Self.renderUpOrientation(image)
 
         Task { @MainActor in
-            self.capturedImage = mirrored
+            self.capturedImage = normalized
             self.captureState = .captured
             self.isCapturing = false
             Haptics.success()
-            print("[StyleMate] Selfie captured successfully")
+            print("[StyleMate] Selfie captured (\(Int(normalized.size.width))x\(Int(normalized.size.height)), orientation: .up)")
+        }
+    }
+
+    /// Renders the image into a new bitmap with .up orientation,
+    /// baking any rotation/mirroring into the pixel data.
+    private nonisolated static func renderUpOrientation(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up, let cgImage = image.cgImage else { return image }
+        let size = image.size
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }
