@@ -3,6 +3,7 @@ import SwiftUI
 struct ScanProgressBanner: View {
     @ObservedObject var scanService: PhotoScanService
     @Binding var showReview: Bool
+    @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
 
     @State private var rotationAngle: Double = 0
     @State private var autoDismissTask: Task<Void, Never>?
@@ -70,6 +71,8 @@ struct ScanProgressBanner: View {
         .background(DS.Colors.backgroundCard)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         .dsCardShadow()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Scanning photos. \(scanService.photosScanned) of \(scanService.totalPhotosToScan) scanned. \(scanService.itemsFound) items added to wardrobe.")
     }
 
     @ViewBuilder
@@ -128,6 +131,8 @@ struct ScanProgressBanner: View {
         .background(DS.Colors.backgroundCard)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         .dsCardShadow()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Scan complete. Added \(scanService.scanAddedItemIDs.count) items to your wardrobe.")
         .onAppear {
             autoDismissTask?.cancel()
             autoDismissTask = Task {
@@ -176,7 +181,9 @@ struct ScanProgressBanner: View {
     private var errorBanner: some View {
         Button {
             Haptics.light()
-            scanService.scanState = .idle
+            Task {
+                await scanService.retryScan(wardrobeViewModel: wardrobeViewModel)
+            }
         } label: {
             HStack(spacing: DS.Spacing.sm) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -200,5 +207,7 @@ struct ScanProgressBanner: View {
             .dsCardShadow()
         }
         .buttonStyle(DSTapBounce())
+        .accessibilityLabel("Scan paused. Double tap to retry.")
+        .accessibilityHint("Retries the photo scan")
     }
 }

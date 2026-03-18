@@ -71,6 +71,7 @@ struct GeminiConsentView: View {
                     }
                 }
                 .buttonStyle(DSPrimaryButton(isDisabled: false))
+                .accessibilityLabel("I agree to send photos to Google Gemini for clothing analysis")
 
                 Button {
                     Haptics.light()
@@ -82,6 +83,7 @@ struct GeminiConsentView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, DS.Spacing.sm)
                 }
+                .accessibilityLabel("Decline. Photos will not be sent for analysis.")
             }
         }
         .padding(.horizontal, DS.Spacing.screenH)

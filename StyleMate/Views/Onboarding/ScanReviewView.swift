@@ -5,9 +5,21 @@ struct ScanReviewView: View {
     @Binding var isPresented: Bool
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
 
+    private var currentUserId: String? {
+        let email = wardrobeViewModel.currentUserEmail
+        return email.isEmpty ? nil : email
+    }
+
     private var scannedWardrobeItems: [WardrobeItem] {
-        let scanIDs = Set(scanService.scanAddedItemIDs)
-        return wardrobeViewModel.items.filter { scanIDs.contains($0.id) }
+        let ids: Set<UUID>
+        if !scanService.scanAddedItemIDs.isEmpty {
+            ids = Set(scanService.scanAddedItemIDs)
+        } else if let userId = currentUserId {
+            ids = Set(scanService.loadLastScanItemIDs(forUser: userId))
+        } else {
+            ids = []
+        }
+        return wardrobeViewModel.items.filter { ids.contains($0.id) }
     }
 
     private let columns = [
@@ -110,9 +122,10 @@ struct ScanReviewView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 22))
                         .foregroundColor(DS.Colors.error.opacity(0.8))
-                        .background(Circle().fill(Color.white).frame(width: 18, height: 18))
+                        .background(Circle().fill(DS.Colors.backgroundPrimary).frame(width: 18, height: 18))
                 }
                 .padding(DS.Spacing.xs)
+                .accessibilityLabel("Remove \(item.product)")
             }
 
             Text(item.product)
@@ -131,6 +144,9 @@ struct ScanReviewView: View {
         .background(DS.Colors.backgroundCard)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         .dsCardShadow()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.product), \(item.category.rawValue)")
+        .accessibilityHint("Double tap the remove button to remove this item")
     }
 
     private func colorDots(for colors: [String]) -> some View {
@@ -175,6 +191,9 @@ struct ScanReviewView: View {
 
             Button {
                 Haptics.success()
+                if let userId = currentUserId {
+                    scanService.clearLastScanIDs(forUser: userId)
+                }
                 isPresented = false
             } label: {
                 HStack {
@@ -186,6 +205,7 @@ struct ScanReviewView: View {
             .buttonStyle(DSPrimaryButton())
             .padding(.horizontal, DS.Spacing.screenH)
             .padding(.vertical, DS.Spacing.md)
+            .accessibilityLabel("Done reviewing scanned items")
         }
         .background(DS.Colors.backgroundPrimary)
     }
@@ -202,6 +222,10 @@ struct ScanReviewView: View {
         WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
 
         scanService.scanAddedItemIDs.removeAll { $0 == item.id }
+
+        if let userId = currentUserId {
+            scanService.removeFromLastScanIDs(item.id, forUser: userId)
+        }
 
         wardrobeViewModel.deleteItemFromCloud(item)
 

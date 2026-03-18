@@ -172,6 +172,9 @@ struct ScanRangePickerView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(option.label). \(photoCounts[option].map { "Approximately \($0) photos" } ?? "Loading")")
+        .accessibilityAddTraits(selectedOption == option ? .isSelected : [])
     }
 
     private var customDatePickers: some View {
@@ -229,6 +232,7 @@ struct ScanRangePickerView: View {
             .buttonStyle(DSPrimaryButton(isDisabled: selectedOption == nil))
             .disabled(selectedOption == nil)
             .opacity(selectedOption == nil ? 0.5 : 1.0)
+            .accessibilityLabel(isScanRunning ? "Cancel current scan and start new" : "Start scanning")
         }
     }
 

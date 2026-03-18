@@ -46,9 +46,28 @@ struct HomeView: View {
                                 scanService: photoScanService,
                                 showReview: $showScanReview
                             )
+                            .environmentObject(wardrobeViewModel)
                             .padding(.top, DS.Spacing.md)
                             .transition(.move(edge: .top).combined(with: .opacity))
                             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: photoScanService.scanState)
+                        }
+
+                        if photoScanService.scanState == .idle,
+                           let userId = authService.user?.id,
+                           !PhotoScanService.shared.loadLastScanItemIDs(forUser: userId).isEmpty {
+                            Button {
+                                Haptics.light()
+                                showScanReview = true
+                            } label: {
+                                HStack(spacing: DS.Spacing.xs) {
+                                    Image(systemName: "slider.horizontal.3")
+                                        .font(.system(size: 12))
+                                    Text("Review last scan results")
+                                        .font(DS.Font.caption1)
+                                }
+                                .foregroundColor(DS.Colors.accent)
+                                .padding(.top, DS.Spacing.xs)
+                            }
                         }
 
                         // MARK: - Style Me Hero Card

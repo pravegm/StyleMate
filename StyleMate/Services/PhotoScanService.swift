@@ -20,6 +20,7 @@ struct ScanProgress: Codable {
     var scanStartDate: Date?
     var scanEndDate: Date?
     var totalItemsFound: Int
+    var lastScanAddedItemIDs: [String] = []
 }
 
 // MARK: - Scan History Info
@@ -46,6 +47,13 @@ class PhotoScanService: ObservableObject {
     @Published var scanAddedItemIDs: [UUID] = []
 
     private var lastUIUpdate = ContinuousClock.now
+    private var lastScanContext: ScanContext?
+
+    private struct ScanContext {
+        let userId: String
+        let dateRange: ScanDateRange
+        let userGender: String?
+    }
 
     enum ScanState: Equatable {
         case idle
@@ -72,8 +80,13 @@ class PhotoScanService: ObservableObject {
 
     private static func progressFileURL(forUser userId: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("ScanProgress", isDirectory: true)
+        var dir = appSupport.appendingPathComponent("ScanProgress", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        try? dir.setResourceValues(resourceValues)
+
         return dir.appendingPathComponent("scanProgress_\(userId).json")
     }
 
@@ -133,6 +146,7 @@ class PhotoScanService: ObservableObject {
         photosScanned = 0
         itemsFound = 0
         scanAddedItemIDs = []
+        lastScanContext = ScanContext(userId: userId, dateRange: dateRange, userGender: userGender)
 
         var progress = loadProgress(forUser: userId)
 
@@ -181,8 +195,9 @@ class PhotoScanService: ObservableObject {
                     continue
                 }
 
-                // Face matching on thumbnail (fast: ~5-15ms)
-                let matchResult = FaceMatchingService.shared.findUserInPhoto(thumbCG)
+                let matchResult = await Task.detached {
+                    FaceMatchingService.shared.findUserInPhoto(thumbCG)
+                }.value
 
                 guard matchResult.isMatch else {
                     progress.scannedAssetIDs.insert(asset.localIdentifier)
@@ -201,21 +216,28 @@ class PhotoScanService: ObservableObject {
                     continue
                 }
 
-                // Synchronous face matching + body cropping inside autoreleasepool
-                // to drain intermediate CGImage/UIImage references between await points
-                let imageForGemini: UIImage = autoreleasepool {
-                    if matchResult.faceCount > 1, let fullCG = fullImage.cgImage {
-                        let fullResMatch = FaceMatchingService.shared.findUserInPhoto(fullCG)
+                let imageForGemini: UIImage
+                if matchResult.faceCount > 1, let fullCG = fullImage.cgImage {
+                    let fullResMatch = await Task.detached {
+                        FaceMatchingService.shared.findUserInPhoto(fullCG)
+                    }.value
+
+                    let cropped: UIImage? = autoreleasepool {
                         if let croppedBody = FaceMatchingService.shared.cropToUserBody(from: fullCG, matchResult: fullResMatch) {
-                            print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - cropped to user")
                             return UIImage(cgImage: croppedBody)
-                        } else {
-                            print("[StyleMate] Auto-scan: Multi-person photo - crop failed, using full image")
-                            return fullImage
                         }
-                    } else {
-                        return fullImage
+                        return nil
                     }
+
+                    if let cropped {
+                        imageForGemini = cropped
+                        print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - cropped to user")
+                    } else {
+                        imageForGemini = fullImage
+                        print("[StyleMate] Auto-scan: Multi-person photo - crop failed, using full image")
+                    }
+                } else {
+                    imageForGemini = fullImage
                 }
 
                 let results = await ImageAnalysisService.shared.analyzeAndSegment(
@@ -298,6 +320,7 @@ class PhotoScanService: ObservableObject {
 
         progress.lastScanDate = Date()
         progress.totalItemsFound += scanAddedItemIDs.count
+        progress.lastScanAddedItemIDs = scanAddedItemIDs.map { $0.uuidString }
         saveProgress(progress, forUser: userId)
 
         scanState = .completed
@@ -325,11 +348,39 @@ class PhotoScanService: ObservableObject {
 
     func dismissCompleted() {
         scanState = .idle
-        scanAddedItemIDs = []
         itemsFound = 0
         photosScanned = 0
         totalPhotosToScan = 0
         currentPhase = ""
+    }
+
+    func retryScan(wardrobeViewModel: WardrobeViewModel) async {
+        guard let context = lastScanContext else { return }
+        await startScan(
+            forUser: context.userId,
+            dateRange: context.dateRange,
+            userGender: context.userGender,
+            wardrobeViewModel: wardrobeViewModel
+        )
+    }
+
+    // MARK: - Persisted Scan Item IDs
+
+    func loadLastScanItemIDs(forUser userId: String) -> [UUID] {
+        let progress = loadProgress(forUser: userId)
+        return progress.lastScanAddedItemIDs.compactMap { UUID(uuidString: $0) }
+    }
+
+    func removeFromLastScanIDs(_ itemId: UUID, forUser userId: String) {
+        var progress = loadProgress(forUser: userId)
+        progress.lastScanAddedItemIDs.removeAll { $0 == itemId.uuidString }
+        saveProgress(progress, forUser: userId)
+    }
+
+    func clearLastScanIDs(forUser userId: String) {
+        var progress = loadProgress(forUser: userId)
+        progress.lastScanAddedItemIDs = []
+        saveProgress(progress, forUser: userId)
     }
 
     // MARK: - Photo Count Estimation
