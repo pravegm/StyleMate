@@ -356,6 +356,7 @@ class PhotoScanService: ObservableObject {
             for (index, asset) in assets.enumerated() {
                 group.addTask { @Sendable in
                     await withCheckedContinuation { continuation in
+                        let lock = NSLock()
                         var resumed = false
                         manager.requestImage(
                             for: asset, targetSize: targetSize,
@@ -363,8 +364,10 @@ class PhotoScanService: ObservableObject {
                         ) { image, info in
                             let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
                             if isDegraded { return }
-                            guard !resumed else { return }
+                            lock.lock()
+                            guard !resumed else { lock.unlock(); return }
                             resumed = true
+                            lock.unlock()
                             continuation.resume(returning: (index, image))
                         }
                     }

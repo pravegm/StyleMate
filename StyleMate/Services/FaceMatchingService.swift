@@ -5,9 +5,13 @@ class FaceMatchingService {
     static let shared = FaceMatchingService()
     private init() {}
 
-    private static let matchThreshold: Float = 14.0
+    // Revision 1 (iOS 16): 2048-dim non-normalized, distances 0–40
+    // Revision 2 (iOS 17+): 768-dim normalized, distances 0–2.0
+    private static let thresholdRevision1: Float = 14.0
+    private static let thresholdRevision2: Float = 0.65
 
     private var referenceFacePrint: VNFeaturePrintObservation?
+    private var activeThreshold: Float = thresholdRevision1
 
     // MARK: - Load Selfie Reference
 
@@ -41,8 +45,13 @@ class FaceMatchingService {
 
         referenceFacePrint = generateFeaturePrint(for: faceCrop)
 
-        if referenceFacePrint != nil {
-            print("[StyleMate] FaceMatch: Selfie reference loaded successfully")
+        if let ref = referenceFacePrint {
+            if #available(iOS 17.0, *) {
+                activeThreshold = Self.thresholdRevision2
+            } else {
+                activeThreshold = Self.thresholdRevision1
+            }
+            print("[StyleMate] FaceMatch: Selfie reference loaded (revision: \(ref.revision), threshold: \(activeThreshold))")
             return true
         } else {
             print("[StyleMate] FaceMatch: Could not generate feature print from selfie")
@@ -95,7 +104,7 @@ class FaceMatchingService {
             }
         }
 
-        if bestDistance < Self.matchThreshold, let matchedFace = bestMatch {
+        if bestDistance < activeThreshold, let matchedFace = bestMatch {
             print("[StyleMate] FaceMatch: Match (distance: \(String(format: "%.2f", bestDistance)), \(faces.count) faces)")
             return MatchResult(isMatch: true, matchedFace: matchedFace, faceCount: faces.count, distance: bestDistance)
         }
@@ -106,6 +115,9 @@ class FaceMatchingService {
 
     // MARK: - Crop to User's Body Region (Multi-Person Photos)
 
+    /// Attempts to crop the image to the matched user's body using VNDetectHumanRectanglesRequest
+    /// to find real body bounding boxes, then spatially matches the user's face to a body.
+    /// Falls back to a face-proportional heuristic if no body rectangle overlaps the face.
     func cropToUserBody(from cgImage: CGImage, matchResult: MatchResult) -> CGImage? {
         guard matchResult.faceCount > 1,
               let face = matchResult.matchedFace else {
@@ -114,15 +126,75 @@ class FaceMatchingService {
 
         let imageW = CGFloat(cgImage.width)
         let imageH = CGFloat(cgImage.height)
-        let bbox = face.boundingBox
 
+        // Try VNDetectHumanRectanglesRequest first (pose-adaptive, handles sitting/standing)
+        if let bodyRect = findBodyForFace(face, in: cgImage) {
+            let cropX = bodyRect.origin.x * imageW
+            let cropY = (1 - bodyRect.origin.y - bodyRect.height) * imageH
+            let cropW = bodyRect.width * imageW
+            let cropH = bodyRect.height * imageH
+
+            let padX = cropW * 0.1
+            let padY = cropH * 0.05
+            let finalX = max(0, cropX - padX)
+            let finalY = max(0, cropY - padY)
+            let cropRect = CGRect(
+                x: finalX,
+                y: finalY,
+                width: min(imageW - finalX, cropW + 2 * padX),
+                height: min(imageH - finalY, cropH + padY)
+            )
+
+            guard cropRect.width >= 200, cropRect.height >= 200 else {
+                return heuristicBodyCrop(face: face, imageW: imageW, imageH: imageH, cgImage: cgImage)
+            }
+
+            print("[StyleMate] FaceMatch: Cropped via body detection: \(Int(cropRect.width))x\(Int(cropRect.height))")
+            return cgImage.cropping(to: cropRect)
+        }
+
+        return heuristicBodyCrop(face: face, imageW: imageW, imageH: imageH, cgImage: cgImage)
+    }
+
+    /// Detects human body rectangles and returns the one whose bounding box best overlaps the given face.
+    private func findBodyForFace(_ face: VNFaceObservation, in cgImage: CGImage) -> CGRect? {
+        let request = VNDetectHumanRectanglesRequest()
+        request.upperBodyOnly = false
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform([request])
+
+        guard let bodies = request.results, !bodies.isEmpty else { return nil }
+
+        let faceMidX = face.boundingBox.midX
+        let faceMidY = face.boundingBox.midY
+
+        var bestBody: CGRect?
+        var bestOverlap: CGFloat = -1
+
+        for body in bodies where body.confidence > 0.5 {
+            let bodyBox = body.boundingBox
+            if bodyBox.contains(CGPoint(x: faceMidX, y: faceMidY)) {
+                let overlap = face.boundingBox.intersection(bodyBox).width * face.boundingBox.intersection(bodyBox).height
+                if overlap > bestOverlap {
+                    bestOverlap = overlap
+                    bestBody = bodyBox
+                }
+            }
+        }
+
+        return bestBody
+    }
+
+    /// Fallback heuristic when VNDetectHumanRectanglesRequest doesn't find a body for the face.
+    private func heuristicBodyCrop(face: VNFaceObservation, imageW: CGFloat, imageH: CGFloat, cgImage: CGImage) -> CGImage? {
+        let bbox = face.boundingBox
         let faceX = bbox.origin.x * imageW
         let faceY = (1 - bbox.origin.y - bbox.height) * imageH
         let faceW = bbox.width * imageW
         let faceH = bbox.height * imageH
 
-        let bodyWidth = faceW * 2.5
-        let bodyHeight = faceH * 5.5
+        let bodyWidth = faceW * 3.0
+        let bodyHeight = faceH * 7.5
         let bodyCenterX = faceX + faceW / 2
         let bodyTop = max(0, faceY - faceH * 0.3)
 
@@ -138,7 +210,7 @@ class FaceMatchingService {
             return nil
         }
 
-        print("[StyleMate] FaceMatch: Cropped to user body: \(Int(cropRect.width))x\(Int(cropRect.height))")
+        print("[StyleMate] FaceMatch: Cropped via heuristic fallback: \(Int(cropRect.width))x\(Int(cropRect.height))")
         return cgImage.cropping(to: cropRect)
     }
 
