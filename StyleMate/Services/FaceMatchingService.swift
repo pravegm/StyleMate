@@ -7,11 +7,10 @@ class FaceMatchingService {
     static let shared = FaceMatchingService()
     private init() {}
 
-    // Cosine similarity threshold for MobileFaceNet 128-dim embeddings.
-    // Real-world scores: same person 0.25–0.7, different person -0.1–0.15.
-    // 0.2 is permissive to handle varied lighting/angles/expressions in photo libraries;
-    // false positives are acceptable since Gemini filters non-clothing downstream.
-    private static let matchThreshold: Float = 0.2
+    // Cosine similarity threshold for MobileFaceNet 512-dim embeddings (BGR input).
+    // With correct channel order: same person typically 0.4–0.8, different person < 0.2.
+    // 0.3 balances recall vs precision for photo library scanning.
+    private static let matchThreshold: Float = 0.3
 
     private var referenceEmbedding: [Float]?
     private var mlModel: MLModel?
@@ -93,7 +92,7 @@ class FaceMatchingService {
         }
 
         referenceEmbedding = embedding
-        print("[StyleMate] FaceMatch: Selfie reference embedding stored (128-dim, model: MobileFaceNet)")
+        print("[StyleMate] FaceMatch: Selfie reference embedding stored (\(embedding.count)-dim, norm: \(String(format: "%.4f", embedding.reduce(0) { $0 + $1 * $1 })))")
         return true
     }
 
@@ -140,12 +139,14 @@ class FaceMatchingService {
 
         var bestMatch: VNFaceObservation?
         var bestSimilarity: Float = -.infinity
+        var allScores: [Float] = []
 
         for face in faces {
             guard let faceCrop = cropFace(from: cgImage, observation: face, padding: 0.2),
                   let embedding = generateEmbedding(for: faceCrop) else { continue }
 
             let similarity = Self.cosineSimilarity(reference, embedding)
+            allScores.append(similarity)
 
             if similarity > bestSimilarity {
                 bestSimilarity = similarity
@@ -153,12 +154,14 @@ class FaceMatchingService {
             }
         }
 
+        let scoresStr = allScores.map { String(format: "%.3f", $0) }.joined(separator: ", ")
+
         if bestSimilarity >= Self.matchThreshold, let matchedFace = bestMatch {
-            print("[StyleMate] FaceMatch: Match (similarity: \(String(format: "%.3f", bestSimilarity)), \(faces.count) faces)")
+            print("[StyleMate] FaceMatch: MATCH (best: \(String(format: "%.3f", bestSimilarity)), all: [\(scoresStr)], \(faces.count) faces)")
             return MatchResult(isMatch: true, matchedFace: matchedFace, faceCount: faces.count, distance: bestSimilarity)
         }
 
-        print("[StyleMate] FaceMatch: No match (\(faces.count) faces, best: \(String(format: "%.3f", bestSimilarity)))")
+        print("[StyleMate] FaceMatch: no match (all: [\(scoresStr)], \(faces.count) faces)")
         return MatchResult(isMatch: false, matchedFace: nil, faceCount: faces.count, distance: bestSimilarity)
     }
 
@@ -226,9 +229,8 @@ class FaceMatchingService {
     }
 
     /// Resizes a face crop to 112x112, converts to CHW Float32 MLMultiArray
-    /// with [-1, 1] normalization as expected by MobileFaceNet.
+    /// with [-1, 1] normalization. InsightFace models expect BGR channel order.
     private func createInputMultiArray(from cgImage: CGImage, size: Int) -> MLMultiArray? {
-        // Render to 112x112 BGRA bitmap
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bytesPerPixel = 4
         let bytesPerRow = bytesPerPixel * size
@@ -246,7 +248,6 @@ class FaceMatchingService {
         context.interpolationQuality = .high
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: size, height: size))
 
-        // Create MLMultiArray with shape [1, 3, 112, 112]
         guard let array = try? MLMultiArray(shape: [1, 3, NSNumber(value: size), NSNumber(value: size)], dataType: .float32) else {
             return nil
         }
@@ -254,7 +255,8 @@ class FaceMatchingService {
         let channelSize = size * size
         let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: 3 * channelSize)
 
-        // RGBA -> RGB CHW, normalized to [-1, 1]: (pixel / 127.5) - 1.0
+        // RGBA -> BGR CHW, normalized to [-1, 1]: (pixel / 127.5) - 1.0
+        // InsightFace w600k_mbf was trained with OpenCV BGR convention
         for y in 0..<size {
             for x in 0..<size {
                 let offset = (y * size + x) * bytesPerPixel
@@ -263,9 +265,9 @@ class FaceMatchingService {
                 let b = Float(pixelData[offset + 2]) / 127.5 - 1.0
 
                 let pixelIndex = y * size + x
-                ptr[pixelIndex] = r
-                ptr[channelSize + pixelIndex] = g
-                ptr[2 * channelSize + pixelIndex] = b
+                ptr[pixelIndex] = b                     // B channel first
+                ptr[channelSize + pixelIndex] = g       // G channel
+                ptr[2 * channelSize + pixelIndex] = r   // R channel last
             }
         }
 
