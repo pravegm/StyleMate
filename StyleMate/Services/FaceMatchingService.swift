@@ -46,11 +46,7 @@ class FaceMatchingService {
         referenceFacePrint = generateFeaturePrint(for: faceCrop)
 
         if let ref = referenceFacePrint {
-            if #available(iOS 17.0, *) {
-                activeThreshold = Self.thresholdRevision2
-            } else {
-                activeThreshold = Self.thresholdRevision1
-            }
+            activeThreshold = ref.revision >= 2 ? Self.thresholdRevision2 : Self.thresholdRevision1
             print("[StyleMate] FaceMatch: Selfie reference loaded (revision: \(ref.revision), threshold: \(activeThreshold))")
             return true
         } else {
