@@ -119,6 +119,15 @@ class PhotoScanService: ObservableObject {
 
         print("[StyleMate] Auto-scan starting for user: \(userId)")
 
+        // Load selfie reference for face matching
+        currentPhase = "Loading face reference..."
+        let hasFaceRef = FaceMatchingService.shared.loadSelfieReference(forUser: userId)
+        if hasFaceRef {
+            print("[StyleMate] Auto-scan: Face matching active (selfie loaded)")
+        } else {
+            print("[StyleMate] Auto-scan: No selfie, falling back to any-person detection")
+        }
+
         currentPhase = "Preparing your photo library..."
         let allAssets = fetchPhotoAssets(in: dateRange)
         let unscannedAssets = allAssets.filter { !progress.scannedAssetIDs.contains($0.localIdentifier) }
@@ -141,19 +150,22 @@ class PhotoScanService: ObservableObject {
             let batchEnd = min(batchStart + batchSize, unscannedAssets.count)
             let batch = Array(unscannedAssets[batchStart..<batchEnd])
 
-            let thumbnails = await loadImages(for: batch, targetSize: CGSize(width: 640, height: 640))
+            let thumbnails = await loadThumbnails(for: batch, targetSize: CGSize(width: 640, height: 640))
 
             for (asset, thumbnail) in zip(batch, thumbnails) {
                 guard !isCancelled else { return }
 
-                guard let thumbnail = thumbnail else {
+                guard let thumbnail = thumbnail, let thumbCG = thumbnail.cgImage else {
                     progress.scannedAssetIDs.insert(asset.localIdentifier)
                     internalScannedCount += 1
                     throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
                     continue
                 }
 
-                guard photoContainsPerson(thumbnail) else {
+                // Face matching on thumbnail (fast: ~5-15ms)
+                let matchResult = FaceMatchingService.shared.findUserInPhoto(thumbCG)
+
+                guard matchResult.isMatch else {
                     progress.scannedAssetIDs.insert(asset.localIdentifier)
                     internalScannedCount += 1
                     throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
@@ -162,59 +174,81 @@ class PhotoScanService: ObservableObject {
 
                 guard !isCancelled else { return }
 
-                if let fullImage = await loadSingleImage(for: asset, targetSize: CGSize(width: 1024, height: 1024)) {
-                    let results = await ImageAnalysisService.shared.analyzeAndSegment(
-                        image: fullImage,
-                        userGender: userGender
+                // Load full-res image for Gemini analysis
+                guard let fullImage = await loadFullImage(for: asset) else {
+                    progress.scannedAssetIDs.insert(asset.localIdentifier)
+                    internalScannedCount += 1
+                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
+                    continue
+                }
+
+                // Multi-person handling: crop to the user's body
+                let imageForGemini: UIImage
+                if matchResult.faceCount > 1, let fullCG = fullImage.cgImage {
+                    let fullResMatch = FaceMatchingService.shared.findUserInPhoto(fullCG)
+                    if let croppedBody = FaceMatchingService.shared.cropToUserBody(from: fullCG, matchResult: fullResMatch) {
+                        imageForGemini = UIImage(cgImage: croppedBody)
+                        print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - cropped to user")
+                    } else {
+                        imageForGemini = fullImage
+                        print("[StyleMate] Auto-scan: Multi-person photo - crop failed, using full image")
+                    }
+                } else {
+                    imageForGemini = fullImage
+                }
+
+                let results = await ImageAnalysisService.shared.analyzeAndSegment(
+                    image: imageForGemini,
+                    userGender: userGender
+                )
+
+                for seg in results {
+                    guard let cat = seg.category, let prod = seg.product,
+                          let pat = seg.pattern, !seg.colors.isEmpty else { continue }
+
+                    let isDup = DuplicateDetector.shared.findBestMatch(
+                        category: cat, product: prod, colors: seg.colors,
+                        pattern: pat, material: seg.material, fit: seg.fit,
+                        neckline: seg.neckline, sleeveLength: seg.sleeveLength,
+                        existingItems: wardrobeViewModel.items
                     )
 
-                    for seg in results {
-                        guard let cat = seg.category, let prod = seg.product,
-                              let pat = seg.pattern, !seg.colors.isEmpty else { continue }
-
-                        let isDup = DuplicateDetector.shared.findBestMatch(
-                            category: cat, product: prod, colors: seg.colors,
-                            pattern: pat, material: seg.material, fit: seg.fit,
-                            neckline: seg.neckline, sleeveLength: seg.sleeveLength,
-                            existingItems: wardrobeViewModel.items
-                        )
-
-                        if isDup != nil {
-                            print("[StyleMate] Auto-scan: Skipping duplicate \(prod)")
-                            continue
-                        }
-
-                        let garmentImage = seg.maskImage ?? fullImage
-
-                        let imagePath = WardrobeImageFileHelper.saveImageAsPNG(garmentImage)
-                            ?? WardrobeImageFileHelper.saveImage(garmentImage) ?? ""
-                        let thumbnailPath = WardrobeImageFileHelper.saveThumbnail(garmentImage)
-
-                        let wardrobeItem = WardrobeItem(
-                            category: cat,
-                            product: prod,
-                            colors: seg.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
-                            brand: seg.brand,
-                            pattern: pat,
-                            imagePath: imagePath,
-                            croppedImagePath: imagePath,
-                            thumbnailPath: thumbnailPath,
-                            material: seg.material,
-                            fit: seg.fit,
-                            neckline: seg.neckline,
-                            sleeveLength: seg.sleeveLength,
-                            garmentLength: seg.garmentLength,
-                            details: seg.details
-                        )
-
-                        wardrobeViewModel.items.append(wardrobeItem)
-                        wardrobeViewModel.syncItemToCloud(wardrobeItem)
-
-                        scanAddedItemIDs.append(wardrobeItem.id)
-                        itemsFound = scanAddedItemIDs.count
-
-                        print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe")
+                    if isDup != nil {
+                        print("[StyleMate] Auto-scan: Skipping duplicate \(prod)")
+                        continue
                     }
+
+                    let garmentImage = seg.maskImage ?? imageForGemini
+
+                    let imagePath = WardrobeImageFileHelper.saveImageAsPNG(garmentImage)
+                        ?? WardrobeImageFileHelper.saveImage(garmentImage) ?? ""
+                    let thumbnailPath = WardrobeImageFileHelper.saveThumbnail(garmentImage)
+
+                    let wardrobeItem = WardrobeItem(
+                        category: cat,
+                        product: prod,
+                        colors: seg.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
+                        brand: seg.brand,
+                        pattern: pat,
+                        imagePath: imagePath,
+                        croppedImagePath: imagePath,
+                        thumbnailPath: thumbnailPath,
+                        material: seg.material,
+                        fit: seg.fit,
+                        neckline: seg.neckline,
+                        sleeveLength: seg.sleeveLength,
+                        garmentLength: seg.garmentLength,
+                        details: seg.details
+                    )
+
+                    wardrobeViewModel.items.append(wardrobeItem)
+                    wardrobeViewModel.syncItemToCloud(wardrobeItem)
+
+                    scanAddedItemIDs.append(wardrobeItem.id)
+                    itemsFound = scanAddedItemIDs.count
+
+                    let distanceStr = matchResult.distance.map { String(format: " [dist: %.1f]", $0) } ?? ""
+                    print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe\(distanceStr)")
                 }
 
                 progress.scannedAssetIDs.insert(asset.localIdentifier)
@@ -246,11 +280,11 @@ class PhotoScanService: ObservableObject {
         print("[StyleMate] Auto-scan complete: added \(scanAddedItemIDs.count) items from \(photosScanned) photos")
     }
 
-    /// Throttle @Published updates to ~100ms intervals to avoid SwiftUI layout thrashing.
+    /// Throttle @Published updates to ~150ms intervals to avoid SwiftUI layout thrashing.
     private func throttleUIUpdate(scanned: Int, total: Int) {
         let now = ContinuousClock.now
         let isLast = scanned >= total
-        if isLast || now - lastUIUpdate >= .milliseconds(100) {
+        if isLast || now - lastUIUpdate >= .milliseconds(150) {
             photosScanned = scanned
             lastUIUpdate = now
         }
@@ -310,17 +344,7 @@ class PhotoScanService: ObservableObject {
         return assets
     }
 
-    private nonisolated func photoContainsPerson(_ image: UIImage) -> Bool {
-        guard let cgImage = image.cgImage else { return false }
-        let request = VNDetectHumanRectanglesRequest()
-        request.upperBodyOnly = false
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([request])
-        guard let observations = request.results as? [VNHumanObservation] else { return false }
-        return observations.contains { $0.confidence > 0.5 }
-    }
-
-    private func loadImages(for assets: [PHAsset], targetSize: CGSize) async -> [UIImage?] {
+    private func loadThumbnails(for assets: [PHAsset], targetSize: CGSize) async -> [UIImage?] {
         await withTaskGroup(of: (Int, UIImage?).self) { group in
             let manager = PHImageManager.default()
             let options = PHImageRequestOptions()
@@ -356,7 +380,7 @@ class PhotoScanService: ObservableObject {
     }
 
     /// Uses requestImageDataAndOrientation which is guaranteed to call its handler exactly once.
-    private func loadSingleImage(for asset: PHAsset, targetSize: CGSize) async -> UIImage? {
+    private func loadFullImage(for asset: PHAsset, maxDimension: CGFloat = 1024) async -> UIImage? {
         await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
             options.isNetworkAccessAllowed = false
@@ -369,8 +393,7 @@ class PhotoScanService: ObservableObject {
                     continuation.resume(returning: nil)
                     return
                 }
-                let maxDim = max(targetSize.width, targetSize.height)
-                let scale = min(maxDim / max(fullImage.size.width, fullImage.size.height), 1.0)
+                let scale = min(maxDimension / max(fullImage.size.width, fullImage.size.height), 1.0)
                 if scale < 1.0 {
                     let newSize = CGSize(width: fullImage.size.width * scale, height: fullImage.size.height * scale)
                     let renderer = UIGraphicsImageRenderer(size: newSize)
