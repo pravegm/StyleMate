@@ -437,9 +437,10 @@ class PhotoScanService: ObservableObject {
                         manager.requestImage(
                             for: asset, targetSize: targetSize,
                             contentMode: .aspectFit, options: options
-                        ) { image, info in
-                            let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
-                            if isDegraded { return }
+                        ) { image, _ in
+                            // .fastFormat delivers exactly one callback.
+                            // Guard ensures continuation resumes at most once
+                            // even if the system unexpectedly calls back again.
                             lock.lock()
                             guard !resumed else { lock.unlock(); return }
                             resumed = true
