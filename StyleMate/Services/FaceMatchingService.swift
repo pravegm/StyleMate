@@ -7,8 +7,10 @@ class FaceMatchingService {
 
     // Revision 1 (iOS 16): 2048-dim non-normalized, distances 0–40
     // Revision 2 (iOS 17+): 768-dim normalized, distances 0–2.0
-    private static let thresholdRevision1: Float = 14.0
-    private static let thresholdRevision2: Float = 0.65
+    // VNFeaturePrint is a general image similarity tool, not a face identity system,
+    // so thresholds must be permissive to tolerate lighting/angle/expression changes.
+    private static let thresholdRevision1: Float = 20.0
+    private static let thresholdRevision2: Float = 1.2
 
     private var referenceFacePrint: VNFeaturePrintObservation?
     private var activeThreshold: Float = thresholdRevision1
@@ -22,10 +24,16 @@ class FaceMatchingService {
             return false
         }
 
-        guard let image = UIImage(contentsOfFile: path) ?? loadFromDocuments(filename: path) else {
+        guard let rawImage = UIImage(contentsOfFile: path) ?? loadFromDocuments(filename: path) else {
             print("[StyleMate] FaceMatch: Could not load selfie image at path: \(path)")
             return false
         }
+
+        // The front-camera selfie is saved with .leftMirrored orientation.
+        // UIImage.cgImage does NOT apply orientation transforms, so Vision
+        // receives a rotated/mirrored image. Render into a normalized bitmap.
+        let image = Self.normalizeOrientation(rawImage)
+        print("[StyleMate] FaceMatch: Selfie loaded (\(Int(image.size.width))x\(Int(image.size.height)), orientation: \(rawImage.imageOrientation.rawValue) -> normalized)")
 
         guard let cgImage = image.cgImage else {
             print("[StyleMate] FaceMatch: Could not get CGImage from selfie")
@@ -33,6 +41,8 @@ class FaceMatchingService {
         }
 
         let faceObservations = detectFaces(in: cgImage)
+        print("[StyleMate] FaceMatch: Detected \(faceObservations.count) face(s) in selfie")
+
         guard let bestFace = faceObservations.first else {
             print("[StyleMate] FaceMatch: No face detected in selfie")
             return false
@@ -43,6 +53,8 @@ class FaceMatchingService {
             return false
         }
 
+        print("[StyleMate] FaceMatch: Face crop size: \(faceCrop.width)x\(faceCrop.height)")
+
         guard let result = generateFeaturePrint(for: faceCrop) else {
             print("[StyleMate] FaceMatch: Could not generate feature print from selfie")
             return false
@@ -52,6 +64,18 @@ class FaceMatchingService {
         activeThreshold = result.requestRevision >= 2 ? Self.thresholdRevision2 : Self.thresholdRevision1
         print("[StyleMate] FaceMatch: Selfie reference loaded (revision: \(result.requestRevision), threshold: \(activeThreshold))")
         return true
+    }
+
+    /// Renders a UIImage into a new context with identity orientation,
+    /// baking any rotation/mirroring into the actual pixel data.
+    private static func normalizeOrientation(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+        let size = image.size
+        UIGraphicsBeginImageContextWithOptions(size, false, image.scale)
+        image.draw(in: CGRect(origin: .zero, size: size))
+        let normalized = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return normalized ?? image
     }
 
     private func loadFromDocuments(filename: String) -> UIImage? {
