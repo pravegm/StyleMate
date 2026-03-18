@@ -3,6 +3,7 @@ import Photos
 
 struct ScanRangePickerView: View {
     @Binding var isPresented: Bool
+    let userId: String
     let onStartScan: (ScanDateRange) -> Void
 
     @State private var selectedOption: ScanOption? = nil
@@ -234,7 +235,7 @@ struct ScanRangePickerView: View {
     // MARK: - Data Loading
 
     private func loadData() {
-        if let userId = getCurrentUserId() {
+        if !userId.isEmpty {
             scanHistory = PhotoScanService.shared.getScanHistory(forUser: userId)
         }
 
@@ -256,15 +257,6 @@ struct ScanRangePickerView: View {
                 isLoadingCounts = false
             }
         }
-    }
-
-    private func getCurrentUserId() -> String? {
-        let key = "currentUserID"
-        return UserDefaults.standard.string(forKey: key)
-            ?? (try? JSONDecoder().decode(
-                [String: String].self,
-                from: UserDefaults.standard.data(forKey: "userProfiles") ?? Data()
-            ))?.keys.first
     }
 }
 

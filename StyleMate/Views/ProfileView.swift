@@ -329,6 +329,11 @@ struct ProfileView: View {
             }
         }
 
+        // Delete scan progress file from Application Support
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let scanProgressFile = appSupport.appendingPathComponent("ScanProgress/scanProgress_\(userId).json")
+        try? FileManager.default.removeItem(at: scanProgressFile)
+
         let keysToRemove = [
             "hasCompletedOnboarding_\(userId)",
             "selfieReferencePath_\(userId)",
@@ -337,7 +342,6 @@ struct ProfileView: View {
             "hasMigratedBackgroundRemoval_\(userId)",
             "hasMigratedThumbnails_\(userId)",
             "hasMigratedZoneCrop_\(userId)",
-            "scanProgress_\(userId)",
             "hasConsentedToGeminiScan_\(userId)",
             "bgRemovalMigrationComplete_\(userId)",
             "thumbnailMigrationComplete_\(userId)",

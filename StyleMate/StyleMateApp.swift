@@ -39,7 +39,15 @@ struct RootView: View {
     @State private var showReview = false
     @State private var isLoadingImages = false
     @State private var showScanRangePicker = false
+    @State private var showGeminiConsent = false
+    @State private var geminiConsentPurpose: GeminiConsentPurpose = .manualAdd
     @Environment(\.scenePhase) private var scenePhase
+
+    private enum GeminiConsentPurpose {
+        case manualAdd
+        case autoScan
+        case scanRangePicker
+    }
 
     var userKey: String {
         authService.user?.id ?? "guest"
@@ -65,7 +73,13 @@ struct RootView: View {
             Button("Take Photo") { showCamera = true }
             if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized {
                 Button("Auto-scan from Photos") {
-                    showScanRangePicker = true
+                    let userId = authService.user?.id ?? ""
+                    if GeminiConsent.hasConsented(userId: userId) {
+                        showScanRangePicker = true
+                    } else {
+                        geminiConsentPurpose = .scanRangePicker
+                        showGeminiConsent = true
+                    }
                 }
             }
         }
@@ -85,7 +99,13 @@ struct RootView: View {
                 pickerItems = []
                 isLoadingImages = false
                 if !images.isEmpty {
-                    showReview = true
+                    let userId = authService.user?.id ?? ""
+                    if GeminiConsent.hasConsented(userId: userId) {
+                        showReview = true
+                    } else {
+                        geminiConsentPurpose = .manualAdd
+                        showGeminiConsent = true
+                    }
                 }
             }
         }
@@ -98,7 +118,13 @@ struct RootView: View {
                     if let image = img {
                         reviewImages = [image]
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            showReview = true
+                            let userId = authService.user?.id ?? ""
+                            if GeminiConsent.hasConsented(userId: userId) {
+                                showReview = true
+                            } else {
+                                geminiConsentPurpose = .manualAdd
+                                showGeminiConsent = true
+                            }
                         }
                     }
                 }
@@ -120,6 +146,7 @@ struct RootView: View {
         .sheet(isPresented: $showScanRangePicker) {
             ScanRangePickerView(
                 isPresented: $showScanRangePicker,
+                userId: authService.user?.id ?? "",
                 onStartScan: { dateRange in
                     showScanRangePicker = false
                     Task {
@@ -129,6 +156,36 @@ struct RootView: View {
                             userGender: authService.user?.gender,
                             wardrobeViewModel: wardrobeVM
                         )
+                    }
+                }
+            )
+        }
+        .sheet(isPresented: $showGeminiConsent) {
+            GeminiConsentView(
+                onConsent: {
+                    let userId = authService.user?.id ?? ""
+                    GeminiConsent.grant(userId: userId)
+                    showGeminiConsent = false
+                    switch geminiConsentPurpose {
+                    case .manualAdd:
+                        showReview = true
+                    case .scanRangePicker:
+                        showScanRangePicker = true
+                    case .autoScan:
+                        Task {
+                            await PhotoScanService.shared.startScan(
+                                forUser: userId,
+                                dateRange: .lastSixMonths,
+                                userGender: authService.user?.gender,
+                                wardrobeViewModel: wardrobeVM
+                            )
+                        }
+                    }
+                },
+                onDecline: {
+                    showGeminiConsent = false
+                    if geminiConsentPurpose == .manualAdd {
+                        reviewImages = []
                     }
                 }
             )
@@ -183,6 +240,18 @@ struct RootView: View {
                 }
             }
         }
+        .onChange(of: onboardingManager.hasCompletedOnboarding) { completed in
+            guard completed,
+                  authService.isAuthenticated,
+                  let userId = authService.user?.id, !userId.isEmpty,
+                  !UserDefaults.standard.bool(forKey: "hasCompletedInitialScan_\(userId)"),
+                  PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else { return }
+
+            if !GeminiConsent.hasConsented(userId: userId) {
+                geminiConsentPurpose = .autoScan
+                showGeminiConsent = true
+            }
+        }
         .task(id: onboardingManager.hasCompletedOnboarding) {
             let userId = authService.user?.id ?? ""
             let scanKey = "hasCompletedInitialScan_\(userId)"
@@ -191,6 +260,7 @@ struct RootView: View {
                   authService.isAuthenticated,
                   !userId.isEmpty,
                   !UserDefaults.standard.bool(forKey: scanKey),
+                  GeminiConsent.hasConsented(userId: userId),
                   PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
                   PhotoScanService.shared.scanState == .idle else { return }
 

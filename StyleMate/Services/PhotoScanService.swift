@@ -68,11 +68,30 @@ class PhotoScanService: ObservableObject {
         scanState != .scanning || Task.isCancelled
     }
 
-    // MARK: - Progress Persistence
+    // MARK: - Progress Persistence (JSON file in Application Support)
+
+    private static func progressFileURL(forUser userId: String) -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("ScanProgress", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("scanProgress_\(userId).json")
+    }
 
     func loadProgress(forUser userId: String) -> ScanProgress {
-        let key = "scanProgress_\(userId)"
-        guard let data = UserDefaults.standard.data(forKey: key),
+        let fileURL = Self.progressFileURL(forUser: userId)
+
+        // Migrate from UserDefaults if file doesn't exist yet
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            let legacyKey = "scanProgress_\(userId)"
+            if let data = UserDefaults.standard.data(forKey: legacyKey),
+               let progress = try? JSONDecoder().decode(ScanProgress.self, from: data) {
+                saveProgress(progress, forUser: userId)
+                UserDefaults.standard.removeObject(forKey: legacyKey)
+                return progress
+            }
+        }
+
+        guard let data = try? Data(contentsOf: fileURL),
               let progress = try? JSONDecoder().decode(ScanProgress.self, from: data) else {
             return ScanProgress(scannedAssetIDs: [], totalItemsFound: 0)
         }
@@ -80,9 +99,9 @@ class PhotoScanService: ObservableObject {
     }
 
     private func saveProgress(_ progress: ScanProgress, forUser userId: String) {
-        let key = "scanProgress_\(userId)"
+        let fileURL = Self.progressFileURL(forUser: userId)
         if let data = try? JSONEncoder().encode(progress) {
-            UserDefaults.standard.set(data, forKey: key)
+            try? data.write(to: fileURL, options: .atomic)
         }
     }
 
@@ -182,19 +201,21 @@ class PhotoScanService: ObservableObject {
                     continue
                 }
 
-                // Multi-person handling: crop to the user's body
-                let imageForGemini: UIImage
-                if matchResult.faceCount > 1, let fullCG = fullImage.cgImage {
-                    let fullResMatch = FaceMatchingService.shared.findUserInPhoto(fullCG)
-                    if let croppedBody = FaceMatchingService.shared.cropToUserBody(from: fullCG, matchResult: fullResMatch) {
-                        imageForGemini = UIImage(cgImage: croppedBody)
-                        print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - cropped to user")
+                // Synchronous face matching + body cropping inside autoreleasepool
+                // to drain intermediate CGImage/UIImage references between await points
+                let imageForGemini: UIImage = autoreleasepool {
+                    if matchResult.faceCount > 1, let fullCG = fullImage.cgImage {
+                        let fullResMatch = FaceMatchingService.shared.findUserInPhoto(fullCG)
+                        if let croppedBody = FaceMatchingService.shared.cropToUserBody(from: fullCG, matchResult: fullResMatch) {
+                            print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - cropped to user")
+                            return UIImage(cgImage: croppedBody)
+                        } else {
+                            print("[StyleMate] Auto-scan: Multi-person photo - crop failed, using full image")
+                            return fullImage
+                        }
                     } else {
-                        imageForGemini = fullImage
-                        print("[StyleMate] Auto-scan: Multi-person photo - crop failed, using full image")
+                        return fullImage
                     }
-                } else {
-                    imageForGemini = fullImage
                 }
 
                 let results = await ImageAnalysisService.shared.analyzeAndSegment(
@@ -220,9 +241,13 @@ class PhotoScanService: ObservableObject {
 
                     let garmentImage = seg.maskImage ?? imageForGemini
 
-                    let imagePath = WardrobeImageFileHelper.saveImageAsPNG(garmentImage)
-                        ?? WardrobeImageFileHelper.saveImage(garmentImage) ?? ""
-                    let thumbnailPath = WardrobeImageFileHelper.saveThumbnail(garmentImage)
+                    // Disk I/O inside autoreleasepool to release intermediate Data/UIImage refs
+                    let (imagePath, thumbnailPath) = autoreleasepool {
+                        let ip = WardrobeImageFileHelper.saveImageAsPNG(garmentImage)
+                            ?? WardrobeImageFileHelper.saveImage(garmentImage) ?? ""
+                        let tp = WardrobeImageFileHelper.saveThumbnail(garmentImage)
+                        return (ip, tp)
+                    }
 
                     let wardrobeItem = WardrobeItem(
                         category: cat,
@@ -392,19 +417,17 @@ class PhotoScanService: ObservableObject {
             PHImageManager.default().requestImageDataAndOrientation(
                 for: asset, options: options
             ) { data, _, _, _ in
-                guard let data, let fullImage = UIImage(data: data) else {
-                    continuation.resume(returning: nil)
-                    return
+                let result: UIImage? = autoreleasepool {
+                    guard let data, let fullImage = UIImage(data: data) else { return nil }
+                    let scale = min(maxDimension / max(fullImage.size.width, fullImage.size.height), 1.0)
+                    if scale < 1.0 {
+                        let newSize = CGSize(width: fullImage.size.width * scale, height: fullImage.size.height * scale)
+                        let renderer = UIGraphicsImageRenderer(size: newSize)
+                        return renderer.image { _ in fullImage.draw(in: CGRect(origin: .zero, size: newSize)) }
+                    }
+                    return fullImage
                 }
-                let scale = min(maxDimension / max(fullImage.size.width, fullImage.size.height), 1.0)
-                if scale < 1.0 {
-                    let newSize = CGSize(width: fullImage.size.width * scale, height: fullImage.size.height * scale)
-                    let renderer = UIGraphicsImageRenderer(size: newSize)
-                    let resized = renderer.image { _ in fullImage.draw(in: CGRect(origin: .zero, size: newSize)) }
-                    continuation.resume(returning: resized)
-                } else {
-                    continuation.resume(returning: fullImage)
-                }
+                continuation.resume(returning: result)
             }
         }
     }
