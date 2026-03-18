@@ -30,4 +30,9 @@ Pods/
 
 # Config files with sensitive data
 Config.plist
-**/Secrets.swift 
+**/Secrets.swift
+
+# ML model artifacts (large binary files)
+*.onnx
+*.mlpackage/
+*.mlmodel

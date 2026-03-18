@@ -1,19 +1,53 @@
 import UIKit
 import Vision
+import CoreML
+import Accelerate
 
 class FaceMatchingService {
     static let shared = FaceMatchingService()
     private init() {}
 
-    // Revision 1 (iOS 16): 2048-dim non-normalized, distances 0–40
-    // Revision 2 (iOS 17+): 768-dim normalized, distances 0–2.0
-    // VNFeaturePrint is a general image similarity tool, not a face identity system,
-    // so thresholds must be permissive to tolerate lighting/angle/expression changes.
-    private static let thresholdRevision1: Float = 20.0
-    private static let thresholdRevision2: Float = 1.2
+    // Cosine similarity threshold for MobileFaceNet 128-dim embeddings.
+    // Same person: typically 0.5–0.9. Different person: typically -0.1–0.3.
+    // 0.4 is permissive to handle varied lighting/angles in photo libraries.
+    private static let matchThreshold: Float = 0.4
 
-    private var referenceFacePrint: VNFeaturePrintObservation?
-    private var activeThreshold: Float = thresholdRevision1
+    private var referenceEmbedding: [Float]?
+    private var mlModel: MLModel?
+
+    // MARK: - Model Loading
+
+    private func ensureModelLoaded() -> Bool {
+        if mlModel != nil { return true }
+
+        guard let url = Bundle.main.url(forResource: "MobileFaceNet", withExtension: "mlmodelc")
+                ?? findCompiledModel() else {
+            print("[StyleMate] FaceMatch: MobileFaceNet.mlmodelc not found in bundle")
+            return false
+        }
+
+        do {
+            let config = MLModelConfiguration()
+            config.computeUnits = .all
+            mlModel = try MLModel(contentsOf: url, configuration: config)
+            print("[StyleMate] FaceMatch: MobileFaceNet model loaded")
+            return true
+        } catch {
+            print("[StyleMate] FaceMatch: Failed to load model: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Search for compiled model variants that Xcode may produce from .mlpackage
+    private func findCompiledModel() -> URL? {
+        let bundle = Bundle.main
+        for ext in ["mlmodelc", "mlpackage"] {
+            if let url = bundle.url(forResource: "MobileFaceNet", withExtension: ext) {
+                return url
+            }
+        }
+        return nil
+    }
 
     // MARK: - Load Selfie Reference
 
@@ -29,9 +63,6 @@ class FaceMatchingService {
             return false
         }
 
-        // The front-camera selfie is saved with .leftMirrored orientation.
-        // UIImage.cgImage does NOT apply orientation transforms, so Vision
-        // receives a rotated/mirrored image. Render into a normalized bitmap.
         let image = Self.normalizeOrientation(rawImage)
         print("[StyleMate] FaceMatch: Selfie loaded (\(Int(image.size.width))x\(Int(image.size.height)), orientation: \(rawImage.imageOrientation.rawValue) -> normalized)")
 
@@ -48,21 +79,20 @@ class FaceMatchingService {
             return false
         }
 
-        guard let faceCrop = cropFace(from: cgImage, observation: bestFace, padding: 0.3) else {
+        guard let faceCrop = cropFace(from: cgImage, observation: bestFace, padding: 0.2) else {
             print("[StyleMate] FaceMatch: Could not crop face from selfie")
             return false
         }
 
         print("[StyleMate] FaceMatch: Face crop size: \(faceCrop.width)x\(faceCrop.height)")
 
-        guard let result = generateFeaturePrint(for: faceCrop) else {
-            print("[StyleMate] FaceMatch: Could not generate feature print from selfie")
+        guard let embedding = generateEmbedding(for: faceCrop) else {
+            print("[StyleMate] FaceMatch: Could not generate embedding from selfie")
             return false
         }
 
-        referenceFacePrint = result.observation
-        activeThreshold = result.requestRevision >= 2 ? Self.thresholdRevision2 : Self.thresholdRevision1
-        print("[StyleMate] FaceMatch: Selfie reference loaded (revision: \(result.requestRevision), threshold: \(activeThreshold))")
+        referenceEmbedding = embedding
+        print("[StyleMate] FaceMatch: Selfie reference embedding stored (128-dim, model: MobileFaceNet)")
         return true
     }
 
@@ -97,7 +127,7 @@ class FaceMatchingService {
     // MARK: - Check if Photo Contains the User
 
     func findUserInPhoto(_ cgImage: CGImage) -> MatchResult {
-        guard let reference = referenceFacePrint else {
+        guard let reference = referenceEmbedding else {
             let hasPerson = photoContainsAnyPerson(cgImage)
             return MatchResult(isMatch: hasPerson, matchedFace: nil, faceCount: hasPerson ? 1 : 0, distance: nil)
         }
@@ -108,35 +138,151 @@ class FaceMatchingService {
         }
 
         var bestMatch: VNFaceObservation?
-        var bestDistance: Float = .infinity
+        var bestSimilarity: Float = -.infinity
 
         for face in faces {
-            guard let faceCrop = cropFace(from: cgImage, observation: face, padding: 0.3),
-                  let result = generateFeaturePrint(for: faceCrop) else { continue }
+            guard let faceCrop = cropFace(from: cgImage, observation: face, padding: 0.2),
+                  let embedding = generateEmbedding(for: faceCrop) else { continue }
 
-            var distance: Float = .infinity
-            do { try reference.computeDistance(&distance, to: result.observation) } catch { continue }
+            let similarity = Self.cosineSimilarity(reference, embedding)
 
-            if distance < bestDistance {
-                bestDistance = distance
+            if similarity > bestSimilarity {
+                bestSimilarity = similarity
                 bestMatch = face
             }
         }
 
-        if bestDistance < activeThreshold, let matchedFace = bestMatch {
-            print("[StyleMate] FaceMatch: Match (distance: \(String(format: "%.2f", bestDistance)), \(faces.count) faces)")
-            return MatchResult(isMatch: true, matchedFace: matchedFace, faceCount: faces.count, distance: bestDistance)
+        if bestSimilarity >= Self.matchThreshold, let matchedFace = bestMatch {
+            print("[StyleMate] FaceMatch: Match (similarity: \(String(format: "%.3f", bestSimilarity)), \(faces.count) faces)")
+            return MatchResult(isMatch: true, matchedFace: matchedFace, faceCount: faces.count, distance: bestSimilarity)
         }
 
-        print("[StyleMate] FaceMatch: No match (\(faces.count) faces, best: \(String(format: "%.2f", bestDistance)))")
-        return MatchResult(isMatch: false, matchedFace: nil, faceCount: faces.count, distance: bestDistance)
+        print("[StyleMate] FaceMatch: No match (\(faces.count) faces, best: \(String(format: "%.3f", bestSimilarity)))")
+        return MatchResult(isMatch: false, matchedFace: nil, faceCount: faces.count, distance: bestSimilarity)
+    }
+
+    // MARK: - Embedding Generation (MobileFaceNet via CoreML)
+
+    /// Generates a 128-dimensional face embedding from a cropped face CGImage.
+    private func generateEmbedding(for faceCrop: CGImage) -> [Float]? {
+        guard ensureModelLoaded(), let model = mlModel else { return nil }
+
+        guard let inputArray = createInputMultiArray(from: faceCrop, size: 112) else {
+            print("[StyleMate] FaceMatch: Failed to create input array")
+            return nil
+        }
+
+        do {
+            let inputName = model.modelDescription.inputDescriptionsByName.keys.first ?? "input"
+            let input = try MLDictionaryFeatureProvider(
+                dictionary: [inputName: MLFeatureValue(multiArray: inputArray)]
+            )
+            let output = try model.prediction(from: input)
+
+            guard let outputFeature = firstMultiArrayFeature(from: output),
+                  let multiArray = outputFeature.multiArrayValue else {
+                print("[StyleMate] FaceMatch: No MLMultiArray in model output")
+                return nil
+            }
+
+            let count = multiArray.count
+            guard count >= 128 else {
+                print("[StyleMate] FaceMatch: Unexpected embedding dimension: \(count)")
+                return nil
+            }
+
+            // Extract floats (use only first 128 if model returns more)
+            let embeddingSize = min(count, 512)
+            var embedding = [Float](repeating: 0, count: embeddingSize)
+            let ptr = multiArray.dataPointer.bindMemory(to: Float.self, capacity: embeddingSize)
+            for i in 0..<embeddingSize {
+                embedding[i] = ptr[i]
+            }
+
+            // L2-normalize the embedding
+            var norm: Float = 0
+            vDSP_svesq(embedding, 1, &norm, vDSP_Length(embeddingSize))
+            norm = sqrt(norm)
+            if norm > 0 {
+                vDSP_vsdiv(embedding, 1, &norm, &embedding, 1, vDSP_Length(embeddingSize))
+            }
+
+            return embedding
+        } catch {
+            print("[StyleMate] FaceMatch: Model prediction failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Extracts the first MLMultiArray feature from model output regardless of key name.
+    private func firstMultiArrayFeature(from output: MLFeatureProvider) -> MLFeatureValue? {
+        for name in output.featureNames {
+            if let value = output.featureValue(for: name), value.multiArrayValue != nil {
+                return value
+            }
+        }
+        return nil
+    }
+
+    /// Resizes a face crop to 112x112, converts to CHW Float32 MLMultiArray
+    /// with [-1, 1] normalization as expected by MobileFaceNet.
+    private func createInputMultiArray(from cgImage: CGImage, size: Int) -> MLMultiArray? {
+        // Render to 112x112 BGRA bitmap
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bytesPerPixel = 4
+        let bytesPerRow = bytesPerPixel * size
+        var pixelData = [UInt8](repeating: 0, count: size * size * bytesPerPixel)
+
+        guard let context = CGContext(
+            data: &pixelData,
+            width: size, height: size,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else { return nil }
+
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: size, height: size))
+
+        // Create MLMultiArray with shape [1, 3, 112, 112]
+        guard let array = try? MLMultiArray(shape: [1, 3, NSNumber(value: size), NSNumber(value: size)], dataType: .float32) else {
+            return nil
+        }
+
+        let channelSize = size * size
+        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: 3 * channelSize)
+
+        // RGBA -> RGB CHW, normalized to [-1, 1]: (pixel / 127.5) - 1.0
+        for y in 0..<size {
+            for x in 0..<size {
+                let offset = (y * size + x) * bytesPerPixel
+                let r = Float(pixelData[offset]) / 127.5 - 1.0
+                let g = Float(pixelData[offset + 1]) / 127.5 - 1.0
+                let b = Float(pixelData[offset + 2]) / 127.5 - 1.0
+
+                let pixelIndex = y * size + x
+                ptr[pixelIndex] = r
+                ptr[channelSize + pixelIndex] = g
+                ptr[2 * channelSize + pixelIndex] = b
+            }
+        }
+
+        return array
+    }
+
+    // MARK: - Cosine Similarity
+
+    private static func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+        var dot: Float = 0
+        vDSP_dotpr(a, 1, b, 1, &dot, vDSP_Length(a.count))
+        // Vectors are already L2-normalized, so dot product = cosine similarity
+        return dot
     }
 
     // MARK: - Crop to User's Body Region (Multi-Person Photos)
 
-    /// Attempts to crop the image to the matched user's body using VNDetectHumanRectanglesRequest
-    /// to find real body bounding boxes, then spatially matches the user's face to a body.
-    /// Falls back to a face-proportional heuristic if no body rectangle overlaps the face.
     func cropToUserBody(from cgImage: CGImage, matchResult: MatchResult) -> CGImage? {
         guard matchResult.faceCount > 1,
               let face = matchResult.matchedFace else {
@@ -146,7 +292,6 @@ class FaceMatchingService {
         let imageW = CGFloat(cgImage.width)
         let imageH = CGFloat(cgImage.height)
 
-        // Try VNDetectHumanRectanglesRequest first (pose-adaptive, handles sitting/standing)
         if let bodyRect = findBodyForFace(face, in: cgImage) {
             let cropX = bodyRect.origin.x * imageW
             let cropY = (1 - bodyRect.origin.y - bodyRect.height) * imageH
@@ -175,7 +320,6 @@ class FaceMatchingService {
         return heuristicBodyCrop(face: face, imageW: imageW, imageH: imageH, cgImage: cgImage)
     }
 
-    /// Detects human body rectangles and returns the one whose bounding box best overlaps the given face.
     private func findBodyForFace(_ face: VNFaceObservation, in cgImage: CGImage) -> CGRect? {
         let request = VNDetectHumanRectanglesRequest()
         request.upperBodyOnly = false
@@ -204,7 +348,6 @@ class FaceMatchingService {
         return bestBody
     }
 
-    /// Fallback heuristic when VNDetectHumanRectanglesRequest doesn't find a body for the face.
     private func heuristicBodyCrop(face: VNFaceObservation, imageW: CGFloat, imageH: CGFloat, cgImage: CGImage) -> CGImage? {
         let bbox = face.boundingBox
         let faceX = bbox.origin.x * imageW
@@ -233,9 +376,12 @@ class FaceMatchingService {
         return cgImage.cropping(to: cropRect)
     }
 
-    var hasReference: Bool { referenceFacePrint != nil }
+    var hasReference: Bool { referenceEmbedding != nil }
 
-    func clearReference() { referenceFacePrint = nil }
+    func clearReference() {
+        referenceEmbedding = nil
+        mlModel = nil
+    }
 
     // MARK: - Face Detection
 
@@ -273,21 +419,6 @@ class FaceMatchingService {
         )
 
         return cgImage.cropping(to: cropRect)
-    }
-
-    // MARK: - Feature Print Generation
-
-    struct FeaturePrintResult {
-        let observation: VNFeaturePrintObservation
-        let requestRevision: Int
-    }
-
-    func generateFeaturePrint(for cgImage: CGImage) -> FeaturePrintResult? {
-        let request = VNGenerateImageFeaturePrintRequest()
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([request])
-        guard let obs = request.results?.first else { return nil }
-        return FeaturePrintResult(observation: obs, requestRevision: request.revision)
     }
 
     // MARK: - Fallback: Any Person Detection
