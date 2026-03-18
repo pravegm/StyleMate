@@ -9,6 +9,7 @@ struct ProfileView: View {
     @State private var showEmptyConfirmation = false
     @State private var showDeleteProfileAlert = false
     @State private var showStyleSheet = false
+    @State private var showRetakeSelfie = false
     @State private var tempSelectedStyles: [OutfitType] = []
     @State private var showStyleError = false
     @State private var editGender: String = ""
@@ -203,6 +204,26 @@ struct ProfileView: View {
                 }
 
                 Section {
+                    Button {
+                        Haptics.light()
+                        showRetakeSelfie = true
+                    } label: {
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image(systemName: "face.smiling")
+                            Text("Retake Selfie")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(DS.Colors.textTertiary)
+                        }
+                        .foregroundColor(DS.Colors.accent)
+                    }
+                } footer: {
+                    Text("Retake your reference selfie to improve outfit photo detection.")
+                        .font(DS.Font.caption2)
+                }
+
+                Section {
                     Button(role: .destructive) {
                         showingSignOutAlert = true
                     } label: {
@@ -300,6 +321,10 @@ struct ProfileView: View {
                     }
                 )
                 .environmentObject(authService)
+            }
+            .sheet(isPresented: $showRetakeSelfie) {
+                RetakeSelfieSheet()
+                    .environmentObject(authService)
             }
             .alert("Delete Everything?", isPresented: $showDeleteProfileAlert) {
                 Button("Cancel", role: .cancel) {}
@@ -526,4 +551,33 @@ struct StylePreferencesSheet: View {
         .environmentObject(AuthService())
         .environmentObject(WardrobeViewModel())
         .environmentObject(OnboardingManager())
+}
+
+// MARK: - Retake Selfie Sheet
+
+private struct RetakeSelfieSheet: View {
+    @EnvironmentObject var authService: AuthService
+    @Environment(\.dismiss) private var dismiss
+    @State private var selfieImage: UIImage?
+
+    var body: some View {
+        NavigationView {
+            OnboardingSelfieView(
+                selfieImage: $selfieImage,
+                onAdvance: { dismiss() },
+                onSkip: { dismiss() },
+                isRetakeMode: true
+            )
+            .environmentObject(authService)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+    }
 }

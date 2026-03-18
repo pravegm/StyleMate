@@ -18,6 +18,9 @@ struct OnboardingSelfieView: View {
     @State private var showCapturedState = false
     @State private var capturedBounce: CGFloat = 1.0
     @State private var searchDotPhase = 0
+    @State private var showConfirmButtons = false
+
+    var isRetakeMode: Bool = false
 
     private let searchDotTimer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
 
@@ -212,10 +215,18 @@ struct OnboardingSelfieView: View {
         switch cameraService.captureState {
         case .searching:
             VStack(spacing: DS.Spacing.xs) {
-                Text("Position your face in the oval")
-                    .font(DS.Font.headline)
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
+                if let warning = cameraService.qualityWarning {
+                    Text(warning)
+                        .font(DS.Font.headline)
+                        .foregroundColor(.yellow)
+                        .multilineTextAlignment(.center)
+                        .transition(.opacity)
+                } else {
+                    Text("Position your face in the oval")
+                        .font(DS.Font.headline)
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                }
 
                 HStack(spacing: DS.Spacing.micro) {
                     ForEach(0..<3, id: \.self) { i in
@@ -252,17 +263,49 @@ struct OnboardingSelfieView: View {
             .accessibilityLabel("Face detected, hold still")
 
         case .captured:
-            HStack(spacing: DS.Spacing.xs) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(DS.Colors.success)
-                Text("Got it!")
-                    .font(DS.Font.headline)
-                    .foregroundColor(DS.Colors.success)
+            VStack(spacing: DS.Spacing.md) {
+                HStack(spacing: DS.Spacing.xs) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(DS.Colors.success)
+                    Text("Looks good!")
+                        .font(DS.Font.headline)
+                        .foregroundColor(DS.Colors.success)
+                }
+                .scaleEffect(showCapturedState ? 1 : 0)
+                .animation(.spring(response: 0.35, dampingFraction: 0.5), value: showCapturedState)
+
+                if showConfirmButtons {
+                    VStack(spacing: DS.Spacing.sm) {
+                        Button {
+                            Haptics.medium()
+                            confirmSelfie()
+                        } label: {
+                            Text("Use This Photo")
+                                .font(DS.Font.headline)
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, DS.Spacing.sm)
+                                .background(DS.Colors.accent)
+                                .cornerRadius(DS.CornerRadius.md)
+                        }
+                        .accessibilityLabel("Use this selfie photo")
+
+                        Button {
+                            Haptics.light()
+                            retakeSelfie()
+                        } label: {
+                            Text("Retake")
+                                .font(DS.Font.callout)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        .accessibilityLabel("Retake selfie photo")
+                    }
+                    .padding(.horizontal, DS.Spacing.xl)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
-            .scaleEffect(showCapturedState ? 1 : 0)
-            .animation(.spring(response: 0.35, dampingFraction: 0.5), value: showCapturedState)
             .transition(.opacity)
-            .accessibilityLabel("Photo captured successfully")
+            .accessibilityLabel("Photo captured, choose to use or retake")
 
         case .denied:
             EmptyView()
@@ -322,15 +365,30 @@ struct OnboardingSelfieView: View {
             }
         }
 
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                showConfirmButtons = true
+            }
+        }
+        print("[StyleMate] Selfie captured, waiting for user confirmation")
+    }
+
+    private func confirmSelfie() {
         if let image = cameraService.capturedImage, let userId = authService.user?.id {
             selfieImage = image
             cameraService.saveSelfie(image, userId: userId)
+            FaceMatchingService.shared.clearReference()
+            print("[StyleMate] Selfie confirmed and saved, reference cleared for reload")
         }
+        onAdvance()
+    }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            onAdvance()
-        }
-        print("[StyleMate] Selfie capture handled, advancing in 0.8s")
+    private func retakeSelfie() {
+        showCapturedState = false
+        showConfirmButtons = false
+        capturedBounce = 1.0
+        faceProgress = 0
+        cameraService.retakeSelfie()
     }
 
     // MARK: - Permission Denied Fallback

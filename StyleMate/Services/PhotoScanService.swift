@@ -152,13 +152,14 @@ class PhotoScanService: ObservableObject {
 
         print("[StyleMate] Auto-scan starting for user: \(userId)")
 
-        // Load selfie reference for face matching
         currentPhase = "Loading face reference..."
         let hasFaceRef = FaceMatchingService.shared.loadSelfieReference(forUser: userId)
         if hasFaceRef {
             print("[StyleMate] Auto-scan: Face matching active (selfie loaded)")
         } else {
-            print("[StyleMate] Auto-scan: No selfie, falling back to any-person detection")
+            print("[StyleMate] Auto-scan: No selfie reference loaded -- scan requires a selfie for accurate results")
+            scanState = .error("No selfie found. Please take a selfie in Profile to enable scanning.")
+            return
         }
 
         currentPhase = "Preparing your photo library..."
@@ -195,8 +196,38 @@ class PhotoScanService: ObservableObject {
                     continue
                 }
 
+                // Stage 1: Quick person detection on thumbnail (catches full-body, partial body, faces)
+                let hasPerson = await Task.detached {
+                    FaceMatchingService.shared.photoContainsAnyPerson(thumbCG)
+                }.value
+
+                guard hasPerson else {
+                    progress.scannedAssetIDs.insert(asset.localIdentifier)
+                    internalScannedCount += 1
+                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
+                    continue
+                }
+
+                guard !isCancelled else { return }
+
+                // Stage 2: Load full-res image for face matching + Gemini analysis
+                guard let fullImage = await loadFullImage(for: asset) else {
+                    progress.scannedAssetIDs.insert(asset.localIdentifier)
+                    internalScannedCount += 1
+                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
+                    continue
+                }
+
+                // Stage 3: Face matching on full-res image where faces are large enough
+                guard let fullCG = fullImage.cgImage else {
+                    progress.scannedAssetIDs.insert(asset.localIdentifier)
+                    internalScannedCount += 1
+                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
+                    continue
+                }
+
                 let matchResult = await Task.detached {
-                    FaceMatchingService.shared.findUserInPhoto(thumbCG)
+                    FaceMatchingService.shared.findUserInPhoto(fullCG)
                 }.value
 
                 guard matchResult.isMatch else {
@@ -206,24 +237,11 @@ class PhotoScanService: ObservableObject {
                     continue
                 }
 
-                guard !isCancelled else { return }
-
-                // Load full-res image for Gemini analysis
-                guard let fullImage = await loadFullImage(for: asset) else {
-                    progress.scannedAssetIDs.insert(asset.localIdentifier)
-                    internalScannedCount += 1
-                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
-                    continue
-                }
-
+                // Stage 4: Crop to user's body in multi-person photos
                 let imageForGemini: UIImage
-                if matchResult.faceCount > 1, let fullCG = fullImage.cgImage {
-                    let fullResMatch = await Task.detached {
-                        FaceMatchingService.shared.findUserInPhoto(fullCG)
-                    }.value
-
+                if matchResult.faceCount > 1 {
                     let cropped: UIImage? = autoreleasepool {
-                        if let croppedBody = FaceMatchingService.shared.cropToUserBody(from: fullCG, matchResult: fullResMatch) {
+                        if let croppedBody = FaceMatchingService.shared.cropToUserBody(from: fullCG, matchResult: matchResult) {
                             return UIImage(cgImage: croppedBody)
                         }
                         return nil

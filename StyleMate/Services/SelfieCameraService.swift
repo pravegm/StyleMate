@@ -9,6 +9,7 @@ class SelfieCameraService: NSObject, ObservableObject {
     @Published var capturedImage: UIImage? = nil
     @Published var captureState: CaptureState = .searching
     @Published var cameraPermissionDenied: Bool = false
+    @Published var qualityWarning: String? = nil
 
     enum CaptureState {
         case searching
@@ -87,12 +88,12 @@ class SelfieCameraService: NSObject, ObservableObject {
     }
 
     func saveSelfie(_ image: UIImage, userId: String) {
-        guard let data = image.jpegData(compressionQuality: 0.8) else { return }
+        guard let data = image.jpegData(compressionQuality: 0.95) else { return }
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let filePath = documentsPath.appendingPathComponent("selfie_reference_\(userId).jpg")
         try? data.write(to: filePath)
         UserDefaults.standard.set(filePath.path, forKey: "selfieReferencePath_\(userId)")
-        print("[StyleMate] Selfie saved for user: \(userId)")
+        print("[StyleMate] Selfie saved for user: \(userId) at \(filePath.path)")
     }
 }
 
@@ -104,12 +105,13 @@ extension SelfieCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
 
         let request = VNDetectFaceRectanglesRequest { [weak self] request, _ in
             guard let self else { return }
-            let faces = request.results as? [VNFaceObservation] ?? []
-            let detected = faces.contains { $0.confidence > 0.7 }
-            let faceRect = faces.first(where: { $0.confidence > 0.7 })?.boundingBox ?? .zero
+            let faces = (request.results as? [VNFaceObservation] ?? []).filter { $0.confidence > 0.7 }
+            let detected = !faces.isEmpty
+            let faceRect = faces.first?.boundingBox ?? .zero
+            let faceCount = faces.count
 
             Task { @MainActor in
-                self.processFaceDetection(detected: detected, rect: faceRect)
+                self.processFaceDetection(detected: detected, rect: faceRect, faceCount: faceCount)
             }
         }
 
@@ -118,18 +120,31 @@ extension SelfieCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 
     @MainActor
-    private func processFaceDetection(detected: Bool, rect: CGRect) {
+    private func processFaceDetection(detected: Bool, rect: CGRect, faceCount: Int) {
         guard captureState != .captured else { return }
 
         isFaceDetected = detected
         faceRect = rect
 
         if detected {
+            let quality = validateFaceQuality(rect: rect, faceCount: faceCount)
+            if !quality.isAcceptable {
+                qualityWarning = quality.warning
+                if captureState == .detected {
+                    captureState = .searching
+                    faceDetectedDuration = 0
+                    lastFaceDetectionTime = nil
+                }
+                return
+            }
+
+            qualityWarning = nil
+
             if captureState == .searching {
                 captureState = .detected
                 lastFaceDetectionTime = Date()
                 faceDetectedDuration = 0
-                print("[StyleMate] Face detected, starting countdown")
+                print("[StyleMate] Face detected with good quality, starting countdown")
             }
 
             if let lastTime = lastFaceDetectionTime {
@@ -139,10 +154,64 @@ extension SelfieCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
                 }
             }
         } else {
+            qualityWarning = nil
             if captureState == .detected {
                 captureState = .searching
                 faceDetectedDuration = 0
                 lastFaceDetectionTime = nil
+            }
+        }
+    }
+
+    // MARK: - Face Quality Validation
+
+    private struct FaceQuality {
+        let isAcceptable: Bool
+        let warning: String?
+    }
+
+    /// Validates that the detected face is large enough, centered, and alone.
+    /// `rect` is in Vision's normalized coordinate space (0..1).
+    private func validateFaceQuality(rect: CGRect, faceCount: Int) -> FaceQuality {
+        if faceCount > 1 {
+            return FaceQuality(isAcceptable: false, warning: "Only one person should be in frame")
+        }
+
+        let minFaceWidth: CGFloat = 0.25
+        if rect.width < minFaceWidth {
+            return FaceQuality(isAcceptable: false, warning: "Move closer to the camera")
+        }
+
+        let faceCenterX = rect.midX
+        let faceCenterY = rect.midY
+        let centerMargin: CGFloat = 0.2
+        let isHorizontallyCentered = faceCenterX >= centerMargin && faceCenterX <= (1.0 - centerMargin)
+        let isVerticallyCentered = faceCenterY >= centerMargin && faceCenterY <= (1.0 - centerMargin)
+
+        if !isHorizontallyCentered || !isVerticallyCentered {
+            return FaceQuality(isAcceptable: false, warning: "Center your face in the oval")
+        }
+
+        return FaceQuality(isAcceptable: true, warning: nil)
+    }
+
+    // MARK: - Retake
+
+    func retakeSelfie() {
+        capturedImage = nil
+        captureState = .searching
+        isFaceDetected = false
+        faceRect = .zero
+        faceDetectedDuration = 0
+        lastFaceDetectionTime = nil
+        isCapturing = false
+        qualityWarning = nil
+
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            if !self.captureSession.isRunning {
+                self.captureSession.startRunning()
+                print("[StyleMate] Camera session restarted for retake")
             }
         }
     }
