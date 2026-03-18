@@ -3,7 +3,7 @@
 Convert InsightFace MobileFaceNet (w600k_mbf.onnx) to CoreML (.mlpackage).
 
 Requirements:
-    pip install coremltools onnx
+    pip install coremltools onnx onnx2torch torch
 
 Usage (run on macOS):
     python convert_model.py
@@ -14,6 +14,8 @@ Output:
 
 import coremltools as ct
 import numpy as np
+import torch
+from onnx2torch import convert as onnx2torch_convert
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
@@ -28,9 +30,15 @@ if not ONNX_PATH.exists():
 
 print(f"Converting {ONNX_PATH} ...")
 
+print("Loading ONNX model via onnx2torch ...")
+torch_model = onnx2torch_convert(str(ONNX_PATH))
+torch_model.eval()
+
+example_input = torch.randn(1, 3, 112, 112)
+traced_model = torch.jit.trace(torch_model, example_input)
+
 model = ct.convert(
-    str(ONNX_PATH),
-    source="onnx",
+    traced_model,
     inputs=[ct.TensorType(name="input", shape=(1, 3, 112, 112))],
     minimum_deployment_target=ct.target.iOS16,
     compute_precision=ct.precision.FLOAT32,

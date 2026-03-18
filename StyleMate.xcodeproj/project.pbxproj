@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		C1BACD032F617DC1009C0553 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = C1BACD022F617DC1009C0553 /* GoogleSignIn */; };
 		C1BACD052F617DC1009C0553 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C1BACD042F617DC1009C0553 /* GoogleSignInSwift */; };
+		C1E13D952F6B218400A09A33 /* MobileFaceNet.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = C1E13D942F6B218400A09A33 /* MobileFaceNet.mlpackage */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,6 +33,7 @@
 		C11A627F2DD281F600CF18D0 /* StyleMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StyleMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C11A628C2DD281FB00CF18D0 /* StyleMateTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StyleMateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C11A62962DD281FB00CF18D0 /* StyleMateUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StyleMateUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C1E13D942F6B218400A09A33 /* MobileFaceNet.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = MobileFaceNet.mlpackage; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -95,6 +97,7 @@
 		C11A62762DD281F600CF18D0 = {
 			isa = PBXGroup;
 			children = (
+				C1E13D942F6B218400A09A33 /* MobileFaceNet.mlpackage */,
 				C11A62812DD281F600CF18D0 /* StyleMate */,
 				C11A628F2DD281FB00CF18D0 /* StyleMateTests */,
 				C11A62992DD281FB00CF18D0 /* StyleMateUITests */,
@@ -261,6 +264,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C1E13D952F6B218400A09A33 /* MobileFaceNet.mlpackage in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
