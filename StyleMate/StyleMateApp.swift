@@ -161,25 +161,28 @@ struct RootView: View {
                 }
             }
         }
-        .onChange(of: onboardingManager.hasCompletedOnboarding) { completed in
-            if completed,
-               authService.isAuthenticated,
-               PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
-               PhotoScanService.shared.scanState == .idle {
+        .task(id: onboardingManager.hasCompletedOnboarding) {
+            let userId = authService.user?.id ?? ""
+            let scanKey = "hasCompletedInitialScan_\(userId)"
 
-                let userId = authService.user?.id ?? ""
-                let gender = authService.user?.gender
-                let existingItems = wardrobeVM.items
+            guard onboardingManager.hasCompletedOnboarding,
+                  authService.isAuthenticated,
+                  !userId.isEmpty,
+                  !UserDefaults.standard.bool(forKey: scanKey),
+                  PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
+                  PhotoScanService.shared.scanState == .idle else { return }
 
-                Task {
-                    await PhotoScanService.shared.startScan(
-                        forUser: userId,
-                        dateRange: .lastSixMonths,
-                        userGender: gender,
-                        existingItems: existingItems
-                    )
-                }
-                print("[StyleMate] Auto-scan triggered after onboarding completion")
+            print("[StyleMate] Auto-scan triggered after onboarding completion")
+
+            await PhotoScanService.shared.startScan(
+                forUser: userId,
+                dateRange: .lastSixMonths,
+                userGender: authService.user?.gender,
+                existingItems: wardrobeVM.items
+            )
+
+            if PhotoScanService.shared.scanState == .completed {
+                UserDefaults.standard.set(true, forKey: scanKey)
             }
         }
     }

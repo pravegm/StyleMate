@@ -56,6 +56,8 @@ class PhotoScanService: ObservableObject {
     @Published var currentPhase: String = ""
     @Published var foundItems: [ScannedItem] = []
 
+    private var lastUIUpdate = ContinuousClock.now
+
     enum ScanState: Equatable {
         case idle
         case scanning
@@ -72,6 +74,10 @@ class PhotoScanService: ObservableObject {
     }
 
     private init() {}
+
+    private var isCancelled: Bool {
+        scanState != .scanning || Task.isCancelled
+    }
 
     // MARK: - Progress Persistence
 
@@ -127,9 +133,10 @@ class PhotoScanService: ObservableObject {
 
         currentPhase = "Scanning your photos..."
         let batchSize = 10
+        var internalScannedCount = 0
 
         for batchStart in stride(from: 0, to: unscannedAssets.count, by: batchSize) {
-            guard scanState == .scanning else { return }
+            guard !isCancelled else { return }
 
             let batchEnd = min(batchStart + batchSize, unscannedAssets.count)
             let batch = Array(unscannedAssets[batchStart..<batchEnd])
@@ -137,19 +144,23 @@ class PhotoScanService: ObservableObject {
             let thumbnails = await loadImages(for: batch, targetSize: CGSize(width: 640, height: 640))
 
             for (asset, thumbnail) in zip(batch, thumbnails) {
-                guard scanState == .scanning else { return }
+                guard !isCancelled else { return }
 
                 guard let thumbnail = thumbnail else {
                     progress.scannedAssetIDs.insert(asset.localIdentifier)
-                    photosScanned += 1
+                    internalScannedCount += 1
+                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
                     continue
                 }
 
                 guard photoContainsPerson(thumbnail) else {
                     progress.scannedAssetIDs.insert(asset.localIdentifier)
-                    photosScanned += 1
+                    internalScannedCount += 1
+                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
                     continue
                 }
+
+                guard !isCancelled else { return }
 
                 if let fullImage = await loadSingleImage(for: asset, targetSize: CGSize(width: 1024, height: 1024)) {
                     let results = await ImageAnalysisService.shared.analyzeAndSegment(
@@ -210,7 +221,8 @@ class PhotoScanService: ObservableObject {
                 }
 
                 progress.scannedAssetIDs.insert(asset.localIdentifier)
-                photosScanned += 1
+                internalScannedCount += 1
+                throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
             }
 
             saveProgress(progress, forUser: userId)
@@ -226,6 +238,8 @@ class PhotoScanService: ObservableObject {
             }
         }
 
+        photosScanned = internalScannedCount
+
         progress.lastScanDate = Date()
         progress.totalItemsFound = foundItems.count
         saveProgress(progress, forUser: userId)
@@ -233,6 +247,16 @@ class PhotoScanService: ObservableObject {
         scanState = .completed
         currentPhase = "Scan complete!"
         print("[StyleMate] Auto-scan complete: found \(foundItems.count) items from \(photosScanned) photos")
+    }
+
+    /// Throttle @Published updates to ~100ms intervals to avoid SwiftUI layout thrashing.
+    private func throttleUIUpdate(scanned: Int, total: Int) {
+        let now = ContinuousClock.now
+        let isLast = scanned >= total
+        if isLast || now - lastUIUpdate >= .milliseconds(100) {
+            photosScanned = scanned
+            lastUIUpdate = now
+        }
     }
 
     // MARK: - Cancel / Dismiss
@@ -315,10 +339,15 @@ class PhotoScanService: ObservableObject {
             for (index, asset) in assets.enumerated() {
                 group.addTask { @Sendable in
                     await withCheckedContinuation { continuation in
+                        var resumed = false
                         manager.requestImage(
                             for: asset, targetSize: targetSize,
                             contentMode: .aspectFit, options: options
-                        ) { image, _ in
+                        ) { image, info in
+                            let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
+                            if isDegraded { return }
+                            guard !resumed else { return }
+                            resumed = true
                             continuation.resume(returning: (index, image))
                         }
                     }
@@ -333,19 +362,30 @@ class PhotoScanService: ObservableObject {
         }
     }
 
+    /// Uses requestImageDataAndOrientation which is guaranteed to call its handler exactly once.
     private func loadSingleImage(for asset: PHAsset, targetSize: CGSize) async -> UIImage? {
         await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
-            options.deliveryMode = .highQualityFormat
-            options.resizeMode = .exact
             options.isNetworkAccessAllowed = false
             options.isSynchronous = false
 
-            PHImageManager.default().requestImage(
-                for: asset, targetSize: targetSize,
-                contentMode: .aspectFit, options: options
-            ) { image, _ in
-                continuation.resume(returning: image)
+            PHImageManager.default().requestImageDataAndOrientation(
+                for: asset, options: options
+            ) { data, _, _, _ in
+                guard let data, let fullImage = UIImage(data: data) else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let maxDim = max(targetSize.width, targetSize.height)
+                let scale = min(maxDim / max(fullImage.size.width, fullImage.size.height), 1.0)
+                if scale < 1.0 {
+                    let newSize = CGSize(width: fullImage.size.width * scale, height: fullImage.size.height * scale)
+                    let renderer = UIGraphicsImageRenderer(size: newSize)
+                    let resized = renderer.image { _ in fullImage.draw(in: CGRect(origin: .zero, size: newSize)) }
+                    continuation.resume(returning: resized)
+                } else {
+                    continuation.resume(returning: fullImage)
+                }
             }
         }
     }
