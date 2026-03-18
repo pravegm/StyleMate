@@ -43,16 +43,15 @@ class FaceMatchingService {
             return false
         }
 
-        referenceFacePrint = generateFeaturePrint(for: faceCrop)
-
-        if let ref = referenceFacePrint {
-            activeThreshold = ref.revision >= 2 ? Self.thresholdRevision2 : Self.thresholdRevision1
-            print("[StyleMate] FaceMatch: Selfie reference loaded (revision: \(ref.revision), threshold: \(activeThreshold))")
-            return true
-        } else {
+        guard let result = generateFeaturePrint(for: faceCrop) else {
             print("[StyleMate] FaceMatch: Could not generate feature print from selfie")
             return false
         }
+
+        referenceFacePrint = result.observation
+        activeThreshold = result.requestRevision >= 2 ? Self.thresholdRevision2 : Self.thresholdRevision1
+        print("[StyleMate] FaceMatch: Selfie reference loaded (revision: \(result.requestRevision), threshold: \(activeThreshold))")
+        return true
     }
 
     private func loadFromDocuments(filename: String) -> UIImage? {
@@ -89,10 +88,10 @@ class FaceMatchingService {
 
         for face in faces {
             guard let faceCrop = cropFace(from: cgImage, observation: face, padding: 0.3),
-                  let facePrint = generateFeaturePrint(for: faceCrop) else { continue }
+                  let result = generateFeaturePrint(for: faceCrop) else { continue }
 
             var distance: Float = .infinity
-            do { try reference.computeDistance(&distance, to: facePrint) } catch { continue }
+            do { try reference.computeDistance(&distance, to: result.observation) } catch { continue }
 
             if distance < bestDistance {
                 bestDistance = distance
@@ -254,11 +253,17 @@ class FaceMatchingService {
 
     // MARK: - Feature Print Generation
 
-    func generateFeaturePrint(for cgImage: CGImage) -> VNFeaturePrintObservation? {
+    struct FeaturePrintResult {
+        let observation: VNFeaturePrintObservation
+        let requestRevision: Int
+    }
+
+    func generateFeaturePrint(for cgImage: CGImage) -> FeaturePrintResult? {
         let request = VNGenerateImageFeaturePrintRequest()
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         try? handler.perform([request])
-        return request.results?.first
+        guard let obs = request.results?.first else { return nil }
+        return FeaturePrintResult(observation: obs, requestRevision: request.revision)
     }
 
     // MARK: - Fallback: Any Person Detection
