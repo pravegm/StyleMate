@@ -38,6 +38,7 @@ struct RootView: View {
     @State private var reviewImages: [UIImage] = []
     @State private var showReview = false
     @State private var isLoadingImages = false
+    @State private var showScanRangePicker = false
     @Environment(\.scenePhase) private var scenePhase
 
     var userKey: String {
@@ -62,6 +63,11 @@ struct RootView: View {
         .confirmationDialog("Add New Item", isPresented: $showSourcePicker, titleVisibility: .visible) {
             Button("Choose from Gallery") { showPhotoPicker = true }
             Button("Take Photo") { showCamera = true }
+            if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized {
+                Button("Auto-scan from Photos") {
+                    showScanRangePicker = true
+                }
+            }
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $pickerItems, maxSelectionCount: 15, matching: .images)
         .onChange(of: pickerItems) { items in
@@ -110,6 +116,22 @@ struct RootView: View {
             if isLoadingImages {
                 OutfitLoadingOverlay(progress: 0.5, message: "Loading images…")
             }
+        }
+        .sheet(isPresented: $showScanRangePicker) {
+            ScanRangePickerView(
+                isPresented: $showScanRangePicker,
+                onStartScan: { dateRange in
+                    showScanRangePicker = false
+                    Task {
+                        await PhotoScanService.shared.startScan(
+                            forUser: authService.user?.id ?? "",
+                            dateRange: dateRange,
+                            userGender: authService.user?.gender,
+                            wardrobeViewModel: wardrobeVM
+                        )
+                    }
+                }
+            )
         }
         .onChange(of: authService.isAuthenticated) { isAuthenticated in
             if isAuthenticated, let id = authService.user?.id {
@@ -178,7 +200,7 @@ struct RootView: View {
                 forUser: userId,
                 dateRange: .lastSixMonths,
                 userGender: authService.user?.gender,
-                existingItems: wardrobeVM.items
+                wardrobeViewModel: wardrobeVM
             )
 
             if PhotoScanService.shared.scanState == .completed {

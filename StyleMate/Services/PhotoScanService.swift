@@ -2,29 +2,10 @@ import UIKit
 import Photos
 import Vision
 
-// MARK: - Scanned Item (pre-approval, held in memory until user reviews)
-
-struct ScannedItem: Identifiable {
-    let id: UUID = UUID()
-    let image: UIImage
-    let category: Category
-    let product: String
-    let colors: [String]
-    let brand: String
-    let pattern: Pattern
-    let material: String?
-    let fit: Fit?
-    let neckline: Neckline?
-    let sleeveLength: SleeveLength?
-    let garmentLength: GarmentLength?
-    let details: String?
-    let sourceAssetID: String
-    var isSelected: Bool = true
-}
-
 // MARK: - Scan Date Range
 
 enum ScanDateRange {
+    case lastMonth
     case lastSixMonths
     case lastYear
     case custom(from: Date, to: Date)
@@ -41,6 +22,14 @@ struct ScanProgress: Codable {
     var totalItemsFound: Int
 }
 
+// MARK: - Scan History Info
+
+struct ScanHistoryInfo {
+    let lastScanDate: Date?
+    let totalScannedAssets: Int
+    let totalItemsFound: Int
+}
+
 // MARK: - Photo Scan Service
 
 @MainActor
@@ -54,7 +43,7 @@ class PhotoScanService: ObservableObject {
     @Published var photosScanned: Int = 0
     @Published var itemsFound: Int = 0
     @Published var currentPhase: String = ""
-    @Published var foundItems: [ScannedItem] = []
+    @Published var scanAddedItemIDs: [UUID] = []
 
     private var lastUIUpdate = ContinuousClock.now
 
@@ -81,7 +70,7 @@ class PhotoScanService: ObservableObject {
 
     // MARK: - Progress Persistence
 
-    private func loadProgress(forUser userId: String) -> ScanProgress {
+    func loadProgress(forUser userId: String) -> ScanProgress {
         let key = "scanProgress_\(userId)"
         guard let data = UserDefaults.standard.data(forKey: key),
               let progress = try? JSONDecoder().decode(ScanProgress.self, from: data) else {
@@ -97,13 +86,24 @@ class PhotoScanService: ObservableObject {
         }
     }
 
+    // MARK: - Scan History
+
+    func getScanHistory(forUser userId: String) -> ScanHistoryInfo {
+        let progress = loadProgress(forUser: userId)
+        return ScanHistoryInfo(
+            lastScanDate: progress.lastScanDate,
+            totalScannedAssets: progress.scannedAssetIDs.count,
+            totalItemsFound: progress.totalItemsFound
+        )
+    }
+
     // MARK: - Main Scan
 
     func startScan(
         forUser userId: String,
         dateRange: ScanDateRange,
         userGender: String?,
-        existingItems: [WardrobeItem]
+        wardrobeViewModel: WardrobeViewModel
     ) async {
         guard scanState != .scanning else {
             print("[StyleMate] Scan already in progress, ignoring")
@@ -113,7 +113,7 @@ class PhotoScanService: ObservableObject {
         scanState = .scanning
         photosScanned = 0
         itemsFound = 0
-        foundItems = []
+        scanAddedItemIDs = []
 
         var progress = loadProgress(forUser: userId)
 
@@ -176,7 +176,7 @@ class PhotoScanService: ObservableObject {
                             category: cat, product: prod, colors: seg.colors,
                             pattern: pat, material: seg.material, fit: seg.fit,
                             neckline: seg.neckline, sleeveLength: seg.sleeveLength,
-                            existingItems: existingItems
+                            existingItems: wardrobeViewModel.items
                         )
 
                         if isDup != nil {
@@ -184,39 +184,36 @@ class PhotoScanService: ObservableObject {
                             continue
                         }
 
-                        let dupInScan = DuplicateDetector.shared.findBestMatch(
-                            category: cat, product: prod, colors: seg.colors,
-                            pattern: pat, material: seg.material, fit: seg.fit,
-                            neckline: seg.neckline, sleeveLength: seg.sleeveLength,
-                            existingItems: foundItems.map { scannedItemToWardrobeStub($0) }
-                        )
-
-                        if dupInScan != nil {
-                            print("[StyleMate] Auto-scan: Skipping scan-internal duplicate \(prod)")
-                            continue
-                        }
-
                         let garmentImage = seg.maskImage ?? fullImage
 
-                        let scannedItem = ScannedItem(
-                            image: garmentImage,
+                        let imagePath = WardrobeImageFileHelper.saveImageAsPNG(garmentImage)
+                            ?? WardrobeImageFileHelper.saveImage(garmentImage) ?? ""
+                        let thumbnailPath = WardrobeImageFileHelper.saveThumbnail(garmentImage)
+
+                        let wardrobeItem = WardrobeItem(
                             category: cat,
                             product: prod,
-                            colors: seg.colors,
+                            colors: seg.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
                             brand: seg.brand,
                             pattern: pat,
+                            imagePath: imagePath,
+                            croppedImagePath: imagePath,
+                            thumbnailPath: thumbnailPath,
                             material: seg.material,
                             fit: seg.fit,
                             neckline: seg.neckline,
                             sleeveLength: seg.sleeveLength,
                             garmentLength: seg.garmentLength,
-                            details: seg.details,
-                            sourceAssetID: asset.localIdentifier
+                            details: seg.details
                         )
 
-                        foundItems.append(scannedItem)
-                        itemsFound = foundItems.count
-                        print("[StyleMate] Auto-scan: Found \(prod) (\(cat.rawValue))")
+                        wardrobeViewModel.items.append(wardrobeItem)
+                        wardrobeViewModel.syncItemToCloud(wardrobeItem)
+
+                        scanAddedItemIDs.append(wardrobeItem.id)
+                        itemsFound = scanAddedItemIDs.count
+
+                        print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe")
                     }
                 }
 
@@ -241,12 +238,12 @@ class PhotoScanService: ObservableObject {
         photosScanned = internalScannedCount
 
         progress.lastScanDate = Date()
-        progress.totalItemsFound = foundItems.count
+        progress.totalItemsFound += scanAddedItemIDs.count
         saveProgress(progress, forUser: userId)
 
         scanState = .completed
         currentPhase = "Scan complete!"
-        print("[StyleMate] Auto-scan complete: found \(foundItems.count) items from \(photosScanned) photos")
+        print("[StyleMate] Auto-scan complete: added \(scanAddedItemIDs.count) items from \(photosScanned) photos")
     }
 
     /// Throttle @Published updates to ~100ms intervals to avoid SwiftUI layout thrashing.
@@ -269,24 +266,17 @@ class PhotoScanService: ObservableObject {
 
     func dismissCompleted() {
         scanState = .idle
-        foundItems = []
+        scanAddedItemIDs = []
         itemsFound = 0
         photosScanned = 0
         totalPhotosToScan = 0
         currentPhase = ""
     }
 
-    // MARK: - Stub Conversion for Duplicate Checking
+    // MARK: - Photo Count Estimation
 
-    private func scannedItemToWardrobeStub(_ item: ScannedItem) -> WardrobeItem {
-        WardrobeItem(
-            category: item.category, product: item.product,
-            colors: item.colors, brand: item.brand, pattern: item.pattern,
-            imagePath: "", croppedImagePath: nil, thumbnailPath: nil,
-            material: item.material, fit: item.fit, neckline: item.neckline,
-            sleeveLength: item.sleeveLength, garmentLength: item.garmentLength,
-            details: item.details
-        )
+    nonisolated func estimatePhotoCount(for dateRange: ScanDateRange) -> Int {
+        fetchPhotoAssets(in: dateRange).count
     }
 
     // MARK: - Photo Library Helpers
@@ -297,6 +287,9 @@ class PhotoScanService: ObservableObject {
 
         let now = Date()
         switch dateRange {
+        case .lastMonth:
+            let start = Calendar.current.date(byAdding: .month, value: -1, to: now)!
+            options.predicate = NSPredicate(format: "creationDate >= %@", start as NSDate)
         case .lastSixMonths:
             let start = Calendar.current.date(byAdding: .month, value: -6, to: now)!
             options.predicate = NSPredicate(format: "creationDate >= %@", start as NSDate)

@@ -5,8 +5,9 @@ struct ScanReviewView: View {
     @Binding var isPresented: Bool
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
 
-    private var selectedCount: Int {
-        scanService.foundItems.filter(\.isSelected).count
+    private var scannedWardrobeItems: [WardrobeItem] {
+        let scanIDs = Set(scanService.scanAddedItemIDs)
+        return wardrobeViewModel.items.filter { scanIDs.contains($0.id) }
     }
 
     private let columns = [
@@ -19,16 +20,22 @@ struct ScanReviewView: View {
             ZStack(alignment: .bottom) {
                 DS.Colors.backgroundPrimary.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                        headerSection
-                        gridSection
+                if scannedWardrobeItems.isEmpty {
+                    emptyState
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                            headerSection
+                            gridSection
+                        }
+                        .padding(.horizontal, DS.Spacing.screenH)
+                        .padding(.bottom, DS.Spacing.xxxl + DS.ButtonSize.height)
                     }
-                    .padding(.horizontal, DS.Spacing.screenH)
-                    .padding(.bottom, DS.Spacing.xxxl + DS.ButtonSize.height)
                 }
 
-                bottomBar
+                if !scannedWardrobeItems.isEmpty {
+                    bottomBar
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -52,34 +59,18 @@ struct ScanReviewView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            Text("Review Found Items")
+            Text("Review Scanned Items")
                 .font(DS.Font.title2)
                 .foregroundColor(DS.Colors.textPrimary)
 
-            Text("\(scanService.foundItems.count) items detected from your photos")
+            Text("These items were added from your photos. Remove any that don't belong.")
                 .font(DS.Font.subheadline)
                 .foregroundColor(DS.Colors.textSecondary)
 
-            HStack {
-                Text("\(selectedCount) selected")
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textTertiary)
-
-                Spacer()
-
-                Button {
-                    Haptics.selection()
-                    let allSelected = scanService.foundItems.allSatisfy(\.isSelected)
-                    for i in scanService.foundItems.indices {
-                        scanService.foundItems[i].isSelected = !allSelected
-                    }
-                } label: {
-                    Text(scanService.foundItems.allSatisfy(\.isSelected) ? "Deselect All" : "Select All")
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.accent)
-                }
-            }
-            .padding(.top, DS.Spacing.xs)
+            Text("\(scannedWardrobeItems.count) items from scan")
+                .font(DS.Font.caption1)
+                .foregroundColor(DS.Colors.textTertiary)
+                .padding(.top, DS.Spacing.xs)
         }
         .padding(.top, DS.Spacing.md)
     }
@@ -88,57 +79,58 @@ struct ScanReviewView: View {
 
     private var gridSection: some View {
         LazyVGrid(columns: columns, spacing: DS.Spacing.sm) {
-            ForEach(scanService.foundItems.indices, id: \.self) { index in
-                itemCard(index: index)
+            ForEach(scannedWardrobeItems) { item in
+                itemCard(item: item)
             }
         }
     }
 
-    private func itemCard(index: Int) -> some View {
-        let item = scanService.foundItems[index]
-        return Button {
-            Haptics.selection()
-            scanService.foundItems[index].isSelected.toggle()
-        } label: {
-            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                ZStack(alignment: .topTrailing) {
-                    Image(uiImage: item.image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 150)
-                        .background(DS.Colors.backgroundCard)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
-
-                    if item.isSelected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundColor(DS.Colors.success)
-                            .background(Circle().fill(Color.white).frame(width: 18, height: 18))
-                            .padding(DS.Spacing.xs)
+    private func itemCard(item: WardrobeItem) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let img = item.croppedImage ?? item.image {
+                        Image(uiImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    } else {
+                        Rectangle()
+                            .fill(DS.Colors.backgroundSecondary)
                     }
                 }
+                .frame(maxWidth: .infinity)
+                .frame(height: 150)
+                .background(DS.Colors.backgroundCard)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
 
-                Text(item.product)
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .lineLimit(1)
-
-                Text(item.category.rawValue)
-                    .font(DS.Font.caption2)
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .lineLimit(1)
-
-                colorDots(for: item.colors)
+                Button {
+                    Haptics.medium()
+                    removeItem(item)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundColor(DS.Colors.error.opacity(0.8))
+                        .background(Circle().fill(Color.white).frame(width: 18, height: 18))
+                }
+                .padding(DS.Spacing.xs)
             }
-            .padding(DS.Spacing.xs)
-            .background(DS.Colors.backgroundCard)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
-            .dsCardShadow()
-            .opacity(item.isSelected ? 1.0 : 0.4)
-            .animation(.easeInOut(duration: 0.2), value: item.isSelected)
+
+            Text(item.product)
+                .font(DS.Font.caption1)
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(1)
+
+            Text(item.category.rawValue)
+                .font(DS.Font.caption2)
+                .foregroundColor(DS.Colors.textSecondary)
+                .lineLimit(1)
+
+            colorDots(for: item.colors)
         }
-        .buttonStyle(.plain)
+        .padding(DS.Spacing.xs)
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .dsCardShadow()
     }
 
     private func colorDots(for colors: [String]) -> some View {
@@ -155,6 +147,26 @@ struct ScanReviewView: View {
         }
     }
 
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: DS.Spacing.md) {
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 40))
+                .foregroundColor(DS.Colors.textTertiary)
+            Text("All scanned items removed")
+                .font(DS.Font.headline)
+                .foregroundColor(DS.Colors.textPrimary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                isPresented = false
+            }
+        }
+    }
+
     // MARK: - Bottom Bar
 
     private var bottomBar: some View {
@@ -162,58 +174,37 @@ struct ScanReviewView: View {
             Divider()
 
             Button {
-                addSelectedItems()
+                Haptics.success()
+                isPresented = false
             } label: {
-                HStack(spacing: DS.Spacing.sm) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(DS.Font.headline)
-                    Text("Add \(selectedCount) Items")
+                HStack {
                     Spacer()
-                    Image(systemName: "arrow.right")
-                        .font(DS.Font.headline)
+                    Text("Done")
+                    Spacer()
                 }
             }
-            .buttonStyle(DSPrimaryButton(isDisabled: selectedCount == 0))
-            .disabled(selectedCount == 0)
-            .opacity(selectedCount == 0 ? 0.5 : 1.0)
+            .buttonStyle(DSPrimaryButton())
             .padding(.horizontal, DS.Spacing.screenH)
             .padding(.vertical, DS.Spacing.md)
         }
         .background(DS.Colors.backgroundPrimary)
     }
 
-    // MARK: - Add Items
+    // MARK: - Remove Item
 
-    private func addSelectedItems() {
-        let selected = scanService.foundItems.filter(\.isSelected)
-
-        for item in selected {
-            let imagePath = WardrobeImageFileHelper.saveImageAsPNG(item.image) ?? WardrobeImageFileHelper.saveImage(item.image) ?? ""
-            let thumbnailPath = WardrobeImageFileHelper.saveThumbnail(item.image)
-
-            let wardrobeItem = WardrobeItem(
-                category: item.category,
-                product: item.product,
-                colors: item.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
-                brand: item.brand,
-                pattern: item.pattern,
-                imagePath: imagePath,
-                croppedImagePath: imagePath,
-                thumbnailPath: thumbnailPath,
-                material: item.material,
-                fit: item.fit,
-                neckline: item.neckline,
-                sleeveLength: item.sleeveLength,
-                garmentLength: item.garmentLength,
-                details: item.details
-            )
-
-            wardrobeViewModel.items.append(wardrobeItem)
-            wardrobeViewModel.syncItemToCloud(wardrobeItem)
+    private func removeItem(_ item: WardrobeItem) {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            wardrobeViewModel.items.removeAll { $0.id == item.id }
         }
 
-        Haptics.success()
-        scanService.dismissCompleted()
-        isPresented = false
+        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+        WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+        WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
+
+        scanService.scanAddedItemIDs.removeAll { $0 == item.id }
+
+        wardrobeViewModel.deleteItemFromCloud(item)
+
+        print("[StyleMate] Removed scan item: \(item.product)")
     }
 }

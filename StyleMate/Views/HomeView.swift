@@ -118,6 +118,12 @@ struct HomeView: View {
                 )
                 .environmentObject(wardrobeViewModel)
             }
+            .onChange(of: photoScanService.scanState) { newState in
+                if case .completed = newState, !photoScanService.scanAddedItemIDs.isEmpty {
+                    Haptics.success()
+                    print("[StyleMate] Scan completed, \(photoScanService.scanAddedItemIDs.count) items added to wardrobe")
+                }
+            }
             .onAppear {
                 if homeVM.weather == nil && !homeVM.isWeatherLoading {
                     homeVM.requestWeatherForCurrentLocation()

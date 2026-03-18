@@ -13,13 +13,13 @@ struct ScanProgressBanner: View {
             case .scanning:
                 scanningBanner
             case .completed:
-                if scanService.foundItems.isEmpty {
+                if scanService.scanAddedItemIDs.isEmpty {
                     emptyCompletedBanner
                 } else {
                     completedBanner
                 }
-            case .error(let message):
-                errorBanner(message)
+            case .error:
+                errorBanner
             case .idle:
                 EmptyView()
             }
@@ -61,7 +61,7 @@ struct ScanProgressBanner: View {
                     progressCountText
                 }
 
-                Text("Found \(scanService.itemsFound) items so far")
+                Text("Added \(scanService.itemsFound) items to your wardrobe")
                     .font(DS.Font.subheadline)
                     .foregroundColor(DS.Colors.textSecondary)
             }
@@ -91,32 +91,54 @@ struct ScanProgressBanner: View {
     // MARK: - Completed State (with items)
 
     private var completedBanner: some View {
-        Button {
-            Haptics.light()
-            showReview = true
-        } label: {
+        VStack(spacing: DS.Spacing.xs) {
             HStack(spacing: DS.Spacing.sm) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 18))
                     .foregroundColor(DS.Colors.success)
 
-                Text("Found \(scanService.foundItems.count) new items!")
-                    .font(DS.Font.headline)
-                    .foregroundColor(DS.Colors.textPrimary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Added \(scanService.scanAddedItemIDs.count) items to your wardrobe!")
+                        .font(DS.Font.headline)
+                        .foregroundColor(DS.Colors.textPrimary)
+
+                    Text("Check your Wardrobe tab to see them")
+                        .font(DS.Font.caption1)
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
 
                 Spacer()
-
-                Text("Review →")
-                    .font(DS.Font.callout)
-                    .foregroundColor(DS.Colors.accent)
             }
-            .padding(.vertical, DS.Spacing.sm)
-            .padding(.horizontal, DS.Spacing.md)
-            .background(DS.Colors.backgroundCard)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
-            .dsCardShadow()
+
+            Button {
+                Haptics.light()
+                autoDismissTask?.cancel()
+                showReview = true
+            } label: {
+                HStack(spacing: DS.Spacing.xs) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 12))
+                    Text("Review & remove any mistakes")
+                        .font(DS.Font.caption1)
+                }
+                .foregroundColor(DS.Colors.accent)
+            }
         }
-        .buttonStyle(DSTapBounce())
+        .padding(DS.Spacing.md)
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .dsCardShadow()
+        .onAppear {
+            autoDismissTask?.cancel()
+            autoDismissTask = Task {
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                guard !Task.isCancelled else { return }
+                scanService.dismissCompleted()
+            }
+        }
+        .onDisappear {
+            autoDismissTask?.cancel()
+        }
     }
 
     // MARK: - Completed State (0 items, auto-dismiss)
@@ -151,12 +173,10 @@ struct ScanProgressBanner: View {
 
     // MARK: - Error State
 
-    private func errorBanner(_ message: String) -> some View {
+    private var errorBanner: some View {
         Button {
             Haptics.light()
-            Task {
-                scanService.scanState = .idle
-            }
+            scanService.scanState = .idle
         } label: {
             HStack(spacing: DS.Spacing.sm) {
                 Image(systemName: "exclamationmark.triangle.fill")
