@@ -317,12 +317,12 @@ class FaceMatchingService {
             }
         }
 
-        var nn: __CLPACK_integer = 4
-        var nrhs: __CLPACK_integer = 1
-        var lda: __CLPACK_integer = 4
-        var ipiv = [__CLPACK_integer](repeating: 0, count: 4)
-        var ldb: __CLPACK_integer = 4
-        var info: __CLPACK_integer = 0
+        var nn: __CLAPACK_integer = 4
+        var nrhs: __CLAPACK_integer = 1
+        var lda: __CLAPACK_integer = 4
+        var ipiv = [__CLAPACK_integer](repeating: 0, count: 4)
+        var ldb: __CLAPACK_integer = 4
+        var info: __CLAPACK_integer = 0
 
         dgesv_(&nn, &nrhs, &ata, &lda, &ipiv, &atb, &ldb, &info)
 
