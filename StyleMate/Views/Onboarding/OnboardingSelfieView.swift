@@ -286,7 +286,7 @@ struct OnboardingSelfieView: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, DS.Spacing.sm)
                                 .background(DS.Colors.accent)
-                                .cornerRadius(DS.CornerRadius.md)
+                                .cornerRadius(DS.Radius.button)
                         }
                         .accessibilityLabel("Use this selfie photo")
 
