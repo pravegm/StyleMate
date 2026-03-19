@@ -7,12 +7,22 @@ class FaceMatchingService {
     static let shared = FaceMatchingService()
     private init() {}
 
-    // Cosine similarity threshold for MobileFaceNet 512-dim embeddings (RGB input).
-    // With correct RGB + unmirrored selfie: same person 0.5–0.8, different person < 0.25.
-    private static let matchThreshold: Float = 0.4
+    // With ArcFace-aligned crops + RGB input, same-person cosine
+    // similarity is typically 0.5–0.8 and different-person < 0.25.
+    private static let matchThreshold: Float = 0.5
 
     private var referenceEmbedding: [Float]?
     private var mlModel: MLModel?
+
+    // InsightFace canonical 5-point destination for 112x112 alignment.
+    // Source: insightface/utils/face_align.py `arcface_dst`.
+    private static let arcfaceDst: [(x: CGFloat, y: CGFloat)] = [
+        (38.2946, 51.6963),   // left eye
+        (73.5318, 51.5014),   // right eye
+        (56.0252, 71.7366),   // nose tip
+        (41.5493, 92.3655),   // left mouth corner
+        (70.7299, 92.2041)    // right mouth corner
+    ]
 
     // MARK: - Model Loading
 
@@ -37,11 +47,9 @@ class FaceMatchingService {
         }
     }
 
-    /// Search for compiled model variants that Xcode may produce from .mlpackage
     private func findCompiledModel() -> URL? {
-        let bundle = Bundle.main
         for ext in ["mlmodelc", "mlpackage"] {
-            if let url = bundle.url(forResource: "MobileFaceNet", withExtension: ext) {
+            if let url = Bundle.main.url(forResource: "MobileFaceNet", withExtension: ext) {
                 return url
             }
         }
@@ -70,7 +78,7 @@ class FaceMatchingService {
             return false
         }
 
-        let faceObservations = detectFaces(in: cgImage)
+        let faceObservations = detectFacesWithLandmarks(in: cgImage)
         print("[StyleMate] FaceMatch: Detected \(faceObservations.count) face(s) in selfie")
 
         guard let bestFace = faceObservations.first else {
@@ -78,14 +86,14 @@ class FaceMatchingService {
             return false
         }
 
-        guard let faceCrop = cropFace(from: cgImage, observation: bestFace, padding: 0.2) else {
-            print("[StyleMate] FaceMatch: Could not crop face from selfie")
+        guard let aligned = alignedFaceCrop(from: cgImage, observation: bestFace) else {
+            print("[StyleMate] FaceMatch: Could not produce aligned face crop from selfie")
             return false
         }
 
-        print("[StyleMate] FaceMatch: Face crop size: \(faceCrop.width)x\(faceCrop.height)")
+        print("[StyleMate] FaceMatch: Aligned face crop: \(aligned.width)x\(aligned.height)")
 
-        guard let embedding = generateEmbedding(for: faceCrop) else {
+        guard let embedding = generateEmbedding(for: aligned) else {
             print("[StyleMate] FaceMatch: Could not generate embedding from selfie")
             return false
         }
@@ -128,7 +136,7 @@ class FaceMatchingService {
             return MatchResult(isMatch: false, matchedFace: nil, faceCount: 0, distance: nil)
         }
 
-        let faces = detectFaces(in: cgImage)
+        let faces = detectFacesWithLandmarks(in: cgImage)
         if faces.isEmpty {
             return MatchResult(isMatch: false, matchedFace: nil, faceCount: 0, distance: nil)
         }
@@ -138,8 +146,8 @@ class FaceMatchingService {
         var allScores: [Float] = []
 
         for face in faces {
-            guard let faceCrop = cropFace(from: cgImage, observation: face, padding: 0.2),
-                  let embedding = generateEmbedding(for: faceCrop) else { continue }
+            guard let aligned = alignedFaceCrop(from: cgImage, observation: face),
+                  let embedding = generateEmbedding(for: aligned) else { continue }
 
             let similarity = Self.cosineSimilarity(reference, embedding)
             allScores.append(similarity)
@@ -161,10 +169,300 @@ class FaceMatchingService {
         return MatchResult(isMatch: false, matchedFace: nil, faceCount: faces.count, distance: bestSimilarity)
     }
 
+    // MARK: - Face Detection with Landmarks
+
+    func detectFacesWithLandmarks(in cgImage: CGImage) -> [VNFaceObservation] {
+        let request = VNDetectFaceLandmarksRequest()
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform([request])
+        return (request.results ?? [])
+            .filter { $0.confidence > 0.5 }
+            .sorted { $0.confidence > $1.confidence }
+    }
+
+    // MARK: - ArcFace-Aligned Face Crop
+
+    /// Produces an aligned 112x112 face crop. Uses a similarity transform
+    /// when landmarks are available, falls back to bbox crop + resize otherwise.
+    func alignedFaceCrop(from cgImage: CGImage, observation: VNFaceObservation) -> CGImage? {
+        let imgW = CGFloat(cgImage.width)
+        let imgH = CGFloat(cgImage.height)
+
+        if let landmarks = observation.landmarks,
+           let srcPoints = extractFiveKeypoints(landmarks: landmarks,
+                                                 boundingBox: observation.boundingBox,
+                                                 imageWidth: imgW, imageHeight: imgH) {
+            if let aligned = warpAffineAligned(image: cgImage, srcPoints: srcPoints, outputSize: 112) {
+                return aligned
+            }
+        }
+
+        // Fallback: simple bbox crop resized to 112x112
+        return bboxCropResized(from: cgImage, observation: observation, outputSize: 112)
+    }
+
+    // MARK: - Landmark Extraction
+
+    /// Extracts the 5 keypoints needed for ArcFace alignment in **pixel coordinates**.
+    ///
+    /// Vision landmark points are normalized (0..1) relative to the face
+    /// bounding box, with origin at bottom-left. We convert them to full-image
+    /// pixel coordinates with origin at top-left (CGImage convention).
+    private func extractFiveKeypoints(
+        landmarks: VNFaceLandmarks2D,
+        boundingBox: CGRect,
+        imageWidth: CGFloat,
+        imageHeight: CGFloat
+    ) -> [(x: CGFloat, y: CGFloat)]? {
+        guard let leftEye = landmarks.leftEye,
+              let rightEye = landmarks.rightEye,
+              let nose = landmarks.nose,
+              let outerLips = landmarks.outerLips else {
+            return nil
+        }
+
+        guard leftEye.pointCount >= 1,
+              rightEye.pointCount >= 1,
+              nose.pointCount >= 1,
+              outerLips.pointCount >= 6 else {
+            return nil
+        }
+
+        func center(of region: VNFaceLandmarkRegion2D) -> CGPoint {
+            let pts = region.normalizedPoints
+            let sumX = pts.reduce(0.0) { $0 + $1.x }
+            let sumY = pts.reduce(0.0) { $0 + $1.y }
+            let n = CGFloat(pts.count)
+            return CGPoint(x: sumX / n, y: sumY / n)
+        }
+
+        let leftEyeCenter = center(of: leftEye)
+        let rightEyeCenter = center(of: rightEye)
+
+        // Nose tip: use the last point in the nose constellation
+        let nosePts = nose.normalizedPoints
+        let noseTip = nosePts[nosePts.count - 1]
+
+        // Mouth corners: first and last points of outer lips
+        let lipPts = outerLips.normalizedPoints
+        let leftMouth = lipPts[0]
+        let rightMouth = lipPts[lipPts.count / 2]
+
+        let rawPoints: [CGPoint] = [leftEyeCenter, rightEyeCenter,
+                                     noseTip, leftMouth, rightMouth]
+
+        // Convert from face-bbox-relative normalized coords to full-image pixel coords.
+        // Vision bbox: origin is bottom-left of image, normalized 0..1.
+        // Landmark points: normalized 0..1 within the bbox, origin bottom-left.
+        let bboxX = boundingBox.origin.x * imageWidth
+        let bboxY = boundingBox.origin.y * imageHeight
+        let bboxW = boundingBox.width * imageWidth
+        let bboxH = boundingBox.height * imageHeight
+
+        var pixelPoints: [(x: CGFloat, y: CGFloat)] = []
+        for p in rawPoints {
+            let px = bboxX + p.x * bboxW
+            // Flip Y: Vision origin is bottom-left, CGImage is top-left
+            let py = imageHeight - (bboxY + p.y * bboxH)
+            pixelPoints.append((x: px, y: py))
+        }
+
+        return pixelPoints
+    }
+
+    // MARK: - Similarity Transform + Warp
+
+    /// Estimates a similarity transform from `srcPoints` to `arcfaceDst`
+    /// and warps the image to produce an aligned 112x112 face crop.
+    ///
+    /// A similarity transform has 4 parameters: scale, rotation, tx, ty.
+    /// We solve it via least-squares on the 5 point pairs (10 equations, 4 unknowns).
+    ///
+    /// Uses inverse mapping with bilinear interpolation to avoid CGContext
+    /// coordinate system pitfalls (CGContext has bottom-left origin while
+    /// our pixel coordinates use top-left origin).
+    private func warpAffineAligned(
+        image: CGImage,
+        srcPoints: [(x: CGFloat, y: CGFloat)],
+        outputSize: Int
+    ) -> CGImage? {
+        let dst = Self.arcfaceDst
+        guard srcPoints.count == dst.count, srcPoints.count >= 2 else { return nil }
+        let n = srcPoints.count
+
+        // Solve for similarity transform [a, -b, tx; b, a, ty] via least squares.
+        // For each point pair (sx, sy) -> (dx, dy):
+        //   dx = a*sx - b*sy + tx
+        //   dy = b*sx + a*sy + ty
+
+        var ata = [Double](repeating: 0, count: 16)
+        var atb = [Double](repeating: 0, count: 4)
+
+        for i in 0..<n {
+            let sx = Double(srcPoints[i].x)
+            let sy = Double(srcPoints[i].y)
+            let dx = Double(dst[i].x)
+            let dy = Double(dst[i].y)
+
+            let row1: [Double] = [sx, -sy, 1, 0]
+            let row2: [Double] = [sy, sx, 0, 1]
+
+            for r in 0..<4 {
+                for c in 0..<4 {
+                    ata[r * 4 + c] += row1[r] * row1[c]
+                    ata[r * 4 + c] += row2[r] * row2[c]
+                }
+                atb[r] += row1[r] * dx
+                atb[r] += row2[r] * dy
+            }
+        }
+
+        var nn: __CLPACK_integer = 4
+        var nrhs: __CLPACK_integer = 1
+        var lda: __CLPACK_integer = 4
+        var ipiv = [__CLPACK_integer](repeating: 0, count: 4)
+        var ldb: __CLPACK_integer = 4
+        var info: __CLPACK_integer = 0
+
+        dgesv_(&nn, &nrhs, &ata, &lda, &ipiv, &atb, &ldb, &info)
+
+        guard info == 0 else {
+            print("[StyleMate] FaceMatch: Similarity transform solve failed (info=\(info))")
+            return nil
+        }
+
+        let a = atb[0]
+        let b = atb[1]
+        let tx = atb[2]
+        let ty = atb[3]
+
+        let det = a * a + b * b
+        guard det > 1e-6 else {
+            print("[StyleMate] FaceMatch: Degenerate transform (det=\(det))")
+            return nil
+        }
+
+        // Inverse transform: for each output pixel (ox, oy), find source pixel (sx, sy)
+        // Forward: dx = a*sx - b*sy + tx,  dy = b*sx + a*sy + ty
+        // Inverse: sx = (a*(dx-tx) + b*(dy-ty)) / det
+        //          sy = (a*(dy-ty) - b*(dx-tx)) / det
+        let invA = a / det
+        let invB = b / det
+
+        // Read source image pixels into a buffer with top-left origin to match
+        // the pixel coordinate system used by extractFiveKeypoints (y=0 is top).
+        // CGBitmapContext has bottom-left origin, so we flip the CTM before drawing.
+        let srcW = image.width
+        let srcH = image.height
+        let srcBytesPerPixel = 4
+        let srcBytesPerRow = srcW * srcBytesPerPixel
+        var srcPixels = [UInt8](repeating: 0, count: srcH * srcBytesPerRow)
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let srcCtx = CGContext(
+            data: &srcPixels,
+            width: srcW, height: srcH,
+            bitsPerComponent: 8,
+            bytesPerRow: srcBytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else { return nil }
+        // Flip to top-left origin: translate up then scale Y by -1
+        srcCtx.translateBy(x: 0, y: CGFloat(srcH))
+        srcCtx.scaleBy(x: 1, y: -1)
+        srcCtx.draw(image, in: CGRect(x: 0, y: 0, width: srcW, height: srcH))
+
+        // Create output buffer
+        let outSize = outputSize
+        let outBytesPerRow = outSize * srcBytesPerPixel
+        var outPixels = [UInt8](repeating: 0, count: outSize * outBytesPerRow)
+
+        // Inverse warp with bilinear interpolation
+        for oy in 0..<outSize {
+            for ox in 0..<outSize {
+                let dxd = Double(ox) - tx
+                let dyd = Double(oy) - ty
+                let sx = invA * dxd + invB * dyd
+                let sy = -invB * dxd + invA * dyd
+
+                guard sx >= 0, sy >= 0, sx < Double(srcW - 1), sy < Double(srcH - 1) else { continue }
+
+                let x0 = Int(sx)
+                let y0 = Int(sy)
+                let x1 = x0 + 1
+                let y1 = y0 + 1
+                let fx = Float(sx - Double(x0))
+                let fy = Float(sy - Double(y0))
+
+                let outOffset = (oy * outSize + ox) * srcBytesPerPixel
+                for c in 0..<3 {
+                    let v00 = Float(srcPixels[y0 * srcBytesPerRow + x0 * srcBytesPerPixel + c])
+                    let v10 = Float(srcPixels[y0 * srcBytesPerRow + x1 * srcBytesPerPixel + c])
+                    let v01 = Float(srcPixels[y1 * srcBytesPerRow + x0 * srcBytesPerPixel + c])
+                    let v11 = Float(srcPixels[y1 * srcBytesPerRow + x1 * srcBytesPerPixel + c])
+
+                    let val = v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy) +
+                              v01 * (1 - fx) * fy + v11 * fx * fy
+                    outPixels[outOffset + c] = UInt8(min(max(val, 0), 255))
+                }
+                outPixels[outOffset + 3] = 255
+            }
+        }
+
+        guard let outCtx = CGContext(
+            data: &outPixels,
+            width: outSize, height: outSize,
+            bitsPerComponent: 8,
+            bytesPerRow: outBytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else { return nil }
+
+        return outCtx.makeImage()
+    }
+
+    // MARK: - Fallback: BBox Crop + Resize to 112x112
+
+    private func bboxCropResized(from cgImage: CGImage, observation: VNFaceObservation, outputSize: Int) -> CGImage? {
+        let imageWidth = CGFloat(cgImage.width)
+        let imageHeight = CGFloat(cgImage.height)
+        let bbox = observation.boundingBox
+
+        let x = bbox.origin.x * imageWidth
+        let y = (1 - bbox.origin.y - bbox.height) * imageHeight
+        let w = bbox.width * imageWidth
+        let h = bbox.height * imageHeight
+
+        let padding: CGFloat = 0.3
+        let padX = w * padding
+        let padY = h * padding
+
+        let cropX = max(0, x - padX)
+        let cropY = max(0, y - padY)
+        let cropRect = CGRect(
+            x: cropX, y: cropY,
+            width: min(imageWidth - cropX, w + 2 * padX),
+            height: min(imageHeight - cropY, h + 2 * padY)
+        )
+
+        guard let cropped = cgImage.cropping(to: cropRect) else { return nil }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: outputSize, height: outputSize,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else { return nil }
+
+        ctx.interpolationQuality = .high
+        ctx.draw(cropped, in: CGRect(x: 0, y: 0, width: outputSize, height: outputSize))
+        return ctx.makeImage()
+    }
+
     // MARK: - Embedding Generation (MobileFaceNet via CoreML)
 
-    /// Generates a 512-dimensional face embedding from a cropped face CGImage
-    /// using the MobileFaceNet (w600k_mbf) CoreML model.
     private func generateEmbedding(for faceCrop: CGImage) -> [Float]? {
         guard ensureModelLoaded(), let model = mlModel else { return nil }
 
@@ -192,7 +490,6 @@ class FaceMatchingService {
                 return nil
             }
 
-            // Extract floats (use only first 128 if model returns more)
             let embeddingSize = min(count, 512)
             var embedding = [Float](repeating: 0, count: embeddingSize)
             let ptr = multiArray.dataPointer.bindMemory(to: Float.self, capacity: embeddingSize)
@@ -200,7 +497,6 @@ class FaceMatchingService {
                 embedding[i] = ptr[i]
             }
 
-            // L2-normalize the embedding
             var norm: Float = 0
             vDSP_svesq(embedding, 1, &norm, vDSP_Length(embeddingSize))
             norm = sqrt(norm)
@@ -215,7 +511,6 @@ class FaceMatchingService {
         }
     }
 
-    /// Extracts the first MLMultiArray feature from model output regardless of key name.
     private func firstMultiArrayFeature(from output: MLFeatureProvider) -> MLFeatureValue? {
         for name in output.featureNames {
             if let value = output.featureValue(for: name), value.multiArrayValue != nil {
@@ -227,8 +522,6 @@ class FaceMatchingService {
 
     /// Resizes a face crop to 112x112, converts to CHW Float32 MLMultiArray
     /// with [-1, 1] normalization in RGB order.
-    /// InsightFace uses `cv2.dnn.blobFromImage(..., swapRB=True)` which converts
-    /// OpenCV BGR to RGB before the model -- so the model expects RGB input.
     private func createInputMultiArray(from cgImage: CGImage, size: Int) -> MLMultiArray? {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bytesPerPixel = 4
@@ -244,6 +537,10 @@ class FaceMatchingService {
             bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
         ) else { return nil }
 
+        // Flip to top-left origin so pixelData[0] = top-left pixel,
+        // matching the row order the ML model expects.
+        context.translateBy(x: 0, y: CGFloat(size))
+        context.scaleBy(x: 1, y: -1)
         context.interpolationQuality = .high
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: size, height: size))
 
@@ -254,7 +551,6 @@ class FaceMatchingService {
         let channelSize = size * size
         let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: 3 * channelSize)
 
-        // RGBA -> RGB CHW, normalized to [-1, 1]: (pixel / 127.5) - 1.0
         for y in 0..<size {
             for x in 0..<size {
                 let offset = (y * size + x) * bytesPerPixel
@@ -278,7 +574,6 @@ class FaceMatchingService {
         guard a.count == b.count, !a.isEmpty else { return 0 }
         var dot: Float = 0
         vDSP_dotpr(a, 1, b, 1, &dot, vDSP_Length(a.count))
-        // Vectors are already L2-normalized, so dot product = cosine similarity
         return dot
     }
 
@@ -333,14 +628,14 @@ class FaceMatchingService {
         let faceMidY = face.boundingBox.midY
 
         var bestBody: CGRect?
-        var bestOverlap: CGFloat = -1
+        var bestArea: CGFloat = -1
 
         for body in bodies where body.confidence > 0.5 {
             let bodyBox = body.boundingBox
             if bodyBox.contains(CGPoint(x: faceMidX, y: faceMidY)) {
-                let overlap = face.boundingBox.intersection(bodyBox).width * face.boundingBox.intersection(bodyBox).height
-                if overlap > bestOverlap {
-                    bestOverlap = overlap
+                let area = bodyBox.width * bodyBox.height
+                if area > bestArea {
+                    bestArea = area
                     bestBody = bodyBox
                 }
             }
@@ -384,42 +679,14 @@ class FaceMatchingService {
         mlModel = nil
     }
 
-    // MARK: - Face Detection
+    // MARK: - Legacy API compatibility
 
     func detectFaces(in cgImage: CGImage) -> [VNFaceObservation] {
-        let request = VNDetectFaceRectanglesRequest()
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([request])
-        return (request.results ?? [])
-            .filter { $0.confidence > 0.5 }
-            .sorted { $0.confidence > $1.confidence }
+        detectFacesWithLandmarks(in: cgImage)
     }
 
-    // MARK: - Face Cropping
-
     func cropFace(from cgImage: CGImage, observation: VNFaceObservation, padding: CGFloat) -> CGImage? {
-        let imageWidth = CGFloat(cgImage.width)
-        let imageHeight = CGFloat(cgImage.height)
-
-        let bbox = observation.boundingBox
-        let x = bbox.origin.x * imageWidth
-        let y = (1 - bbox.origin.y - bbox.height) * imageHeight
-        let w = bbox.width * imageWidth
-        let h = bbox.height * imageHeight
-
-        let padX = w * padding
-        let padY = h * padding
-
-        let cropX = max(0, x - padX)
-        let cropY = max(0, y - padY)
-        let cropRect = CGRect(
-            x: cropX,
-            y: cropY,
-            width: min(imageWidth - cropX, w + 2 * padX),
-            height: min(imageHeight - cropY, h + 2 * padY)
-        )
-
-        return cgImage.cropping(to: cropRect)
+        alignedFaceCrop(from: cgImage, observation: observation)
     }
 
     // MARK: - Fallback: Any Person Detection

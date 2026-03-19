@@ -456,14 +456,12 @@ class PhotoScanService: ObservableObject {
                             for: asset, targetSize: targetSize,
                             contentMode: .aspectFit, options: options
                         ) { image, _ in
-                            // .fastFormat delivers exactly one callback.
-                            // Guard ensures continuation resumes at most once
-                            // even if the system unexpectedly calls back again.
                             lock.lock()
                             guard !resumed else { lock.unlock(); return }
                             resumed = true
                             lock.unlock()
-                            continuation.resume(returning: (index, image))
+                            let normalized = image.flatMap { Self.bakeOrientation($0) }
+                            continuation.resume(returning: (index, normalized))
                         }
                     }
                 }
@@ -489,16 +487,37 @@ class PhotoScanService: ObservableObject {
             ) { data, _, _, _ in
                 let result: UIImage? = autoreleasepool {
                     guard let data, let fullImage = UIImage(data: data) else { return nil }
+                    // Always render through UIGraphicsImageRenderer to bake EXIF
+                    // orientation into pixels. Without this, .cgImage returns the
+                    // raw rotated bitmap and Vision face coordinates are wrong.
+                    let targetSize: CGSize
                     let scale = min(maxDimension / max(fullImage.size.width, fullImage.size.height), 1.0)
                     if scale < 1.0 {
-                        let newSize = CGSize(width: fullImage.size.width * scale, height: fullImage.size.height * scale)
-                        let renderer = UIGraphicsImageRenderer(size: newSize)
-                        return renderer.image { _ in fullImage.draw(in: CGRect(origin: .zero, size: newSize)) }
+                        targetSize = CGSize(width: fullImage.size.width * scale,
+                                            height: fullImage.size.height * scale)
+                    } else {
+                        targetSize = fullImage.size
                     }
-                    return fullImage
+                    let renderer = UIGraphicsImageRenderer(size: targetSize)
+                    return renderer.image { _ in
+                        fullImage.draw(in: CGRect(origin: .zero, size: targetSize))
+                    }
                 }
                 continuation.resume(returning: result)
             }
+        }
+    }
+
+    // MARK: - Orientation Normalization
+
+    /// Renders any UIImage into a new bitmap with .up orientation,
+    /// baking EXIF rotation/mirroring into the actual pixel data so
+    /// that .cgImage returns correctly-oriented pixels for Vision.
+    private nonisolated static func bakeOrientation(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up, image.cgImage != nil else { return image }
+        let renderer = UIGraphicsImageRenderer(size: image.size)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
         }
     }
 }
