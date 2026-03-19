@@ -317,17 +317,9 @@ class FaceMatchingService {
             }
         }
 
-        var nn: __CLAPACK_integer = 4
-        var nrhs: __CLAPACK_integer = 1
-        var lda: __CLAPACK_integer = 4
-        var ipiv = [__CLAPACK_integer](repeating: 0, count: 4)
-        var ldb: __CLAPACK_integer = 4
-        var info: __CLAPACK_integer = 0
-
-        dgesv_(&nn, &nrhs, &ata, &lda, &ipiv, &atb, &ldb, &info)
-
-        guard info == 0 else {
-            print("[StyleMate] FaceMatch: Similarity transform solve failed (info=\(info))")
+        // Solve 4x4 via Gaussian elimination with partial pivoting
+        guard solve4x4(&ata, &atb) else {
+            print("[StyleMate] FaceMatch: Similarity transform solve failed")
             return nil
         }
 
@@ -419,6 +411,45 @@ class FaceMatchingService {
         ) else { return nil }
 
         return outCtx.makeImage()
+    }
+
+    // MARK: - 4x4 Linear Solve (Gaussian Elimination)
+
+    /// Solves A*x = b in-place for a 4x4 system stored as flat row-major arrays.
+    /// On return, `b` contains the solution. Returns false if singular.
+    private func solve4x4(_ a: inout [Double], _ b: inout [Double]) -> Bool {
+        let n = 4
+        for col in 0..<n {
+            // Partial pivoting: find row with largest absolute value in column
+            var maxVal = abs(a[col * n + col])
+            var maxRow = col
+            for row in (col + 1)..<n {
+                let v = abs(a[row * n + col])
+                if v > maxVal { maxVal = v; maxRow = row }
+            }
+            if maxVal < 1e-12 { return false }
+
+            // Swap rows
+            if maxRow != col {
+                for k in 0..<n { a.swapAt(col * n + k, maxRow * n + k) }
+                b.swapAt(col, maxRow)
+            }
+
+            // Eliminate below
+            let pivot = a[col * n + col]
+            for row in (col + 1)..<n {
+                let factor = a[row * n + col] / pivot
+                for k in col..<n { a[row * n + k] -= factor * a[col * n + k] }
+                b[row] -= factor * b[col]
+            }
+        }
+
+        // Back substitution
+        for col in stride(from: n - 1, through: 0, by: -1) {
+            for k in (col + 1)..<n { b[col] -= a[col * n + k] * b[k] }
+            b[col] /= a[col * n + col]
+        }
+        return true
     }
 
     // MARK: - Fallback: BBox Crop + Resize to 112x112
