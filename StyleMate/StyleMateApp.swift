@@ -68,11 +68,12 @@ struct RootView: View {
             .animation(.easeInOut(duration: 0.4), value: authService.isAuthenticated)
             .animation(.easeInOut(duration: 0.4), value: onboardingManager.hasCompletedOnboarding)
         }
-        .confirmationDialog("Add New Item", isPresented: $showSourcePicker, titleVisibility: .visible) {
-            Button("Choose from Gallery") { showPhotoPicker = true }
-            Button("Take Photo") { showCamera = true }
-            if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized {
-                Button("Auto-scan from Photos") {
+        .sheet(isPresented: $showSourcePicker) {
+            AddSourceSheet(
+                onGallery: { showSourcePicker = false; showPhotoPicker = true },
+                onCamera: { showSourcePicker = false; showCamera = true },
+                onAutoScan: {
+                    showSourcePicker = false
                     let userId = authService.user?.id ?? ""
                     if GeminiConsent.hasConsented(userId: userId) {
                         showScanRangePicker = true
@@ -80,8 +81,12 @@ struct RootView: View {
                         geminiConsentPurpose = .scanRangePicker
                         showGeminiConsent = true
                     }
-                }
-            }
+                },
+                showAutoScan: PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
+            )
+            .presentationDetents([.height(380)])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $pickerItems, maxSelectionCount: 15, matching: .images)
         .onChange(of: pickerItems) { items in
@@ -149,9 +154,11 @@ struct RootView: View {
                 userId: authService.user?.id ?? "",
                 onStartScan: { dateRange in
                     showScanRangePicker = false
+                    let uid = authService.user?.id ?? ""
+                    PhotoScanService.shared.resetProgress(forUser: uid)
                     Task {
                         await PhotoScanService.shared.startScan(
-                            forUser: authService.user?.id ?? "",
+                            forUser: uid,
                             dateRange: dateRange,
                             userGender: authService.user?.gender,
                             wardrobeViewModel: wardrobeVM
@@ -277,5 +284,119 @@ struct RootView: View {
                 UserDefaults.standard.set(true, forKey: scanKey)
             }
         }
+    }
+}
+
+// MARK: - Add Source Bottom Sheet
+
+private struct AddSourceSheet: View {
+    let onGallery: () -> Void
+    let onCamera: () -> Void
+    let onAutoScan: () -> Void
+    let showAutoScan: Bool
+
+    @State private var appeared = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Add to Wardrobe")
+                .font(DS.Font.title2)
+                .foregroundColor(DS.Colors.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DS.Spacing.lg)
+                .padding(.top, DS.Spacing.md)
+                .padding(.bottom, DS.Spacing.lg)
+
+            VStack(spacing: DS.Spacing.sm) {
+                addOptionRow(
+                    icon: "photo.on.rectangle.angled",
+                    iconColor: .blue,
+                    title: "Choose from Gallery",
+                    subtitle: "Pick photos of your clothes",
+                    delay: 0,
+                    action: onGallery
+                )
+
+                addOptionRow(
+                    icon: "camera.fill",
+                    iconColor: DS.Colors.accent,
+                    title: "Take a Photo",
+                    subtitle: "Snap a picture of what you're wearing",
+                    delay: 1,
+                    action: onCamera
+                )
+
+                if showAutoScan {
+                    addOptionRow(
+                        icon: "sparkles.rectangle.stack.fill",
+                        iconColor: .purple,
+                        title: "Auto-Scan Photos",
+                        subtitle: "AI finds your outfits in your photo library",
+                        delay: 2,
+                        action: onAutoScan
+                    )
+                }
+            }
+            .padding(.horizontal, DS.Spacing.lg)
+
+            Spacer()
+        }
+        .background(DS.Colors.backgroundPrimary)
+        .onAppear {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                appeared = true
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func addOptionRow(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        subtitle: String,
+        delay: Int,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: {
+            Haptics.medium()
+            action()
+        }) {
+            HStack(spacing: DS.Spacing.md) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(iconColor)
+                    .frame(width: 44, height: 44)
+                    .background(iconColor.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(DS.Font.headline)
+                        .foregroundColor(DS.Colors.textPrimary)
+                    Text(subtitle)
+                        .font(DS.Font.caption1)
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.vertical, DS.Spacing.sm)
+            .background(DS.Colors.backgroundCard)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            .dsCardShadow()
+        }
+        .buttonStyle(DSTapBounce())
+        .opacity(appeared ? 1 : 0)
+        .offset(y: appeared ? 0 : 20)
+        .animation(
+            .spring(response: 0.45, dampingFraction: 0.78).delay(Double(delay) * 0.06),
+            value: appeared
+        )
     }
 }

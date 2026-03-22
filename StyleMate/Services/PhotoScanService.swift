@@ -401,6 +401,13 @@ class PhotoScanService: ObservableObject {
         saveProgress(progress, forUser: userId)
     }
 
+    /// Resets all scan progress so the next scan re-processes every photo.
+    func resetProgress(forUser userId: String) {
+        let fresh = ScanProgress(scannedAssetIDs: [], totalItemsFound: 0)
+        saveProgress(fresh, forUser: userId)
+        print("[StyleMate] Scan progress reset for user \(userId)")
+    }
+
     // MARK: - Photo Count Estimation
 
     nonisolated func estimatePhotoCount(for dateRange: ScanDateRange) -> Int {
