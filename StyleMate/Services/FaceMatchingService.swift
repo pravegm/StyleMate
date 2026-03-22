@@ -7,7 +7,7 @@ class FaceMatchingService {
     static let shared = FaceMatchingService()
     private init() {}
 
-    private static let matchThreshold: Float = 0.45
+    private static let matchThreshold: Float = 0.30
 
     private var referenceEmbedding: [Float]?
     private var mlModel: MLModel?
@@ -71,6 +71,16 @@ class FaceMatchingService {
         guard let embedding = generateEmbeddingFromPhoto(cgImage, label: "selfie") else {
             print("[FaceMatch] ERROR: Could not generate embedding from selfie")
             return false
+        }
+
+        // Self-consistency check: generate a second embedding from the same image
+        // and verify they match. If they don't, the pipeline is broken.
+        if let secondEmbedding = generateEmbeddingFromPhoto(cgImage, label: "selfie-verify") {
+            let selfSim = dotProduct(embedding, secondEmbedding)
+            print("[FaceMatch] Self-consistency: selfie vs selfie = \(String(format: "%.4f", selfSim)) (should be >0.95)")
+            if selfSim < 0.8 {
+                print("[FaceMatch] WARNING: Self-consistency FAILED - pipeline may be non-deterministic")
+            }
         }
 
         referenceEmbedding = embedding
@@ -275,6 +285,10 @@ class FaceMatchingService {
         }
 
         let result = [leftEyeCenter, rightEyeCenter, noseTip, leftMouth, rightMouth]
+        let names = ["L-eye", "R-eye", "nose", "L-mouth", "R-mouth"]
+        for (name, pt) in zip(names, result) {
+            print("[FaceMatch] Keypoint \(name): (\(String(format: "%.1f", pt.x)), \(String(format: "%.1f", pt.y)))")
+        }
 
         // Sanity check: all points should be within a reasonable range
         for (i, pt) in result.enumerated() {
@@ -339,6 +353,9 @@ class FaceMatchingService {
 
         let a = atb[0], b = atb[1], tx = atb[2], ty = atb[3]
         let det = a * a + b * b
+        let scale = sqrt(det)
+        let angle = atan2(b, a) * 180 / .pi
+        print("[FaceMatch] Transform: scale=\(String(format: "%.3f", scale)) rot=\(String(format: "%.1f", angle))° tx=\(String(format: "%.1f", tx)) ty=\(String(format: "%.1f", ty))")
         guard det > 1e-6 else {
             print("[FaceMatch] Degenerate transform (det=\(det))")
             return nil
@@ -391,6 +408,22 @@ class FaceMatchingService {
                 }
                 outPixels[outOff + 3] = 255
             }
+        }
+
+        // Count non-black pixels to verify the warp produced a real image
+        var filledPixels = 0
+        for i in stride(from: 0, to: outPixels.count, by: bpp) {
+            if outPixels[i] > 0 || outPixels[i + 1] > 0 || outPixels[i + 2] > 0 {
+                filledPixels += 1
+            }
+        }
+        let totalPixels = outSize * outSize
+        let fillPct = Float(filledPixels) / Float(totalPixels) * 100
+        print("[FaceMatch] Warp result: \(filledPixels)/\(totalPixels) pixels filled (\(String(format: "%.0f", fillPct))%)")
+
+        if filledPixels < totalPixels / 4 {
+            print("[FaceMatch] WARNING: Warp produced mostly empty image, falling back to bbox")
+            return nil
         }
 
         return pixelBufferToImage(outPixels, width: outSize, height: outSize)
@@ -518,6 +551,10 @@ class FaceMatchingService {
             var norm: Float = 0
             vDSP_svesq(embedding, 1, &norm, vDSP_Length(embeddingSize))
             norm = sqrt(norm)
+
+            let firstFew = embedding.prefix(5).map { String(format: "%.3f", $0) }.joined(separator: ", ")
+            print("[FaceMatch] Raw embedding: dim=\(embeddingSize) L2=\(String(format: "%.4f", norm)) first5=[\(firstFew)]")
+
             if norm > 0 {
                 vDSP_vsdiv(embedding, 1, &norm, &embedding, 1, vDSP_Length(embeddingSize))
             }
