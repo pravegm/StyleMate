@@ -31,6 +31,7 @@ struct RootView: View {
     @StateObject private var outfitsVM = MyOutfitsViewModel()
     @State private var lastUserKey: String = ""
     @State private var showSourcePicker = false
+    @State private var hasPhotoAccess = false
     @State private var showPhotoPicker = false
     @State private var showCamera = false
     @State private var capturedCameraImage: UIImage? = nil
@@ -82,7 +83,7 @@ struct RootView: View {
                         showGeminiConsent = true
                     }
                 },
-                showAutoScan: PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
+                showAutoScan: hasPhotoAccess
             )
             .presentationDetents([.height(380)])
             .presentationDragIndicator(.visible)
@@ -218,6 +219,7 @@ struct RootView: View {
             }
         }
         .onAppear {
+            hasPhotoAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
             authService.checkCredentialState()
             if authService.isAuthenticated, let id = authService.user?.id {
                 wardrobeVM.load(forUser: id)
