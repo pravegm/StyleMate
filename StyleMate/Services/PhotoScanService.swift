@@ -237,22 +237,19 @@ class PhotoScanService: ObservableObject {
                     continue
                 }
 
-                // Stage 4: Crop to user's body in multi-person photos
+                // Stage 4: Isolate user's body in multi-person photos
                 let imageForGemini: UIImage
                 if matchResult.faceCount > 1 {
-                    let cropped: UIImage? = autoreleasepool {
-                        if let croppedBody = FaceMatchingService.shared.cropToUserBody(from: fullCG, matchResult: matchResult) {
-                            return UIImage(cgImage: croppedBody)
-                        }
-                        return nil
+                    let isolated: UIImage? = autoreleasepool {
+                        FaceMatchingService.shared.isolateMatchedPerson(from: fullCG, matchResult: matchResult)
                     }
 
-                    if let cropped {
-                        imageForGemini = cropped
-                        print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - cropped to user")
+                    if let isolated {
+                        imageForGemini = isolated
+                        print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - isolated user via instance mask")
                     } else {
                         imageForGemini = fullImage
-                        print("[StyleMate] Auto-scan: Multi-person photo - crop failed, using full image")
+                        print("[StyleMate] Auto-scan: Multi-person photo - isolation failed, using full image")
                     }
                 } else {
                     imageForGemini = fullImage
