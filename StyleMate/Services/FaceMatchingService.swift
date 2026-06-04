@@ -269,61 +269,75 @@ class FaceMatchingService {
             try handler.perform([maskRequest])
         } catch {
             print("[FaceMatch] Person instance mask failed: \(error)")
-            return heuristicBodyCrop(face: face, cgImage: cgImage)
+            return nil
         }
 
         guard let maskObs = maskRequest.results?.first else {
             print("[FaceMatch] No person instance mask results")
-            return heuristicBodyCrop(face: face, cgImage: cgImage)
+            return nil
         }
 
         let allInstances = maskObs.allInstances
         guard !allInstances.isEmpty else {
             print("[FaceMatch] Instance mask found no people")
-            return heuristicBodyCrop(face: face, cgImage: cgImage)
+            return nil
         }
 
         if allInstances.count == 1 {
             return extractPerson(maskObs: maskObs, instances: allInstances, handler: handler, ciImage: ciImage)
         }
 
-        // Map the matched face center to the correct person instance by testing
-        // which instance mask covers the face center pixel.
-        let faceCenterX = face.boundingBox.midX
-        let faceCenterY = face.boundingBox.midY
+        // Multiple people: pick the instance whose mask actually covers the
+        // matched face. generateMask returns a Float32 soft mask in [0,1].
+        guard let idx = instanceCoveringFace(face, in: maskObs) else {
+            print("[FaceMatch] Could not map matched face to a person instance")
+            return nil
+        }
+        print("[FaceMatch] Matched face -> person instance \(idx) of \(allInstances.count)")
+        return extractPerson(maskObs: maskObs, instances: IndexSet(integer: idx),
+                             handler: handler, ciImage: ciImage)
+    }
 
-        for idx in allInstances {
-            do {
-                let mask = try maskObs.generateMask(forInstances: IndexSet(integer: idx))
-                let maskW = CVPixelBufferGetWidth(mask)
-                let maskH = CVPixelBufferGetHeight(mask)
-                let px = Int(faceCenterX * CGFloat(maskW))
-                let py = Int((1.0 - faceCenterY) * CGFloat(maskH))
+    /// Returns the instance index whose mask best covers the matched face, or nil
+    /// if no instance meaningfully covers it. Samples the face center plus a point
+    /// toward the chest so a face on a body boundary still maps correctly.
+    private func instanceCoveringFace(_ face: VNFaceObservation, in maskObs: VNInstanceMaskObservation) -> Int? {
+        let bbox = face.boundingBox
+        // Vision normalized coords (bottom-left origin): face center, and below the
+        // chin toward the chest.
+        let samples: [(CGFloat, CGFloat)] = [
+            (bbox.midX, bbox.midY),
+            (bbox.midX, max(0, bbox.minY - bbox.height * 0.4))
+        ]
 
-                CVPixelBufferLockBaseAddress(mask, .readOnly)
-                defer { CVPixelBufferUnlockBaseAddress(mask, .readOnly) }
+        var bestIdx: Int?
+        var bestCoverage: Float = 0
 
-                if let base = CVPixelBufferGetBaseAddress(mask) {
-                    let rowBytes = CVPixelBufferGetBytesPerRow(mask)
-                    let ptr = base.assumingMemoryBound(to: UInt8.self)
-                    let clampedX = min(max(px, 0), maskW - 1)
-                    let clampedY = min(max(py, 0), maskH - 1)
-                    let val = ptr[clampedY * rowBytes + clampedX]
-                    if val > 128 {
-                        print("[FaceMatch] Face center covered by instance \(idx)")
-                        let personSet = IndexSet(integer: idx)
-                        if let result = extractPerson(maskObs: maskObs, instances: personSet, handler: handler, ciImage: ciImage) {
-                            return result
-                        }
-                    }
-                }
-            } catch {
-                continue
+        for idx in maskObs.allInstances {
+            guard let mask = try? maskObs.generateMask(forInstances: IndexSet(integer: idx)) else { continue }
+            let w = CVPixelBufferGetWidth(mask)
+            let h = CVPixelBufferGetHeight(mask)
+
+            CVPixelBufferLockBaseAddress(mask, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(mask, .readOnly) }
+            guard let base = CVPixelBufferGetBaseAddress(mask) else { continue }
+            let rowFloats = CVPixelBufferGetBytesPerRow(mask) / MemoryLayout<Float32>.stride
+            let ptr = base.assumingMemoryBound(to: Float32.self)
+
+            var coverage: Float = 0
+            for (nx, ny) in samples {
+                let px = min(max(Int(nx * CGFloat(w)), 0), w - 1)
+                let py = min(max(Int((1.0 - ny) * CGFloat(h)), 0), h - 1)
+                coverage += ptr[py * rowFloats + px]
+            }
+            if coverage > bestCoverage {
+                bestCoverage = coverage
+                bestIdx = idx
             }
         }
 
-        print("[FaceMatch] Could not map face to any person instance, using heuristic crop")
-        return heuristicBodyCrop(face: face, cgImage: cgImage)
+        // Require the face to be solidly inside the chosen person mask.
+        return bestCoverage > 0.5 ? bestIdx : nil
     }
 
     private func extractPerson(maskObs: VNInstanceMaskObservation, instances: IndexSet,
@@ -780,28 +794,6 @@ class FaceMatchingService {
         let url = docsDir.appendingPathComponent(URL(fileURLWithPath: filename).lastPathComponent)
         guard let data = try? Data(contentsOf: url) else { return nil }
         return UIImage(data: data)
-    }
-
-    /// Fallback body crop when instance mask is unavailable.
-    private func heuristicBodyCrop(face: VNFaceObservation, cgImage: CGImage) -> UIImage? {
-        let imageW = CGFloat(cgImage.width), imageH = CGFloat(cgImage.height)
-        let bbox = face.boundingBox
-        let faceX = bbox.origin.x * imageW
-        let faceY = (1 - bbox.origin.y - bbox.height) * imageH
-        let faceW = bbox.width * imageW, faceH = bbox.height * imageH
-
-        let bodyWidth = faceW * 3.5
-        let bodyHeight = faceH * 8.0
-        let bodyCenterX = faceX + faceW / 2
-        let bodyTop = max(0, faceY - faceH * 0.3)
-        let cropX = max(0, bodyCenterX - bodyWidth / 2)
-        let cropRect = CGRect(x: cropX, y: bodyTop,
-                              width: min(imageW - cropX, bodyWidth),
-                              height: min(imageH - bodyTop, bodyHeight))
-        guard cropRect.width >= 100, cropRect.height >= 100,
-              let cropped = cgImage.cropping(to: cropRect) else { return nil }
-        print("[FaceMatch] Body crop via heuristic: \(Int(cropRect.width))x\(Int(cropRect.height))")
-        return UIImage(cgImage: cropped)
     }
 
     // MARK: - Backward-Compatible API

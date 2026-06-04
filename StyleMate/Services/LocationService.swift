@@ -41,8 +41,15 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorizationStatus = manager.authorizationStatus
-        if authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways {
+        switch authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
             manager.requestLocation()
+        case .denied, .restricted:
+            // Propagate so the weather UI stops its loading spinner and can offer
+            // a Grant/Retry affordance instead of hanging forever.
+            locationError = CLError(.denied)
+        default:
+            break
         }
     }
 } 

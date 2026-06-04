@@ -244,13 +244,19 @@ class PhotoScanService: ObservableObject {
                         FaceMatchingService.shared.isolateMatchedPerson(from: fullCG, matchResult: matchResult)
                     }
 
-                    if let isolated {
-                        imageForGemini = isolated
-                        print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - isolated user via instance mask")
-                    } else {
-                        imageForGemini = fullImage
-                        print("[StyleMate] Auto-scan: Multi-person photo - isolation failed, using full image")
+                    guard let isolated else {
+                        // Could not cleanly separate the user from the others in
+                        // frame. Skip rather than risk cataloguing someone else's
+                        // clothes (e.g. a partner standing next to them).
+                        print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - could not isolate user, skipping")
+                        progress.scannedAssetIDs.insert(asset.localIdentifier)
+                        internalScannedCount += 1
+                        throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
+                        continue
                     }
+
+                    imageForGemini = isolated
+                    print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - isolated user via instance mask")
                 } else {
                     imageForGemini = fullImage
                 }

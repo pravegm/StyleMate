@@ -169,6 +169,7 @@ struct OnboardingWelcomeView: View {
                         .frame(width: btnGeo.size.width, alignment: .leading)
                     }
                     .clipped()
+                    .allowsHitTesting(false)
                 )
         }
         .buttonStyle(DSPrimaryButton())
