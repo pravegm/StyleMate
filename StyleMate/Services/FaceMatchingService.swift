@@ -349,25 +349,39 @@ class FaceMatchingService {
     /// - multi-person, confident face match -> isolate just the user (silent)
     /// - multi-person, unsure  -> ask the user "which one is you?"
     func resolveIdentity(in image: UIImage, userId: String) -> IdentityResolution {
-        guard let cg = image.cgImage else { return .useWhole }
+        guard let cg = image.cgImage else {
+            print("[Identity] No CGImage — using whole photo")
+            return .useWhole
+        }
         _ = loadReference(forUser: userId)
 
         let faces = detectFacesWithLandmarks(in: cg)
-        let peopleCount = max(faces.count, countPeople(in: cg))
+        let bodies = countPeople(in: cg)
+        let peopleCount = max(faces.count, bodies)
+        print("[Identity] faces=\(faces.count) bodies=\(bodies) gallery=\(referenceCount)")
 
         // One person (or none) — just extract.
-        if peopleCount <= 1 { return .useWhole }
+        if peopleCount <= 1 {
+            print("[Identity] -> useWhole (solo/product)")
+            return .useWhole
+        }
 
         // Multi-person: try a confident automatic match against the gallery.
         let match = findUserInPhoto(cg)
+        let simStr = match.similarity.map { String(format: "%.3f", $0) } ?? "-"
         if match.confidence == .high, match.matchedFace != nil,
            let isolated = isolateMatchedPerson(from: cg, matchResult: match) {
+            print("[Identity] -> isolated user (high match, sim=\(simStr))")
             return .isolated(isolated)
         }
 
         // Unsure -> surface the detected people for the user to pick.
         let people = detectedPeople(in: cg, faces: faces)
-        if people.isEmpty { return .useWhole }
+        if people.isEmpty {
+            print("[Identity] multi-person (\(peopleCount)) but no usable faces -> useWhole")
+            return .useWhole
+        }
+        print("[Identity] -> ambiguous: asking which of \(people.count) is you (best conf=\(match.confidence), sim=\(simStr))")
         return .ambiguous(people)
     }
 
@@ -390,10 +404,13 @@ class FaceMatchingService {
         guard let cg = image.cgImage else { return nil }
         if let emb = person.embedding {
             addReferenceEmbeddings([emb], forUser: userId)   // active learning
+            print("[Identity] User picked a person — learned their face (active learning)")
         }
         let mr = MatchResult(confidence: .high, matchedFace: person.face,
                              faceCount: max(totalFaces, 2), similarity: nil)
-        return isolateMatchedPerson(from: cg, matchResult: mr)
+        let result = isolateMatchedPerson(from: cg, matchResult: mr)
+        print("[Identity] Isolating picked person: \(result != nil ? "ok" : "FAILED -> using whole photo")")
+        return result
     }
 
     /// A head-and-shoulders crop around a face for the "which one is you?" cards.

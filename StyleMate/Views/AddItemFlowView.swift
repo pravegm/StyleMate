@@ -43,13 +43,16 @@ struct AddItemFlowView: View {
 
     private func resolveAll() async {
         guard let userId = authService.user?.id else {
+            print("[Identity] No signed-in user — skipping identity gating, analyzing whole photos")
             resolvedImages = images
             phase = .review
             return
         }
 
+        print("[Identity] Resolving \(images.count) uploaded photo(s)…")
         var resolved: [UIImage] = []
         var ambiguous: [Ambiguous] = []
+        var isolatedCount = 0
 
         for image in images {
             let resolution = await Task.detached(priority: .userInitiated) {
@@ -61,6 +64,7 @@ struct AddItemFlowView: View {
                 resolved.append(image)
             case .isolated(let isolated):
                 resolved.append(isolated)
+                isolatedCount += 1
             case .ambiguous(let people):
                 ambiguous.append(Ambiguous(image: image, people: people))
             }
@@ -68,6 +72,7 @@ struct AddItemFlowView: View {
 
         resolvedImages = resolved
         ambiguousQueue = ambiguous
+        print("[Identity] Resolved \(images.count): \(resolved.count - isolatedCount) whole, \(isolatedCount) auto-isolated, \(ambiguous.count) need 'which is you?'")
         advance()
     }
 

@@ -43,9 +43,11 @@ final class FaceReferenceViewModel: ObservableObject {
         if status == .notDetermined {
             let newStatus = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
             guard newStatus == .authorized || newStatus == .limited else {
+                print("[FaceRef] Photo permission denied")
                 phase = .noPermission; return
             }
         } else if status != .authorized && status != .limited {
+            print("[FaceRef] Photo permission not granted (status=\(status.rawValue))")
             phase = .noPermission; return
         }
 
@@ -54,10 +56,15 @@ final class FaceReferenceViewModel: ObservableObject {
         candidates = []
 
         // Ensure the selfie anchor is loaded so similarity ranking has a reference.
-        _ = FaceMatchingService.shared.loadReference(forUser: userId)
+        let hasAnchor = FaceMatchingService.shared.loadReference(forUser: userId)
+        print("[FaceRef] Scanning library (Selfies + Portraits); anchor loaded=\(hasAnchor), gallery=\(FaceMatchingService.shared.referenceCount)")
 
         let assets = Self.fetchCandidateAssets(limit: candidateLimit)
-        guard !assets.isEmpty else { phase = .empty; return }
+        print("[FaceRef] Found \(assets.count) candidate photos")
+        guard !assets.isEmpty else {
+            print("[FaceRef] No Selfies/Portrait photos found -> empty state")
+            phase = .empty; return
+        }
 
         let manager = PHImageManager.default()
         let options = PHImageRequestOptions()
@@ -87,7 +94,10 @@ final class FaceReferenceViewModel: ObservableObject {
             }
         }
 
-        guard !results.isEmpty else { phase = .empty; return }
+        guard !results.isEmpty else {
+            print("[FaceRef] No usable faces detected in \(assets.count) candidates -> empty state")
+            phase = .empty; return
+        }
 
         // Rank by similarity (best matches first); pre-select confident matches.
         results.sort { $0.similarity > $1.similarity }
@@ -99,6 +109,9 @@ final class FaceReferenceViewModel: ObservableObject {
         }
         candidates = results
         phase = .ready
+        let top = results.first?.similarity ?? 0
+        let bottom = results.last?.similarity ?? 0
+        print("[FaceRef] Ready: \(results.count) faces (of \(assets.count) photos), sim range [\(String(format: "%.3f", bottom))..\(String(format: "%.3f", top))], pre-selected \(selectedCount)\(anchored ? "" : " (no anchor — none pre-selected)")")
     }
 
     // MARK: - Selection
@@ -113,9 +126,13 @@ final class FaceReferenceViewModel: ObservableObject {
     @discardableResult
     func confirm(forUser userId: String) -> Int {
         let embeddings = candidates.filter { $0.isSelected }.map { $0.embedding }
-        guard !embeddings.isEmpty else { return 0 }
+        guard !embeddings.isEmpty else {
+            print("[FaceRef] Confirm tapped with 0 selected")
+            return 0
+        }
         let added = FaceMatchingService.shared.addReferenceEmbeddings(embeddings, forUser: userId)
         addedCount = added
+        print("[FaceRef] Confirmed \(embeddings.count) faces; \(added) new added; gallery now \(FaceMatchingService.shared.referenceCount)")
         return added
     }
 
