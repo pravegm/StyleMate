@@ -200,11 +200,11 @@ struct RootView: View {
         }
         .onChange(of: authService.isAuthenticated) { isAuthenticated in
             if isAuthenticated, let id = authService.user?.id {
-                MainThreadWatchdog.time("onChange wardrobeVM.load") { wardrobeVM.load(forUser: id) }
+                wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
                 onboardingManager.check(forUser: id)
-                MainThreadWatchdog.time("onChange migrateBackgroundRemoval") { wardrobeVM.migrateBackgroundRemoval() }
-                MainThreadWatchdog.time("onChange migrateThumbnails") { wardrobeVM.migrateThumbnails() }
+                wardrobeVM.migrateBackgroundRemoval()
+                wardrobeVM.migrateThumbnails()
 
                 Task {
                     await CloudKitService.shared.setupZone()
@@ -219,15 +219,14 @@ struct RootView: View {
             }
         }
         .onAppear {
-            MainThreadWatchdog.shared.start()
             hasPhotoAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
             authService.checkCredentialState()
             if authService.isAuthenticated, let id = authService.user?.id {
-                MainThreadWatchdog.time("onAppear wardrobeVM.load") { wardrobeVM.load(forUser: id) }
+                wardrobeVM.load(forUser: id)
                 lastUserKey = userKey
                 onboardingManager.check(forUser: id)
-                MainThreadWatchdog.time("onAppear migrateBackgroundRemoval") { wardrobeVM.migrateBackgroundRemoval() }
-                MainThreadWatchdog.time("onAppear migrateThumbnails") { wardrobeVM.migrateThumbnails() }
+                wardrobeVM.migrateBackgroundRemoval()
+                wardrobeVM.migrateThumbnails()
 
                 Task {
                     await CloudKitService.shared.setupZone()

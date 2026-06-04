@@ -388,10 +388,8 @@ class PhotoScanService: ObservableObject {
     // MARK: - Persisted Scan Item IDs
 
     func loadLastScanItemIDs(forUser userId: String) -> [UUID] {
-        MainThreadWatchdog.time("loadLastScanItemIDs") {
-            let progress = loadProgress(forUser: userId)
-            return progress.lastScanAddedItemIDs.compactMap { UUID(uuidString: $0) }
-        }
+        let progress = loadProgress(forUser: userId)
+        return progress.lastScanAddedItemIDs.compactMap { UUID(uuidString: $0) }
     }
 
     func removeFromLastScanIDs(_ itemId: UUID, forUser userId: String) {

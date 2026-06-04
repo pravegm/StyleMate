@@ -191,7 +191,6 @@ struct OnboardingWelcomeView: View {
     // MARK: - Choreography
 
     private func choreographEntrance() {
-        print("[StyleMate] OnboardingWelcomeView appeared (Get Started screen)")
         glowVisible = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             centerCardVisible = true
