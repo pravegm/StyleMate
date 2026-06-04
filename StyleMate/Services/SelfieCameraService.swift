@@ -19,6 +19,9 @@ class SelfieCameraService: NSObject, ObservableObject {
     }
 
     let captureSession = AVCaptureSession()
+    /// The preview layer is owned here so the captured photo can be cropped to
+    /// exactly the on-screen oval (WYSIWYG). The view attaches this layer.
+    let previewLayer = AVCaptureVideoPreviewLayer()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let photoOutput = AVCapturePhotoOutput()
     private let sessionQueue = DispatchQueue(label: "com.stylemate.selfie.session")
@@ -26,6 +29,11 @@ class SelfieCameraService: NSObject, ObservableObject {
     private var lastFaceDetectionTime: Date?
     private let requiredFaceDuration: TimeInterval = 1.5
     private var isCapturing = false
+
+    /// Geometry of the on-screen preview + oval guide, set by the view. Used to
+    /// crop the full-frame photo down to what the user framed in the oval.
+    var previewSize: CGSize = .zero
+    var ovalRect: CGRect = .zero
 
     func configure() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -68,6 +76,12 @@ class SelfieCameraService: NSObject, ObservableObject {
             if self.captureSession.canAddOutput(self.photoOutput) { self.captureSession.addOutput(self.photoOutput) }
 
             self.captureSession.commitConfiguration()
+
+            Task { @MainActor in
+                self.previewLayer.session = self.captureSession
+                self.previewLayer.videoGravity = .resizeAspectFill
+            }
+
             self.captureSession.startRunning()
             print("[StyleMate] Selfie camera session started")
         }
@@ -83,8 +97,44 @@ class SelfieCameraService: NSObject, ObservableObject {
     func capturePhoto() {
         guard !isCapturing else { return }
         isCapturing = true
+        // Capture upright and MIRRORED so the saved photo matches the mirrored
+        // preview the user is looking at — i.e. exactly what's framed in the oval.
+        if let conn = photoOutput.connection(with: .video) {
+            if conn.isVideoOrientationSupported { conn.videoOrientation = .portrait }
+            if conn.isVideoMirroringSupported {
+                conn.automaticallyAdjustsVideoMirroring = false
+                conn.isVideoMirrored = true
+            }
+        }
         let settings = AVCapturePhotoSettings()
         photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
+    /// Crops the full-frame, upright photo down to the on-screen oval region,
+    /// reversing the preview layer's resize-aspect-fill transform so the result
+    /// is exactly what the user saw inside the oval (plus a little padding).
+    static func cropToOval(_ image: UIImage, previewSize: CGSize, oval: CGRect) -> UIImage? {
+        guard previewSize.width > 0, previewSize.height > 0,
+              oval.width > 0, oval.height > 0,
+              let cg = image.cgImage else { return nil }
+
+        let pw = CGFloat(cg.width), ph = CGFloat(cg.height)
+        let vw = previewSize.width, vh = previewSize.height
+        let scale = max(vw / pw, vh / ph)          // aspect-fill
+        let offsetX = (vw - pw * scale) / 2
+        let offsetY = (vh - ph * scale) / 2
+
+        func toPixel(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: (x - offsetX) / scale, y: (y - offsetY) / scale)
+        }
+        let tl = toPixel(oval.minX, oval.minY)
+        let br = toPixel(oval.maxX, oval.maxY)
+        var rect = CGRect(x: tl.x, y: tl.y, width: br.x - tl.x, height: br.y - tl.y)
+        rect = rect.insetBy(dx: -rect.width * 0.12, dy: -rect.height * 0.12)   // breathing room
+        rect = rect.integral.intersection(CGRect(x: 0, y: 0, width: pw, height: ph))
+
+        guard !rect.isEmpty, let cropped = cg.cropping(to: rect) else { return nil }
+        return UIImage(cgImage: cropped)
     }
 
     func saveSelfie(_ image: UIImage, userId: String) {
@@ -230,20 +280,17 @@ extension SelfieCameraService: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        // Render the image to a canonical .up orientation bitmap.
-        // The front camera produces .leftMirrored which confuses face
-        // recognition models that expect unmirrored faces. Baking the
-        // orientation into pixels and discarding the flag gives us a
-        // stable reference image identical to how the user appears in
-        // their photo library (camera-roll images are also .up).
+        // Bake orientation/mirroring into pixels, then crop to exactly the oval
+        // the user framed (WYSIWYG). All geometry reads happen on the main actor.
         let normalized = Self.renderUpOrientation(image)
 
         Task { @MainActor in
-            self.capturedImage = normalized
+            let cropped = Self.cropToOval(normalized, previewSize: self.previewSize, oval: self.ovalRect) ?? normalized
+            self.capturedImage = cropped
             self.captureState = .captured
             self.isCapturing = false
             Haptics.success()
-            print("[StyleMate] Selfie captured (\(Int(normalized.size.width))x\(Int(normalized.size.height)), orientation: .up)")
+            print("[StyleMate] Selfie captured & cropped to oval (\(Int(cropped.size.width))x\(Int(cropped.size.height)))")
         }
     }
 
@@ -262,28 +309,30 @@ extension SelfieCameraService: AVCapturePhotoCaptureDelegate {
 // MARK: - Camera Preview UIViewRepresentable
 
 struct CameraPreviewView: UIViewRepresentable {
-    let session: AVCaptureSession
+    let previewLayer: AVCaptureVideoPreviewLayer
 
     func makeUIView(context: Context) -> UIView {
         let view = CameraPreviewUIView()
-        view.previewLayer.session = session
-        view.previewLayer.videoGravity = .resizeAspectFill
+        view.attach(previewLayer)
         return view
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
         if let view = uiView as? CameraPreviewUIView {
-            view.previewLayer.frame = view.bounds
+            view.previewLayer?.frame = view.bounds
         }
     }
 
     private class CameraPreviewUIView: UIView {
-        let previewLayer = AVCaptureVideoPreviewLayer()
+        private(set) var previewLayer: AVCaptureVideoPreviewLayer?
 
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            layer.addSublayer(previewLayer)
+        func attach(_ layer: AVCaptureVideoPreviewLayer) {
+            previewLayer = layer
+            layer.frame = bounds
+            self.layer.addSublayer(layer)
         }
+
+        required override init(frame: CGRect) { super.init(frame: frame) }
 
         required init?(coder: NSCoder) {
             fatalError("init(coder:) has not been implemented")
@@ -291,7 +340,7 @@ struct CameraPreviewView: UIViewRepresentable {
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            previewLayer.frame = bounds
+            previewLayer?.frame = bounds
         }
     }
 }

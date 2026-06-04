@@ -58,13 +58,17 @@ struct OnboardingSelfieView: View {
 
     private var cameraView: some View {
         GeometryReader { geo in
-            let ovalW = geo.size.width * 0.58
-            let ovalH = ovalW * 1.3
-            let ovalCenterY = geo.safeAreaInsets.top + 80 + ovalH / 2
-            let ovalCenter = CGPoint(x: geo.size.width / 2, y: ovalCenterY)
+            // Oval centered, slightly above the vertical middle (where faces sit
+            // naturally). The oval rect (in full-screen coords) is handed to the
+            // camera service so the captured photo is cropped to exactly this.
+            let ovalW = geo.size.width * 0.62
+            let ovalH = ovalW * 1.28
+            let ovalCenter = CGPoint(x: geo.size.width / 2, y: geo.size.height * 0.43)
+            let ovalRect = CGRect(x: ovalCenter.x - ovalW / 2, y: ovalCenter.y - ovalH / 2,
+                                  width: ovalW, height: ovalH)
 
             ZStack {
-                CameraPreviewView(session: cameraService.captureSession)
+                CameraPreviewView(previewLayer: cameraService.previewLayer)
                     .ignoresSafeArea()
 
                 Color.black.opacity(cameraBlackout)
@@ -74,7 +78,7 @@ struct OnboardingSelfieView: View {
                 OvalCutoutView(
                     center: ovalCenter,
                     ovalSize: CGSize(width: ovalW, height: ovalH),
-                    fillColor: Color.black.opacity(0.6)
+                    fillColor: Color.black.opacity(0.55)
                 )
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
@@ -92,23 +96,31 @@ struct OnboardingSelfieView: View {
                         .transition(.opacity)
                 }
 
+                // Title above the oval, instruction below it, controls at the bottom.
+                titleArea
+                    .position(x: geo.size.width / 2,
+                              y: max(geo.safeAreaInsets.top + 44, ovalCenter.y - ovalH / 2 - 54))
+
+                instructionText
+                    .padding(.horizontal, DS.Spacing.lg)
+                    .position(x: geo.size.width / 2, y: ovalCenter.y + ovalH / 2 + 56)
+
                 VStack {
-                    titleArea
-                        .padding(.top, geo.safeAreaInsets.top + DS.Spacing.md)
-
                     Spacer()
-                        .frame(height: ovalCenterY + ovalH / 2 - geo.safeAreaInsets.top - 60 + DS.Spacing.xl)
-
-                    instructionText
-                        .padding(.horizontal, DS.Spacing.lg)
-
-                    Spacer()
-
                     bottomArea
-                        .padding(.bottom, DS.Spacing.xl)
+                        .padding(.bottom, geo.safeAreaInsets.bottom + DS.Spacing.md)
                 }
             }
+            .onAppear {
+                cameraService.previewSize = geo.size
+                cameraService.ovalRect = ovalRect
+            }
+            .onChange(of: geo.size) { _ in
+                cameraService.previewSize = geo.size
+                cameraService.ovalRect = ovalRect
+            }
         }
+        .ignoresSafeArea()
     }
 
     // MARK: - Title
