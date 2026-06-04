@@ -4,6 +4,21 @@ import CoreML
 import Accelerate
 import CoreImage
 
+/// One detected person in a photo, shown in the "which one is you?" picker.
+struct DetectedPerson: Identifiable {
+    let id = UUID()
+    let face: VNFaceObservation
+    let crop: UIImage
+    let embedding: [Float]?
+}
+
+/// How a photo's "image to analyze" was resolved for identity.
+enum IdentityResolution {
+    case useWhole               // solo photo / product shot — analyze the whole image
+    case isolated(UIImage)      // multi-person, confident match — isolated just the user
+    case ambiguous([DetectedPerson])  // multi-person, unsure — ask the user
+}
+
 /// On-device face identity matching for the photo-library auto-scan.
 ///
 /// The bundled model is InsightFace `w600k_mbf` (buffalo_s MobileFaceNet), an
@@ -315,6 +330,87 @@ class FaceMatchingService {
             if s > best { best = s }
         }
         return best
+    }
+
+    // MARK: - Identity Resolution (upload flow: "extract only my clothes")
+
+    /// Counts people (bodies) in a photo, so a bystander whose face isn't visible
+    /// (back turned) still makes the photo "multi-person".
+    func countPeople(in cgImage: CGImage) -> Int {
+        let request = VNDetectHumanRectanglesRequest()
+        request.upperBodyOnly = false
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform([request])
+        return (request.results ?? []).filter { $0.confidence > 0.5 }.count
+    }
+
+    /// Decides, for an uploaded photo, which image to actually analyze:
+    /// - solo / product photo  -> analyze the whole image (trust the user)
+    /// - multi-person, confident face match -> isolate just the user (silent)
+    /// - multi-person, unsure  -> ask the user "which one is you?"
+    func resolveIdentity(in image: UIImage, userId: String) -> IdentityResolution {
+        guard let cg = image.cgImage else { return .useWhole }
+        _ = loadReference(forUser: userId)
+
+        let faces = detectFacesWithLandmarks(in: cg)
+        let peopleCount = max(faces.count, countPeople(in: cg))
+
+        // One person (or none) — just extract.
+        if peopleCount <= 1 { return .useWhole }
+
+        // Multi-person: try a confident automatic match against the gallery.
+        let match = findUserInPhoto(cg)
+        if match.confidence == .high, match.matchedFace != nil,
+           let isolated = isolateMatchedPerson(from: cg, matchResult: match) {
+            return .isolated(isolated)
+        }
+
+        // Unsure -> surface the detected people for the user to pick.
+        let people = detectedPeople(in: cg, faces: faces)
+        if people.isEmpty { return .useWhole }
+        return .ambiguous(people)
+    }
+
+    private func detectedPeople(in cgImage: CGImage, faces: [VNFaceObservation]) -> [DetectedPerson] {
+        var result: [DetectedPerson] = []
+        for face in faces {
+            guard let cropCG = personDisplayCrop(from: cgImage, faceBBox: face.boundingBox) else { continue }
+            let aligned = alignedFaceCrop(from: cgImage, observation: face,
+                                          imageWidth: cgImage.width, imageHeight: cgImage.height)
+            let emb = aligned.flatMap { generateEmbedding(for: $0) }
+            result.append(DetectedPerson(face: face, crop: UIImage(cgImage: cropCG), embedding: emb))
+        }
+        return result
+    }
+
+    /// Isolates a user-chosen person from a multi-person photo and learns their
+    /// face (appends to the gallery so future matches improve).
+    func isolateChosenPerson(_ person: DetectedPerson, in image: UIImage,
+                             totalFaces: Int, userId: String) -> UIImage? {
+        guard let cg = image.cgImage else { return nil }
+        if let emb = person.embedding {
+            addReferenceEmbeddings([emb], forUser: userId)   // active learning
+        }
+        let mr = MatchResult(confidence: .high, matchedFace: person.face,
+                             faceCount: max(totalFaces, 2), similarity: nil)
+        return isolateMatchedPerson(from: cg, matchResult: mr)
+    }
+
+    /// A head-and-shoulders crop around a face for the "which one is you?" cards.
+    private func personDisplayCrop(from cgImage: CGImage, faceBBox: CGRect) -> CGImage? {
+        let imgW = CGFloat(cgImage.width), imgH = CGFloat(cgImage.height)
+        let fx = faceBBox.origin.x * imgW
+        let fy = (1 - faceBBox.origin.y - faceBBox.height) * imgH
+        let fw = faceBBox.width * imgW, fh = faceBBox.height * imgH
+        let cx = fx + fw / 2
+        let w = fw * 2.4
+        let x = max(0, cx - w / 2)
+        let y = max(0, fy - fh * 0.6)
+        let cropW = min(imgW - x, w)
+        let cropH = min(imgH - y, fh * 3.6)
+        guard cropW > 20, cropH > 20,
+              let c = cgImage.cropping(to: CGRect(x: x, y: y, width: cropW, height: cropH)) else { return nil }
+        return c
     }
 
     // MARK: - Person Isolation (Instance Mask)

@@ -7,6 +7,7 @@ struct OnboardingView: View {
 
     @State private var currentStep = 0
     @State private var selfieImage: UIImage? = nil
+    @State private var showReferenceBuilder = false
 
     private let totalSteps = 4
 
@@ -32,7 +33,7 @@ struct OnboardingView: View {
                                 onSkip: { advance() }
                             )
                         case 3:
-                            OnboardingPhotoPermissionView(onComplete: completeOnboarding)
+                            OnboardingPhotoPermissionView(onComplete: handlePhotoPermissionDone)
                         default:
                             EmptyView()
                         }
@@ -45,6 +46,22 @@ struct OnboardingView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .sheet(isPresented: $showReferenceBuilder, onDismiss: { completeOnboarding() }) {
+            if let userId = authService.user?.id {
+                FaceReferenceBuilderView(userId: userId, isPresented: $showReferenceBuilder)
+            }
+        }
+    }
+
+    /// After photo permission: if granted, let the user build their face
+    /// reference ("tap which photos are you") before finishing onboarding.
+    private func handlePhotoPermissionDone() {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .authorized || status == .limited {
+            showReferenceBuilder = true
+        } else {
+            completeOnboarding()
         }
     }
 

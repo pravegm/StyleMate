@@ -141,8 +141,9 @@ struct RootView: View {
             capturedCameraImage = nil
             reviewImages = []
         }) {
-            AddItemReviewView(images: reviewImages, isPresented: $showReview)
+            AddItemFlowView(images: reviewImages, isPresented: $showReview)
                 .environmentObject(wardrobeVM)
+                .environmentObject(authService)
         }
         .overlay {
             if isLoadingImages {
