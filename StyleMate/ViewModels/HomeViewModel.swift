@@ -57,6 +57,7 @@ class HomeViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] loc in
                 guard let self = self, let loc = loc else { return }
+                print("[Weather] Location delivered: \(loc.coordinate.latitude), \(loc.coordinate.longitude)")
                 self.fetchWeather(for: loc)
             }
             .store(in: &cancellables)
@@ -255,6 +256,7 @@ class HomeViewModel: ObservableObject {
                     self.lastFahrenheit = (weather.temperature2m * 9.0 / 5.0) + 32.0
                 }
             } catch {
+                print("[Weather] fetchWeather failed: \(error)")
                 await MainActor.run {
                     self.weatherError = "Failed to fetch weather."
                     self.isWeatherLoading = false

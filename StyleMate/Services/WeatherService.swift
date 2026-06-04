@@ -25,16 +25,44 @@ class WeatherService {
     
     func fetchWeather(latitude: Double, longitude: Double, useFahrenheit: Bool = false) async throws -> Weather {
         let unit = useFahrenheit ? "fahrenheit" : "celsius"
-        let urlString = "https://api.open-meteo.com/v1/forecast?latitude=\(latitude)&longitude=\(longitude)&current=temperature_2m,weather_code,is_day&temperature_unit=\(unit)"
+        let lat = String(format: "%.4f", latitude)
+        let lon = String(format: "%.4f", longitude)
+        let urlString = "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=temperature_2m,weather_code,is_day&temperature_unit=\(unit)"
         guard let url = URL(string: urlString) else {
+            print("[Weather] Bad URL: \(urlString)")
             throw URLError(.badURL)
         }
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        print("[Weather] Fetching: \(urlString)")
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            print("[Weather] Network error: \(error.localizedDescription)")
+            throw error
+        }
+
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 200 else {
+            let body = String(data: data, encoding: .utf8)?.prefix(300) ?? "no body"
+            print("[Weather] HTTP \(status): \(body)")
             throw URLError(.badServerResponse)
         }
-        let decoded = try JSONDecoder().decode(WeatherResponse.self, from: data)
+
+        let decoded: WeatherResponse
+        do {
+            decoded = try JSONDecoder().decode(WeatherResponse.self, from: data)
+        } catch {
+            let body = String(data: data, encoding: .utf8)?.prefix(300) ?? "no body"
+            print("[Weather] Decode failed: \(error) | body=\(body)")
+            throw error
+        }
         let current = decoded.current
+        print("[Weather] OK: \(current.temperature_2m)° code=\(current.weather_code) day=\(current.is_day)")
         // Reverse geocode to get city name
         let city = try? await Self.reverseGeocodeCity(latitude: latitude, longitude: longitude)
         return Weather(
