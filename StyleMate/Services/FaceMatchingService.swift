@@ -217,20 +217,35 @@ class FaceMatchingService {
     /// similarity to the current gallery (for ranking; 0 if the gallery is empty).
     func evaluateFaceForReference(in cgImage: CGImage) -> (displayCrop: CGImage, embedding: [Float], similarity: Float)? {
         let faces = detectFacesWithLandmarks(in: cgImage)
-        // The subject of a selfie/portrait is the largest face.
-        guard let face = faces.max(by: {
-            ($0.boundingBox.width * $0.boundingBox.height) < ($1.boundingBox.width * $1.boundingBox.height)
-        }) else { return nil }
+        guard !faces.isEmpty else { return nil }
 
-        guard let aligned = alignedFaceCrop(from: cgImage, observation: face,
-                                            imageWidth: cgImage.width, imageHeight: cgImage.height),
-              let embedding = generateEmbedding(for: aligned),
-              let display = paddedFaceCrop(from: cgImage, bbox: face.boundingBox) else {
-            return nil
+        func embedAndCrop(_ face: VNFaceObservation) -> (crop: CGImage, embedding: [Float])? {
+            guard let aligned = alignedFaceCrop(from: cgImage, observation: face,
+                                                imageWidth: cgImage.width, imageHeight: cgImage.height),
+                  let embedding = generateEmbedding(for: aligned),
+                  let crop = paddedFaceCrop(from: cgImage, bbox: face.boundingBox) else { return nil }
+            return (crop, embedding)
         }
 
-        let similarity = referenceGallery.isEmpty ? 0 : bestGallerySimilarity(of: embedding)
-        return (display, embedding, similarity)
+        // No anchor yet (no selfie): fall back to the largest face.
+        if referenceGallery.isEmpty {
+            guard let face = faces.max(by: {
+                ($0.boundingBox.width * $0.boundingBox.height) < ($1.boundingBox.width * $1.boundingBox.height)
+            }), let r = embedAndCrop(face) else { return nil }
+            return (r.crop, r.embedding, 0)
+        }
+
+        // With a selfie anchor: surface the face that best matches the USER, not
+        // just the largest. In a couple photo this returns the user's face (and
+        // its similarity), so a partner's larger face can't be mistaken for them.
+        var best: (crop: CGImage, embedding: [Float], sim: Float)?
+        for face in faces {
+            guard let r = embedAndCrop(face) else { continue }
+            let sim = bestGallerySimilarity(of: r.embedding)
+            if best == nil || sim > best!.sim { best = (r.crop, r.embedding, sim) }
+        }
+        guard let b = best else { return nil }
+        return (b.crop, b.embedding, b.sim)
     }
 
     /// Appends already-computed embeddings (from evaluateFaceForReference) to the

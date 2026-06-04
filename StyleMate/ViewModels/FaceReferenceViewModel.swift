@@ -29,9 +29,10 @@ final class FaceReferenceViewModel: ObservableObject {
     @Published var addedCount: Int = 0
 
     private let candidateLimit = 60
-    /// Pre-select candidates at/above the high-confidence threshold when an anchor
-    /// exists. Mirrors FaceMatchingService.highConfidenceThreshold.
-    private let preselectThreshold: Float = 0.42
+    /// A library face must match the selfie anchor at least this much to even be
+    /// offered as "you". A different person (esp. different gender) scores well
+    /// below this, so they can't be added and pollute the gallery.
+    static let referenceFloor: Float = 0.30
 
     var selectedCount: Int { candidates.filter { $0.isSelected }.count }
     var hasAnchorRanking: Bool { candidates.contains { $0.similarity > 0 } }
@@ -99,19 +100,29 @@ final class FaceReferenceViewModel: ObservableObject {
             phase = .empty; return
         }
 
-        // Rank by similarity (best matches first); pre-select confident matches.
-        results.sort { $0.similarity > $1.similarity }
-        let anchored = results.contains { $0.similarity > 0 }
-        if anchored {
-            for i in results.indices {
-                results[i].isSelected = results[i].similarity >= preselectThreshold
+        // With a selfie anchor, KEEP ONLY faces that plausibly are the user. A
+        // different person (e.g. a partner — even more so a different gender)
+        // scores far below this floor, so this stops the gallery being polluted
+        // with someone else's face. The selfie just taken is the ground truth.
+        if hasAnchor {
+            let before = results.count
+            results = results.filter { $0.similarity >= Self.referenceFloor }
+            print("[FaceRef] Kept \(results.count)/\(before) faces matching your selfie (>= \(Self.referenceFloor))")
+            guard !results.isEmpty else {
+                print("[FaceRef] No library faces matched your selfie strongly enough -> empty")
+                phase = .empty; return
             }
         }
+
+        // Rank best-first. Everything shown already passed the match floor, so
+        // pre-select it all (the user can still deselect any).
+        results.sort { $0.similarity > $1.similarity }
+        for i in results.indices { results[i].isSelected = hasAnchor }
         candidates = results
         phase = .ready
         let top = results.first?.similarity ?? 0
         let bottom = results.last?.similarity ?? 0
-        print("[FaceRef] Ready: \(results.count) faces (of \(assets.count) photos), sim range [\(String(format: "%.3f", bottom))..\(String(format: "%.3f", top))], pre-selected \(selectedCount)\(anchored ? "" : " (no anchor — none pre-selected)")")
+        print("[FaceRef] Ready: \(results.count) faces (of \(assets.count) photos), sim range [\(String(format: "%.3f", bottom))..\(String(format: "%.3f", top))], pre-selected \(selectedCount)\(hasAnchor ? "" : " (no selfie anchor)")")
     }
 
     // MARK: - Selection
