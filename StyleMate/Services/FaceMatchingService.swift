@@ -180,6 +180,70 @@ class FaceMatchingService {
         return added
     }
 
+    // MARK: - Reference Builder ("tap which photos are you")
+
+    /// Evaluates the most prominent face in a candidate library photo for the
+    /// reference-builder UI. Returns a display crop (padded, for the grid), the
+    /// aligned face embedding (to add to the gallery on confirm), and its
+    /// similarity to the current gallery (for ranking; 0 if the gallery is empty).
+    func evaluateFaceForReference(in cgImage: CGImage) -> (displayCrop: CGImage, embedding: [Float], similarity: Float)? {
+        let faces = detectFacesWithLandmarks(in: cgImage)
+        // The subject of a selfie/portrait is the largest face.
+        guard let face = faces.max(by: {
+            ($0.boundingBox.width * $0.boundingBox.height) < ($1.boundingBox.width * $1.boundingBox.height)
+        }) else { return nil }
+
+        guard let aligned = alignedFaceCrop(from: cgImage, observation: face,
+                                            imageWidth: cgImage.width, imageHeight: cgImage.height),
+              let embedding = generateEmbedding(for: aligned),
+              let display = paddedFaceCrop(from: cgImage, bbox: face.boundingBox) else {
+            return nil
+        }
+
+        let similarity = referenceGallery.isEmpty ? 0 : bestGallerySimilarity(of: embedding)
+        return (display, embedding, similarity)
+    }
+
+    /// Appends already-computed embeddings (from evaluateFaceForReference) to the
+    /// gallery, skipping near-duplicates to keep it diverse, and caps the size.
+    @discardableResult
+    func addReferenceEmbeddings(_ embeddings: [[Float]], forUser userId: String) -> Int {
+        loadReference(forUser: userId)
+        var added = 0
+        for emb in embeddings {
+            let tooSimilar = referenceGallery.contains { dotProduct($0, emb) > 0.95 }
+            if tooSimilar { continue }
+            referenceGallery.append(emb)
+            added += 1
+        }
+        let cap = 40
+        if referenceGallery.count > cap {
+            referenceGallery.removeFirst(referenceGallery.count - cap)
+        }
+        if added > 0 {
+            loadedUserId = userId
+            persistGallery(forUser: userId)
+        }
+        print("[FaceMatch] Added \(added) reference embeddings; gallery now \(referenceGallery.count)")
+        return added
+    }
+
+    /// A square, padded crop around a face for display in the reference grid.
+    private func paddedFaceCrop(from cgImage: CGImage, bbox: CGRect) -> CGImage? {
+        let imgW = CGFloat(cgImage.width), imgH = CGFloat(cgImage.height)
+        let x = bbox.origin.x * imgW
+        let y = (1 - bbox.origin.y - bbox.height) * imgH
+        let w = bbox.width * imgW, h = bbox.height * imgH
+        let cx = x + w / 2, cy = y + h / 2
+        let side = max(w, h) * 1.6
+        let cropX = max(0, cx - side / 2)
+        let cropY = max(0, cy - side / 2)
+        let cropW = min(imgW - cropX, side)
+        let cropH = min(imgH - cropY, side)
+        guard cropW > 20, cropH > 20 else { return nil }
+        return cgImage.cropping(to: CGRect(x: cropX, y: cropY, width: cropW, height: cropH))
+    }
+
     // MARK: - Find User in Photo
 
     func findUserInPhoto(_ cgImage: CGImage) -> MatchResult {

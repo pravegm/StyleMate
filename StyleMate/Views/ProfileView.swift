@@ -10,6 +10,7 @@ struct ProfileView: View {
     @State private var showDeleteProfileAlert = false
     @State private var showStyleSheet = false
     @State private var showRetakeSelfie = false
+    @State private var showReferenceBuilder = false
     @State private var tempSelectedStyles: [OutfitType] = []
     @State private var showStyleError = false
     @State private var editGender: String = ""
@@ -218,8 +219,23 @@ struct ProfileView: View {
                         }
                         .foregroundColor(DS.Colors.accent)
                     }
+
+                    Button {
+                        Haptics.light()
+                        showReferenceBuilder = true
+                    } label: {
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image(systemName: "person.crop.rectangle.stack")
+                            Text("Improve Recognition")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(DS.Colors.textTertiary)
+                        }
+                        .foregroundColor(DS.Colors.accent)
+                    }
                 } footer: {
-                    Text("Retake your reference selfie to improve outfit photo detection.")
+                    Text("Retake your selfie, or tap which of your photos are you so StyleMate can recognize you in pictures with other people.")
                         .font(DS.Font.caption2)
                 }
 
@@ -325,6 +341,11 @@ struct ProfileView: View {
             .sheet(isPresented: $showRetakeSelfie) {
                 RetakeSelfieSheet()
                     .environmentObject(authService)
+            }
+            .sheet(isPresented: $showReferenceBuilder) {
+                if let userId = authService.user?.id {
+                    FaceReferenceBuilderView(userId: userId, isPresented: $showReferenceBuilder)
+                }
             }
             .alert("Delete Everything?", isPresented: $showDeleteProfileAlert) {
                 Button("Cancel", role: .cancel) {}
