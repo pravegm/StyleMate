@@ -22,6 +22,7 @@ struct AddItemFlowView: View {
     @State private var phase: Phase = .resolving
     @State private var resolvedImages: [UIImage] = []
     @State private var ambiguousQueue: [Ambiguous] = []
+    @State private var didStartResolving = false
 
     var body: some View {
         Group {
@@ -36,7 +37,11 @@ struct AddItemFlowView: View {
                     .environmentObject(authService)
             }
         }
-        .task { await resolveAll() }
+        .task {
+            guard !didStartResolving else { return }
+            didStartResolving = true
+            await resolveAll()
+        }
     }
 
     // MARK: - Resolution

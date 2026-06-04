@@ -43,6 +43,10 @@ class FaceMatchingService {
     static var highConfidenceThreshold: Float = 0.42   // auto-add
     static var borderlineThreshold: Float = 0.30        // send to review
     private static let minFaceQuality: Float = 0.30     // skip blurry / poorly-captured faces
+    // In a multi-person photo, the best match must beat the next-best face by at
+    // least this much to auto-isolate silently. Otherwise two people score too
+    // close to be sure, so we ask "which one is you?" instead of guessing.
+    static var ambiguityMargin: Float = 0.08
 
     // InsightFace canonical 5-point destination for 112x112 alignment.
     // Source: insightface/utils/face_align.py `arcface_dst`
@@ -71,9 +75,19 @@ class FaceMatchingService {
         let matchedFace: VNFaceObservation?
         let faceCount: Int
         let similarity: Float?
+        /// Best similarity of any OTHER face in the photo. Used to detect the
+        /// "two people score close together" case where the pick is uncertain.
+        var runnerUpSimilarity: Float? = nil
 
         /// True when the photo should enter the pipeline at all (high or borderline).
         var isMatch: Bool { confidence == .high || confidence == .borderline }
+
+        /// How far ahead the matched face is from the next-best face. Large = a
+        /// confident, unambiguous pick; small = two similar-scoring people.
+        var margin: Float {
+            guard let best = similarity, let runner = runnerUpSimilarity else { return .greatestFiniteMagnitude }
+            return best - runner
+        }
 
         static let noFaces = MatchResult(confidence: .none, matchedFace: nil, faceCount: 0, similarity: nil)
     }
@@ -274,6 +288,7 @@ class FaceMatchingService {
 
         var bestMatch: VNFaceObservation?
         var bestSimilarity: Float = -.infinity
+        var secondSimilarity: Float = -.infinity
         var allScores: [Float] = []
 
         let imgW = cgImage.width
@@ -297,8 +312,11 @@ class FaceMatchingService {
             allScores.append(similarity)
 
             if similarity > bestSimilarity {
+                secondSimilarity = bestSimilarity
                 bestSimilarity = similarity
                 bestMatch = face
+            } else if similarity > secondSimilarity {
+                secondSimilarity = similarity
             }
         }
 
@@ -318,7 +336,8 @@ class FaceMatchingService {
             confidence: confidence,
             matchedFace: confidence == .none ? nil : bestMatch,
             faceCount: faces.count,
-            similarity: bestSimilarity.isFinite ? bestSimilarity : nil
+            similarity: bestSimilarity.isFinite ? bestSimilarity : nil,
+            runnerUpSimilarity: secondSimilarity.isFinite ? secondSimilarity : nil
         )
     }
 
@@ -367,21 +386,29 @@ class FaceMatchingService {
         }
 
         // Multi-person: try a confident automatic match against the gallery.
+        // Require BOTH a high score AND a clear margin over the next-best face —
+        // otherwise two people score too close to silently isolate the right one.
         let match = findUserInPhoto(cg)
         let simStr = match.similarity.map { String(format: "%.3f", $0) } ?? "-"
-        if match.confidence == .high, match.matchedFace != nil,
+        let marginStr = match.margin == .greatestFiniteMagnitude ? "inf" : String(format: "%.3f", match.margin)
+        let confidentPick = match.confidence == .high && match.margin >= Self.ambiguityMargin
+
+        if confidentPick, match.matchedFace != nil,
            let isolated = isolateMatchedPerson(from: cg, matchResult: match) {
-            print("[Identity] -> isolated user (high match, sim=\(simStr))")
+            print("[Identity] -> isolated user (high match, sim=\(simStr), margin=\(marginStr))")
             return .isolated(isolated)
         }
 
-        // Unsure -> surface the detected people for the user to pick.
+        // Unsure (low score, close runner-up, or isolation failed) -> ask the user.
         let people = detectedPeople(in: cg, faces: faces)
         if people.isEmpty {
             print("[Identity] multi-person (\(peopleCount)) but no usable faces -> useWhole")
             return .useWhole
         }
-        print("[Identity] -> ambiguous: asking which of \(people.count) is you (best conf=\(match.confidence), sim=\(simStr))")
+        let reason = !confidentPick && match.confidence == .high
+            ? "two people score too close (margin=\(marginStr))"
+            : "best conf=\(match.confidence), sim=\(simStr)"
+        print("[Identity] -> ambiguous: asking which of \(people.count) is you (\(reason))")
         return .ambiguous(people)
     }
 
