@@ -364,6 +364,7 @@ struct AddItemReviewView: View {
                         fit: item.fit,
                         neckline: item.neckline,
                         sleeveLength: item.sleeveLength,
+                        brand: item.brand,
                         existingItems: existingItems
                     )
             }

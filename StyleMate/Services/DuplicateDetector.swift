@@ -5,14 +5,27 @@ struct DuplicateMatch {
     let score: Int
 }
 
+/// Decides whether a newly-detected garment is the same physical item as one
+/// already in the wardrobe (to avoid cataloguing it twice during a scan).
+///
+/// Design: two garments are duplicates only if they could plausibly be the SAME
+/// physical item. That is a set of HARD requirements, not a soft point tally —
+/// the previous additive-only scorer flagged a blue shirt and a white shirt as
+/// duplicates because identical type/material/cut alone cleared the threshold
+/// while a total color mismatch only "lost points". Color, product type, pattern
+/// and (visible) brand are now gates: fail any one and it is not a duplicate.
+/// The remaining attributes are scored only to rank candidates and apply a final
+/// confidence threshold.
 class DuplicateDetector {
 
     static let shared = DuplicateDetector()
     private init() {}
 
+    private static let matchThreshold = 55
+
     // MARK: - Public API
 
-    /// Returns the best matching existing item if score >= 60, otherwise nil.
+    /// Returns the best matching existing item if it clears the threshold, else nil.
     func findBestMatch(
         category: Category,
         product: String,
@@ -22,6 +35,7 @@ class DuplicateDetector {
         fit: Fit?,
         neckline: Neckline?,
         sleeveLength: SleeveLength?,
+        brand: String = "",
         existingItems: [WardrobeItem]
     ) -> DuplicateMatch? {
         var bestMatch: WardrobeItem?
@@ -31,7 +45,7 @@ class DuplicateDetector {
             let score = computeScore(
                 newCategory: category, newProduct: product, newColors: colors,
                 newPattern: pattern, newMaterial: material, newFit: fit,
-                newNeckline: neckline, newSleeveLength: sleeveLength,
+                newNeckline: neckline, newSleeveLength: sleeveLength, newBrand: brand,
                 existing: existing
             )
             if score > bestScore {
@@ -40,35 +54,50 @@ class DuplicateDetector {
             }
         }
 
-        guard let match = bestMatch, bestScore >= 60 else { return nil }
-
+        guard let match = bestMatch, bestScore >= Self.matchThreshold else { return nil }
         return DuplicateMatch(existingItem: match, score: bestScore)
     }
 
-    // MARK: - Scoring (max 95)
+    // MARK: - Scoring (gated)
 
     private func computeScore(
         newCategory: Category, newProduct: String, newColors: [String],
         newPattern: Pattern, newMaterial: String?, newFit: Fit?,
-        newNeckline: Neckline?, newSleeveLength: SleeveLength?,
+        newNeckline: Neckline?, newSleeveLength: SleeveLength?, newBrand: String,
         existing: WardrobeItem
     ) -> Int {
+        // --- HARD GATES: must plausibly be the same physical item ---
+
+        // 1. Same category.
         guard newCategory == existing.category else { return 0 }
 
-        var score = 0
+        // 2. Same product type (or a genuine label-synonym, e.g. Shirt/Button-Down).
+        let pScore = productScore(newProduct, existing.product)
+        guard pScore > 0 else { return 0 }
 
-        score += productScore(newProduct, existing.product)
-        score += colorScore(newColors, existing.colors)
-        score += materialScore(newMaterial, existing.material)
-        score += necklineScore(newNeckline, existing.neckline)
+        // 3. Same pattern — a solid item and a floral/striped item are different.
+        guard newPattern == existing.pattern else { return 0 }
+
+        // 4. Clearly shared dominant color — THE key fix. Different colors (blue vs
+        //    white) means different items even if everything else matches.
+        let cScore = colorScore(newColors, existing.colors)
+        guard cScore >= 15 else { return 0 }
+
+        // 5. Conflicting visible brands => different physical items.
+        let nb = newBrand.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let eb = existing.brand.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !nb.isEmpty, !eb.isEmpty, nb != eb { return 0 }
+
+        // --- Gates passed: score confirming attributes to rank candidates ---
+        var score = pScore + cScore                                   // 35..55
+        score += materialScore(newMaterial, existing.material)        // 0..15
+        score += necklineScore(newNeckline, existing.neckline)        // 0/3/10
 
         if let newFit, let existingFit = existing.fit {
             score += (newFit == existingFit) ? 5 : 0
         } else {
             score += 3
         }
-
-        score += (newPattern == existing.pattern) ? 5 : 0
 
         if let newSleeveLength, let existingSleeve = existing.sleeveLength {
             score += (newSleeveLength == existingSleeve) ? 5 : 0
@@ -79,7 +108,7 @@ class DuplicateDetector {
         return score
     }
 
-    // MARK: - Product (max 30)
+    // MARK: - Product (exact 30 / synonym 20 / else 0)
 
     private func productScore(_ a: String, _ b: String) -> Int {
         let la = a.lowercased()
@@ -87,39 +116,24 @@ class DuplicateDetector {
 
         if la == lb { return 30 }
 
-        let equivalenceGroups: [[String]] = [
+        // ONLY genuine label-synonyms: cases where the classifier could legitimately
+        // tag the SAME physical item with either name. NOT broad category groupings
+        // (a ring and a necklace, or a backpack and a tote, are different items).
+        let synonymGroups: [[String]] = [
+            ["shirts", "button-down shirts", "flannel shirts"],
             ["sweaters", "pullovers"],
-            ["shirts", "button-down shirts"],
+            ["t-shirts", "graphic tees"],
+            ["hoodies", "sweatshirts"],
             ["joggers", "sweatpants"],
             ["trousers", "chinos"],
-            ["leggings", "active leggings", "yoga pants"],
-            ["t-shirts", "graphic tees"],
-            ["tank tops", "camisoles"],
             ["boots", "ankle boots", "chelsea boots"],
             ["sandals", "slides"],
-            ["flats", "loafers"],
-            ["heels", "platform shoes"],
-            ["dresses", "wrap dresses", "maxi dresses", "shirt dresses"],
-            ["jackets", "leather jackets", "denim jackets", "bomber jackets", "shirt jackets"],
-            ["coats", "overcoats", "trench coats"],
-            ["handbags", "tote bags", "crossbody bags", "clutches"],
-            ["backpacks", "messenger bags", "briefcases"],
-            ["underwear", "boxers", "briefs"],
-            ["bras", "bralettes"],
+            ["coats", "overcoats"],
             ["kurta", "kurti"],
-            ["shorts", "athletic shorts", "running shorts", "cycling shorts"],
-            ["sunglasses", "eyeglasses", "reading glasses"],
-            ["baseball caps", "beanies", "fedoras", "bucket hats", "sun hats", "visors", "berets"],
-            ["rings", "necklaces", "earrings", "pendants", "chains", "bracelets", "anklets", "cufflinks", "brooches"],
-            ["scarves", "bandanas"],
-            ["fanny packs"],
         ]
 
-        for group in equivalenceGroups {
-            let groupLower = group.map { $0.lowercased() }
-            if groupLower.contains(la) && groupLower.contains(lb) {
-                return 20
-            }
+        for group in synonymGroups where group.contains(la) && group.contains(lb) {
+            return 20
         }
 
         return 0
@@ -139,7 +153,7 @@ class DuplicateDetector {
         let union = normalizedA.union(normalizedB)
         let overlap = Double(intersection.count) / Double(union.count)
 
-        if overlap > 0.5 {
+        if overlap >= 0.5 {
             return 15
         } else if !intersection.isEmpty {
             return 5

@@ -274,6 +274,7 @@ class PhotoScanService: ObservableObject {
                         category: cat, product: prod, colors: seg.colors,
                         pattern: pat, material: seg.material, fit: seg.fit,
                         neckline: seg.neckline, sleeveLength: seg.sleeveLength,
+                        brand: seg.brand,
                         existingItems: wardrobeViewModel.items
                     )
 
