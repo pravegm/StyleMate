@@ -350,15 +350,17 @@ private struct WardrobeCategoryCard: View {
     let count: Int
 
     private var thumbnails: [UIImage] {
-        let shuffled = items.shuffled()
-        var result: [UIImage] = []
-        for item in shuffled {
-            if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
-                result.append(img)
-                if result.count >= 2 { break }
+        MainThreadWatchdog.time("WardrobeCategoryCard.thumbnails[\(category.rawValue)]") {
+            let shuffled = items.shuffled()
+            var result: [UIImage] = []
+            for item in shuffled {
+                if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
+                    result.append(img)
+                    if result.count >= 2 { break }
+                }
             }
+            return result
         }
-        return result
     }
 
     var body: some View {

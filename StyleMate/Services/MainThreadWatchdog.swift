@@ -34,4 +34,15 @@ final class MainThreadWatchdog {
             print(String(format: "[Watchdog] ⚠️ Main thread blocked %.0fms", delta * 1000))
         }
     }
+
+    /// Times a synchronous block and logs it if it runs longer than 80ms.
+    /// Used to localize the launch-time main-thread hang.
+    @discardableResult
+    static func time<T>(_ label: String, _ block: () -> T) -> T {
+        let t0 = CFAbsoluteTimeGetCurrent()
+        let result = block()
+        let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+        if ms > 80 { print(String(format: "[Perf] %@ took %.0fms", label, ms)) }
+        return result
+    }
 }
