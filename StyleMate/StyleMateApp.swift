@@ -219,6 +219,7 @@ struct RootView: View {
             }
         }
         .onAppear {
+            MainThreadWatchdog.shared.start()
             hasPhotoAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
             authService.checkCredentialState()
             if authService.isAuthenticated, let id = authService.user?.id {
