@@ -1353,7 +1353,7 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
         var weatherInstruction: String
         if let weather = weather {
             let temp = Int(weather.temperature2m)
-            let desc = WeatherService.weatherDescription(for: weather.weathercode)
+            let desc = weather.displayDescription
             let city = weather.city ?? "their location"
             let seasonHint: String
             switch temp {

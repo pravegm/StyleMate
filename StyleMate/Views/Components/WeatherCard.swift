@@ -47,7 +47,7 @@ struct WeatherInlineRow: View {
                 }
             } else if let weather = weather, let tempC = temperatureC, let tempF = temperatureF {
                 HStack(spacing: DS.Spacing.sm) {
-                    Image(systemName: WeatherService.weatherIconName(for: weather.weathercode, isDay: weather.isDay == 1))
+                    Image(systemName: weather.iconSymbol)
                         .font(DS.Font.title3)
                         .foregroundColor(DS.Colors.accent)
 
@@ -56,7 +56,7 @@ struct WeatherInlineRow: View {
                         .foregroundColor(DS.Colors.textPrimary)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(WeatherService.weatherDescription(for: weather.weathercode))
+                        Text(weather.displayDescription)
                             .font(DS.Font.subheadline)
                             .foregroundColor(DS.Colors.textSecondary)
                             .lineLimit(1)

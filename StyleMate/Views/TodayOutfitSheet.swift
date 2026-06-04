@@ -52,7 +52,7 @@ struct TodayOutfitSheet: View {
             parts.append("\(temp)°\(homeVM.displayFahrenheit ? "F" : "C")")
         }
         if let weather = homeVM.weather {
-            parts.append(WeatherService.weatherDescription(for: weather.weathercode))
+            parts.append(weather.displayDescription)
         }
         return parts.isEmpty ? "Curated for you" : parts.joined(separator: " · ")
     }

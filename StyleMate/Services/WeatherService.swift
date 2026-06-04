@@ -1,5 +1,6 @@
 import Foundation
 import CoreLocation
+import WeatherKit
 
 struct Weather: Codable {
     let temperature2m: Double
@@ -7,6 +8,20 @@ struct Weather: Codable {
     let isDay: Int
     let time: String
     let city: String?
+    // Populated when the reading comes from Apple WeatherKit (richer than the
+    // open-meteo WMO code). Optional so cached/open-meteo data still decodes.
+    var symbolName: String? = nil
+    var conditionText: String? = nil
+
+    /// SF Symbol for the current condition. Prefers WeatherKit's own symbol,
+    /// falling back to the WMO-code mapping for open-meteo / cached readings.
+    var iconSymbol: String {
+        symbolName ?? WeatherService.weatherIconName(for: weathercode, isDay: isDay == 1)
+    }
+    /// Human-readable condition. Prefers WeatherKit's localized description.
+    var displayDescription: String {
+        conditionText ?? WeatherService.weatherDescription(for: weathercode)
+    }
 }
 
 struct WeatherResponse: Codable {
@@ -24,6 +39,14 @@ class WeatherService {
     private init() {}
     
     func fetchWeather(latitude: Double, longitude: Double, useFahrenheit: Bool = false) async throws -> Weather {
+        // Primary: Apple WeatherKit (reliable, accurate). Requires the WeatherKit
+        // capability on the App ID; until that's enabled it throws and we fall
+        // back to open-meteo below.
+        if let wk = try? await fetchFromWeatherKit(latitude: latitude, longitude: longitude) {
+            return wk
+        }
+
+        // Fallback: open-meteo (free, occasionally down).
         let unit = useFahrenheit ? "fahrenheit" : "celsius"
         let lat = String(format: "%.4f", latitude)
         let lon = String(format: "%.4f", longitude)
@@ -84,6 +107,48 @@ class WeatherService {
 
         print("[Weather] All \(maxAttempts) attempts failed (open-meteo likely down)")
         throw lastError
+    }
+
+    // MARK: - Apple WeatherKit
+
+    private func fetchFromWeatherKit(latitude: Double, longitude: Double) async throws -> Weather {
+        let location = CLLocation(latitude: latitude, longitude: longitude)
+        let current = try await WeatherKit.WeatherService.shared.weather(for: location, including: .current)
+        let tempC = current.temperature.converted(to: .celsius).value
+        let city = try? await Self.reverseGeocodeCity(latitude: latitude, longitude: longitude)
+        print("[Weather] WeatherKit OK: \(String(format: "%.1f", tempC))° \(current.condition) day=\(current.isDaylight)")
+        return Weather(
+            temperature2m: tempC,
+            weathercode: Self.wmoCode(for: current.condition),
+            isDay: current.isDaylight ? 1 : 0,
+            time: ISO8601DateFormatter().string(from: current.date),
+            city: city,
+            symbolName: current.symbolName,
+            conditionText: current.condition.description
+        )
+    }
+
+    /// Coarse mapping from WeatherKit's condition to an open-meteo WMO code, so
+    /// any consumer still keyed on `weathercode` keeps working. The primary
+    /// display path uses WeatherKit's own symbolName / condition text.
+    static func wmoCode(for condition: WeatherCondition) -> Int {
+        switch condition {
+        case .clear, .hot: return 0
+        case .mostlyClear: return 1
+        case .partlyCloudy: return 2
+        case .cloudy, .mostlyCloudy, .breezy, .windy: return 3
+        case .foggy, .haze, .smoky: return 45
+        case .drizzle: return 51
+        case .freezingDrizzle: return 56
+        case .rain: return 63
+        case .heavyRain: return 65
+        case .freezingRain: return 66
+        case .snow, .flurries, .blowingSnow, .blizzard, .frigid: return 71
+        case .heavySnow: return 75
+        case .sleet, .wintryMix, .hail: return 85
+        case .thunderstorms, .isolatedThunderstorms, .scatteredThunderstorms, .strongStorms: return 95
+        default: return 3
+        }
     }
 
     static func reverseGeocodeCity(latitude: Double, longitude: Double) async throws -> String? {
