@@ -467,7 +467,11 @@ class PhotoScanService: ObservableObject {
     }
 
     /// Uses requestImageDataAndOrientation which is guaranteed to call its handler exactly once.
-    private func loadFullImage(for asset: PHAsset, maxDimension: CGFloat = 1024) async -> UIImage? {
+    /// 2048 (not 1024): face recognition + person isolation need faces large enough
+    /// to embed reliably. At 1024 the faces in multi-person photos are too small and
+    /// the wrong person can outscore the user — the upload flow gets this right
+    /// because it matches on the full-res picked image.
+    private func loadFullImage(for asset: PHAsset, maxDimension: CGFloat = 2048) async -> UIImage? {
         await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
             options.isNetworkAccessAllowed = false
