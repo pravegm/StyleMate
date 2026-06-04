@@ -53,13 +53,17 @@ struct OnboardingWelcomeView: View {
                 .padding(.bottom, DS.Spacing.lg)
         }
         .background(
-            Circle()
-                .fill(DS.Colors.accent.opacity(0.05))
-                .frame(width: 500)
-                .blur(radius: 100)
-                .offset(y: -100)
-                .opacity(glowVisible ? 1 : 0)
-                .animation(.easeIn(duration: 0.5), value: glowVisible)
+            // A radial gradient gives the same soft glow as a blurred circle but
+            // without the expensive offscreen blur rasterization, which stalled the
+            // main thread (~1.5s) on first render and made "Get Started" feel dead.
+            RadialGradient(
+                colors: [DS.Colors.accent.opacity(0.10), .clear],
+                center: .center, startRadius: 0, endRadius: 250
+            )
+            .frame(width: 500, height: 500)
+            .offset(y: -100)
+            .opacity(glowVisible ? 1 : 0)
+            .animation(.easeIn(duration: 0.5), value: glowVisible)
         )
         .onAppear { choreographEntrance() }
     }

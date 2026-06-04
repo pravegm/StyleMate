@@ -78,7 +78,19 @@ class HomeViewModel: ObservableObject {
                 self?.locationStatus = status
             }
             .store(in: &cancellables)
+
+        // Show last-known weather immediately so a transient open-meteo outage
+        // doesn't blank the home screen while a fresh fetch is attempted.
+        if let data = UserDefaults.standard.data(forKey: Self.weatherCacheKey),
+           let cached = try? JSONDecoder().decode(Weather.self, from: data) {
+            weather = cached
+            lastCity = cached.city
+            lastCelsius = cached.temperature2m
+            lastFahrenheit = (cached.temperature2m * 9.0 / 5.0) + 32.0
+        }
     }
+
+    private static let weatherCacheKey = "cachedWeather"
 
     // MARK: - Suggest Today Outfit (Index-Based)
 
@@ -250,10 +262,14 @@ class HomeViewModel: ObservableObject {
                 let weather = try await WeatherService.shared.fetchWeather(latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude, useFahrenheit: false)
                 await MainActor.run {
                     self.weather = weather
+                    self.weatherError = nil
                     self.isWeatherLoading = false
                     self.lastCity = weather.city
                     self.lastCelsius = weather.temperature2m
                     self.lastFahrenheit = (weather.temperature2m * 9.0 / 5.0) + 32.0
+                    if let data = try? JSONEncoder().encode(weather) {
+                        UserDefaults.standard.set(data, forKey: Self.weatherCacheKey)
+                    }
                 }
             } catch {
                 print("[Weather] fetchWeather failed: \(error)")

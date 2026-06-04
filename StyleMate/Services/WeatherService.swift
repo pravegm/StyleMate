@@ -37,42 +37,55 @@ class WeatherService {
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
 
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch {
-            print("[Weather] Network error: \(error.localizedDescription)")
-            throw error
+        // Retry transient failures (open-meteo's free tier occasionally returns
+        // 5xx / times out). Decode failures are deterministic and not retried.
+        let maxAttempts = 3
+        var lastError: Error = URLError(.badServerResponse)
+
+        for attempt in 1...maxAttempts {
+            if attempt > 1 {
+                try? await Task.sleep(nanoseconds: UInt64(attempt - 1) * 700_000_000)
+            }
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+
+                if (500...599).contains(status) || status == -1 {
+                    print("[Weather] HTTP \(status) (attempt \(attempt)/\(maxAttempts)), will retry")
+                    lastError = URLError(.badServerResponse)
+                    continue
+                }
+                guard status == 200 else {
+                    let body = String(data: data, encoding: .utf8)?.prefix(200) ?? "no body"
+                    print("[Weather] HTTP \(status): \(body)")
+                    throw URLError(.badServerResponse)
+                }
+
+                let decoded = try JSONDecoder().decode(WeatherResponse.self, from: data)
+                let current = decoded.current
+                print("[Weather] OK: \(current.temperature_2m)° code=\(current.weather_code) day=\(current.is_day) (attempt \(attempt))")
+                let city = try? await Self.reverseGeocodeCity(latitude: latitude, longitude: longitude)
+                return Weather(
+                    temperature2m: current.temperature_2m,
+                    weathercode: current.weather_code,
+                    isDay: current.is_day,
+                    time: current.time,
+                    city: city
+                )
+            } catch let decodeError as DecodingError {
+                print("[Weather] Decode failed: \(decodeError)")
+                throw decodeError
+            } catch {
+                print("[Weather] Attempt \(attempt)/\(maxAttempts) failed: \(error.localizedDescription)")
+                lastError = error
+                continue
+            }
         }
 
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        guard status == 200 else {
-            let body = String(data: data, encoding: .utf8)?.prefix(300) ?? "no body"
-            print("[Weather] HTTP \(status): \(body)")
-            throw URLError(.badServerResponse)
-        }
-
-        let decoded: WeatherResponse
-        do {
-            decoded = try JSONDecoder().decode(WeatherResponse.self, from: data)
-        } catch {
-            let body = String(data: data, encoding: .utf8)?.prefix(300) ?? "no body"
-            print("[Weather] Decode failed: \(error) | body=\(body)")
-            throw error
-        }
-        let current = decoded.current
-        print("[Weather] OK: \(current.temperature_2m)° code=\(current.weather_code) day=\(current.is_day)")
-        // Reverse geocode to get city name
-        let city = try? await Self.reverseGeocodeCity(latitude: latitude, longitude: longitude)
-        return Weather(
-            temperature2m: current.temperature_2m,
-            weathercode: current.weather_code,
-            isDay: current.is_day,
-            time: current.time,
-            city: city
-        )
+        print("[Weather] All \(maxAttempts) attempts failed (open-meteo likely down)")
+        throw lastError
     }
+
     static func reverseGeocodeCity(latitude: Double, longitude: Double) async throws -> String? {
         let location = CLLocation(latitude: latitude, longitude: longitude)
         let geocoder = CLGeocoder()
