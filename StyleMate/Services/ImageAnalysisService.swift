@@ -7,9 +7,44 @@ class ImageAnalysisService {
     private init() {}
     
     private let geminiAPIKey = Secrets.geminiAPIKey
-    private let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key="
-    private var geminiProEndpoint: String {
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key="
+
+    // MARK: - Per-Use-Case Gemini Model Selection
+    //
+    // Gemini 3.x migration (June 2026). Models + thinking levels are chosen per
+    // task to balance quality / latency / cost (see research). IMPORTANT: Gemini 3
+    // defaults thinking to "high"; we set thinkingLevel explicitly on EVERY call,
+    // or these would silently run max-thinking (expensive + slow). The old
+    // thinkingBudget param is replaced by thinkingLevel (minimal/low/medium/high).
+    // All model IDs and the thinkingLevel param were verified live against the API.
+    private enum GeminiTask {
+        case classify     // UC1: multimodal garment classification -> structured JSON
+        case batchBBox    // UC2: batch 2D bounding boxes
+        case focusedBBox  // UC3: focused small-object bounding box (was gemini-2.5-pro)
+        case outfit       // UC4: outfit suggestion (text reasoning)
+        case quickEdit    // UC5: trivial swap/add (text reasoning)
+
+        var model: String {
+            switch self {
+            case .classify:    return "gemini-3.5-flash"
+            case .batchBBox:   return "gemini-3-flash-preview"
+            case .focusedBBox: return "gemini-3-flash-preview"
+            case .outfit:      return "gemini-3.5-flash"
+            case .quickEdit:   return "gemini-3.1-flash-lite"
+            }
+        }
+
+        /// thinkingLevel: minimal for spatial/trivial (Google's spatial guidance
+        /// says disable thinking for 2D detection); low where reasoning helps.
+        var thinkingLevel: String {
+            switch self {
+            case .batchBBox, .focusedBBox, .quickEdit: return "minimal"
+            case .classify, .outfit:                   return "low"
+            }
+        }
+    }
+
+    private func geminiURL(_ task: GeminiTask) -> URL? {
+        URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(task.model):generateContent?key=\(geminiAPIKey)")
     }
     
     struct BoundingBox: Codable {
@@ -319,12 +354,12 @@ RULES:
             "generationConfig": [
                 "temperature": 0.5,
                 "thinkingConfig": [
-                    "thinkingBudget": 0
+                    "thinkingLevel": GeminiTask.batchBBox.thinkingLevel
                 ]
             ]
         ]
 
-        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+        guard let url = geminiURL(.batchBBox),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
             return [:]
         }
@@ -514,12 +549,12 @@ If you absolutely cannot find this item, return an empty list: []
             "generationConfig": [
                 "temperature": 0.5,
                 "thinkingConfig": [
-                    "thinkingBudget": 128
+                    "thinkingLevel": GeminiTask.focusedBBox.thinkingLevel
                 ]
             ]
         ]
 
-        guard let url = URL(string: geminiProEndpoint + geminiAPIKey),
+        guard let url = geminiURL(.focusedBBox),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
             return nil
         }
@@ -859,11 +894,14 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             ],
             "generationConfig": [
                 "responseMimeType": "application/json",
-                "responseSchema": responseSchema
+                "responseSchema": responseSchema,
+                "thinkingConfig": [
+                    "thinkingLevel": GeminiTask.classify.thinkingLevel
+                ]
             ]
         ]
 
-        guard let url = URL(string: geminiEndpoint + geminiAPIKey) else {
+        guard let url = geminiURL(.classify) else {
             print("[StyleMate] Invalid API URL")
             return []
         }
@@ -1521,12 +1559,12 @@ Return ONLY the JSON array. Example format:
                 "responseMimeType": "application/json",
                 "responseSchema": responseSchema,
                 "thinkingConfig": [
-                    "thinkingBudget": 0
+                    "thinkingLevel": GeminiTask.outfit.thinkingLevel
                 ]
             ]
         ]
 
-        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+        guard let url = geminiURL(.outfit),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
             print("[StyleMate] suggestOutfitBatch: failed to build request")
             return .failure(.networkError)
@@ -1699,12 +1737,12 @@ where N is the index number from the AVAILABLE REPLACEMENTS list above.
                 "responseMimeType": "application/json",
                 "responseSchema": responseSchema,
                 "thinkingConfig": [
-                    "thinkingBudget": 0
+                    "thinkingLevel": GeminiTask.quickEdit.thinkingLevel
                 ]
             ]
         ]
 
-        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+        guard let url = geminiURL(.quickEdit),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
             return .failure
         }
@@ -1841,12 +1879,12 @@ where N is the index number from the AVAILABLE OPTIONS list above.
                 "responseMimeType": "application/json",
                 "responseSchema": responseSchema,
                 "thinkingConfig": [
-                    "thinkingBudget": 0
+                    "thinkingLevel": GeminiTask.quickEdit.thinkingLevel
                 ]
             ]
         ]
 
-        guard let url = URL(string: geminiEndpoint + geminiAPIKey),
+        guard let url = geminiURL(.quickEdit),
               let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
             return nil
         }
