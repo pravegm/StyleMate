@@ -187,7 +187,8 @@ struct HomeView: View {
                 .font(DS.Font.title2)
                 .foregroundColor(DS.Colors.textSecondary)
 
-            if let firstName = authService.user?.name.components(separatedBy: " ").first, !firstName.isEmpty {
+            if let firstName = authService.user?.name.components(separatedBy: " ").first,
+               !firstName.isEmpty, firstName.lowercased() != "user" {
                 Text(firstName)
                     .font(DS.Font.display)
                     .foregroundColor(DS.Colors.textPrimary)

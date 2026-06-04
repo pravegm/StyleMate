@@ -10,10 +10,6 @@ struct OnboardingPhotoPermissionView: View {
     @State private var iconVisible = false
     @State private var titleVisible = false
     @State private var subtitleVisible = false
-    @State private var showCompletion = false
-    @State private var checkmarkScale: CGFloat = 0
-    @State private var completionTextVisible = false
-    @State private var completionSubtitleVisible = false
     @State private var requestContentFade: Double = 1.0
 
     private enum PermissionPhase {
@@ -25,17 +21,9 @@ struct OnboardingPhotoPermissionView: View {
     }
 
     var body: some View {
-        ZStack {
-            if showCompletion {
-                completionCelebration
-            } else {
-                permissionContent
-                    .opacity(requestContentFade)
-            }
-        }
-        .onAppear {
-            checkCurrentStatus()
-        }
+        permissionContent
+            .opacity(requestContentFade)
+            .onAppear { checkCurrentStatus() }
     }
 
     // MARK: - Permission Content
@@ -211,33 +199,6 @@ struct OnboardingPhotoPermissionView: View {
         }
     }
 
-    // MARK: - Completion Celebration
-
-    private var completionCelebration: some View {
-        VStack(spacing: DS.Spacing.md) {
-            Spacer()
-
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 70))
-                .foregroundColor(DS.Colors.success)
-                .scaleEffect(checkmarkScale)
-
-            Text("You're all set!")
-                .font(DS.Font.title1)
-                .foregroundColor(DS.Colors.textPrimary)
-                .opacity(completionTextVisible ? 1 : 0)
-                .animation(.spring(response: 0.45, dampingFraction: 0.8), value: completionTextVisible)
-
-            Text("Let's build your wardrobe")
-                .font(DS.Font.callout)
-                .foregroundColor(DS.Colors.textSecondary)
-                .opacity(completionSubtitleVisible ? 1 : 0)
-                .animation(.spring(response: 0.45, dampingFraction: 0.8), value: completionSubtitleVisible)
-
-            Spacer()
-        }
-    }
-
     // MARK: - Logic
 
     private func checkCurrentStatus() {
@@ -277,26 +238,13 @@ struct OnboardingPhotoPermissionView: View {
     }
 
     private func triggerCompletion() {
+        print("[StyleMate] Photo permission resolved — continuing onboarding")
         withAnimation(.easeOut(duration: 0.2)) {
             requestContentFade = 0
         }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            showCompletion = true
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.55)) {
-                checkmarkScale = 1.0
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-            completionTextVisible = true
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            completionSubtitleVisible = true
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             onComplete()
         }
-        print("[StyleMate] Photo permission: triggering completion celebration")
     }
 
     private func openSettings() {
