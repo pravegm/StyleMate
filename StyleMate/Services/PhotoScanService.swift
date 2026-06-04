@@ -218,7 +218,10 @@ class PhotoScanService: ObservableObject {
                     continue
                 }
 
-                // Stage 3: Face matching on full-res image where faces are large enough
+                // Stage 3+4: STRICT identity gate — only proceed when we're
+                // confidently sure this is the user (and can isolate them in a
+                // multi-person photo). Anything uncertain is skipped: a background
+                // scan must never silently catalog a stranger's clothes.
                 guard let fullCG = fullImage.cgImage else {
                     progress.scannedAssetIDs.insert(asset.localIdentifier)
                     internalScannedCount += 1
@@ -226,39 +229,17 @@ class PhotoScanService: ObservableObject {
                     continue
                 }
 
-                let matchResult = await Task.detached {
-                    FaceMatchingService.shared.findUserInPhoto(fullCG)
+                let imageForGemini: UIImage? = await Task.detached {
+                    autoreleasepool {
+                        FaceMatchingService.shared.resolveIdentityForScan(in: fullCG, fullImage: fullImage, userId: userId)
+                    }
                 }.value
 
-                guard matchResult.isMatch else {
+                guard let imageForGemini else {
                     progress.scannedAssetIDs.insert(asset.localIdentifier)
                     internalScannedCount += 1
                     throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
                     continue
-                }
-
-                // Stage 4: Isolate user's body in multi-person photos
-                let imageForGemini: UIImage
-                if matchResult.faceCount > 1 {
-                    let isolated: UIImage? = autoreleasepool {
-                        FaceMatchingService.shared.isolateMatchedPerson(from: fullCG, matchResult: matchResult)
-                    }
-
-                    guard let isolated else {
-                        // Could not cleanly separate the user from the others in
-                        // frame. Skip rather than risk cataloguing someone else's
-                        // clothes (e.g. a partner standing next to them).
-                        print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - could not isolate user, skipping")
-                        progress.scannedAssetIDs.insert(asset.localIdentifier)
-                        internalScannedCount += 1
-                        throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
-                        continue
-                    }
-
-                    imageForGemini = isolated
-                    print("[StyleMate] Auto-scan: Multi-person photo (\(matchResult.faceCount) people) - isolated user via instance mask")
-                } else {
-                    imageForGemini = fullImage
                 }
 
                 let results = await ImageAnalysisService.shared.analyzeAndSegment(
@@ -316,8 +297,7 @@ class PhotoScanService: ObservableObject {
                     scanAddedItemIDs.append(wardrobeItem.id)
                     itemsFound = scanAddedItemIDs.count
 
-                    let distanceStr = matchResult.similarity.map { String(format: " [sim: %.3f]", $0) } ?? ""
-                    print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe\(distanceStr)")
+                    print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe")
                 }
 
                 progress.scannedAssetIDs.insert(asset.localIdentifier)

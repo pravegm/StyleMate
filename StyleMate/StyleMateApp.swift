@@ -184,7 +184,7 @@ struct RootView: View {
                         Task {
                             await PhotoScanService.shared.startScan(
                                 forUser: userId,
-                                dateRange: .lastSixMonths,
+                                dateRange: .lastMonth,
                                 userGender: authService.user?.gender,
                                 wardrobeViewModel: wardrobeVM
                             )
@@ -278,7 +278,7 @@ struct RootView: View {
 
             await PhotoScanService.shared.startScan(
                 forUser: userId,
-                dateRange: .lastSixMonths,
+                dateRange: .lastMonth,
                 userGender: authService.user?.gender,
                 wardrobeViewModel: wardrobeVM
             )

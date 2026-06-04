@@ -37,8 +37,11 @@ class ImageAnalysisService {
         /// says disable thinking for 2D detection); low where reasoning helps.
         var thinkingLevel: String {
             switch self {
-            case .batchBBox, .focusedBBox, .quickEdit: return "minimal"
-            case .classify, .outfit:                   return "low"
+            case .batchBBox, .quickEdit: return "minimal"
+            // Tiny accessories (watch, ring, glasses) are the hardest localization
+            // task — a little reasoning materially improves the bounding box.
+            case .focusedBBox:           return "low"
+            case .classify, .outfit:     return "low"
             }
         }
     }
@@ -207,19 +210,14 @@ class ImageAnalysisService {
             var garmentImage: UIImage?
 
             if let box = allBoxes[label] {
-                print("[StyleMate] Segmentation: Applying box \(box) for \(label) to bgRemovedRaw \(Int(bgRemovedRaw.size.width))x\(Int(bgRemovedRaw.size.height))")
                 garmentImage = extractGarment(from: bgRemovedRaw, boxNormalized: box)
-                if garmentImage != nil {
-                    print("[StyleMate] Segmentation: Extracted \(label) via bounding box")
-                } else {
-                    let cropped = BodyZone.cropToZone(image: bgRemoved, category: category) ?? bgRemoved
-                    garmentImage = padToSquare(cropped)
-                    print("[StyleMate] Segmentation: BBox extraction failed, fallback for \(label)")
+                if garmentImage == nil {
+                    garmentImage = fallbackGarmentCrop(from: bgRemoved, category: category, product: product)
+                    print("[StyleMate] Segmentation: BBox extraction failed, region fallback for \(label)")
                 }
             } else {
-                let cropped = BodyZone.cropToZone(image: bgRemoved, category: category) ?? bgRemoved
-                garmentImage = padToSquare(cropped)
-                print("[StyleMate] Segmentation: No bbox returned, fallback for \(label)")
+                garmentImage = fallbackGarmentCrop(from: bgRemoved, category: category, product: product)
+                print("[StyleMate] Segmentation: No bbox, region fallback for \(label)")
             }
 
             results.append(SegmentedItem(
@@ -631,10 +629,6 @@ If you absolutely cannot find this item, return an empty list: []
     private func extractGarment(from bgRemovedImage: UIImage, boxNormalized: [Int]) -> UIImage? {
         guard let cgImage = bgRemovedImage.cgImage else { return nil }
 
-        print("[StyleMate] extractGarment: UIImage size=\(Int(bgRemovedImage.size.width))x\(Int(bgRemovedImage.size.height)), scale=\(bgRemovedImage.scale), orientation=\(bgRemovedImage.imageOrientation.rawValue)")
-        print("[StyleMate] extractGarment: CGImage width=\(cgImage.width), height=\(cgImage.height)")
-        print("[StyleMate] extractGarment: box=\(boxNormalized)")
-
         let imgWidth = CGFloat(cgImage.width)
         let imgHeight = CGFloat(cgImage.height)
 
@@ -642,8 +636,6 @@ If you absolutely cannot find this item, return an empty list: []
         let x0 = CGFloat(boxNormalized[1]) / 1000.0 * imgWidth
         let y1 = CGFloat(boxNormalized[2]) / 1000.0 * imgHeight
         let x1 = CGFloat(boxNormalized[3]) / 1000.0 * imgWidth
-
-        print("[StyleMate] extractGarment: mapped to pixels x0=\(Int(x0)), y0=\(Int(y0)), x1=\(Int(x1)), y1=\(Int(y1)) in \(Int(imgWidth))x\(Int(imgHeight)) image")
 
         let boxWidth = x1 - x0
         let boxHeight = y1 - y0
@@ -683,6 +675,53 @@ If you absolutely cannot find this item, return an empty list: []
         UIGraphicsEndImageContext()
 
         return result
+    }
+
+    // MARK: - Fallback Garment Crop (when no bounding box was produced)
+
+    /// When a bounding box can't be produced for an item, crop a sensible REGION
+    /// rather than returning the whole body (which was useless, especially for
+    /// accessories). Uses category body-zones, then accessory-specific vertical
+    /// zones, then a center square as a last resort.
+    private func fallbackGarmentCrop(from image: UIImage, category: Category, product: String) -> UIImage {
+        if let zoned = BodyZone.cropToZone(image: image, category: category) {
+            return padToSquare(zoned)
+        }
+        if let region = accessoryZone(for: product), let cg = image.cgImage {
+            let w = CGFloat(cg.width), h = CGFloat(cg.height)
+            let rect = CGRect(x: 0, y: h * region.0, width: w, height: h * (region.1 - region.0))
+                .intersection(CGRect(x: 0, y: 0, width: w, height: h))
+            if !rect.isEmpty, let cropped = cg.cropping(to: rect) {
+                return padToSquare(UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation))
+            }
+        }
+        return padToSquare(centerSquareCrop(image))
+    }
+
+    /// Approximate vertical band where an accessory product usually sits on a
+    /// head-to-toe person photo (0 = top, 1 = bottom).
+    private func accessoryZone(for product: String) -> (CGFloat, CGFloat)? {
+        let p = product.lowercased()
+        let head = ["sunglasses", "eyeglasses", "reading glasses", "baseball caps", "beanies",
+                    "fedoras", "bucket hats", "sun hats", "visors", "bandanas", "turbans",
+                    "headbands", "berets", "earrings", "hair accessories"]
+        let neck = ["necklaces", "pendants", "chains", "ties", "bowties", "scarves"]
+        let waist = ["belts", "suspenders"]
+        if head.contains(where: { p.contains($0) }) { return (0.0, 0.22) }
+        if neck.contains(where: { p.contains($0) }) { return (0.08, 0.32) }
+        if waist.contains(where: { p.contains($0) }) { return (0.40, 0.58) }
+        // Watches / bracelets / rings / bags etc. live around the hands / carried —
+        // a broad mid band beats the whole body.
+        return (0.25, 0.78)
+    }
+
+    private func centerSquareCrop(_ image: UIImage) -> UIImage {
+        guard let cg = image.cgImage else { return image }
+        let w = CGFloat(cg.width), h = CGFloat(cg.height)
+        let side = min(w, h)
+        let rect = CGRect(x: (w - side) / 2, y: (h - side) / 2, width: side, height: side)
+        guard let c = cg.cropping(to: rect) else { return image }
+        return UIImage(cgImage: c, scale: image.scale, orientation: image.imageOrientation)
     }
 
     /// Renders the UIImage into a new context, applying the orientation transform.
@@ -970,7 +1009,6 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
                 return await retryOrEmpty(image: image, userGender: userGender, imageIndex: imageIndex, retryCount: retryCount, isProductPhoto: isProductPhoto)
             }
 
-            print("[StyleMate] Response text: \(text.prefix(500))")
 
             guard let textData = text.data(using: .utf8),
                   let itemsArray = try? JSONSerialization.jsonObject(with: textData) as? [[String: Any]] else {

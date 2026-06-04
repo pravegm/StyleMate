@@ -57,7 +57,6 @@ class HomeViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] loc in
                 guard let self = self, let loc = loc else { return }
-                print("[Weather] Location delivered: \(loc.coordinate.latitude), \(loc.coordinate.longitude)")
                 self.fetchWeather(for: loc)
             }
             .store(in: &cancellables)

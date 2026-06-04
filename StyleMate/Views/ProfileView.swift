@@ -13,6 +13,7 @@ struct ProfileView: View {
     @State private var showReferenceBuilder = false
     @State private var tempSelectedStyles: [OutfitType] = []
     @State private var showStyleError = false
+    @State private var editName: String = ""
     @State private var editGender: String = ""
     @State private var editAge: String = ""
     @State private var iCloudAvailable = true
@@ -79,6 +80,17 @@ struct ProfileView: View {
                     }
 
                     Section("Personal Information") {
+                        TextField("Name", text: $editName)
+                            .onAppear { editName = user.name }
+                            .onChange(of: editName) { newName in
+                                let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if var user = authService.user, !trimmed.isEmpty {
+                                    user.name = trimmed
+                                    authService.user = user
+                                    authService.saveCurrentUser()
+                                }
+                            }
+
                         Picker("Gender", selection: $editGender) {
                             ForEach(genderOptions, id: \.self) { option in
                                 Text(option.isEmpty ? "Select Gender" : option).tag(option)
@@ -375,16 +387,23 @@ struct ProfileView: View {
             }
         }
 
-        // Delete scan progress file from Application Support
+        // Delete the on-device face reference gallery (in-memory + persisted file).
+        FaceMatchingService.shared.clearReference(forUser: userId)
+
+        // Delete scan progress + face reference files from Application Support.
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let scanProgressFile = appSupport.appendingPathComponent("ScanProgress/scanProgress_\(userId).json")
-        try? FileManager.default.removeItem(at: scanProgressFile)
+        try? FileManager.default.removeItem(at: appSupport.appendingPathComponent("ScanProgress/scanProgress_\(userId).json"))
+        try? FileManager.default.removeItem(at: appSupport.appendingPathComponent("FaceReference/faceReference_\(userId).json"))
 
         let keysToRemove = [
             "hasCompletedOnboarding_\(userId)",
             "selfieReferencePath_\(userId)",
             "wardrobeData_\(userId)",
+            "wardrobe_\(userId)",
+            "scanProgress_\(userId)",
+            "hasCompletedInitialScan_\(userId)",
             "hasSeenSwipeHint",
+            "cachedWeather",
             "hasMigratedBackgroundRemoval_\(userId)",
             "hasMigratedThumbnails_\(userId)",
             "hasMigratedZoneCrop_\(userId)",
@@ -396,7 +415,6 @@ struct ProfileView: View {
         for key in keysToRemove {
             UserDefaults.standard.removeObject(forKey: key)
         }
-        UserDefaults.standard.removeObject(forKey: "wardrobe_\(userId)")
 
         Task {
             await CloudKitService.shared.deleteAllData()

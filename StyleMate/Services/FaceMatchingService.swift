@@ -412,6 +412,35 @@ class FaceMatchingService {
         return .ambiguous(people)
     }
 
+    /// STRICT identity resolution for the background auto-scan. There is no user
+    /// in the loop, so anything less than a confident, unambiguous, cleanly-
+    /// isolatable match is skipped (returns nil). Returns the image to analyze
+    /// (whole for a confident solo match, isolated user for multi-person).
+    func resolveIdentityForScan(in cgImage: CGImage, fullImage: UIImage, userId: String) -> UIImage? {
+        _ = loadReference(forUser: userId)
+        let match = findUserInPhoto(cgImage)
+        let simStr = match.similarity.map { String(format: "%.3f", $0) } ?? "-"
+        let marginStr = match.margin == .greatestFiniteMagnitude ? "inf" : String(format: "%.3f", match.margin)
+
+        // Must be a high-confidence match that clearly beats any other face.
+        guard match.confidence == .high, match.margin >= Self.ambiguityMargin, match.matchedFace != nil else {
+            print("[Scan] skip: not confidently the user (conf=\(match.confidence) sim=\(simStr) margin=\(marginStr) faces=\(match.faceCount))")
+            return nil
+        }
+
+        if match.faceCount > 1 {
+            guard let isolated = isolateMatchedPerson(from: cgImage, matchResult: match) else {
+                print("[Scan] skip: confident match but couldn't isolate user (\(match.faceCount) people)")
+                return nil
+            }
+            print("[Scan] add: isolated user from \(match.faceCount) people (sim=\(simStr) margin=\(marginStr))")
+            return isolated
+        }
+
+        print("[Scan] add: confident solo match (sim=\(simStr))")
+        return fullImage
+    }
+
     private func detectedPeople(in cgImage: CGImage, faces: [VNFaceObservation]) -> [DetectedPerson] {
         var result: [DetectedPerson] = []
         for face in faces {
