@@ -377,7 +377,7 @@ struct OnboardingSelfieView: View {
         if let image = cameraService.capturedImage, let userId = authService.user?.id {
             selfieImage = image
             cameraService.saveSelfie(image, userId: userId)
-            FaceMatchingService.shared.clearReference()
+            FaceMatchingService.shared.clearReference(forUser: userId)
             print("[StyleMate] Selfie confirmed and saved, reference cleared for reload")
         }
         onAdvance()

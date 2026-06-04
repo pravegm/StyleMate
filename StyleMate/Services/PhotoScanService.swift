@@ -309,7 +309,7 @@ class PhotoScanService: ObservableObject {
                     scanAddedItemIDs.append(wardrobeItem.id)
                     itemsFound = scanAddedItemIDs.count
 
-                    let distanceStr = matchResult.distance.map { String(format: " [dist: %.1f]", $0) } ?? ""
+                    let distanceStr = matchResult.similarity.map { String(format: " [sim: %.3f]", $0) } ?? ""
                     print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe\(distanceStr)")
                 }
 
