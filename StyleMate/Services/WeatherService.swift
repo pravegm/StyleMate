@@ -41,72 +41,139 @@ class WeatherService {
     func fetchWeather(latitude: Double, longitude: Double, useFahrenheit: Bool = false) async throws -> Weather {
         // Primary: Apple WeatherKit (reliable, accurate). Requires the WeatherKit
         // capability on the App ID; until that's enabled it throws and we fall
-        // back to open-meteo below.
+        // back to MET Norway below.
         if let wk = try? await fetchFromWeatherKit(latitude: latitude, longitude: longitude) {
             return wk
         }
 
-        // Fallback: open-meteo (free, occasionally down).
-        let unit = useFahrenheit ? "fahrenheit" : "celsius"
+        // Fallback: MET Norway (free, no API key, reliable). Works without the
+        // WeatherKit entitlement, so weather functions before/without it.
+        return try await fetchFromMetNo(latitude: latitude, longitude: longitude)
+    }
+
+    // MARK: - MET Norway (api.met.no)
+
+    private struct MetNoResponse: Codable {
+        struct Properties: Codable { let timeseries: [TimeSeries] }
+        struct TimeSeries: Codable { let time: String; let data: TSData }
+        struct TSData: Codable {
+            let instant: Instant
+            let next_1_hours: Period?
+            let next_6_hours: Period?
+        }
+        struct Instant: Codable { let details: Details }
+        struct Details: Codable { let air_temperature: Double }
+        struct Period: Codable { let summary: Summary }
+        struct Summary: Codable { let symbol_code: String }
+        let properties: Properties
+    }
+
+    private func fetchFromMetNo(latitude: Double, longitude: Double) async throws -> Weather {
         let lat = String(format: "%.4f", latitude)
         let lon = String(format: "%.4f", longitude)
-        let urlString = "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=temperature_2m,weather_code,is_day&temperature_unit=\(unit)"
-        guard let url = URL(string: urlString) else {
-            print("[Weather] Bad URL: \(urlString)")
-            throw URLError(.badURL)
-        }
-        print("[Weather] Fetching: \(urlString)")
+        let urlString = "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=\(lat)&lon=\(lon)"
+        guard let url = URL(string: urlString) else { throw URLError(.badURL) }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
+        // MET Norway requires an identifying User-Agent or it returns 403.
+        request.setValue("StyleMate/1.0 (github.com/pravegm/StyleMate)", forHTTPHeaderField: "User-Agent")
 
-        // Retry transient failures (open-meteo's free tier occasionally returns
-        // 5xx / times out). Decode failures are deterministic and not retried.
+        print("[Weather] Fetching (met.no): \(urlString)")
+
         let maxAttempts = 3
         var lastError: Error = URLError(.badServerResponse)
-
         for attempt in 1...maxAttempts {
-            if attempt > 1 {
-                try? await Task.sleep(nanoseconds: UInt64(attempt - 1) * 700_000_000)
-            }
+            if attempt > 1 { try? await Task.sleep(nanoseconds: UInt64(attempt - 1) * 600_000_000) }
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-
-                if (500...599).contains(status) || status == -1 {
-                    print("[Weather] HTTP \(status) (attempt \(attempt)/\(maxAttempts)), will retry")
-                    lastError = URLError(.badServerResponse)
-                    continue
-                }
-                guard status == 200 else {
+                if status != 200 {
                     let body = String(data: data, encoding: .utf8)?.prefix(200) ?? "no body"
-                    print("[Weather] HTTP \(status): \(body)")
+                    print("[Weather] met.no HTTP \(status) (attempt \(attempt)): \(body)")
+                    lastError = URLError(.badServerResponse)
+                    if (500...599).contains(status) || status == -1 { continue }
                     throw URLError(.badServerResponse)
                 }
 
-                let decoded = try JSONDecoder().decode(WeatherResponse.self, from: data)
-                let current = decoded.current
-                print("[Weather] OK: \(current.temperature_2m)° code=\(current.weather_code) day=\(current.is_day) (attempt \(attempt))")
+                let decoded = try JSONDecoder().decode(MetNoResponse.self, from: data)
+                guard let first = decoded.properties.timeseries.first else {
+                    throw URLError(.cannotParseResponse)
+                }
+                let tempC = first.data.instant.details.air_temperature
+                let symbolCode = first.data.next_1_hours?.summary.symbol_code
+                    ?? first.data.next_6_hours?.summary.symbol_code
+                    ?? "cloudy"
+                let (icon, desc, isDay) = Self.mapMetNoSymbol(symbolCode)
                 let city = try? await Self.reverseGeocodeCity(latitude: latitude, longitude: longitude)
+
+                print("[Weather] met.no OK: \(tempC)° \(symbolCode) -> \(desc) day=\(isDay) (attempt \(attempt))")
                 return Weather(
-                    temperature2m: current.temperature_2m,
-                    weathercode: current.weather_code,
-                    isDay: current.is_day,
-                    time: current.time,
-                    city: city
+                    temperature2m: tempC,
+                    weathercode: 0,
+                    isDay: isDay ? 1 : 0,
+                    time: first.time,
+                    city: city,
+                    symbolName: icon,
+                    conditionText: desc
                 )
             } catch let decodeError as DecodingError {
-                print("[Weather] Decode failed: \(decodeError)")
+                print("[Weather] met.no decode failed: \(decodeError)")
                 throw decodeError
             } catch {
-                print("[Weather] Attempt \(attempt)/\(maxAttempts) failed: \(error.localizedDescription)")
+                print("[Weather] met.no attempt \(attempt) failed: \(error.localizedDescription)")
                 lastError = error
                 continue
             }
         }
-
-        print("[Weather] All \(maxAttempts) attempts failed (open-meteo likely down)")
+        print("[Weather] met.no: all \(maxAttempts) attempts failed")
         throw lastError
+    }
+
+    /// Maps a MET Norway symbol_code (e.g. "rainshowers_day", "clearsky_night")
+    /// to an SF Symbol, a description, and a day/night flag.
+    static func mapMetNoSymbol(_ code: String) -> (icon: String, description: String, isDay: Bool) {
+        let isNight = code.hasSuffix("_night")
+        let isDay = !isNight
+        // Strip the _day / _night / _polartwilight suffix to get the base condition.
+        var base = code
+        for suffix in ["_day", "_night", "_polartwilight"] {
+            if base.hasSuffix(suffix) { base = String(base.dropLast(suffix.count)); break }
+        }
+
+        func icon(_ day: String, _ night: String) -> String { isNight ? night : day }
+
+        if base.contains("thunder") {
+            return (icon("cloud.bolt.rain.fill", "cloud.bolt.rain.fill"), "Thunderstorm", isDay)
+        }
+        if base.contains("sleet") {
+            return ("cloud.sleet.fill", "Sleet", isDay)
+        }
+        if base.contains("snow") {
+            return ("cloud.snow.fill", "Snow", isDay)
+        }
+        if base.contains("heavyrain") {
+            return ("cloud.heavyrain.fill", "Heavy rain", isDay)
+        }
+        if base.contains("rain") || base.contains("drizzle") {
+            let heavy = base.contains("light")
+            return ("cloud.rain.fill", heavy ? "Light rain" : "Rain", isDay)
+        }
+        if base.contains("fog") {
+            return ("cloud.fog.fill", "Fog", isDay)
+        }
+        switch base {
+        case "clearsky":
+            return (icon("sun.max.fill", "moon.stars.fill"), "Clear sky", isDay)
+        case "fair":
+            return (icon("sun.max.fill", "moon.stars.fill"), "Fair", isDay)
+        case "partlycloudy":
+            return (icon("cloud.sun.fill", "cloud.moon.fill"), "Partly cloudy", isDay)
+        case "cloudy":
+            return ("cloud.fill", "Cloudy", isDay)
+        default:
+            return ("cloud.fill", base.capitalized, isDay)
+        }
     }
 
     // MARK: - Apple WeatherKit
