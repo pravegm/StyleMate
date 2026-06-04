@@ -780,7 +780,12 @@ If you absolutely cannot find this item, return an empty list: []
     // MARK: - Classification Pipeline
 
     func analyzeMultiple(image: UIImage, userGender: String? = nil, imageIndex: Int? = nil, retryCount: Int = 0, isProductPhoto: Bool = false) async -> [ClassifiedItem] {
-        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+        // Downscale before upload. Full-res photos (e.g. 18MP / ~2.2MB) make this
+        // call slow and timeout-prone, and Gemini downsamples internally anyway —
+        // so sending full-res buys no accuracy. 1536px keeps ample detail for
+        // fine-grained attributes (matches the bbox path's resize).
+        let apiImage = resizedForAPI(image, maxDimension: 1536)
+        guard let imageData = apiImage.jpegData(compressionQuality: 0.8) else {
             print("[StyleMate] Failed to convert image to JPEG")
             return []
         }
