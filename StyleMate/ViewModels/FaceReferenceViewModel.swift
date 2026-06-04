@@ -114,15 +114,33 @@ final class FaceReferenceViewModel: ObservableObject {
             }
         }
 
-        // Rank best-first. Everything shown already passed the match floor, so
-        // pre-select it all (the user can still deselect any).
+        // Rank best-first, then drop near-identical faces (burst shots / very
+        // similar selfies) so the grid shows distinct photos and the gallery
+        // isn't stuffed with redundant copies of the same face.
         results.sort { $0.similarity > $1.similarity }
+        var deduped: [FaceCandidate] = []
+        for cand in results {
+            let isNearDup = deduped.contains { Self.cosine($0.embedding, cand.embedding) > 0.90 }
+            if !isNearDup { deduped.append(cand) }
+        }
+        let removed = results.count - deduped.count
+        results = deduped
+
+        // Everything shown passed the match floor, so pre-select it all.
         for i in results.indices { results[i].isSelected = hasAnchor }
         candidates = results
         phase = .ready
         let top = results.first?.similarity ?? 0
         let bottom = results.last?.similarity ?? 0
-        print("[FaceRef] Ready: \(results.count) faces (of \(assets.count) photos), sim range [\(String(format: "%.3f", bottom))..\(String(format: "%.3f", top))], pre-selected \(selectedCount)\(hasAnchor ? "" : " (no selfie anchor)")")
+        print("[FaceRef] Ready: \(results.count) distinct faces (\(removed) near-dupes removed), sim [\(String(format: "%.3f", bottom))..\(String(format: "%.3f", top))], pre-selected \(selectedCount)\(hasAnchor ? "" : " (no selfie anchor)")")
+    }
+
+    /// Cosine similarity of two L2-normalized embeddings (a dot product).
+    private static func cosine(_ a: [Float], _ b: [Float]) -> Float {
+        guard a.count == b.count else { return 0 }
+        var sum: Float = 0
+        for i in 0..<a.count { sum += a[i] * b[i] }
+        return sum
     }
 
     // MARK: - Selection
