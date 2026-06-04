@@ -193,13 +193,28 @@ class WardrobeImageFileHelper {
             return nil
         }
     }
+    // In-memory cache of decoded images. SwiftUI re-evaluates view bodies many
+    // times (e.g. the 5x location/CloudKit/transition churn at launch), and the
+    // home/wardrobe grids read item.thumbnailImage directly in their bodies.
+    // Without this cache every re-render re-read + re-decoded each file from
+    // disk on the main thread — the multi-second launch hang.
+    private static let imageCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 600
+        return cache
+    }()
+
     static func loadImage(at filename: String) -> UIImage? {
+        let key = filename as NSString
+        if let cached = imageCache.object(forKey: key) { return cached }
         let url = folderURL.appendingPathComponent(filename)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return UIImage(data: data)
+        guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else { return nil }
+        imageCache.setObject(image, forKey: key)
+        return image
     }
     static func deleteImage(at filename: String?) {
         guard let filename = filename else { return }
+        imageCache.removeObject(forKey: filename as NSString)
         let url = folderURL.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: url)
     }

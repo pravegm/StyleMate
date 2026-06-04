@@ -256,7 +256,19 @@ class HomeViewModel: ObservableObject {
         displayFahrenheit.toggle()
     }
 
+    private var weatherFetchInFlight = false
+    private var lastWeatherFetchLocation: CLLocation?
+
     private func fetchWeather(for loc: CLLocation) {
+        // CLLocationManager.requestLocation delivers several refined fixes in a
+        // row; without these guards each one kicked off a full weather fetch
+        // (the "5x met.no fetch" seen in logs). Coalesce them.
+        if weatherFetchInFlight { return }
+        if weather != nil, let last = lastWeatherFetchLocation, loc.distance(from: last) < 1000 {
+            isWeatherLoading = false
+            return
+        }
+        weatherFetchInFlight = true
         Task {
             do {
                 let weather = try await WeatherService.shared.fetchWeather(latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude, useFahrenheit: false)
@@ -264,6 +276,8 @@ class HomeViewModel: ObservableObject {
                     self.weather = weather
                     self.weatherError = nil
                     self.isWeatherLoading = false
+                    self.weatherFetchInFlight = false
+                    self.lastWeatherFetchLocation = loc
                     self.lastCity = weather.city
                     self.lastCelsius = weather.temperature2m
                     self.lastFahrenheit = (weather.temperature2m * 9.0 / 5.0) + 32.0
@@ -276,6 +290,7 @@ class HomeViewModel: ObservableObject {
                 await MainActor.run {
                     self.weatherError = "Failed to fetch weather."
                     self.isWeatherLoading = false
+                    self.weatherFetchInFlight = false
                 }
             }
         }
