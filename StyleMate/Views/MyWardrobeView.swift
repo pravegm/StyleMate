@@ -240,13 +240,30 @@ struct CategoryTile: View {
     let count: Int
     let items: [WardrobeItem]
 
-    private var thumbnails: [UIImage] {
-        items.shuffled().compactMap { $0.thumbnailImage ?? $0.croppedImage ?? $0.image }.prefix(4).map { $0 }
+    // Decoded once, off the main thread (see WardrobeCategoryCard). The old
+    // computed property ran items.shuffled().compactMap{ decode } which decoded
+    // EVERY item's image (often full-res) on every render before keeping 4.
+    @State private var thumbs: [UIImage] = []
+    @State private var loadedCount: Int = -1
+
+    private func loadThumbsIfNeeded() {
+        guard loadedCount != items.count else { return }
+        loadedCount = items.count
+        let snapshot = items
+        DispatchQueue.global(qos: .userInitiated).async {
+            var result: [UIImage] = []
+            for item in snapshot {
+                if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
+                    result.append(img)
+                    if result.count >= 4 { break }
+                }
+            }
+            DispatchQueue.main.async { self.thumbs = result }
+        }
     }
 
     var body: some View {
         VStack(spacing: DS.Spacing.xs) {
-            let thumbs = thumbnails
             if thumbs.isEmpty {
                 Image(systemName: category.iconName)
                     .font(.system(size: 28))
@@ -299,6 +316,8 @@ struct CategoryTile: View {
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
         .dsCardShadow()
         .opacity(count > 0 ? 1.0 : 0.5)
+        .onAppear { loadThumbsIfNeeded() }
+        .onChange(of: items.count) { _ in loadThumbsIfNeeded() }
     }
 
     @ViewBuilder

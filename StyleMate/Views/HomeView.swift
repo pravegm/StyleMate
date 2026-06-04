@@ -349,45 +349,17 @@ private struct WardrobeCategoryCard: View {
     let items: [WardrobeItem]
     let count: Int
 
-    private var thumbnails: [UIImage] {
-        MainThreadWatchdog.time("WardrobeCategoryCard.thumbnails[\(category.rawValue)]") {
-            let shuffled = items.shuffled()
-            var result: [UIImage] = []
-            for item in shuffled {
-                if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
-                    result.append(img)
-                    if result.count >= 2 { break }
-                }
-            }
-            return result
-        }
-    }
+    // Decoded thumbnails are held in state and produced ONCE off the main thread.
+    // Previously this was a computed property that ran items.shuffled() and
+    // decoded (often full-res) images on every render — re-decoding different
+    // random images each pass defeated the cache and blocked the main thread for
+    // seconds during launch.
+    @State private var thumbs: [UIImage] = []
+    @State private var loadedCount: Int = -1
 
     var body: some View {
         VStack(spacing: DS.Spacing.xs) {
-            let thumbs = thumbnails
-            if thumbs.count >= 2 {
-                HStack(spacing: DS.Spacing.micro) {
-                    ForEach(0..<2, id: \.self) { i in
-                        Image(uiImage: thumbs[i])
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 56, height: 56)
-                            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-                    }
-                }
-            } else if thumbs.count == 1 {
-                Image(uiImage: thumbs[0])
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 80, height: 80)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-            } else {
-                Image(systemName: category.iconName)
-                    .font(.system(size: 32))
-                    .foregroundColor(DS.Colors.accent)
-                    .frame(width: 80, height: 80)
-            }
+            thumbnailArea
 
             Text(category.rawValue)
                 .font(DS.Font.headline)
@@ -403,6 +375,50 @@ private struct WardrobeCategoryCard: View {
         .background(DS.Colors.backgroundCard)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
         .dsCardShadow()
+        .onAppear { loadThumbsIfNeeded() }
+        .onChange(of: items.count) { _ in loadThumbsIfNeeded() }
+    }
+
+    @ViewBuilder
+    private var thumbnailArea: some View {
+        if thumbs.count >= 2 {
+            HStack(spacing: DS.Spacing.micro) {
+                ForEach(0..<2, id: \.self) { i in
+                    Image(uiImage: thumbs[i])
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                }
+            }
+        } else if thumbs.count == 1 {
+            Image(uiImage: thumbs[0])
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 80, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+        } else {
+            Image(systemName: category.iconName)
+                .font(.system(size: 32))
+                .foregroundColor(DS.Colors.accent)
+                .frame(width: 80, height: 80)
+        }
+    }
+
+    private func loadThumbsIfNeeded() {
+        guard loadedCount != items.count else { return }
+        loadedCount = items.count
+        let snapshot = items
+        DispatchQueue.global(qos: .userInitiated).async {
+            var result: [UIImage] = []
+            for item in snapshot {
+                if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
+                    result.append(img)
+                    if result.count >= 2 { break }
+                }
+            }
+            DispatchQueue.main.async { self.thumbs = result }
+        }
     }
 }
 
