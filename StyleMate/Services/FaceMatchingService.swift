@@ -42,13 +42,14 @@ class FaceMatchingService {
     // MARK: - Tunable Thresholds
     //
     // Cosine similarity of L2-normalized ArcFace embeddings (R50 / w600k_r50).
-    // Calibrated from real device logs: the user's own face scores 0.33–0.63
-    // while every other person collapses to ~0.00 (max seen ~0.06) — a ~0.27 gap.
-    // Thresholds sit in the middle of that gap, so genuine matches at slight
-    // angles are caught while impostors (incl. same-household, different person)
-    // are firmly rejected. Re-tune only from fresh [FaceMatch] lines.
-    static var highConfidenceThreshold: Float = 0.30   // auto-add
-    static var borderlineThreshold: Float = 0.20        // send to review
+    // Calibrated from real device logs: the user's own face scores 0.25–0.65
+    // while every other person collapses to ~0.00 (max seen ~0.06). With that
+    // huge gap we can sit the bar low to recover angled/smaller faces of the
+    // user without ever admitting an impostor. The builder's match floor is kept
+    // at/below highConfidenceThreshold so a face the user confirms is also one
+    // the scan will pick up. Re-tune only from fresh [FaceMatch] lines.
+    static var highConfidenceThreshold: Float = 0.24   // auto-add
+    static var borderlineThreshold: Float = 0.15        // send to review
     private static let minFaceQuality: Float = 0.30     // skip blurry / poorly-captured faces
     // In a multi-person photo, the best match must beat the next-best face by at
     // least this much to auto-isolate silently. Otherwise two people score too
@@ -133,7 +134,7 @@ class FaceMatchingService {
     /// are model-specific (an R50 vector is meaningless to compare against an mbf
     /// vector), so a gallery tagged with a different version is discarded and
     /// rebuilt from the selfie when the model changes.
-    private static let modelVersion = "w600k_r50"
+    private static let modelVersion = "w600k_r50+flip2"
 
     private static func galleryURL(forUser userId: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -923,7 +924,29 @@ class FaceMatchingService {
 
     // MARK: - Embedding Generation
 
+    /// Embeds an aligned 112x112 face with horizontal-flip test-time augmentation:
+    /// the raw features of the crop and its mirror are summed, then L2-normalized.
+    /// This is a standard ArcFace TTA that improves robustness to pose/asymmetry,
+    /// raising genuine same-person similarity without affecting impostors.
+    /// IMPORTANT: gallery-building and matching both go through here, so the
+    /// reference and query embeddings stay consistent.
     private func generateEmbedding(for faceCrop: CGImage) -> [Float]? {
+        guard var combined = rawEmbedding(for: faceCrop) else { return nil }
+        if let flipped = horizontallyFlipped(faceCrop), let mirror = rawEmbedding(for: flipped),
+           mirror.count == combined.count {
+            for i in 0..<combined.count { combined[i] += mirror[i] }
+        }
+        var norm: Float = 0
+        vDSP_svesq(combined, 1, &norm, vDSP_Length(combined.count))
+        norm = sqrt(norm)
+        if norm > 0 {
+            vDSP_vsdiv(combined, 1, &norm, &combined, 1, vDSP_Length(combined.count))
+        }
+        return combined
+    }
+
+    /// Single forward pass of the model, returning the RAW (un-normalized) embedding.
+    private func rawEmbedding(for faceCrop: CGImage) -> [Float]? {
         guard ensureModelLoaded(), let model = mlModel else {
             print("[FaceMatch] Model not available")
             return nil
@@ -955,18 +978,24 @@ class FaceMatchingService {
             var embedding = [Float](repeating: 0, count: embeddingSize)
             let ptr = multiArray.dataPointer.bindMemory(to: Float.self, capacity: embeddingSize)
             for i in 0..<embeddingSize { embedding[i] = ptr[i] }
-
-            var norm: Float = 0
-            vDSP_svesq(embedding, 1, &norm, vDSP_Length(embeddingSize))
-            norm = sqrt(norm)
-            if norm > 0 {
-                vDSP_vsdiv(embedding, 1, &norm, &embedding, 1, vDSP_Length(embeddingSize))
-            }
             return embedding
         } catch {
             print("[FaceMatch] Model prediction failed: \(error)")
             return nil
         }
+    }
+
+    /// Mirrors a CGImage left-to-right (for flip TTA).
+    private func horizontallyFlipped(_ image: CGImage) -> CGImage? {
+        let w = image.width, h = image.height
+        guard let ctx = CGContext(
+            data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.translateBy(x: CGFloat(w), y: 0)
+        ctx.scaleBy(x: -1, y: 1)
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()
     }
 
     private func firstMultiArrayOutput(from output: MLFeatureProvider) -> MLFeatureValue? {

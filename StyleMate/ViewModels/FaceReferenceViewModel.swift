@@ -30,10 +30,12 @@ final class FaceReferenceViewModel: ObservableObject {
 
     private let candidateLimit = 120
     /// A library face must match the selfie anchor at least this much to even be
-    /// offered as "you". With the R50 model a different person scores ~0.00, so
-    /// this floor (well above that) keeps other people out while still surfacing
-    /// your own face across varied poses/lighting (which score 0.30+).
-    static let referenceFloor: Float = 0.24
+    /// *offered* as "you". A different person scores ~0.00 with R50, so this floor
+    /// (well above that) keeps other people out while surfacing your own face
+    /// across varied poses/lighting — including angled/smaller faces that score
+    /// lower. Faces at/above highConfidenceThreshold are pre-checked; the ones
+    /// between this floor and that are shown unchecked for you to confirm.
+    static let referenceFloor: Float = 0.18
 
     var selectedCount: Int { candidates.filter { $0.isSelected }.count }
     var hasAnchorRanking: Bool { candidates.contains { $0.similarity > 0 } }
@@ -77,8 +79,13 @@ final class FaceReferenceViewModel: ObservableObject {
 
         var results: [FaceCandidate] = []
         for (index, asset) in assets.enumerated() {
+            // Embed faces at the same resolution the auto-scan uses (~1600px),
+            // not a tiny 600px thumbnail. A small face upscaled from 600px embeds
+            // poorly and — worse — its stored vector then won't match the sharp
+            // vector the scan computes for the SAME face, so a confirmed photo gets
+            // skipped during the scan. Matching resolutions keeps them consistent.
             let image = await loadImage(asset, manager: manager, options: options,
-                                        targetSize: CGSize(width: 600, height: 600))
+                                        targetSize: CGSize(width: 1600, height: 1600))
             progress = Double(index + 1) / Double(assets.count)
 
             guard let cg = image?.cgImage else { continue }
@@ -127,8 +134,13 @@ final class FaceReferenceViewModel: ObservableObject {
         let removed = results.count - deduped.count
         results = deduped
 
-        // Everything shown passed the match floor, so pre-select it all.
-        for i in results.indices { results[i].isSelected = hasAnchor }
+        // Pre-check only the confident matches; faces between the floor and the
+        // confidence bar are shown unchecked for the user to confirm (these are
+        // the angled/varied shots that enrich the gallery). Without an anchor we
+        // can't rank, so nothing is pre-checked.
+        for i in results.indices {
+            results[i].isSelected = hasAnchor && results[i].similarity >= FaceMatchingService.highConfidenceThreshold
+        }
         candidates = results
         phase = .ready
         let top = results.first?.similarity ?? 0
