@@ -32,6 +32,7 @@ final class SCRFDDetector {
     private let numAnchors = 2
     private var model: MLModel?
     private var anchorCenters: [Int: [(Float, Float)]] = [:]
+    private var loggedDiagnostics = false
 
     private init() {
         for s in strides { anchorCenters[s] = Self.makeAnchors(stride: s, size: inputSize) }
@@ -73,8 +74,22 @@ final class SCRFDDetector {
         guard w > 0, h > 0 else { return [] }
         let scale = min(Float(inputSize) / Float(w), Float(inputSize) / Float(h))
         guard let input = makeInput(cgImage, scale: scale) else { return [] }
-        guard let out = try? model.prediction(from: try! MLDictionaryFeatureProvider(
-            dictionary: [inputName(model): MLFeatureValue(multiArray: input)])) else { return [] }
+        guard let provider = try? MLDictionaryFeatureProvider(
+                dictionary: [inputName(model): MLFeatureValue(multiArray: input)]),
+              let out = try? model.prediction(from: provider) else {
+            print("[SCRFD] prediction failed")
+            return []
+        }
+
+        let diagLogged = loggedDiagnostics
+        if !diagLogged {
+            loggedDiagnostics = true
+            let dims = out.featureNames.compactMap { n -> String? in
+                guard let a = out.featureValue(for: n)?.multiArrayValue else { return nil }
+                return "\(n):\(a.shape.map{$0.intValue})/\(a.dataType.rawValue)"
+            }
+            print("[SCRFD] input \(cgImage.width)x\(cgImage.height) scale \(scale) | outputs \(dims)")
+        }
 
         var boxes: [CGRect] = []
         var kpss: [[SIMD2<Float>]] = []
@@ -84,8 +99,12 @@ final class SCRFDDetector {
             let n = (inputSize / s) * (inputSize / s) * numAnchors
             guard let scArr = outputArray(out, count: n, inner: 1),
                   let bbArr = outputArray(out, count: n, inner: 4),
-                  let kpArr = outputArray(out, count: n, inner: 10) else { continue }
+                  let kpArr = outputArray(out, count: n, inner: 10) else {
+                print("[SCRFD] stride \(s): outputs not matched (need score[\(n),1] bbox[\(n),4] kps[\(n),10])")
+                continue
+            }
             let sc = floats(scArr), bb = floats(bbArr), kp = floats(kpArr)
+            if !diagLogged { print("[SCRFD] stride \(s): maxScore \(sc.max() ?? -1)") }
             let ac = anchorCenters[s]!
             let fs = Float(s)
             for i in 0..<n where sc[i] >= scoreThreshold {
@@ -119,48 +138,66 @@ final class SCRFDDetector {
     }
 
     /// 640x640 letterboxed (top-left, zero-pad) RGB tensor, normalized (x-127.5)/128.
+    /// Rasterizes the full image with the proven top-left method, then resizes +
+    /// places it at the top-left of the tensor (matching the Python reference). The
+    /// prior version drew a partial-height image into a full-height flipped context,
+    /// which mispositioned it in the letterbox -> SCRFD saw no face.
     private func makeInput(_ cg: CGImage, scale: Float) -> MLMultiArray? {
         let S = inputSize
-        let nw = Int((Float(cg.width)  * scale).rounded())
-        let nh = Int((Float(cg.height) * scale).rounded())
-        let bytesPerRow = S * 4
-        var buf = [UInt8](repeating: 0, count: S * bytesPerRow)
-        let made: Bool = buf.withUnsafeMutableBytes { raw in
-            guard let ctx = CGContext(
-                data: raw.baseAddress, width: S, height: S, bitsPerComponent: 8,
-                bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
-            ) else { return false }
-            // CG draws bottom-left origin; flip so (0,0) lands at the buffer's TOP-left.
-            ctx.translateBy(x: 0, y: CGFloat(S))
-            ctx.scaleBy(x: 1, y: -1)
-            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: CGFloat(nw), height: CGFloat(nh)))
-            return true
-        }
-        guard made,
-              let arr = try? MLMultiArray(shape: [1, 3, NSNumber(value: S), NSNumber(value: S)],
+        let sw = cg.width, sh = cg.height
+        guard let src = rasterizeTopLeft(cg) else { return nil }
+        let srcBytesPerRow = sw * 4
+        let nw = min(S, Int((Float(sw) * scale).rounded()))
+        let nh = min(S, Int((Float(sh) * scale).rounded()))
+        guard let arr = try? MLMultiArray(shape: [1, 3, NSNumber(value: S), NSNumber(value: S)],
                                           dataType: .float32) else { return nil }
         let plane = S * S
         let p = arr.dataPointer.bindMemory(to: Float.self, capacity: 3 * plane)
-        for y in 0..<S {
-            let row = y * bytesPerRow
-            for x in 0..<S {
-                let o = row + x * 4
-                let idx = y * S + x
-                p[idx]           = (Float(buf[o])     - 127.5) / 128.0   // R
-                p[plane + idx]   = (Float(buf[o + 1]) - 127.5) / 128.0   // G
-                p[2*plane + idx] = (Float(buf[o + 2]) - 127.5) / 128.0   // B
+        // Pad value = normalized 0 px = (0-127.5)/128 (matches the Python zero canvas).
+        let pad: Float = (0 - 127.5) / 128.0
+        for i in 0..<(3 * plane) { p[i] = pad }
+        for y in 0..<nh {
+            let sy = min(Int(Float(y) / scale), sh - 1)
+            let srcRow = sy * srcBytesPerRow
+            let dstRow = y * S
+            for x in 0..<nw {
+                let sx = min(Int(Float(x) / scale), sw - 1)
+                let o = srcRow + sx * 4
+                let idx = dstRow + x
+                p[idx]           = (Float(src[o])     - 127.5) / 128.0   // R
+                p[plane + idx]   = (Float(src[o + 1]) - 127.5) / 128.0   // G
+                p[2*plane + idx] = (Float(src[o + 2]) - 127.5) / 128.0   // B
             }
         }
         return arr
     }
 
+    /// Full-size RGBA pixel buffer, top-left origin (same proven method the
+    /// embedder's warp uses).
+    private func rasterizeTopLeft(_ cg: CGImage) -> [UInt8]? {
+        let w = cg.width, h = cg.height
+        let bytesPerRow = w * 4
+        var pixels = [UInt8](repeating: 0, count: h * bytesPerRow)
+        guard let ctx = CGContext(
+            data: &pixels, width: w, height: h, bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else { return nil }
+        ctx.translateBy(x: 0, y: CGFloat(h))
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
+        return pixels
+    }
+
     // MARK: - Output helpers
 
+    /// Finds the output whose flattened layout is [count, inner], tolerant of any
+    /// leading batch dims (e.g. [N,inner] or [1,N,inner]). The (count, inner) pair
+    /// is unique per output even when totals collide (e.g. 12800x1 vs 3200x4).
     private func outputArray(_ out: MLFeatureProvider, count: Int, inner: Int) -> MLMultiArray? {
         for name in out.featureNames {
             if let v = out.featureValue(for: name)?.multiArrayValue,
-               v.shape.count == 2, v.shape[0].intValue == count, v.shape[1].intValue == inner {
+               v.count == count * inner, (v.shape.last?.intValue ?? -1) == inner {
                 return v
             }
         }
