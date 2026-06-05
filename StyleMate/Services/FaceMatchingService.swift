@@ -136,7 +136,7 @@ class FaceMatchingService {
     /// are model-specific (an R50 vector is meaningless to compare against an mbf
     /// vector), so a gallery tagged with a different version is discarded and
     /// rebuilt from the selfie when the model changes.
-    private static let modelVersion = "adaface_ir101_w12m_v1"
+    private static let modelVersion = "adaface_ir101_align2"
 
     private static func galleryURL(forUser userId: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -763,14 +763,24 @@ class FaceMatchingService {
                            y: pts.reduce(0) { $0 + $1.y } / n)
         }
 
-        let leftEyeCenter = convertPoint(center(of: leftEye))
-        let rightEyeCenter = convertPoint(center(of: rightEye))
+        // The ArcFace template (arcfaceDst) is laid out GEOMETRICALLY: index 0 is
+        // the image-LEFT eye, index 1 the image-RIGHT eye. Vision's leftEye/rightEye
+        // are ANATOMICAL (the subject's left eye sits on the RIGHT of the image), so
+        // mapping center(of: leftEye) -> index 0 swapped the eyes relative to the
+        // geometrically-extracted mouth corners below. A similarity transform can't
+        // reflect, so swapped-eyes + correct-mouth forced a distorted/rotated fit on
+        // EVERY face — the root cause of chronically low same-person similarity
+        // across all embedding models. Assign eyes by x position, like the mouth.
+        let eyeCenterA = convertPoint(center(of: leftEye))
+        let eyeCenterB = convertPoint(center(of: rightEye))
+        let imageLeftEye = eyeCenterA.x <= eyeCenterB.x ? eyeCenterA : eyeCenterB
+        let imageRightEye = eyeCenterA.x <= eyeCenterB.x ? eyeCenterB : eyeCenterA
 
         let nosePts = nose.normalizedPoints
         let noseTip = convertPoint(nosePts[nosePts.count - 1])
 
-        // Mouth corners: take the geometric leftmost / rightmost lip points
-        // (robust to Vision's point ordering), falling back to an estimate.
+        // Mouth corners: geometric leftmost / rightmost lip points (image-left /
+        // image-right), matching the template layout.
         var leftMouth: SIMD2<Float>
         var rightMouth: SIMD2<Float>
         let lipRegion = landmarks.outerLips ?? landmarks.innerLips
@@ -781,15 +791,15 @@ class FaceMatchingService {
             leftMouth = convertPoint(leftMostNorm)
             rightMouth = convertPoint(rightMostNorm)
         } else {
-            let eyeMidX = (leftEyeCenter.x + rightEyeCenter.x) / 2
-            let eyeSpan = rightEyeCenter.x - leftEyeCenter.x
-            let mouthY = noseTip.y + (noseTip.y - (leftEyeCenter.y + rightEyeCenter.y) / 2) * 0.6
+            let eyeMidX = (imageLeftEye.x + imageRightEye.x) / 2
+            let eyeSpan = imageRightEye.x - imageLeftEye.x
+            let mouthY = noseTip.y + (noseTip.y - (imageLeftEye.y + imageRightEye.y) / 2) * 0.6
             leftMouth = SIMD2<Float>(eyeMidX - eyeSpan * 0.35, mouthY)
             rightMouth = SIMD2<Float>(eyeMidX + eyeSpan * 0.35, mouthY)
             print("[FaceMatch] Estimated mouth corners from eye/nose positions")
         }
 
-        let result = [leftEyeCenter, rightEyeCenter, noseTip, leftMouth, rightMouth]
+        let result = [imageLeftEye, imageRightEye, noseTip, leftMouth, rightMouth]
 
         for (i, pt) in result.enumerated() {
             if pt.x < -50 || pt.y < -50 || pt.x > Float(imageWidth + 50) || pt.y > Float(imageHeight + 50) {
