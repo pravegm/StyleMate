@@ -41,15 +41,15 @@ class FaceMatchingService {
 
     // MARK: - Tunable Thresholds
     //
-    // Cosine similarity of L2-normalized ArcFace embeddings (R50 / w600k_r50).
-    // Calibrated from real device logs: the user's own face scores 0.25–0.65
-    // while every other person collapses to ~0.00 (max seen ~0.06). With that
-    // huge gap we can sit the bar low to recover angled/smaller faces of the
-    // user without ever admitting an impostor. The builder's match floor is kept
-    // at/below highConfidenceThreshold so a face the user confirms is also one
-    // the scan will pick up. Re-tune only from fresh [FaceMatch] lines.
-    static var highConfidenceThreshold: Float = 0.24   // auto-add
-    static var borderlineThreshold: Float = 0.15        // send to review
+    // Cosine similarity of L2-normalized ArcFace embeddings (R50 / w600k_r50 with
+    // flip TTA). Calibrated from real device logs: with flip-aug the user's own
+    // face scores ~0.46–0.56 and impostors rise to ~0.14, so the gap is roughly
+    // 0.14–0.46. The bar sits at 0.42 — just under the genuine cluster — because
+    // this app's whole promise is to NEVER add someone else's clothes; we accept
+    // missing a borderline self-photo over admitting a stranger. Re-tune only
+    // from fresh [FaceMatch] lines (watch galleryIdx for a polluted reference).
+    static var highConfidenceThreshold: Float = 0.42   // auto-add
+    static var borderlineThreshold: Float = 0.30        // send to review
     private static let minFaceQuality: Float = 0.30     // skip blurry / poorly-captured faces
     // In a multi-person photo, the best match must beat the next-best face by at
     // least this much to auto-isolate silently. Otherwise two people score too
@@ -134,7 +134,7 @@ class FaceMatchingService {
     /// are model-specific (an R50 vector is meaningless to compare against an mbf
     /// vector), so a gallery tagged with a different version is discarded and
     /// rebuilt from the selfie when the model changes.
-    private static let modelVersion = "w600k_r50+flip2"
+    private static let modelVersion = "w600k_r50+flip3"
 
     private static func galleryURL(forUser userId: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -327,6 +327,7 @@ class FaceMatchingService {
         var bestMatch: VNFaceObservation?
         var bestSimilarity: Float = -.infinity
         var secondSimilarity: Float = -.infinity
+        var bestRefIndex = -1
         var allScores: [Float] = []
 
         let imgW = cgImage.width
@@ -346,13 +347,14 @@ class FaceMatchingService {
                 continue
             }
 
-            let similarity = bestGallerySimilarity(of: embedding)
+            let (similarity, refIdx) = bestGalleryMatch(of: embedding)
             allScores.append(similarity)
 
             if similarity > bestSimilarity {
                 secondSimilarity = bestSimilarity
                 bestSimilarity = similarity
                 bestMatch = face
+                bestRefIndex = refIdx
             } else if similarity > secondSimilarity {
                 secondSimilarity = similarity
             }
@@ -368,7 +370,7 @@ class FaceMatchingService {
             confidence = .none
         }
 
-        print("[FaceMatch] \(confidence) best=\(String(format: "%.3f", bestSimilarity)) all=[\(scoresStr)] faces=\(faces.count) gallery=\(referenceGallery.count)")
+        print("[FaceMatch] \(confidence) best=\(String(format: "%.3f", bestSimilarity)) galleryIdx=\(bestRefIndex) all=[\(scoresStr)] faces=\(faces.count) gallery=\(referenceGallery.count)")
 
         return MatchResult(
             confidence: confidence,
@@ -381,12 +383,20 @@ class FaceMatchingService {
 
     /// Best cosine similarity of `embedding` against every reference in the gallery.
     private func bestGallerySimilarity(of embedding: [Float]) -> Float {
+        bestGalleryMatch(of: embedding).sim
+    }
+
+    /// Best cosine similarity AND which gallery slot produced it. The index lets
+    /// us spot a polluted reference: if the same slot keeps winning matches for
+    /// different people, that slot is probably not the user.
+    private func bestGalleryMatch(of embedding: [Float]) -> (sim: Float, index: Int) {
         var best: Float = -.infinity
-        for ref in referenceGallery {
+        var idx = -1
+        for (i, ref) in referenceGallery.enumerated() {
             let s = dotProduct(ref, embedding)
-            if s > best { best = s }
+            if s > best { best = s; idx = i }
         }
-        return best
+        return (best, idx)
     }
 
     // MARK: - Identity Resolution (upload flow: "extract only my clothes")
