@@ -113,6 +113,17 @@ final class FaceReferenceViewModel: ObservableObject {
         // with someone else's face. The selfie just taken is the ground truth.
         if hasAnchor {
             let before = results.count
+            // Distribution diagnostic: of the detected faces, how many land in each
+            // similarity band? Tells us whether faces are being filtered because they
+            // genuinely don't match (<0.10), are just under the bar (0.10..floor), or
+            // pass. If many sit just under the floor, recall is a tuning problem; if
+            // almost all are <0.10, same-person scoring is still broken.
+            let b1 = results.filter { $0.similarity < 0.10 }.count
+            let b2 = results.filter { $0.similarity >= 0.10 && $0.similarity < Self.referenceFloor }.count
+            let b3 = results.filter { $0.similarity >= Self.referenceFloor }.count
+            let topScores = results.map { $0.similarity }.sorted(by: >).prefix(12)
+                .map { String(format: "%.2f", $0) }.joined(separator: ",")
+            print("[FaceRef] facesDetected=\(before) | <0.10:\(b1)  0.10–\(Self.referenceFloor):\(b2)  >=\(Self.referenceFloor):\(b3) | top: \(topScores)")
             results = results.filter { $0.similarity >= Self.referenceFloor }
             print("[FaceRef] Kept \(results.count)/\(before) faces matching your selfie (>= \(Self.referenceFloor))")
             guard !results.isEmpty else {
