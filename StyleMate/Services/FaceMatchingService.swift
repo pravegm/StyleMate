@@ -121,7 +121,16 @@ class FaceMatchingService {
 
     // MARK: - Reference Gallery (persisted)
 
-    private struct StoredGallery: Codable { var embeddings: [[Float]] }
+    private struct StoredGallery: Codable {
+        var embeddings: [[Float]]
+        var modelVersion: String = ""
+    }
+
+    /// Identifies which face model produced the persisted embeddings. Embeddings
+    /// are model-specific (an R50 vector is meaningless to compare against an mbf
+    /// vector), so a gallery tagged with a different version is discarded and
+    /// rebuilt from the selfie when the model changes.
+    private static let modelVersion = "w600k_r50"
 
     private static func galleryURL(forUser userId: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -134,7 +143,7 @@ class FaceMatchingService {
     }
 
     private func persistGallery(forUser userId: String) {
-        let stored = StoredGallery(embeddings: referenceGallery)
+        let stored = StoredGallery(embeddings: referenceGallery, modelVersion: Self.modelVersion)
         if let data = try? JSONEncoder().encode(stored) {
             try? data.write(to: Self.galleryURL(forUser: userId), options: .atomic)
             print("[FaceMatch] Persisted gallery (\(referenceGallery.count) embeddings) for \(userId)")
@@ -151,10 +160,16 @@ class FaceMatchingService {
         if let data = try? Data(contentsOf: Self.galleryURL(forUser: userId)),
            let stored = try? JSONDecoder().decode(StoredGallery.self, from: data),
            !stored.embeddings.isEmpty {
-            referenceGallery = stored.embeddings
-            loadedUserId = userId
-            print("[FaceMatch] Loaded gallery: \(referenceGallery.count) embeddings for \(userId)")
-            return true
+            if stored.modelVersion == Self.modelVersion {
+                referenceGallery = stored.embeddings
+                loadedUserId = userId
+                print("[FaceMatch] Loaded gallery: \(referenceGallery.count) embeddings for \(userId)")
+                return true
+            }
+            // Persisted with a different face model — those embeddings can't be
+            // compared against the current model. Discard and rebuild from the selfie.
+            print("[FaceMatch] Gallery model mismatch ('\(stored.modelVersion)' != '\(Self.modelVersion)'); discarding \(stored.embeddings.count) stale embeddings, rebuilding from selfie")
+            try? FileManager.default.removeItem(at: Self.galleryURL(forUser: userId))
         }
 
         // 2. Bootstrap from the selfie image
