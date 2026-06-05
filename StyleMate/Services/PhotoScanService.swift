@@ -542,7 +542,13 @@ class PhotoScanService: ObservableObject {
                     } else {
                         targetSize = fullImage.size
                     }
-                    let renderer = UIGraphicsImageRenderer(size: targetSize)
+                    // scale = 1.0 so the output is targetSize in PIXELS. Without
+                    // this the renderer uses the screen's 3x scale, producing a
+                    // ~6144px image whose face embeds differently from the ~1600px
+                    // gallery faces — degrading the match (proven by the loader probe).
+                    let format = UIGraphicsImageRendererFormat.default()
+                    format.scale = 1.0
+                    let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
                     return renderer.image { _ in
                         fullImage.draw(in: CGRect(origin: .zero, size: targetSize))
                     }

@@ -136,7 +136,7 @@ class FaceMatchingService {
     /// are model-specific (an R50 vector is meaningless to compare against an mbf
     /// vector), so a gallery tagged with a different version is discarded and
     /// rebuilt from the selfie when the model changes.
-    private static let modelVersion = "adaface_ir101_align2"
+    private static let modelVersion = "adaface_ir101_align3_mirror"
 
     private static func galleryURL(forUser userId: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -178,14 +178,18 @@ class FaceMatchingService {
             try? FileManager.default.removeItem(at: Self.galleryURL(forUser: userId))
         }
 
-        // 2. Bootstrap from the selfie image
-        guard let anchor = embeddingFromSelfie(forUser: userId) else {
+        // 2. Bootstrap from the selfie image. The selfie is captured MIRRORED
+        // (front-camera convention) but library photos are not, and ArcFace/AdaFace
+        // are not mirror-invariant — so anchor BOTH orientations to be robust no
+        // matter which way the user's other photos are flipped.
+        guard let anchors = selfieAnchors(forUser: userId), !anchors.isEmpty else {
             print("[FaceMatch] ERROR: Could not build reference from selfie for \(userId)")
             return false
         }
-        referenceGallery = [anchor]
+        referenceGallery = anchors
         loadedUserId = userId
         persistGallery(forUser: userId)
+        print("[FaceMatch] Bootstrapped gallery with \(anchors.count) selfie anchors")
         return true
     }
 
@@ -193,23 +197,38 @@ class FaceMatchingService {
     @discardableResult
     func loadSelfieReference(forUser userId: String) -> Bool { loadReference(forUser: userId) }
 
-    private func embeddingFromSelfie(forUser userId: String) -> [Float]? {
+    /// Builds selfie anchor embeddings in BOTH orientations (upright + mirrored),
+    /// since the captured selfie is mirrored but library/scan faces usually aren't.
+    private func selfieAnchors(forUser userId: String) -> [[Float]]? {
         let key = "selfieReferencePath_\(userId)"
         guard let path = UserDefaults.standard.string(forKey: key) else {
             print("[FaceMatch] ERROR: No selfie path stored for user \(userId)")
             return nil
         }
-        guard let rawImage = UIImage(contentsOfFile: path) ?? loadFromDocuments(filename: path) else {
+        guard let rawImage = UIImage(contentsOfFile: path) ?? loadFromDocuments(filename: path),
+              let cgImage = renderUpOrientation(rawImage).cgImage else {
             print("[FaceMatch] ERROR: Could not load selfie image at \(path)")
             return nil
         }
-        guard let cgImage = renderUpOrientation(rawImage).cgImage,
-              let embedding = generateEmbeddingFromPhoto(cgImage, label: "selfie") else {
-            print("[FaceMatch] ERROR: Could not generate embedding from selfie")
-            return nil
-        }
-        print("[FaceMatch] Selfie anchor embedding built (\(embedding.count)-dim)")
-        return embedding
+        var anchors: [[Float]] = []
+        if let e = generateEmbeddingFromPhoto(cgImage, label: "selfie") { anchors.append(e) }
+        if let flipped = horizontallyFlipped(cgImage),
+           let m = generateEmbeddingFromPhoto(flipped, label: "selfie-mirror") { anchors.append(m) }
+        print("[FaceMatch] Selfie anchors built: \(anchors.count) (upright + mirror)")
+        return anchors.isEmpty ? nil : anchors
+    }
+
+    /// Mirrors a CGImage left-to-right.
+    private func horizontallyFlipped(_ image: CGImage) -> CGImage? {
+        let w = image.width, h = image.height
+        guard let ctx = CGContext(
+            data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.translateBy(x: CGFloat(w), y: 0)
+        ctx.scaleBy(x: -1, y: 1)
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()
     }
 
     /// Adds confirmed library faces to the reference gallery (Phase 2: "tap the
