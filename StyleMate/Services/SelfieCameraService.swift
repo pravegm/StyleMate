@@ -57,6 +57,16 @@ class SelfieCameraService: NSObject, ObservableObject {
     }
 
     private func setupSession() {
+        // Associate the preview layer with the session HERE, on the main actor,
+        // before any session work is dispatched to the session queue. Assigning
+        // `previewLayer.session` triggers an internal begin/commitConfiguration on
+        // the session; doing it from a concurrent main-actor Task while the queue
+        // calls `startRunning()` crashes with "startRunning may not be called
+        // between calls to beginConfiguration and commitConfiguration". Doing it
+        // up front (serialized before the async block) removes that race.
+        previewLayer.videoGravity = .resizeAspectFill
+        previewLayer.session = captureSession
+
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.captureSession.beginConfiguration()
@@ -76,11 +86,6 @@ class SelfieCameraService: NSObject, ObservableObject {
             if self.captureSession.canAddOutput(self.photoOutput) { self.captureSession.addOutput(self.photoOutput) }
 
             self.captureSession.commitConfiguration()
-
-            Task { @MainActor in
-                self.previewLayer.session = self.captureSession
-                self.previewLayer.videoGravity = .resizeAspectFill
-            }
 
             self.captureSession.startRunning()
             print("[StyleMate] Selfie camera session started")
