@@ -35,4 +35,4 @@ Config.plist
 # ML model artifacts (large binary files)
 *.onnx
 *.mlpackage/
-*.mlmodel
+*.mlmodelc

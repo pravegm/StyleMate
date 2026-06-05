@@ -21,8 +21,12 @@ enum IdentityResolution {
 
 /// On-device face identity matching for the photo-library auto-scan.
 ///
-/// The bundled model is InsightFace `w600k_mbf` (buffalo_s MobileFaceNet), an
-/// ArcFace model. ArcFace embeddings are ONLY meaningful when the input face is
+/// The bundled model (resource name "MobileFaceNet" for historical reasons) is
+/// now InsightFace `w600k_r50` (buffalo_L ResNet-50, glint360k, fp16 Core ML) —
+/// a much stronger embedding than the old buffalo_s MobileFaceNet, for wider
+/// same-person/different-person separation. Same I/O: 112x112 RGB in, 512-dim out,
+/// (px-127.5)/127.5 normalization. It is an ArcFace model. ArcFace embeddings are
+/// ONLY meaningful when the input face is
 /// warped to the canonical 5-point template (eyes / nose / mouth-corners mapped
 /// to fixed 112x112 positions). A loose bounding-box crop produces near-random
 /// embeddings — which is why matching must align faces before embedding.
