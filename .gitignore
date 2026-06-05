@@ -36,3 +36,7 @@ Config.plist
 *.onnx
 *.mlpackage/
 *.mlmodelc
+*.ckpt
+
+# Conversion virtualenvs
+scripts/*venv*/

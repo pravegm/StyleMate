@@ -12,9 +12,12 @@
   works on inspection alone.
 
 ## Face recognition (the app's USP — must be error-less)
-- Embedding model: InsightFace ArcFace **ResNet-50 `w600k_r50`** (buffalo_L),
-  Core ML fp16, bundled as `MobileFaceNet.mlpackage` (filename kept for history).
-  Regenerate via `scripts/convert_r50.py`. The `.mlpackage` is git-ignored.
+- Embedding model: **AdaFace IR-101 (WebFace12M)**, Core ML fp16 (~125 MB),
+  bundled as `MobileFaceNet.mlpackage` (filename kept for history). Regenerate via
+  `scripts/convert_adaface.py`. The `.mlpackage` is git-ignored.
+- **AdaFace input is BGR** (cv2 convention), `(px-127.5)/127.5`, 112×112 — NOT RGB.
+  `createInputMultiArray` feeds B→plane0, R→plane2. A model swap back to an
+  InsightFace/ArcFace model must restore RGB.
 - Embeddings are model-specific. Persisted galleries are tagged with
   `FaceMatchingService.modelVersion`; a mismatch auto-discards and rebuilds from
   the selfie. Bump that constant on any model swap.

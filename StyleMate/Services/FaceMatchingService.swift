@@ -22,14 +22,16 @@ enum IdentityResolution {
 /// On-device face identity matching for the photo-library auto-scan.
 ///
 /// The bundled model (resource name "MobileFaceNet" for historical reasons) is
-/// now InsightFace `w600k_r50` (buffalo_L ResNet-50, glint360k, fp16 Core ML) —
-/// a much stronger embedding than the old buffalo_s MobileFaceNet, for wider
-/// same-person/different-person separation. Same I/O: 112x112 RGB in, 512-dim out,
-/// (px-127.5)/127.5 normalization. It is an ArcFace model. ArcFace embeddings are
-/// ONLY meaningful when the input face is
-/// warped to the canonical 5-point template (eyes / nose / mouth-corners mapped
-/// to fixed 112x112 positions). A loose bounding-box crop produces near-random
-/// embeddings — which is why matching must align faces before embedding.
+/// now **AdaFace IR-101 (WebFace12M)**, fp16 Core ML — chosen because AdaFace's
+/// quality-adaptive margin is designed for low-quality / varied faces (angles,
+/// distance, lighting), exactly the auto-scan's hard case, giving cleaner
+/// same-person/different-person separation than the prior InsightFace models.
+/// I/O: 112x112 **BGR** in (cv2 convention, NOT RGB), 512-dim out, (px-127.5)/127.5
+/// normalization. Like all ArcFace-family models its embeddings are ONLY
+/// meaningful when the input face is warped to the canonical 5-point template
+/// (eyes / nose / mouth-corners mapped to fixed 112x112 positions). A loose
+/// bounding-box crop produces near-random embeddings — which is why matching must
+/// align faces before embedding.
 ///
 /// Identity is represented by a *gallery* of embeddings (the onboarding selfie
 /// plus any library photos the user later confirms are them), persisted to disk.
@@ -41,15 +43,14 @@ class FaceMatchingService {
 
     // MARK: - Tunable Thresholds
     //
-    // Cosine similarity of L2-normalized ArcFace embeddings (R50 / w600k_r50,
-    // single pass — no flip TTA). Calibrated from real device logs: the user's
-    // own face across different photos scores ~0.33–0.65, while other people sit
-    // at ~0.00 (rarely above 0.10). The bar at 0.28 sits well inside that gap —
-    // low enough to recover the user's angled/varied shots, far enough above the
-    // impostor cloud to never add a stranger. Re-tune only from fresh [FaceMatch]
-    // lines (watch galleryIdx — if one slot wins matches for different people,
-    // that reference is polluted).
-    static var highConfidenceThreshold: Float = 0.28   // auto-add
+    // Cosine similarity of L2-normalized AdaFace IR-101 (WebFace12M) embeddings.
+    // AdaFace's score scale differs from InsightFace ArcFace, so these are STARTING
+    // estimates to be calibrated from the first device logs: AdaFace typically
+    // separates same-person from impostors more cleanly, with verification
+    // thresholds around ~0.2–0.3. Read the first [FaceRef] builder range and
+    // [FaceMatch] galleryIdx lines, then set highConfidenceThreshold just under
+    // the genuine same-person cluster and well above the impostor cloud.
+    static var highConfidenceThreshold: Float = 0.28   // auto-add — CALIBRATE from logs
     static var borderlineThreshold: Float = 0.18        // send to review
     private static let minFaceQuality: Float = 0.30     // skip blurry / poorly-captured faces
     // In a multi-person photo, the best match must beat the next-best face by at
@@ -135,7 +136,7 @@ class FaceMatchingService {
     /// are model-specific (an R50 vector is meaningless to compare against an mbf
     /// vector), so a gallery tagged with a different version is discarded and
     /// rebuilt from the selfie when the model changes.
-    private static let modelVersion = "w600k_r50_noflip_v4"
+    private static let modelVersion = "adaface_ir101_w12m_v1"
 
     private static func galleryURL(forUser userId: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -1002,7 +1003,9 @@ class FaceMatchingService {
     }
 
     /// Converts a 112x112 CGImage to a [1, 3, 112, 112] Float32 MLMultiArray.
-    /// Normalization: (pixel / 127.5) - 1.0, RGB channel order (InsightFace convention).
+    /// Normalization: (pixel / 127.5) - 1.0 (mean 0.5, std 0.5), **BGR** channel
+    /// order — AdaFace's convention (cv2-style), NOT InsightFace's RGB. The pixel
+    /// buffer is RGBA, so B goes to plane 0 and R to plane 2.
     private func createInputMultiArray(from cgImage: CGImage) -> MLMultiArray? {
         let size = 112
         guard let pixels = imageToPixelBuffer(cgImage) else { return nil }
@@ -1027,9 +1030,10 @@ class FaceMatchingService {
                 let g = Float(pixels[offset + 1]) / 127.5 - 1.0
                 let b = Float(pixels[offset + 2]) / 127.5 - 1.0
                 let pixelIndex = y * size + x
-                ptr[pixelIndex] = r
+                // BGR order for AdaFace: plane 0 = B, plane 1 = G, plane 2 = R.
+                ptr[pixelIndex] = b
                 ptr[channelSize + pixelIndex] = g
-                ptr[2 * channelSize + pixelIndex] = b
+                ptr[2 * channelSize + pixelIndex] = r
             }
         }
         return array
