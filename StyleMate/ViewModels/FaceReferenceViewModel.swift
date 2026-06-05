@@ -28,11 +28,12 @@ final class FaceReferenceViewModel: ObservableObject {
     @Published var progress: Double = 0
     @Published var addedCount: Int = 0
 
-    private let candidateLimit = 60
+    private let candidateLimit = 120
     /// A library face must match the selfie anchor at least this much to even be
-    /// offered as "you". A different person (esp. different gender) scores well
-    /// below this, so they can't be added and pollute the gallery.
-    static let referenceFloor: Float = 0.30
+    /// offered as "you". With the R50 model a different person scores ~0.00, so
+    /// this floor (well above that) keeps other people out while still surfacing
+    /// your own face across varied poses/lighting (which score 0.30+).
+    static let referenceFloor: Float = 0.24
 
     var selectedCount: Int { candidates.filter { $0.isSelected }.count }
     var hasAnchorRanking: Bool { candidates.contains { $0.similarity > 0 } }
@@ -167,7 +168,10 @@ final class FaceReferenceViewModel: ObservableObject {
 
     // MARK: - Library Fetch
 
-    /// Selfies smart album + Portrait-mode photos (both high-yield for "the user").
+    /// Candidate photos likely to contain the user, best-prior first: Selfies
+    /// album, then Portrait-mode photos, then recent general library photos. The
+    /// general-library fill is what surfaces the user across varied poses (not
+    /// just front-facing selfies); the selfie-match floor filters out everyone else.
     private nonisolated static func fetchCandidateAssets(limit: Int) -> [PHAsset] {
         var assets: [PHAsset] = []
         var seen = Set<String>()
@@ -197,6 +201,17 @@ final class FaceReferenceViewModel: ObservableObject {
             opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
             opts.predicate = NSPredicate(format: "(mediaSubtypes & %d) != 0",
                                          PHAssetMediaSubtype.photoDepthEffect.rawValue)
+            collect(PHAsset.fetchAssets(with: .image, options: opts))
+        }
+
+        // 3. Recent general-library photos. Selfies/Portraits alone are too narrow
+        //    (a user with few selfies sees almost nothing), so fill the rest of the
+        //    budget with recent photos. The selfie-match floor downstream keeps only
+        //    the ones that are actually the user, across varied poses.
+        if assets.count < limit {
+            let opts = PHFetchOptions()
+            opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            opts.fetchLimit = limit * 6   // over-fetch; most won't contain the user
             collect(PHAsset.fetchAssets(with: .image, options: opts))
         }
 

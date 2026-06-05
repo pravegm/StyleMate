@@ -41,11 +41,14 @@ class FaceMatchingService {
 
     // MARK: - Tunable Thresholds
     //
-    // Cosine similarity of L2-normalized ArcFace embeddings. With Vision-landmark
-    // alignment (slightly noisier than InsightFace's own detector) sensible
-    // starting points are ~0.42 / ~0.30. Tune from device logs ([FaceMatch] lines).
-    static var highConfidenceThreshold: Float = 0.42   // auto-add
-    static var borderlineThreshold: Float = 0.30        // send to review
+    // Cosine similarity of L2-normalized ArcFace embeddings (R50 / w600k_r50).
+    // Calibrated from real device logs: the user's own face scores 0.33–0.63
+    // while every other person collapses to ~0.00 (max seen ~0.06) — a ~0.27 gap.
+    // Thresholds sit in the middle of that gap, so genuine matches at slight
+    // angles are caught while impostors (incl. same-household, different person)
+    // are firmly rejected. Re-tune only from fresh [FaceMatch] lines.
+    static var highConfidenceThreshold: Float = 0.30   // auto-add
+    static var borderlineThreshold: Float = 0.20        // send to review
     private static let minFaceQuality: Float = 0.30     // skip blurry / poorly-captured faces
     // In a multi-person photo, the best match must beat the next-best face by at
     // least this much to auto-isolate silently. Otherwise two people score too
