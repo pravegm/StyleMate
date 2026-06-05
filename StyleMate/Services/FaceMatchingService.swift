@@ -41,15 +41,16 @@ class FaceMatchingService {
 
     // MARK: - Tunable Thresholds
     //
-    // Cosine similarity of L2-normalized ArcFace embeddings (R50 / w600k_r50 with
-    // flip TTA). Calibrated from real device logs: with flip-aug the user's own
-    // face scores ~0.46–0.56 and impostors rise to ~0.14, so the gap is roughly
-    // 0.14–0.46. The bar sits at 0.42 — just under the genuine cluster — because
-    // this app's whole promise is to NEVER add someone else's clothes; we accept
-    // missing a borderline self-photo over admitting a stranger. Re-tune only
-    // from fresh [FaceMatch] lines (watch galleryIdx for a polluted reference).
-    static var highConfidenceThreshold: Float = 0.42   // auto-add
-    static var borderlineThreshold: Float = 0.30        // send to review
+    // Cosine similarity of L2-normalized ArcFace embeddings (R50 / w600k_r50,
+    // single pass — no flip TTA). Calibrated from real device logs: the user's
+    // own face across different photos scores ~0.33–0.65, while other people sit
+    // at ~0.00 (rarely above 0.10). The bar at 0.28 sits well inside that gap —
+    // low enough to recover the user's angled/varied shots, far enough above the
+    // impostor cloud to never add a stranger. Re-tune only from fresh [FaceMatch]
+    // lines (watch galleryIdx — if one slot wins matches for different people,
+    // that reference is polluted).
+    static var highConfidenceThreshold: Float = 0.28   // auto-add
+    static var borderlineThreshold: Float = 0.18        // send to review
     private static let minFaceQuality: Float = 0.30     // skip blurry / poorly-captured faces
     // In a multi-person photo, the best match must beat the next-best face by at
     // least this much to auto-isolate silently. Otherwise two people score too
@@ -134,7 +135,7 @@ class FaceMatchingService {
     /// are model-specific (an R50 vector is meaningless to compare against an mbf
     /// vector), so a gallery tagged with a different version is discarded and
     /// rebuilt from the selfie when the model changes.
-    private static let modelVersion = "w600k_r50+flip3"
+    private static let modelVersion = "w600k_r50_noflip_v4"
 
     private static func galleryURL(forUser userId: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -934,25 +935,20 @@ class FaceMatchingService {
 
     // MARK: - Embedding Generation
 
-    /// Embeds an aligned 112x112 face with horizontal-flip test-time augmentation:
-    /// the raw features of the crop and its mirror are summed, then L2-normalized.
-    /// This is a standard ArcFace TTA that improves robustness to pose/asymmetry,
-    /// raising genuine same-person similarity without affecting impostors.
-    /// IMPORTANT: gallery-building and matching both go through here, so the
-    /// reference and query embeddings stay consistent.
+    /// Embeds an aligned 112x112 face: one forward pass, then L2-normalize so the
+    /// dot product is cosine similarity. (Flip test-time augmentation was tried and
+    /// measurably DEGRADED same-person similarity for this model — it's removed.)
+    /// Gallery-building and matching both go through here, so reference and query
+    /// embeddings stay consistent.
     private func generateEmbedding(for faceCrop: CGImage) -> [Float]? {
-        guard var combined = rawEmbedding(for: faceCrop) else { return nil }
-        if let flipped = horizontallyFlipped(faceCrop), let mirror = rawEmbedding(for: flipped),
-           mirror.count == combined.count {
-            for i in 0..<combined.count { combined[i] += mirror[i] }
-        }
+        guard var embedding = rawEmbedding(for: faceCrop) else { return nil }
         var norm: Float = 0
-        vDSP_svesq(combined, 1, &norm, vDSP_Length(combined.count))
+        vDSP_svesq(embedding, 1, &norm, vDSP_Length(embedding.count))
         norm = sqrt(norm)
         if norm > 0 {
-            vDSP_vsdiv(combined, 1, &norm, &combined, 1, vDSP_Length(combined.count))
+            vDSP_vsdiv(embedding, 1, &norm, &embedding, 1, vDSP_Length(embedding.count))
         }
-        return combined
+        return embedding
     }
 
     /// Single forward pass of the model, returning the RAW (un-normalized) embedding.
@@ -995,18 +991,6 @@ class FaceMatchingService {
         }
     }
 
-    /// Mirrors a CGImage left-to-right (for flip TTA).
-    private func horizontallyFlipped(_ image: CGImage) -> CGImage? {
-        let w = image.width, h = image.height
-        guard let ctx = CGContext(
-            data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        ctx.translateBy(x: CGFloat(w), y: 0)
-        ctx.scaleBy(x: -1, y: 1)
-        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        return ctx.makeImage()
-    }
 
     private func firstMultiArrayOutput(from output: MLFeatureProvider) -> MLFeatureValue? {
         for name in output.featureNames {

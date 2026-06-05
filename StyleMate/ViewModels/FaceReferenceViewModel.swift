@@ -29,13 +29,12 @@ final class FaceReferenceViewModel: ObservableObject {
     @Published var addedCount: Int = 0
 
     private let candidateLimit = 120
-    /// A library face must match the selfie anchor at least this much to even be
-    /// *offered* as "you". The builder ranks against a SINGLE selfie anchor, which
-    /// is noisy — too low a floor lets look-alikes/strangers in, and a face the
-    /// user wrongly confirms pollutes the gallery and makes the scan add that
-    /// person's clothes. Keep the floor strict; only faces genuinely close to the
-    /// selfie are shown. Faces >= highConfidenceThreshold are pre-checked.
-    static let referenceFloor: Float = 0.32
+    /// A library face must match the selfie anchor at least this much to be
+    /// *offered* as "you". Same-person scores ~0.33–0.65 and other people ~0.00,
+    /// so this floor surfaces your varied shots while keeping strangers out. The
+    /// user still confirms, so a borderline that slips in is caught by eye; faces
+    /// >= highConfidenceThreshold are pre-checked.
+    static let referenceFloor: Float = 0.22
 
     var selectedCount: Int { candidates.filter { $0.isSelected }.count }
     var hasAnchorRanking: Bool { candidates.contains { $0.similarity > 0 } }
