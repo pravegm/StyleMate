@@ -17,10 +17,10 @@ There are three ways to add items, all funneled through the same analysis pipeli
 Each photo is run through:
 
 - **Photo-mode detection** (`Vision` / `VNDetectHumanRectanglesRequest`) — is this a person wearing the item, or a flat product shot?
-- **Segmentation + classification** — the image is sent to Gemini 2.5, which identifies every distinct garment and returns structured metadata (category, product, colors, pattern, material, fit, neckline, sleeve length, garment length, brand, details).
+- **Segmentation + classification** — the image is sent to Gemini (3.x Flash family), which identifies every distinct garment and returns structured metadata (category, product, colors, pattern, material, fit, neckline, sleeve length, garment length, brand, details).
 - **Background removal** (`VNGenerateForegroundInstanceMaskRequest`) — per-item mask composited onto a clean background.
 - **Category-aware cropping** — `BodyZone` crops the segmented image to the right vertical region for the category (tops, bottoms, footwear, etc.) so thumbnails look right.
-- **Duplicate detection** — `DuplicateDetector` scores the new item against your existing wardrobe across category, product, colors, pattern, material, fit, neckline, sleeves. Matches over a score of 60 prompt you before adding.
+- **Duplicate detection** — `DuplicateDetector` scores the new item against your existing wardrobe across category, product, colors, pattern, material, fit, neckline, sleeves, gated so unrelated categories never collide. Matches over a score of 55 prompt you before adding.
 
 Originals, cropped images, and thumbnails are stored under `Documents/wardrobe_images/`. Metadata is persisted as JSON in `UserDefaults` per signed-in user, with parallel sync to a private CloudKit zone.
 
@@ -28,9 +28,9 @@ Originals, cropped images, and thumbnails are stored under `Documents/wardrobe_i
 
 The auto-scan walks `PHAssetCollection` chronologically across the date range you pick (last month / 6 months / year / custom / all). Before any photo is sent to Gemini, it's filtered by an on-device face check:
 
-- During onboarding you capture a reference selfie (`SelfieCameraService` → `FaceMatchingService`).
-- A reference embedding is generated from that selfie using **MobileFaceNet** (Core ML, bundled in `MobileFaceNet.mlpackage`) on top of `Vision` face landmarks and quality filtering.
-- Each candidate photo is embedded the same way and compared by Euclidean distance against the reference. Photos that don't contain you are skipped — so the scan finds *your* outfit photos and ignores everything else.
+- During onboarding you capture a reference selfie (`SelfieCameraService` → `FaceMatchingService`), and can optionally confirm more of your own faces from your library ("tap which photos are you") to strengthen the reference gallery.
+- Each face is aligned to a canonical 112×112 via `Vision` 5-point landmarks, then embedded with an **InsightFace ArcFace model** — a ResNet-50 (`w600k_r50`, buffalo_L) converted to Core ML, bundled as `MobileFaceNet.mlpackage` (the filename is kept for historical reasons). Embeddings are tagged with the model version so a model upgrade auto-rebuilds the gallery.
+- Each candidate photo is embedded the same way and compared by **cosine similarity** against the reference gallery, with tiered confidence (high / borderline / none) and a runner-up margin. When a photo has several people, the scan only keeps it if *you* are matched with high confidence and a clean margin, then isolates your garments via a person-instance mask — so other people's clothes are never extracted.
 
 Scan progress is checkpointed to `Application Support/ScanProgress/` so you can resume after backgrounding or a crash.
 
@@ -40,7 +40,7 @@ The Home screen's "Style Me" flow combines:
 
 - your full wardrobe (sent to Gemini as indexed metadata, not raw images),
 - the occasion you pick (`OutfitType`: Everyday Casual, Formal, Date Night, Sports, Party, Business, Loungewear, Vacation, Ethnic, Streetwear) or a free-text description,
-- the current weather (Open-Meteo, no auth required, reverse-geocoded city via `CoreLocation`),
+- the current weather (met.no primary, Open-Meteo fallback — both free, no auth required, reverse-geocoded city via `CoreLocation`),
 - your gender preference, if set.
 
 Gemini returns a batch of outfit suggestions — each is a set of wardrobe item indices and a short markdown explanation. The `TodayOutfitSheet` presents them as a swipeable card stack: swipe to keep, skip the rest. You can shuffle individual slots ("show me a different top") or ask the model to add a missing piece, and both call back into Gemini with narrowed scope.
@@ -65,9 +65,9 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and show up 
 - **Pattern**: MVVM. `HomeViewModel`, `MyOutfitsViewModel`, plus services published via `@Published`.
 - **Local persistence**: `UserDefaults` (wardrobe items per user, scoped by sanitized email) + Core Data (`StyleMateDataModel.xcdatamodeld`, outfit history).
 - **Cloud**: CloudKit private DB (zone `WardrobeZone`), `CKRecord` per wardrobe item with `CKAsset` image attachments.
-- **On-device ML**: Core ML (`MobileFaceNet.mlpackage`), `Vision` (face landmarks, foreground instance mask, human detection).
-- **Remote AI**: Google Gemini 2.5 Flash / Pro for classification, segmentation, and outfit reasoning.
-- **Weather**: Open-Meteo (free, no key).
+- **On-device ML**: Core ML — InsightFace ArcFace ResNet-50 (`w600k_r50`), bundled as `MobileFaceNet.mlpackage` — plus `Vision` (face landmarks, capture quality, person-instance mask, foreground mask, human detection).
+- **Remote AI**: Google Gemini (3.x Flash family) for classification, segmentation, and outfit reasoning.
+- **Weather**: met.no primary with Open-Meteo fallback (both free, no key).
 
 ```
 StyleMate/
@@ -79,12 +79,12 @@ StyleMate/
 │   ├── ImageAnalysisService     # Gemini calls (classify, segment, suggest outfits)
 │   ├── BackgroundRemovalService # Vision foreground mask + category crops
 │   ├── DuplicateDetector        # similarity scoring
-│   ├── FaceMatchingService      # MobileFaceNet + Vision landmarks
+│   ├── FaceMatchingService      # InsightFace ArcFace (ResNet-50) + Vision landmarks
 │   ├── SelfieCameraService      # onboarding selfie capture
 │   ├── PhotoScanService         # date-range library scan + face filter
 │   ├── OnboardingManager        # per-user completion flags
 │   ├── OutfitLogic              # Outfit value type
-│   ├── WeatherService           # Open-Meteo client
+│   ├── WeatherService           # met.no + Open-Meteo client
 │   └── LocationService          # CLLocationManager wrapper
 ├── ViewModels/                  # HomeViewModel, MyOutfitsViewModel
 ├── Views/
@@ -120,7 +120,7 @@ Declared in `StyleMate.entitlements`:
 ### Requirements
 
 - Xcode 15+
-- iOS 17+ device or simulator (face matching needs a real device for camera capture during onboarding)
+- iOS 18+ device or simulator (face matching needs a real device for camera capture during onboarding)
 - An Apple Developer team with iCloud + Sign in with Apple capabilities
 - A Google OAuth client ID for Sign in with Google
 - A Google Gemini API key
@@ -146,9 +146,21 @@ Declared in `StyleMate.entitlements`:
 
    Update `GIDClientID` and the matching `CFBundleURLSchemes` entry in `StyleMate/Info.plist` with your OAuth client ID.
 
-4. **Bundle the MobileFaceNet model**
+4. **Generate the face-embedding model**
 
-   `MobileFaceNet.mlpackage` is included at the repo root. See `scripts/SETUP_MOBILEFACENET.md` if you want to regenerate it from `scripts/w600k_mbf.onnx` via `scripts/convert_model.py`.
+   The face model is **not** committed (large binary, git-ignored). Regenerate `MobileFaceNet.mlpackage` at the repo root from the public InsightFace ONNX:
+
+   ```bash
+   cd scripts
+   python3 -m venv venv && source venv/bin/activate
+   pip install "coremltools>=8" onnx onnx2torch torch "numpy<2"
+   curl -L -o w600k_r50.onnx \
+     "https://huggingface.co/deepghs/insightface/resolve/main/buffalo_l/w600k_r50.onnx?download=true"
+   python convert_r50.py
+   rm -rf ../MobileFaceNet.mlpackage && cp -R FaceNetR50.mlpackage ../MobileFaceNet.mlpackage
+   ```
+
+   This produces the InsightFace ArcFace ResNet-50 (`w600k_r50`) model the app loads by the historical name `MobileFaceNet`. See the header of `scripts/convert_r50.py` for details.
 
 5. **Open and run**
 
