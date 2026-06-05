@@ -1051,6 +1051,9 @@ class FaceMatchingService {
 
     // MARK: - Cosine Similarity (dot product of L2-normalized vectors)
 
+    /// Public cosine of two L2-normalized embeddings (used by diagnostics).
+    func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float { dotProduct(a, b) }
+
     private func dotProduct(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count, !a.isEmpty else { return 0 }
         var result: Float = 0
