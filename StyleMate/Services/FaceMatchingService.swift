@@ -7,7 +7,7 @@ import CoreImage
 /// One detected person in a photo, shown in the "which one is you?" picker.
 struct DetectedPerson: Identifiable {
     let id = UUID()
-    let face: VNFaceObservation
+    let faceBox: CGRect      // normalized, bottom-left (Vision convention)
     let crop: UIImage
     let embedding: [Float]?
 }
@@ -29,9 +29,14 @@ enum IdentityResolution {
 /// I/O: 112x112 **BGR** in (cv2 convention, NOT RGB), 512-dim out, (px-127.5)/127.5
 /// normalization. Like all ArcFace-family models its embeddings are ONLY
 /// meaningful when the input face is warped to the canonical 5-point template
-/// (eyes / nose / mouth-corners mapped to fixed 112x112 positions). A loose
-/// bounding-box crop produces near-random embeddings — which is why matching must
-/// align faces before embedding.
+/// (eyes / nose / mouth-corners mapped to fixed 112x112 positions).
+///
+/// Face detection + the 5 landmarks come from the bundled **InsightFace SCRFD-10G**
+/// detector (`SCRFDDetector`), NOT Apple Vision. This is load-bearing: Apple
+/// Vision's landmarks were too imprecise, and ArcFace alignment is brutally
+/// sensitive — offline, proper SCRFD landmarks gave same-person 0.988 vs ~0.2 with
+/// Vision. SCRFD outputs the 5 points already in the canonical ArcFace order, fed
+/// straight to `warpAligned`.
 ///
 /// Identity is represented by a *gallery* of embeddings (the onboarding selfie
 /// plus any library photos the user later confirms are them), persisted to disk.
@@ -43,15 +48,14 @@ class FaceMatchingService {
 
     // MARK: - Tunable Thresholds
     //
-    // Cosine similarity of L2-normalized AdaFace IR-101 (WebFace12M) embeddings.
-    // AdaFace's score scale differs from InsightFace ArcFace, so these are STARTING
-    // estimates to be calibrated from the first device logs: AdaFace typically
-    // separates same-person from impostors more cleanly, with verification
-    // thresholds around ~0.2–0.3. Read the first [FaceRef] builder range and
-    // [FaceMatch] galleryIdx lines, then set highConfidenceThreshold just under
-    // the genuine same-person cluster and well above the impostor cloud.
-    static var highConfidenceThreshold: Float = 0.28   // auto-add — CALIBRATE from logs
-    static var borderlineThreshold: Float = 0.18        // send to review
+    // Cosine of L2-normalized AdaFace IR-101 embeddings, now fed faces aligned by
+    // the SCRFD detector (not Apple Vision). Offline with proper SCRFD alignment:
+    // same-person ~0.6–0.99, impostors ~0.03 (max ~0.18). So the genuine cluster
+    // and the impostor cloud are now cleanly separated and the bar can sit safely
+    // in the gap. Starting points below; calibrate from the first [FaceRef]/
+    // [FaceMatch] device logs (watch galleryIdx for a polluted reference).
+    static var highConfidenceThreshold: Float = 0.35   // auto-add
+    static var borderlineThreshold: Float = 0.25        // send to review
     private static let minFaceQuality: Float = 0.30     // skip blurry / poorly-captured faces
     // In a multi-person photo, the best match must beat the next-best face by at
     // least this much to auto-isolate silently. Otherwise two people score too
@@ -82,7 +86,7 @@ class FaceMatchingService {
 
     struct MatchResult {
         let confidence: Confidence
-        let matchedFace: VNFaceObservation?
+        let matchedFaceBox: CGRect?    // normalized, bottom-left — for person isolation
         let faceCount: Int
         let similarity: Float?
         /// Best similarity of any OTHER face in the photo. Used to detect the
@@ -99,7 +103,7 @@ class FaceMatchingService {
             return best - runner
         }
 
-        static let noFaces = MatchResult(confidence: .none, matchedFace: nil, faceCount: 0, similarity: nil)
+        static let noFaces = MatchResult(confidence: .none, matchedFaceBox: nil, faceCount: 0, similarity: nil)
     }
 
     // MARK: - Model Loading
@@ -136,7 +140,7 @@ class FaceMatchingService {
     /// are model-specific (an R50 vector is meaningless to compare against an mbf
     /// vector), so a gallery tagged with a different version is discarded and
     /// rebuilt from the selfie when the model changes.
-    private static let modelVersion = "adaface_ir101_align3_mirror"
+    private static let modelVersion = "adaface_ir101_scrfd"
 
     private static func galleryURL(forUser userId: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -260,21 +264,22 @@ class FaceMatchingService {
     /// aligned face embedding (to add to the gallery on confirm), and its
     /// similarity to the current gallery (for ranking; 0 if the gallery is empty).
     func evaluateFaceForReference(in cgImage: CGImage) -> (displayCrop: CGImage, embedding: [Float], similarity: Float)? {
-        let faces = detectFacesWithLandmarks(in: cgImage)
+        let faces = SCRFDDetector.shared.detect(in: cgImage)
         guard !faces.isEmpty else { return nil }
+        let imgW = cgImage.width, imgH = cgImage.height
 
-        func embedAndCrop(_ face: VNFaceObservation) -> (crop: CGImage, embedding: [Float])? {
-            guard let aligned = alignedFaceCrop(from: cgImage, observation: face,
-                                                imageWidth: cgImage.width, imageHeight: cgImage.height),
+        func embedAndCrop(_ face: DetectedFace) -> (crop: CGImage, embedding: [Float])? {
+            guard let aligned = warpAligned(image: cgImage, srcPoints: face.keypoints),
                   let embedding = generateEmbedding(for: aligned),
-                  let crop = paddedFaceCrop(from: cgImage, bbox: face.boundingBox) else { return nil }
+                  let crop = paddedFaceCrop(from: cgImage,
+                                            bbox: face.normalizedBox(imageWidth: imgW, imageHeight: imgH)) else { return nil }
             return (crop, embedding)
         }
 
         // No anchor yet (no selfie): fall back to the largest face.
         if referenceGallery.isEmpty {
             guard let face = faces.max(by: {
-                ($0.boundingBox.width * $0.boundingBox.height) < ($1.boundingBox.width * $1.boundingBox.height)
+                ($0.boxPixels.width * $0.boxPixels.height) < ($1.boxPixels.width * $1.boxPixels.height)
             }), let r = embedAndCrop(face) else { return nil }
             return (r.crop, r.embedding, 0)
         }
@@ -340,12 +345,10 @@ class FaceMatchingService {
             return .noFaces
         }
 
-        let faces = detectFacesWithLandmarks(in: cgImage)
+        let faces = SCRFDDetector.shared.detect(in: cgImage)
         if faces.isEmpty { return .noFaces }
 
-        let qualityMap = detectFaceQualities(in: cgImage)
-
-        var bestMatch: VNFaceObservation?
+        var bestBox: CGRect?
         var bestSimilarity: Float = -.infinity
         var secondSimilarity: Float = -.infinity
         var bestRefIndex = -1
@@ -355,14 +358,7 @@ class FaceMatchingService {
         let imgH = cgImage.height
 
         for face in faces {
-            let quality = qualityForFace(face, qualityMap: qualityMap)
-            if quality < Self.minFaceQuality {
-                allScores.append(-1)   // marker: skipped for low quality
-                continue
-            }
-
-            guard let aligned = alignedFaceCrop(from: cgImage, observation: face,
-                                                 imageWidth: imgW, imageHeight: imgH),
+            guard let aligned = warpAligned(image: cgImage, srcPoints: face.keypoints),
                   let embedding = generateEmbedding(for: aligned) else {
                 allScores.append(-999) // marker: align/embed failed
                 continue
@@ -374,7 +370,7 @@ class FaceMatchingService {
             if similarity > bestSimilarity {
                 secondSimilarity = bestSimilarity
                 bestSimilarity = similarity
-                bestMatch = face
+                bestBox = face.normalizedBox(imageWidth: imgW, imageHeight: imgH)
                 bestRefIndex = refIdx
             } else if similarity > secondSimilarity {
                 secondSimilarity = similarity
@@ -395,7 +391,7 @@ class FaceMatchingService {
 
         return MatchResult(
             confidence: confidence,
-            matchedFace: confidence == .none ? nil : bestMatch,
+            matchedFaceBox: confidence == .none ? nil : bestBox,
             faceCount: faces.count,
             similarity: bestSimilarity.isFinite ? bestSimilarity : nil,
             runnerUpSimilarity: secondSimilarity.isFinite ? secondSimilarity : nil
@@ -443,7 +439,7 @@ class FaceMatchingService {
         }
         _ = loadReference(forUser: userId)
 
-        let faces = detectFacesWithLandmarks(in: cg)
+        let faces = SCRFDDetector.shared.detect(in: cg)
         let bodies = countPeople(in: cg)
         let peopleCount = max(faces.count, bodies)
         print("[Identity] faces=\(faces.count) bodies=\(bodies) gallery=\(referenceCount)")
@@ -462,7 +458,7 @@ class FaceMatchingService {
         let marginStr = match.margin == .greatestFiniteMagnitude ? "inf" : String(format: "%.3f", match.margin)
         let confidentPick = match.confidence == .high && match.margin >= Self.ambiguityMargin
 
-        if confidentPick, match.matchedFace != nil,
+        if confidentPick, match.matchedFaceBox != nil,
            let isolated = isolateMatchedPerson(from: cg, matchResult: match) {
             print("[Identity] -> isolated user (high match, sim=\(simStr), margin=\(marginStr))")
             return .isolated(isolated)
@@ -492,7 +488,7 @@ class FaceMatchingService {
         let marginStr = match.margin == .greatestFiniteMagnitude ? "inf" : String(format: "%.3f", match.margin)
 
         // Must be a high-confidence match that clearly beats any other face.
-        guard match.confidence == .high, match.margin >= Self.ambiguityMargin, match.matchedFace != nil else {
+        guard match.confidence == .high, match.margin >= Self.ambiguityMargin, match.matchedFaceBox != nil else {
             print("[Scan] skip: not confidently the user (conf=\(match.confidence) sim=\(simStr) margin=\(marginStr) faces=\(match.faceCount))")
             return nil
         }
@@ -510,14 +506,15 @@ class FaceMatchingService {
         return fullImage
     }
 
-    private func detectedPeople(in cgImage: CGImage, faces: [VNFaceObservation]) -> [DetectedPerson] {
+    private func detectedPeople(in cgImage: CGImage, faces: [DetectedFace]) -> [DetectedPerson] {
+        let imgW = cgImage.width, imgH = cgImage.height
         var result: [DetectedPerson] = []
         for face in faces {
-            guard let cropCG = personDisplayCrop(from: cgImage, faceBBox: face.boundingBox) else { continue }
-            let aligned = alignedFaceCrop(from: cgImage, observation: face,
-                                          imageWidth: cgImage.width, imageHeight: cgImage.height)
+            let nbox = face.normalizedBox(imageWidth: imgW, imageHeight: imgH)
+            guard let cropCG = personDisplayCrop(from: cgImage, faceBBox: nbox) else { continue }
+            let aligned = warpAligned(image: cgImage, srcPoints: face.keypoints)
             let emb = aligned.flatMap { generateEmbedding(for: $0) }
-            result.append(DetectedPerson(face: face, crop: UIImage(cgImage: cropCG), embedding: emb))
+            result.append(DetectedPerson(faceBox: nbox, crop: UIImage(cgImage: cropCG), embedding: emb))
         }
         return result
     }
@@ -531,7 +528,7 @@ class FaceMatchingService {
             addReferenceEmbeddings([emb], forUser: userId)   // active learning
             print("[Identity] User picked a person — learned their face (active learning)")
         }
-        let mr = MatchResult(confidence: .high, matchedFace: person.face,
+        let mr = MatchResult(confidence: .high, matchedFaceBox: person.faceBox,
                              faceCount: max(totalFaces, 2), similarity: nil)
         let result = isolateMatchedPerson(from: cg, matchResult: mr)
         print("[Identity] Isolating picked person: \(result != nil ? "ok" : "FAILED -> using whole photo")")
@@ -561,7 +558,7 @@ class FaceMatchingService {
     /// VNGeneratePersonInstanceMaskRequest. Returns a UIImage with only the
     /// matched person visible (transparent background), cropped to their extent.
     func isolateMatchedPerson(from cgImage: CGImage, matchResult: MatchResult) -> UIImage? {
-        guard let face = matchResult.matchedFace else { return nil }
+        guard let faceBox = matchResult.matchedFaceBox else { return nil }
 
         let ciImage = CIImage(cgImage: cgImage)
         let handler = VNImageRequestHandler(ciImage: ciImage)
@@ -591,7 +588,7 @@ class FaceMatchingService {
 
         // Multiple people: pick the instance whose mask actually covers the
         // matched face. generateMask returns a Float32 soft mask in [0,1].
-        guard let idx = instanceCoveringFace(face, in: maskObs) else {
+        guard let idx = instanceCoveringFace(faceBox, in: maskObs) else {
             print("[FaceMatch] Could not map matched face to a person instance")
             return nil
         }
@@ -603,8 +600,7 @@ class FaceMatchingService {
     /// Returns the instance index whose mask best covers the matched face, or nil
     /// if no instance meaningfully covers it. Samples the face center plus a point
     /// toward the chest so a face on a body boundary still maps correctly.
-    private func instanceCoveringFace(_ face: VNFaceObservation, in maskObs: VNInstanceMaskObservation) -> Int? {
-        let bbox = face.boundingBox
+    private func instanceCoveringFace(_ bbox: CGRect, in maskObs: VNInstanceMaskObservation) -> Int? {
         // Vision normalized coords (bottom-left origin): face center, and below the
         // chin toward the chest.
         let samples: [(CGFloat, CGFloat)] = [
@@ -715,16 +711,18 @@ class FaceMatchingService {
     // MARK: - Embedding from a Full Photo (detect + align + embed best face)
 
     private func generateEmbeddingFromPhoto(_ cgImage: CGImage, label: String) -> [Float]? {
-        let faces = detectFacesWithLandmarks(in: cgImage)
+        let faces = SCRFDDetector.shared.detect(in: cgImage)
         print("[FaceMatch] [\(label)] Detected \(faces.count) face(s)")
 
-        guard let bestFace = faces.first else {
+        // Largest (most prominent) face — for a selfie/confirm crop there's one.
+        guard let bestFace = faces.max(by: {
+            ($0.boxPixels.width * $0.boxPixels.height) < ($1.boxPixels.width * $1.boxPixels.height)
+        }) else {
             print("[FaceMatch] [\(label)] No face detected")
             return nil
         }
 
-        guard let aligned = alignedFaceCrop(from: cgImage, observation: bestFace,
-                                             imageWidth: cgImage.width, imageHeight: cgImage.height) else {
+        guard let aligned = warpAligned(image: cgImage, srcPoints: bestFace.keypoints) else {
             print("[FaceMatch] [\(label)] Failed to produce aligned face crop")
             return nil
         }

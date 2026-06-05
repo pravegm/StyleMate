@@ -29,7 +29,7 @@ Originals, cropped images, and thumbnails are stored under `Documents/wardrobe_i
 The auto-scan walks `PHAssetCollection` chronologically across the date range you pick (last month / 6 months / year / custom / all). Before any photo is sent to Gemini, it's filtered by an on-device face check:
 
 - During onboarding you capture a reference selfie (`SelfieCameraService` → `FaceMatchingService`), and can optionally confirm more of your own faces from your library ("tap which photos are you") to strengthen the reference gallery.
-- Each face is aligned to a canonical 112×112 via `Vision` 5-point landmarks, then embedded with **AdaFace IR-101 (WebFace12M)** converted to Core ML, bundled as `MobileFaceNet.mlpackage` (the filename is kept for historical reasons). AdaFace's quality-adaptive margin is built for low-quality/varied faces (angles, distance, lighting), which suits real camera-roll photos. Embeddings are tagged with the model version so a model upgrade auto-rebuilds the gallery.
+- Faces are detected and 5-point-landmarked by the bundled **InsightFace SCRFD-10G** detector (Core ML), aligned to a canonical 112×112, then embedded with **AdaFace IR-101 (WebFace12M)** (bundled as `MobileFaceNet.mlpackage`, filename kept for history). SCRFD's precise landmarks are essential — ArcFace-family alignment is extremely sensitive, and imprecise landmarks collapse same-person similarity. Embeddings are tagged with the model version so an upgrade auto-rebuilds the gallery.
 - Each candidate photo is embedded the same way and compared by **cosine similarity** against the reference gallery, with tiered confidence (high / borderline / none) and a runner-up margin. When a photo has several people, the scan only keeps it if *you* are matched with high confidence and a clean margin, then isolates your garments via a person-instance mask — so other people's clothes are never extracted.
 
 Scan progress is checkpointed to `Application Support/ScanProgress/` so you can resume after backgrounding or a crash.
@@ -65,7 +65,7 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and show up 
 - **Pattern**: MVVM. `HomeViewModel`, `MyOutfitsViewModel`, plus services published via `@Published`.
 - **Local persistence**: `UserDefaults` (wardrobe items per user, scoped by sanitized email) + Core Data (`StyleMateDataModel.xcdatamodeld`, outfit history).
 - **Cloud**: CloudKit private DB (zone `WardrobeZone`), `CKRecord` per wardrobe item with `CKAsset` image attachments.
-- **On-device ML**: Core ML — AdaFace IR-101 (WebFace12M), bundled as `MobileFaceNet.mlpackage` — plus `Vision` (face landmarks, capture quality, person-instance mask, foreground mask, human detection).
+- **On-device ML**: Core ML — InsightFace SCRFD-10G face detector (`SCRFD10G.mlpackage`) + AdaFace IR-101 embedder (`MobileFaceNet.mlpackage`) — plus `Vision` (person-instance mask, foreground mask, human detection). Face landmarks come from SCRFD, not Vision.
 - **Remote AI**: Google Gemini (3.x Flash family) for classification, segmentation, and outfit reasoning.
 - **Weather**: met.no primary with Open-Meteo fallback (both free, no key).
 
@@ -79,7 +79,8 @@ StyleMate/
 │   ├── ImageAnalysisService     # Gemini calls (classify, segment, suggest outfits)
 │   ├── BackgroundRemovalService # Vision foreground mask + category crops
 │   ├── DuplicateDetector        # similarity scoring
-│   ├── FaceMatchingService      # AdaFace IR-101 embeddings + Vision landmarks
+│   ├── SCRFDDetector            # InsightFace SCRFD-10G face detect + 5-pt landmarks
+│   ├── FaceMatchingService      # SCRFD align + AdaFace IR-101 embeddings
 │   ├── SelfieCameraService      # onboarding selfie capture
 │   ├── PhotoScanService         # date-range library scan + face filter
 │   ├── OnboardingManager        # per-user completion flags
@@ -159,7 +160,18 @@ Declared in `StyleMate.entitlements`:
    rm -rf ../MobileFaceNet.mlpackage && cp -R AdaFaceR100.mlpackage ../MobileFaceNet.mlpackage
    ```
 
-   This produces the AdaFace IR-101 (WebFace12M) model the app loads by the historical name `MobileFaceNet`. Note it takes **BGR** input (handled in `createInputMultiArray`). See the header of `scripts/convert_adaface.py` for details. (`scripts/convert_r50.py` remains for the prior InsightFace R50 model.)
+   This produces the AdaFace IR-101 (WebFace12M) embedder the app loads by the historical name `MobileFaceNet` (**BGR** input, handled in `createInputMultiArray`). See `scripts/convert_adaface.py`.
+
+   Also generate the face **detector** (`SCRFD10G.mlpackage`, ~8 MB), likewise git-ignored:
+
+   ```bash
+   pip install insightface onnxruntime           # downloads buffalo_l (incl. det_10g.onnx)
+   python -c "from insightface.app import FaceAnalysis; FaceAnalysis(name='buffalo_l').prepare(ctx_id=-1)"
+   python convert_scrfd.py                        # -> SCRFD10G.mlpackage
+   cp -R SCRFD10G.mlpackage ../SCRFD10G.mlpackage
+   ```
+
+   (`scripts/convert_r50.py` remains for the prior InsightFace R50 embedder.)
 
 5. **Open and run**
 

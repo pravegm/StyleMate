@@ -18,6 +18,12 @@
 - **AdaFace input is BGR** (cv2 convention), `(px-127.5)/127.5`, 112×112 — NOT RGB.
   `createInputMultiArray` feeds B→plane0, R→plane2. A model swap back to an
   InsightFace/ArcFace model must restore RGB.
+- **Face detection + 5-point landmarks come from bundled InsightFace SCRFD-10G**
+  (`SCRFDDetector`, `SCRFD10G.mlpackage`), NOT Apple Vision — Vision's landmarks
+  were too imprecise and collapsed same-person similarity (proven: SCRFD→0.988 vs
+  Vision→~0.2). SCRFD input is **RGB**, `(px-127.5)/128`, 640×640 letterboxed
+  top-left. It outputs 5 points in canonical ArcFace order, fed to `warpAligned`.
+  Regenerate via `scripts/convert_scrfd.py`. Don't reintroduce Vision landmarks.
 - Embeddings are model-specific. Persisted galleries are tagged with
   `FaceMatchingService.modelVersion`; a mismatch auto-discards and rebuilds from
   the selfie. Bump that constant on any model swap.
