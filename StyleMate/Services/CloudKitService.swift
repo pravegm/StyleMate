@@ -22,6 +22,26 @@ class CloudKitService: ObservableObject {
     private let zoneName = "WardrobeZone"
     private lazy var zoneID = CKRecordZone.ID(zoneName: zoneName)
 
+    /// Set once we hit a permanent provisioning/schema rejection (e.g. the
+    /// WardrobeItem record type / queryable index isn't configured in this build's
+    /// CloudKit container). Further cloud reads are short-circuited so we don't
+    /// hammer the server and spam the log on every foreground. Cleared next launch.
+    private var cloudUnavailable = false
+
+    /// Errors that won't fix themselves by retrying — they need the CloudKit
+    /// container/schema to be set up (or the user to sign into iCloud), not a retry.
+    private func isPermanent(_ error: Error) -> Bool {
+        guard let ck = error as? CKError else { return false }
+        switch ck.code {
+        case .serverRejectedRequest, .unknownItem, .badContainer,
+             .missingEntitlement, .notAuthenticated, .managedAccountRestricted,
+             .invalidArguments:
+            return true
+        default:
+            return false
+        }
+    }
+
     private init() {
         lastSyncDate = UserDefaults.standard.object(forKey: "lastCloudKitSync") as? Date
     }
@@ -140,6 +160,8 @@ class CloudKitService: ObservableObject {
     // MARK: - Fetch All Items
 
     func fetchAll(userID: String) async -> [WardrobeItem] {
+        // Already known to be unavailable this session — don't retry / spam the log.
+        guard !cloudUnavailable else { return [] }
         syncStatus = .syncing
         var allItems: [WardrobeItem] = []
 
@@ -181,9 +203,17 @@ class CloudKitService: ObservableObject {
             UserDefaults.standard.set(lastSyncDate, forKey: "lastCloudKitSync")
             resetStatusAfterDelay()
         } catch {
-            print("[CloudKit] Fetch error: \(error.localizedDescription)")
-            syncStatus = .error("Could not fetch from iCloud")
-            resetStatusAfterDelay()
+            if isPermanent(error) {
+                // Provisioning/schema not set up for this build — stop retrying and
+                // don't surface a scary sync error; the wardrobe just stays local.
+                cloudUnavailable = true
+                print("[CloudKit] Cloud sync unavailable (not provisioned): \(error.localizedDescription). Disabling cloud sync for this session.")
+                syncStatus = .idle
+            } else {
+                print("[CloudKit] Fetch error: \(error.localizedDescription)")
+                syncStatus = .error("Could not fetch from iCloud")
+                resetStatusAfterDelay()
+            }
         }
 
         return allItems
