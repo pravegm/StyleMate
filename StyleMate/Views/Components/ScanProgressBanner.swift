@@ -33,10 +33,10 @@ struct ScanProgressBanner: View {
 
     private var scanningBanner: some View {
         HStack(alignment: .top, spacing: DS.Spacing.sm) {
-            Image(systemName: "magnifyingglass")
+            Image(systemName: scanService.isPaused ? "pause.circle.fill" : "magnifyingglass")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(DS.Colors.accent)
-                .rotationEffect(.degrees(rotationAngle))
+                .rotationEffect(.degrees(scanService.isPaused ? 0 : rotationAngle))
                 .onAppear {
                     withAnimation(.linear(duration: 2.5).repeatForever(autoreverses: false)) {
                         rotationAngle = 360
@@ -46,7 +46,7 @@ struct ScanProgressBanner: View {
                 .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                Text("Scanning your photos...")
+                Text(scanService.isPaused ? "Scan paused" : "Scanning your photos...")
                     .font(DS.Font.headline)
                     .foregroundColor(DS.Colors.textPrimary)
 
@@ -66,13 +66,25 @@ struct ScanProgressBanner: View {
                     .font(DS.Font.subheadline)
                     .foregroundColor(DS.Colors.textSecondary)
             }
+
+            Spacer(minLength: DS.Spacing.xs)
+
+            Button {
+                Haptics.light()
+                scanService.togglePause()
+            } label: {
+                Image(systemName: scanService.isPaused ? "play.circle.fill" : "pause.circle.fill")
+                    .font(.system(size: 26))
+                    .foregroundColor(DS.Colors.accent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(scanService.isPaused ? "Resume scan" : "Pause scan")
         }
         .padding(DS.Spacing.md)
         .background(DS.Colors.backgroundCard)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         .dsCardShadow()
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Scanning photos. \(scanService.photosScanned) of \(scanService.totalPhotosToScan) scanned. \(scanService.itemsFound) items added to wardrobe.")
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder

@@ -438,7 +438,11 @@ class FaceMatchingService {
     /// - multi-person, confident face match -> isolate just the user (silent)
     /// - multi-person, unsure  -> ask the user "which one is you?"
     func resolveIdentity(in image: UIImage, userId: String) -> IdentityResolution {
-        guard let cg = image.cgImage else {
+        // Bake EXIF orientation: a picked/captured UIImage carries its rotation in
+        // metadata, and raw .cgImage drops it — feeding the detector a sideways
+        // image (same class of bug we fixed for the scan/builder). The scan path
+        // bakes via loadFullImage; do the same here.
+        guard let cg = renderUpOrientation(image).cgImage else {
             print("[Identity] No CGImage — using whole photo")
             return .useWhole
         }
@@ -535,7 +539,7 @@ class FaceMatchingService {
     /// face (appends to the gallery so future matches improve).
     func isolateChosenPerson(_ person: DetectedPerson, in image: UIImage,
                              totalFaces: Int, userId: String) -> UIImage? {
-        guard let cg = image.cgImage else { return nil }
+        guard let cg = renderUpOrientation(image).cgImage else { return nil }
         if let emb = person.embedding {
             addReferenceEmbeddings([emb], forUser: userId)   // active learning
             print("[Identity] User picked a person — learned their face (active learning)")

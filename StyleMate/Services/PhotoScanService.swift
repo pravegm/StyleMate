@@ -45,6 +45,8 @@ class PhotoScanService: ObservableObject {
     @Published var itemsFound: Int = 0
     @Published var currentPhase: String = ""
     @Published var scanAddedItemIDs: [UUID] = []
+    /// User-controlled pause. The scan loop parks (without ending) while true.
+    @Published var isPaused: Bool = false
 
     private var lastUIUpdate = ContinuousClock.now
     private var lastScanContext: ScanContext?
@@ -74,6 +76,33 @@ class PhotoScanService: ObservableObject {
 
     private var isCancelled: Bool {
         scanState != .scanning || Task.isCancelled
+    }
+
+    // MARK: - Pause / Resume
+
+    func pauseScan() {
+        guard scanState == .scanning, !isPaused else { return }
+        isPaused = true
+        currentPhase = "Scan paused"
+        print("[StyleMate] Auto-scan paused")
+    }
+
+    func resumeScan() {
+        guard isPaused else { return }
+        isPaused = false
+        currentPhase = "Scanning your photos..."
+        print("[StyleMate] Auto-scan resumed")
+    }
+
+    func togglePause() { isPaused ? resumeScan() : pauseScan() }
+
+    /// Parks the loop while paused (without exiting). Returns false if the scan was
+    /// cancelled while paused, so the caller can bail out.
+    private func awaitWhilePaused() async -> Bool {
+        while isPaused && !isCancelled {
+            try? await Task.sleep(nanoseconds: 200_000_000)   // 0.2s
+        }
+        return !isCancelled
     }
 
     // MARK: - Progress Persistence (JSON file in Application Support)
@@ -143,6 +172,7 @@ class PhotoScanService: ObservableObject {
         }
 
         scanState = .scanning
+        isPaused = false
         photosScanned = 0
         itemsFound = 0
         scanAddedItemIDs = []
@@ -188,6 +218,7 @@ class PhotoScanService: ObservableObject {
 
             for (asset, thumbnail) in zip(batch, thumbnails) {
                 guard !isCancelled else { return }
+                if isPaused { guard await awaitWhilePaused() else { return } }
 
                 guard let thumbnail = thumbnail, let thumbCG = thumbnail.cgImage else {
                     progress.scannedAssetIDs.insert(asset.localIdentifier)
@@ -346,6 +377,7 @@ class PhotoScanService: ObservableObject {
 
     func cancelScan() {
         scanState = .idle
+        isPaused = false
         currentPhase = ""
         print("[StyleMate] Auto-scan cancelled")
     }
