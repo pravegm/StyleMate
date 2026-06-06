@@ -140,7 +140,7 @@ class FaceMatchingService {
     /// are model-specific (an R50 vector is meaningless to compare against an mbf
     /// vector), so a gallery tagged with a different version is discarded and
     /// rebuilt from the selfie when the model changes.
-    private static let modelVersion = "adaface_ir101_scrfd"
+    private static let modelVersion = "adaface_ir101_upright"
 
     private static func galleryURL(forUser userId: String) -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -933,8 +933,11 @@ class FaceMatchingService {
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
         ) else { return nil }
-        ctx.translateBy(x: 0, y: CGFloat(h))
-        ctx.scaleBy(x: 1, y: -1)
+        // NO vertical flip. Verified with CoreGraphics: drawing a CGImage into a
+        // bitmap context without a flip yields a TOP-LEFT (upright) buffer. The old
+        // flip produced an upside-down buffer, so warpAligned's sampled keypoints
+        // were Y-inverted vs the upright arcfaceDst template — every aligned face
+        // crop came out upside down, and every embedding was of an upside-down face.
         ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: w, height: h))
         return pixels
     }

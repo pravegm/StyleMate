@@ -209,10 +209,10 @@ final class SCRFDDetector {
             bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
         ) else { return nil }
-        // Same flip the rasterizer uses, so the result is upright and the face sits
-        // at top-left offset (marginX, marginY) — which detect() subtracts back off.
-        ctx.translateBy(x: 0, y: CGFloat(h))
-        ctx.scaleBy(x: 1, y: -1)
+        // NO vertical flip: drawing a CGImage into a bitmap context WITHOUT a flip
+        // already yields a top-left (upright) buffer (verified). The previous flip
+        // produced upside-down images. Symmetric margins put the face at top-left
+        // offset (marginX, marginY), which detect() subtracts back off.
         ctx.draw(cg, in: CGRect(x: marginX, y: marginY, width: cg.width, height: cg.height))
         return ctx.makeImage()
     }
@@ -228,8 +228,8 @@ final class SCRFDDetector {
             bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
         ) else { return nil }
-        ctx.translateBy(x: 0, y: CGFloat(h))
-        ctx.scaleBy(x: 1, y: -1)
+        // NO flip — see paddedImage. Drawing without a flip gives a top-left buffer;
+        // the old flip made SCRFD's input upside down (low scores, garbage landmarks).
         ctx.draw(cg, in: CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
         return pixels
     }
