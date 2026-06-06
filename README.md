@@ -49,7 +49,7 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and show up 
 
 ## Major features
 
-- **Onboarding** — welcome → photo-permission explainer → selfie capture → photo library permission → optional initial library scan.
+- **Onboarding** — welcome → about you (name / age / gender) → photo-scan explainer → selfie capture → photo library permission → reference builder → optional initial library scan. The auto-scan that follows can be paused/resumed from the home banner.
 - **Home** — time-aware greeting, weather card, wardrobe-summary widget, "Style Me" launcher, scan progress banner, last-scan results.
 - **My Wardrobe** — grid grouped by category (sorted by item count), tap into category → product subgroups → item detail. Add via the custom bottom sheet (Camera / Gallery / Auto-scan), edit any field, delete with CloudKit cleanup.
 - **My Outfits** — calendar of logged outfits, day detail with edit/delete, manual outfit composer.

@@ -388,9 +388,14 @@ struct OnboardingSelfieView: View {
     private func confirmSelfie() {
         if let image = cameraService.capturedImage, let userId = authService.user?.id {
             selfieImage = image
-            cameraService.saveSelfie(image, userId: userId)
-            FaceMatchingService.shared.clearReference(forUser: userId)
-            print("[StyleMate] Selfie confirmed and saved, reference cleared for reload")
+            // Advance immediately; do the JPEG-encode + disk write + reference reset
+            // off the main thread so the tap and transition stay responsive (this
+            // synchronous I/O was the source of the gesture-gate lag).
+            Task.detached(priority: .userInitiated) {
+                cameraService.saveSelfie(image, userId: userId)
+                FaceMatchingService.shared.clearReference(forUser: userId)
+                print("[StyleMate] Selfie confirmed and saved, reference cleared for reload")
+            }
         }
         onAdvance()
     }

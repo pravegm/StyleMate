@@ -142,7 +142,9 @@ class SelfieCameraService: NSObject, ObservableObject {
         return UIImage(cgImage: cropped)
     }
 
-    func saveSelfie(_ image: UIImage, userId: String) {
+    // nonisolated: pure image-encode + file write, no actor state — lets callers
+    // run it off the main thread (avoids blocking the UI on confirm).
+    nonisolated func saveSelfie(_ image: UIImage, userId: String) {
         guard let data = image.jpegData(compressionQuality: 0.95) else { return }
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let filePath = documentsPath.appendingPathComponent("selfie_reference_\(userId).jpg")

@@ -9,7 +9,7 @@ struct OnboardingView: View {
     @State private var selfieImage: UIImage? = nil
     @State private var showReferenceBuilder = false
 
-    private let totalSteps = 4
+    private let totalSteps = 5
 
     var body: some View {
         ZStack {
@@ -25,14 +25,16 @@ struct OnboardingView: View {
                         case 0:
                             OnboardingWelcomeView(onAdvance: advance)
                         case 1:
-                            OnboardingPhotoExplanationView(onAdvance: advance, onSkip: skipToEnd)
+                            OnboardingProfileView(onAdvance: advance)
                         case 2:
+                            OnboardingPhotoExplanationView(onAdvance: advance, onSkip: skipToEnd)
+                        case 3:
                             OnboardingSelfieView(
                                 selfieImage: $selfieImage,
                                 onAdvance: advance,
                                 onSkip: { advance() }
                             )
-                        case 3:
+                        case 4:
                             OnboardingPhotoPermissionView(onComplete: handlePhotoPermissionDone)
                         default:
                             EmptyView()
