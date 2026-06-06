@@ -88,7 +88,12 @@ final class SCRFDDetector {
                 guard let a = out.featureValue(for: n)?.multiArrayValue else { return nil }
                 return "\(n):\(a.shape.map{$0.intValue})/\(a.dataType.rawValue)"
             }
-            print("[SCRFD] input \(cgImage.width)x\(cgImage.height) scale \(scale) | outputs \(dims)")
+            // Input sanity: a face region should have varied, non-pad values. If the
+            // top-left (where the image is placed) reads ~pad, rasterization failed.
+            let ip = input.dataPointer.bindMemory(to: Float.self, capacity: input.count)
+            let plane = inputSize * inputSize
+            let sampleIdx = (inputSize/4) * inputSize + (inputSize/4)   // ~top-left quadrant
+            print("[SCRFD] input \(cgImage.width)x\(cgImage.height) scale \(scale) | inSample R/G/B=\(String(format: "%.2f/%.2f/%.2f", ip[sampleIdx], ip[plane+sampleIdx], ip[2*plane+sampleIdx])) | outputs \(dims)")
         }
 
         var boxes: [CGRect] = []
@@ -206,16 +211,15 @@ final class SCRFDDetector {
 
     private func floats(_ a: MLMultiArray) -> [Float] {
         let n = a.count
-        switch a.dataType {
-        case .float32:
+        // Fast path only for plain contiguous Float32. For anything else (e.g. the
+        // Float16 outputs an ML-program emits, which may be non-contiguous), use the
+        // element accessor — it converts via NSNumber and respects strides, so it's
+        // always correct (raw Float16 dataPointer reads silently returned garbage).
+        if a.dataType == .float32, (a.strides.last?.intValue ?? 0) == 1 {
             let p = a.dataPointer.bindMemory(to: Float.self, capacity: n)
             return Array(UnsafeBufferPointer(start: p, count: n))
-        case .float16:
-            let p = a.dataPointer.bindMemory(to: Float16.self, capacity: n)
-            return (0..<n).map { Float(p[$0]) }
-        default:
-            return (0..<n).map { a[$0].floatValue }
         }
+        return (0..<n).map { a[$0].floatValue }
     }
 
     // MARK: - NMS
