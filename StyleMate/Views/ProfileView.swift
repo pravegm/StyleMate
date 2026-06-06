@@ -18,6 +18,8 @@ struct ProfileView: View {
     @State private var editAge: String = ""
     @State private var iCloudAvailable = true
     @State private var syncRotation: Double = 0
+    @State private var didSeedFields = false
+    @State private var profileSaveTask: Task<Void, Never>?
     let genderOptions = ["", "Male", "Female"]
 
     private let maxStyles = 6
@@ -34,6 +36,28 @@ struct ProfileView: View {
 
     private var categoryCount: Int {
         Set(wardrobeViewModel.items.map { $0.category }).count
+    }
+
+    /// Debounced profile save: commits ~0.5s after the user stops editing, so we
+    /// don't mutate the observed user (re-rendering the Form) on every keystroke.
+    private func scheduleProfileSave() {
+        guard didSeedFields else { return }
+        profileSaveTask?.cancel()
+        profileSaveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            commitProfileEdits()
+        }
+    }
+
+    private func commitProfileEdits() {
+        guard didSeedFields, var user = authService.user else { return }
+        let trimmed = editName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { user.name = trimmed }
+        user.gender = editGender.isEmpty ? nil : editGender
+        user.age = Int(editAge)
+        authService.user = user
+        authService.saveCurrentUser()
     }
 
     var body: some View {
@@ -80,16 +104,12 @@ struct ProfileView: View {
                     }
 
                     Section("Personal Information") {
+                        // Fields are seeded once (see .onAppear below) and saved on a
+                        // debounce. Do NOT write authService.user per keystroke or
+                        // re-seed via per-field .onAppear — that re-rendered the Form
+                        // mid-edit and reverted the text, hanging the screen.
                         TextField("Name", text: $editName)
-                            .onAppear { editName = user.name }
-                            .onChange(of: editName) { newName in
-                                let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-                                if var user = authService.user, !trimmed.isEmpty {
-                                    user.name = trimmed
-                                    authService.user = user
-                                    authService.saveCurrentUser()
-                                }
-                            }
+                            .onChange(of: editName) { _ in scheduleProfileSave() }
 
                         Picker("Gender", selection: $editGender) {
                             ForEach(genderOptions, id: \.self) { option in
@@ -97,24 +117,13 @@ struct ProfileView: View {
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
-                        .onAppear { editGender = user.gender ?? "" }
-                        .onChange(of: editGender) { newGender in
-                            if var user = authService.user {
-                                user.gender = newGender.isEmpty ? nil : newGender
-                                authService.user = user
-                                authService.saveCurrentUser()
-                            }
-                        }
+                        .onChange(of: editGender) { _ in scheduleProfileSave() }
 
                         TextField("Age", text: $editAge)
                             .keyboardType(.numberPad)
-                            .onAppear { editAge = user.age != nil ? String(user.age!) : "" }
                             .onChange(of: editAge) { newAge in
-                                if var user = authService.user {
-                                    user.age = Int(newAge)
-                                    authService.user = user
-                                    authService.saveCurrentUser()
-                                }
+                                editAge = String(newAge.filter(\.isNumber).prefix(3))
+                                scheduleProfileSave()
                             }
                     }
 
@@ -305,6 +314,18 @@ struct ProfileView: View {
             .navigationTitle("Profile")
             .task {
                 iCloudAvailable = await CloudKitService.shared.checkAccountStatus()
+            }
+            .onAppear {
+                guard !didSeedFields, let user = authService.user else { return }
+                editName = user.name
+                editGender = user.gender ?? ""
+                editAge = user.age.map(String.init) ?? ""
+                didSeedFields = true
+            }
+            .onDisappear {
+                profileSaveTask?.cancel()
+                commitProfileEdits()
+                didSeedFields = false
             }
             .alert("Sign Out", isPresented: $showingSignOutAlert) {
                 Button("Cancel", role: .cancel) {}
