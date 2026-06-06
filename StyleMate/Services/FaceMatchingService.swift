@@ -54,13 +54,17 @@ class FaceMatchingService {
     // and the impostor cloud are now cleanly separated and the bar can sit safely
     // in the gap. Starting points below; calibrate from the first [FaceRef]/
     // [FaceMatch] device logs (watch galleryIdx for a polluted reference).
-    static var highConfidenceThreshold: Float = 0.40   // auto-add (solo photos)
-    static var borderlineThreshold: Float = 0.25        // send to review
-    // Multi-person photos need a HIGHER bar: a borderline face match plus a
-    // person-instance mask that can grab the wrong body lets someone else's
-    // clothes slip in. Device data: the user's own group-photo matches are 0.69+,
-    // while wrong-person extractions sat at <=0.51 — so 0.55 cleanly separates them.
-    static var multiPersonThreshold: Float = 0.55
+    // Device data across runs: the user's OWN matches (solo and group) are all
+    // >=0.64, while a partner who slipped into the gallery as a borderline
+    // reference matches her own photos at <=0.515 — a clean gap. The bar sits in
+    // that gap, and it applies to SOLO photos too: a solo shot of the partner at
+    // 0.514 was getting through the old 0.40 solo bar. (borderline = "review" tier.)
+    static var highConfidenceThreshold: Float = 0.55   // auto-add (solo photos)
+    static var borderlineThreshold: Float = 0.30        // send to review
+    // Multi-person photos need an even higher bar: a borderline match plus an
+    // imperfect person-instance mask can extract the wrong body. Kept above the
+    // partner's max (~0.515) with margin, below the user's group matches (>=0.64).
+    static var multiPersonThreshold: Float = 0.58
     private static let minFaceQuality: Float = 0.30     // skip blurry / poorly-captured faces
     // In a multi-person photo, the best match must beat the next-best face by at
     // least this much to auto-isolate silently. Otherwise two people score too
