@@ -159,55 +159,42 @@ class CloudKitService: ObservableObject {
 
     // MARK: - Fetch All Items
 
+    /// Pulls every wardrobe record from the user's OWN private zone. Uses a
+    /// zone-changes fetch (not a CKQuery), so it needs no queryable index in the
+    /// CloudKit dashboard — it works as soon as the user is signed into iCloud.
+    /// The private database is per-Apple-ID, so all records in the zone are theirs.
     func fetchAll(userID: String) async -> [WardrobeItem] {
         // Already known to be unavailable this session — don't retry / spam the log.
         guard !cloudUnavailable else { return [] }
         syncStatus = .syncing
+        await setupZone()   // make sure the zone exists before fetching changes
+
         var allItems: [WardrobeItem] = []
-
-        let predicate = NSPredicate(format: "userID == %@", userID)
-        let query = CKQuery(recordType: recordType, predicate: predicate)
-
+        var token: CKServerChangeToken? = nil
         do {
-            var cursor: CKQueryOperation.Cursor? = nil
-
-            let (firstResults, firstCursor) = try await privateDB.records(
-                matching: query,
-                inZoneWith: zoneID,
-                resultsLimit: CKQueryOperation.maximumResults
-            )
-            for (_, result) in firstResults {
-                if case .success(let record) = result,
-                   let item = wardrobeItem(from: record) {
-                    allItems.append(item)
-                }
-            }
-            cursor = firstCursor
-
-            while let activeCursor = cursor {
-                let (nextResults, nextCursor) = try await privateDB.records(
-                    continuingMatchFrom: activeCursor,
-                    resultsLimit: CKQueryOperation.maximumResults
-                )
-                for (_, result) in nextResults {
-                    if case .success(let record) = result,
-                       let item = wardrobeItem(from: record) {
+            while true {
+                let changes = try await privateDB.recordZoneChanges(inZoneWith: zoneID, since: token)
+                for (_, result) in changes.modificationResultsByID {
+                    if case .success(let mod) = result,
+                       (mod.record["userID"] as? String) == userID,   // this app-account's items
+                       let item = wardrobeItem(from: mod.record) {
                         allItems.append(item)
                     }
                 }
-                cursor = nextCursor
+                token = changes.changeToken
+                if !changes.moreComing { break }
             }
-
             syncStatus = .success
             lastSyncDate = Date()
             UserDefaults.standard.set(lastSyncDate, forKey: "lastCloudKitSync")
             resetStatusAfterDelay()
+        } catch let ck as CKError where ck.code == .zoneNotFound || ck.code == .userDeletedZone {
+            // No data backed up yet for this account — not an error.
+            syncStatus = .idle
         } catch {
             if isPermanent(error) {
-                // Provisioning/schema not set up for this build — stop retrying and
-                // don't surface a scary sync error; the wardrobe just stays local.
                 cloudUnavailable = true
-                print("[CloudKit] Cloud sync unavailable (not provisioned): \(error.localizedDescription). Disabling cloud sync for this session.")
+                print("[CloudKit] Cloud sync unavailable (not provisioned / not signed into iCloud): \(error.localizedDescription). Disabling cloud reads for this session.")
                 syncStatus = .idle
             } else {
                 print("[CloudKit] Fetch error: \(error.localizedDescription)")
