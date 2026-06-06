@@ -212,6 +212,14 @@ class WardrobeImageFileHelper {
         imageCache.setObject(image, forKey: key)
         return image
     }
+
+    /// Cheap existence check — no decode. Use this instead of `loadImage(...) != nil`
+    /// when you only need to know whether a file is present (avoids decoding full
+    /// images on the main thread, e.g. during the per-foreground cloud restore).
+    static func imageExists(at filename: String) -> Bool {
+        if imageCache.object(forKey: filename as NSString) != nil { return true }
+        return FileManager.default.fileExists(atPath: folderURL.appendingPathComponent(filename).path)
+    }
     static func deleteImage(at filename: String?) {
         guard let filename = filename else { return }
         imageCache.removeObject(forKey: filename as NSString)

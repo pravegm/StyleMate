@@ -197,7 +197,9 @@ class PhotoScanService: ObservableObject {
                 }
 
                 // Stage 1: Quick person detection on thumbnail (catches full-body, partial body, faces)
-                let hasPerson = await Task.detached {
+                // .utility priority so the background scan's heavy Vision/CoreML work
+                // yields CPU to the UI — otherwise the app stutters while scanning.
+                let hasPerson = await Task.detached(priority: .utility) {
                     FaceMatchingService.shared.photoContainsAnyPerson(thumbCG)
                 }.value
 
@@ -229,7 +231,7 @@ class PhotoScanService: ObservableObject {
                     continue
                 }
 
-                let imageForGemini: UIImage? = await Task.detached {
+                let imageForGemini: UIImage? = await Task.detached(priority: .utility) {
                     autoreleasepool {
                         FaceMatchingService.shared.resolveIdentityForScan(in: fullCG, fullImage: fullImage, userId: userId)
                     }

@@ -125,11 +125,11 @@ class WardrobeViewModel: ObservableObject {
                         || localItem.details != cloudItem.details
 
                     if metadataChanged, let idx = items.firstIndex(where: { $0.id == cloudItem.id }) {
-                        let finalImagePath = WardrobeImageFileHelper.loadImage(at: localItem.imagePath) != nil
+                        let finalImagePath = WardrobeImageFileHelper.imageExists(at: localItem.imagePath)
                             ? localItem.imagePath : cloudItem.imagePath
                         let finalCroppedPath: String? = {
                             if let localCropped = localItem.croppedImagePath,
-                               WardrobeImageFileHelper.loadImage(at: localCropped) != nil {
+                               WardrobeImageFileHelper.imageExists(at: localCropped) {
                                 return localCropped
                             }
                             return cloudItem.croppedImagePath
