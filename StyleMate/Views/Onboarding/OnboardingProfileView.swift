@@ -59,6 +59,7 @@ struct OnboardingProfileView: View {
                 .opacity(appeared ? 1 : 0)
                 .offset(y: appeared ? 0 : 16)
             }
+            .scrollDismissesKeyboard(.interactively)
 
             VStack(spacing: DS.Spacing.sm) {
                 Button {
@@ -83,8 +84,6 @@ struct OnboardingProfileView: View {
             .padding(.horizontal, DS.Spacing.lg)
             .padding(.bottom, DS.Spacing.lg)
         }
-        .contentShape(Rectangle())
-        .onTapGesture { focusedField = nil }
         .onAppear {
             if let user = authService.user {
                 name = (user.name == "User") ? "" : user.name
