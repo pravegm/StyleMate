@@ -32,7 +32,6 @@ final class SCRFDDetector {
     private let numAnchors = 2
     private var model: MLModel?
     private var anchorCenters: [Int: [(Float, Float)]] = [:]
-    private var loggedDiagnostics = false
 
     private init() {
         for s in strides { anchorCenters[s] = Self.makeAnchors(stride: s, size: inputSize) }
@@ -102,21 +101,6 @@ final class SCRFDDetector {
             return []
         }
 
-        let diagLogged = loggedDiagnostics
-        if !diagLogged {
-            loggedDiagnostics = true
-            let dims = out.featureNames.compactMap { n -> String? in
-                guard let a = out.featureValue(for: n)?.multiArrayValue else { return nil }
-                return "\(n):\(a.shape.map{$0.intValue})/\(a.dataType.rawValue)"
-            }
-            // Input sanity: a face region should have varied, non-pad values. If the
-            // top-left (where the image is placed) reads ~pad, rasterization failed.
-            let ip = input.dataPointer.bindMemory(to: Float.self, capacity: input.count)
-            let plane = inputSize * inputSize
-            let sampleIdx = (inputSize/4) * inputSize + (inputSize/4)   // ~top-left quadrant
-            print("[SCRFD] input \(cgImage.width)x\(cgImage.height) scale \(scale) | inSample R/G/B=\(String(format: "%.2f/%.2f/%.2f", ip[sampleIdx], ip[plane+sampleIdx], ip[2*plane+sampleIdx])) | outputs \(dims)")
-        }
-
         var boxes: [CGRect] = []
         var kpss: [[SIMD2<Float>]] = []
         var scores: [Float] = []
@@ -130,7 +114,6 @@ final class SCRFDDetector {
                 continue
             }
             let sc = floats(scArr), bb = floats(bbArr), kp = floats(kpArr)
-            if !diagLogged { print("[SCRFD] stride \(s): maxScore \(sc.max() ?? -1)") }
             let ac = anchorCenters[s]!
             let fs = Float(s)
             for i in 0..<n where sc[i] >= scoreThreshold {

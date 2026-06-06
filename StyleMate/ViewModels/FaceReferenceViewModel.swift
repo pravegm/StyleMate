@@ -113,19 +113,6 @@ final class FaceReferenceViewModel: ObservableObject {
             phase = .empty; return
         }
 
-        // DEBUG: save what the model actually sees to Photos — the selfie anchor
-        // crop (leftmost) + the top-scoring library faces — so we can VISUALLY tell
-        // whether the anchor is a clean face and whether the candidates are the user.
-        let ranked = results.sorted { $0.similarity > $1.similarity }
-        if let selfieCrop = FaceMatchingService.shared.debugSelfieAlignedCrop(forUser: userId) {
-            let strip = Self.debugStrip([selfieCrop] + ranked.prefix(4).map { $0.thumbnail })
-            UIImageWriteToSavedPhotosAlbum(strip, nil, nil, nil)
-            let sims = ranked.prefix(4).map { String(format: "%.2f", $0.similarity) }.joined(separator: ",")
-            print("[FaceRef] DEBUG saved to Photos: [selfie-anchor | top-4 candidates] sims=[\(sims)]")
-        } else {
-            print("[FaceRef] DEBUG: could not build selfie anchor crop")
-        }
-
         // With a selfie anchor, KEEP ONLY faces that plausibly are the user. A
         // different person (e.g. a partner — even more so a different gender)
         // scores far below this floor, so this stops the gallery being polluted
@@ -175,23 +162,6 @@ final class FaceReferenceViewModel: ObservableObject {
         let top = results.first?.similarity ?? 0
         let bottom = results.last?.similarity ?? 0
         print("[FaceRef] Ready: \(results.count) distinct faces (\(removed) near-dupes removed), sim [\(String(format: "%.3f", bottom))..\(String(format: "%.3f", top))], pre-selected \(selectedCount)\(hasAnchor ? "" : " (no selfie anchor)")")
-    }
-
-    /// Lays out crops in a horizontal strip (each 220px tall) for one-glance debug.
-    nonisolated static func debugStrip(_ images: [UIImage]) -> UIImage {
-        let h: CGFloat = 220, gap: CGFloat = 8
-        let scaled = images.map { img -> UIImage in img }
-        let widths = scaled.map { $0.size.height > 0 ? $0.size.width * (h / $0.size.height) : h }
-        let totalW = widths.reduce(0, +) + gap * CGFloat(max(0, images.count - 1))
-        let fmt = UIGraphicsImageRendererFormat.default(); fmt.scale = 1
-        return UIGraphicsImageRenderer(size: CGSize(width: max(1, totalW), height: h), format: fmt).image { ctx in
-            UIColor.systemPink.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: totalW, height: h))
-            var x: CGFloat = 0
-            for (i, img) in scaled.enumerated() {
-                img.draw(in: CGRect(x: x, y: 0, width: widths[i], height: h))
-                x += widths[i] + gap
-            }
-        }
     }
 
     /// Returns the image's pixels with EXIF orientation baked in (upright). `.cgImage`

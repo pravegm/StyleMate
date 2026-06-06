@@ -54,8 +54,13 @@ class FaceMatchingService {
     // and the impostor cloud are now cleanly separated and the bar can sit safely
     // in the gap. Starting points below; calibrate from the first [FaceRef]/
     // [FaceMatch] device logs (watch galleryIdx for a polluted reference).
-    static var highConfidenceThreshold: Float = 0.35   // auto-add
+    static var highConfidenceThreshold: Float = 0.40   // auto-add (solo photos)
     static var borderlineThreshold: Float = 0.25        // send to review
+    // Multi-person photos need a HIGHER bar: a borderline face match plus a
+    // person-instance mask that can grab the wrong body lets someone else's
+    // clothes slip in. Device data: the user's own group-photo matches are 0.69+,
+    // while wrong-person extractions sat at <=0.51 — so 0.55 cleanly separates them.
+    static var multiPersonThreshold: Float = 0.55
     private static let minFaceQuality: Float = 0.30     // skip blurry / poorly-captured faces
     // In a multi-person photo, the best match must beat the next-best face by at
     // least this much to auto-isolate silently. Otherwise two people score too
@@ -337,20 +342,6 @@ class FaceMatchingService {
         return cgImage.cropping(to: CGRect(x: cropX, y: cropY, width: cropW, height: cropH))
     }
 
-    /// DEBUG: the actual 112x112 aligned crop fed to the embedder for the selfie —
-    /// so we can SEE on device whether the anchor is a clean face or garbage.
-    func debugSelfieAlignedCrop(forUser userId: String) -> UIImage? {
-        let key = "selfieReferencePath_\(userId)"
-        guard let path = UserDefaults.standard.string(forKey: key),
-              let raw = UIImage(contentsOfFile: path) ?? loadFromDocuments(filename: path),
-              let cg = renderUpOrientation(raw).cgImage else { return nil }
-        let faces = SCRFDDetector.shared.detect(in: cg)
-        guard let f = faces.max(by: {
-            ($0.boxPixels.width * $0.boxPixels.height) < ($1.boxPixels.width * $1.boxPixels.height)
-        }), let aligned = warpAligned(image: cg, srcPoints: f.keypoints) else { return nil }
-        return UIImage(cgImage: aligned)
-    }
-
     // MARK: - Find User in Photo
 
     func findUserInPhoto(_ cgImage: CGImage) -> MatchResult {
@@ -508,6 +499,13 @@ class FaceMatchingService {
         }
 
         if match.faceCount > 1 {
+            // Stricter bar for multi-person photos: a borderline match here, plus an
+            // imperfect person-instance mask, risks extracting the wrong person's
+            // clothes (e.g. a partner standing next to the user).
+            guard (match.similarity ?? 0) >= Self.multiPersonThreshold else {
+                print("[Scan] skip: multi-person match below the multi-person bar (sim=\(simStr) < \(Self.multiPersonThreshold), faces=\(match.faceCount))")
+                return nil
+            }
             guard let isolated = isolateMatchedPerson(from: cgImage, matchResult: match) else {
                 print("[Scan] skip: confident match but couldn't isolate user (\(match.faceCount) people)")
                 return nil
@@ -1084,9 +1082,6 @@ class FaceMatchingService {
     }
 
     // MARK: - Cosine Similarity (dot product of L2-normalized vectors)
-
-    /// Public cosine of two L2-normalized embeddings (used by diagnostics).
-    func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float { dotProduct(a, b) }
 
     private func dotProduct(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count, !a.isEmpty else { return 0 }

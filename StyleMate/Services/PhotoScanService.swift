@@ -174,12 +174,6 @@ class PhotoScanService: ObservableObject {
             return
         }
 
-        // DIAGNOSTIC: prove whether the scan loader and the builder loader produce
-        // matching embeddings for the same face. If cos(scan,aspect) << 1, the
-        // gallery (built with the aspect loader) and scan queries are different
-        // images of the same face — the recall bug. Remove once resolved.
-        await debugLoaderProbe(unscannedAssets, userId: userId)
-
         currentPhase = "Scanning your photos..."
         let batchSize = 10
         var internalScannedCount = 0
@@ -477,49 +471,6 @@ class PhotoScanService: ObservableObject {
     /// to embed reliably. At 1024 the faces in multi-person photos are too small and
     /// the wrong person can outscore the user — the upload flow gets this right
     /// because it matches on the full-res picked image.
-    /// One-shot diagnostic: for the first faces found, embed each via BOTH the scan
-    /// loader (loadFullImage) and the builder loader (aspect-fit 1600), and log the
-    /// cosine between the two embeddings + each one's best gallery similarity.
-    private func debugLoaderProbe(_ assets: [PHAsset], userId: String) async {
-        FaceMatchingService.shared.loadReference(forUser: userId)
-        print("[LoaderProbe] === scan-loader vs builder-loader (gallery=\(FaceMatchingService.shared.referenceCount)) ===")
-        var done = 0
-        for asset in assets {
-            if done >= 15 { break }
-            guard let scanImg = await loadFullImage(for: asset), let scanCG = scanImg.cgImage,
-                  let aspImg = await loadAspectFit1600(for: asset), let aspCG = aspImg.cgImage,
-                  let s = FaceMatchingService.shared.evaluateFaceForReference(in: scanCG),
-                  let a = FaceMatchingService.shared.evaluateFaceForReference(in: aspCG) else { continue }
-            let cross = FaceMatchingService.shared.cosineSimilarity(s.embedding, a.embedding)
-            print(String(format: "[LoaderProbe] #%d scan=%dx%d galSim=%.3f | aspect=%dx%d galSim=%.3f | cos(scan,aspect)=%.3f",
-                         done, scanCG.width, scanCG.height, s.similarity, aspCG.width, aspCG.height, a.similarity, cross))
-            done += 1
-        }
-        print("[LoaderProbe] === done (\(done) faces compared) ===")
-    }
-
-    private func loadAspectFit1600(for asset: PHAsset) async -> UIImage? {
-        await withCheckedContinuation { continuation in
-            let options = PHImageRequestOptions()
-            options.deliveryMode = .highQualityFormat
-            options.resizeMode = .fast
-            options.isNetworkAccessAllowed = false
-            options.isSynchronous = false
-            let lock = NSLock(); var resumed = false
-            PHImageManager.default().requestImage(
-                for: asset, targetSize: CGSize(width: 1600, height: 1600),
-                contentMode: .aspectFit, options: options
-            ) { image, info in
-                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if degraded { return }
-                lock.lock(); defer { lock.unlock() }
-                guard !resumed else { return }
-                resumed = true
-                continuation.resume(returning: image)
-            }
-        }
-    }
-
     private func loadFullImage(for asset: PHAsset, maxDimension: CGFloat = 2048) async -> UIImage? {
         await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
