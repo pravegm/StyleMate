@@ -293,7 +293,17 @@ class CloudKitService: ObservableObject {
             }
         }
 
-        let thumbnailPath = record["thumbnailPath"] as? String
+        // Thumbnails aren't uploaded (they're derived). After a restore the stored
+        // thumbnailPath points at a file that doesn't exist here, so regenerate it
+        // from the now-local cropped/full image; otherwise the grid shows blanks.
+        var thumbnailPath = record["thumbnailPath"] as? String
+        if thumbnailPath == nil || WardrobeImageFileHelper.loadImage(at: thumbnailPath!) == nil {
+            if let source = WardrobeImageFileHelper.loadImage(at: croppedImagePath ?? imagePath) {
+                thumbnailPath = WardrobeImageFileHelper.saveThumbnail(source)
+            } else {
+                thumbnailPath = nil
+            }
+        }
         let material = record["material"] as? String
         let fitStr = record["fit"] as? String
         let necklineStr = record["neckline"] as? String
