@@ -337,6 +337,20 @@ class FaceMatchingService {
         return cgImage.cropping(to: CGRect(x: cropX, y: cropY, width: cropW, height: cropH))
     }
 
+    /// DEBUG: the actual 112x112 aligned crop fed to the embedder for the selfie —
+    /// so we can SEE on device whether the anchor is a clean face or garbage.
+    func debugSelfieAlignedCrop(forUser userId: String) -> UIImage? {
+        let key = "selfieReferencePath_\(userId)"
+        guard let path = UserDefaults.standard.string(forKey: key),
+              let raw = UIImage(contentsOfFile: path) ?? loadFromDocuments(filename: path),
+              let cg = renderUpOrientation(raw).cgImage else { return nil }
+        let faces = SCRFDDetector.shared.detect(in: cg)
+        guard let f = faces.max(by: {
+            ($0.boxPixels.width * $0.boxPixels.height) < ($1.boxPixels.width * $1.boxPixels.height)
+        }), let aligned = warpAligned(image: cg, srcPoints: f.keypoints) else { return nil }
+        return UIImage(cgImage: aligned)
+    }
+
     // MARK: - Find User in Photo
 
     func findUserInPhoto(_ cgImage: CGImage) -> MatchResult {
