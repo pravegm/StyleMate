@@ -87,7 +87,13 @@ final class FaceReferenceViewModel: ObservableObject {
                                         targetSize: CGSize(width: 1600, height: 1600))
             progress = Double(index + 1) / Double(assets.count)
 
-            guard let cg = image?.cgImage else { continue }
+            // Bake EXIF orientation into pixels. `.cgImage` drops the UIImage's
+            // orientation, so a rotated library photo would be fed sideways to the
+            // detector and align rotated — never matching the upright selfie anchor.
+            if index == 0, let o = image?.imageOrientation {
+                print("[FaceRef] first candidate imageOrientation = \(o.rawValue) (0 = up)")
+            }
+            guard let cg = Self.uprightCGImage(image) else { continue }
 
             // Face detect + embed off the main thread (CoreML is CPU-heavy).
             let eval: (UIImage, [Float], Float)? = await Task.detached(priority: .userInitiated) {
@@ -156,6 +162,18 @@ final class FaceReferenceViewModel: ObservableObject {
         let top = results.first?.similarity ?? 0
         let bottom = results.last?.similarity ?? 0
         print("[FaceRef] Ready: \(results.count) distinct faces (\(removed) near-dupes removed), sim [\(String(format: "%.3f", bottom))..\(String(format: "%.3f", top))], pre-selected \(selectedCount)\(hasAnchor ? "" : " (no selfie anchor)")")
+    }
+
+    /// Returns the image's pixels with EXIF orientation baked in (upright). `.cgImage`
+    /// alone discards orientation, which would feed rotated faces to the detector.
+    nonisolated static func uprightCGImage(_ image: UIImage?) -> CGImage? {
+        guard let image else { return nil }
+        if image.imageOrientation == .up { return image.cgImage }
+        let fmt = UIGraphicsImageRendererFormat.default()
+        fmt.scale = 1
+        return UIGraphicsImageRenderer(size: image.size, format: fmt).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }.cgImage
     }
 
     /// Cosine similarity of two L2-normalized embeddings (a dot product).

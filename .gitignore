@@ -40,3 +40,4 @@ Config.plist
 
 # Conversion virtualenvs
 scripts/*venv*/
+debug_photos/
