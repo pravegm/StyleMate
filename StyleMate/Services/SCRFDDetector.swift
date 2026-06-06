@@ -68,7 +68,28 @@ final class SCRFDDetector {
     }
 
     /// Detect faces. Returns each with 5 ArcFace-ordered landmarks in image pixels.
+    /// If the first pass finds nothing, retries on a margin-padded copy — a face
+    /// that fills the whole frame (e.g. a tight selfie crop) is invisible to SCRFD,
+    /// which needs the face to be a sub-region. (Verified offline: face-fills-frame
+    /// crop → 0 detections; +40% margin → detected.)
     func detect(in cgImage: CGImage, scoreThreshold: Float = 0.5) -> [DetectedFace] {
+        let faces = detectCore(in: cgImage, scoreThreshold: scoreThreshold)
+        if !faces.isEmpty { return faces }
+
+        let mw = max(1, cgImage.width * 2 / 5)
+        let mh = max(1, cgImage.height * 2 / 5)
+        guard let padded = paddedImage(cgImage, marginX: mw, marginY: mh) else { return [] }
+        let padFaces = detectCore(in: padded, scoreThreshold: scoreThreshold)
+        guard !padFaces.isEmpty else { return [] }
+        let dx = Float(mw), dy = Float(mh)
+        return padFaces.map {
+            DetectedFace(boxPixels: $0.boxPixels.offsetBy(dx: -CGFloat(mw), dy: -CGFloat(mh)),
+                         keypoints: $0.keypoints.map { SIMD2<Float>($0.x - dx, $0.y - dy) },
+                         score: $0.score)
+        }
+    }
+
+    private func detectCore(in cgImage: CGImage, scoreThreshold: Float) -> [DetectedFace] {
         guard ensureLoaded(), let model else { return [] }
         let w = cgImage.width, h = cgImage.height
         guard w > 0, h > 0 else { return [] }
@@ -175,6 +196,25 @@ final class SCRFDDetector {
             }
         }
         return arr
+    }
+
+    /// Centers `cg` in a larger canvas with a zero (black) border, so a
+    /// frame-filling face becomes a detectable sub-region.
+    private func paddedImage(_ cg: CGImage, marginX: Int, marginY: Int) -> CGImage? {
+        let w = cg.width + 2 * marginX, h = cg.height + 2 * marginY
+        let bytesPerRow = w * 4
+        var pixels = [UInt8](repeating: 0, count: h * bytesPerRow)
+        guard let ctx = CGContext(
+            data: &pixels, width: w, height: h, bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else { return nil }
+        // Same flip the rasterizer uses, so the result is upright and the face sits
+        // at top-left offset (marginX, marginY) — which detect() subtracts back off.
+        ctx.translateBy(x: 0, y: CGFloat(h))
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(cg, in: CGRect(x: marginX, y: marginY, width: cg.width, height: cg.height))
+        return ctx.makeImage()
     }
 
     /// Full-size RGBA pixel buffer, top-left origin (same proven method the
