@@ -88,6 +88,12 @@ struct LoginView: View {
                         )
                     }
                 }
+                // ASAuthorizationAppleIDButton has an internal `width <= 375`
+                // constraint; stretching it edge-to-edge on wide phones (e.g. Pro Max,
+                // content width 376) conflicts with it and spams the console. Cap the
+                // button column at 360 and center it — no conflict, and it looks cleaner.
+                .frame(maxWidth: 360)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, DS.Spacing.xl)
                 .opacity(appear ? 1 : 0)
                 .offset(y: appear ? 0 : 20)

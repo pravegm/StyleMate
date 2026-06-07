@@ -62,6 +62,7 @@ class CloudKitService: ObservableObject {
     // MARK: - Upload Single Item
 
     func uploadItem(_ item: WardrobeItem, userID: String) async -> Bool {
+        guard !cloudUnavailable else { return false }
         let recordID = CKRecord.ID(recordName: item.id.uuidString, zoneID: zoneID)
         let record = CKRecord(recordType: recordType, recordID: recordID)
 
@@ -98,7 +99,7 @@ class CloudKitService: ObservableObject {
             )
             return !saveResults.isEmpty
         } catch {
-            print("[CloudKit] Upload error: \(error.localizedDescription)")
+            latchIfPermanent(error, context: "Upload")
             return false
         }
     }
@@ -106,6 +107,7 @@ class CloudKitService: ObservableObject {
     // MARK: - Upload All Items (Full Sync)
 
     func uploadAll(items: [WardrobeItem], userID: String) async {
+        guard !cloudUnavailable else { return }
         syncStatus = .syncing
         var successCount = 0
 
@@ -147,7 +149,8 @@ class CloudKitService: ObservableObject {
                 let (saveResults, _) = try await privateDB.modifyRecords(saving: records, deleting: [], savePolicy: .changedKeys, atomically: false)
                 successCount += saveResults.count
             } catch {
-                print("[CloudKit] Batch upload error: \(error.localizedDescription)")
+                latchIfPermanent(error, context: "Batch upload")
+                if cloudUnavailable { break }   // stop the remaining batches
             }
         }
 
@@ -209,17 +212,19 @@ class CloudKitService: ObservableObject {
     // MARK: - Delete Item
 
     func deleteItem(id: UUID) async {
+        guard !cloudUnavailable else { return }
         let recordID = CKRecord.ID(recordName: id.uuidString, zoneID: zoneID)
         do {
             try await privateDB.deleteRecord(withID: recordID)
         } catch {
-            print("[CloudKit] Delete error: \(error.localizedDescription)")
+            latchIfPermanent(error, context: "Delete")
         }
     }
 
     // MARK: - Delete All Data
 
     func deleteAllData() async {
+        guard !cloudUnavailable else { return }
         print("[StyleMate] CloudKit: Deleting all data")
         do {
             try await privateDB.deleteRecordZone(withID: zoneID)
@@ -227,7 +232,22 @@ class CloudKitService: ObservableObject {
             await setupZone()
             print("[StyleMate] CloudKit: Zone recreated")
         } catch {
-            print("[StyleMate] CloudKit: Delete all data error: \(error.localizedDescription)")
+            latchIfPermanent(error, context: "Delete all data")
+        }
+    }
+
+    /// Latches `cloudUnavailable` on a permanent (provisioning/auth) error so we stop
+    /// retrying — and hammering the log — for the rest of the session. Logs exactly
+    /// once at the moment we latch; transient errors still log normally.
+    private func latchIfPermanent(_ error: Error, context: String) {
+        if isPermanent(error) {
+            if !cloudUnavailable {
+                let code = (error as? CKError)?.code.rawValue ?? -1
+                print("[CloudKit] Cloud unavailable (error \(code)); disabling cloud writes for this session.")
+            }
+            cloudUnavailable = true
+        } else {
+            print("[CloudKit] \(context) error: \(error.localizedDescription)")
         }
     }
 
