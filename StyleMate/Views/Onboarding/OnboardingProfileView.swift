@@ -31,8 +31,13 @@ struct OnboardingProfileView: View {
                     .padding(.top, DS.Spacing.xl)
 
                     fieldCard(title: "Name") {
+                        // NOTE: deliberately NO .textContentType(.givenName) here.
+                        // That opts the field into name AutoFill, which queries the
+                        // Contacts framework on first focus and stalls the main thread
+                        // ~1-2s the moment you tap the field. Plain text input is instant.
                         TextField("Your name", text: $name)
-                            .textContentType(.givenName)
+                            .textContentType(.none)
+                            .autocorrectionDisabled()
                             .submitLabel(.next)
                             .focused($focusedField, equals: .name)
                             .onSubmit { focusedField = .age }

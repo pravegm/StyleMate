@@ -54,7 +54,15 @@ struct OnboardingView: View {
                 FaceReferenceBuilderView(userId: userId, isPresented: $showReferenceBuilder)
             }
         }
-        .onAppear { Haptics.prepare() }   // warm the Taptic Engine so the first tap is instant
+        .onAppear {
+            Haptics.prepare()         // warm the Taptic Engine so the first tap is instant
+            // Warm the keyboard during idle reading time on the Welcome step — NOT
+            // synchronously here, so its one-time load can't stall this screen's
+            // entrance. By the time the user reaches "About you", it's hot.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                KeyboardWarmer.warm()
+            }
+        }
     }
 
     /// After photo permission: if granted, let the user build their face
