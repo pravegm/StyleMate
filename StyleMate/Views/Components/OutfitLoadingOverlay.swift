@@ -4,8 +4,6 @@ struct StylingLoadingView: View {
     let progress: Double
     var weather: Weather?
 
-    @State private var pulseScale: CGFloat = 1.0
-
     private var stage: (icon: String, message: String, accent: Bool) {
         switch progress {
         case ..<0.15:
@@ -39,13 +37,10 @@ struct StylingLoadingView: View {
             VStack(spacing: DS.Spacing.lg) {
                 Image(systemName: stage.icon)
                     .font(.system(size: 40))
-                    .foregroundColor(stage.accent ? DS.Colors.accent : DS.Colors.textPrimary)
-                    .scaleEffect(pulseScale)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                            pulseScale = 1.15
-                        }
-                    }
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(stage.accent ? DS.Colors.accent : DS.Colors.textPrimary)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.pulse, options: .repeating)
 
                 Text(stage.message)
                     .font(DS.Font.headline)

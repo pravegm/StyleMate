@@ -70,16 +70,17 @@ struct ProfileView: View {
                                 Circle()
                                     .fill(
                                         LinearGradient(
-                                            colors: [DS.Colors.accent, DS.Colors.accent.opacity(0.7)],
+                                            colors: [DS.Colors.accent, DS.Colors.accent.opacity(0.75)],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         )
                                     )
-                                    .frame(width: 72, height: 72)
+                                    .frame(width: 76, height: 76)
+                                    .shadow(color: DS.Colors.accent.opacity(0.30), radius: 10, x: 0, y: 5)
 
                                 Text(initials)
                                     .font(.system(size: 28, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
+                                    .foregroundStyle(.white)
                             }
 
                             Text(user.name)
@@ -139,12 +140,11 @@ struct ProfileView: View {
                                                 Text(style.rawValue)
                                                     .font(DS.Font.caption1)
                                             }
-                                            .foregroundColor(DS.Colors.accent)
+                                            .foregroundStyle(DS.Colors.accent)
                                             .padding(.horizontal, DS.Spacing.sm)
                                             .padding(.vertical, DS.Spacing.xs)
-                                            .background(DS.Colors.accent.opacity(0.12))
-                                            .clipShape(Capsule())
-                                            .overlay(Capsule().stroke(DS.Colors.accent.opacity(0.2), lineWidth: 0.5))
+                                            .background(DS.Colors.accentSoft, in: Capsule(style: .continuous))
+                                            .overlay(Capsule(style: .continuous).strokeBorder(DS.Colors.accent.opacity(0.25), lineWidth: 0.5))
                                         }
                                     }
                                 }

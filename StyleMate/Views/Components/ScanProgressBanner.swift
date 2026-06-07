@@ -5,7 +5,6 @@ struct ScanProgressBanner: View {
     @Binding var showReview: Bool
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
 
-    @State private var rotationAngle: Double = 0
     @State private var autoDismissTask: Task<Void, Never>?
 
     var body: some View {
@@ -35,14 +34,9 @@ struct ScanProgressBanner: View {
         HStack(alignment: .top, spacing: DS.Spacing.sm) {
             Image(systemName: scanService.isPaused ? "pause.circle.fill" : "magnifyingglass")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(DS.Colors.accent)
-                .rotationEffect(.degrees(scanService.isPaused ? 0 : rotationAngle))
-                .onAppear {
-                    withAnimation(.linear(duration: 2.5).repeatForever(autoreverses: false)) {
-                        rotationAngle = 360
-                    }
-                }
-                .onDisappear { rotationAngle = 0 }
+                .foregroundStyle(DS.Colors.accent)
+                .contentTransition(.symbolEffect(.replace))
+                .symbolEffect(.variableColor.iterative.reversing, isActive: !scanService.isPaused)
                 .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
