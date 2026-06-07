@@ -1,84 +1,109 @@
 import SwiftUI
 
 // MARK: - StyleMate Design System
-// Premium-minimal design tokens. 8-point grid. SF Pro typography.
-// Glass helpers use .ultraThinMaterial as a cross-version stand-in.
-// When building with the iOS 26 SDK, replace dsGlass* internals
-// with the native .glassEffect() modifier for true Liquid Glass.
+//
+// Modern iOS-native premium foundation. Everything is a semantic token so the
+// whole app stays consistent and adapts to light/dark automatically.
+//
+// Principles (Apple HIG):
+// • 8-pt spacing grid, fixed side margins.
+// • Type built on Dynamic Type text styles, so it scales for accessibility.
+// • Semantic, system-aligned surfaces; one brand tint (teal) set once via .tint.
+// • Continuous (squircle) corners everywhere.
+// • iOS-17 spring presets for coherent, interruptible motion.
+//
+// All public symbol names are stable — screens reference DS.Colors/Font/Spacing/
+// Radius/Motion, the DS* button styles, Haptics, ColorMapping, and the card/glass
+// helpers. Internals here were upgraded; call sites keep working unchanged.
 
 enum DS {
 
     // MARK: - Colors
+    //
+    // Crisp, near-neutral surfaces (gray canvas + white cards in light; layered
+    // near-blacks in dark, never pure #000/#FFF) with a single teal brand tint.
 
     enum Colors {
-        static let backgroundPrimary = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.067, green: 0.067, blue: 0.075, alpha: 1)   // #111113
-                : UIColor(red: 0.980, green: 0.976, blue: 0.965, alpha: 1)   // #FAF9F6
-        })
+        // Canvas → the app background.
+        static let backgroundPrimary = dyn(
+            light: UIColor(red: 0.969, green: 0.969, blue: 0.976, alpha: 1),   // #F7F7F9
+            dark:  UIColor(red: 0.043, green: 0.043, blue: 0.047, alpha: 1)    // #0B0B0C
+        )
 
-        static let backgroundSecondary = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.110, green: 0.110, blue: 0.125, alpha: 1)   // #1C1C20
-                : UIColor(red: 0.941, green: 0.929, blue: 0.910, alpha: 1)   // #F0EDE8
-        })
+        // Recessed fills (chips, segmented tracks, subtle wells).
+        static let backgroundSecondary = dyn(
+            light: UIColor(red: 0.925, green: 0.925, blue: 0.937, alpha: 1),   // #ECECEF
+            dark:  UIColor(red: 0.110, green: 0.110, blue: 0.118, alpha: 1)    // #1C1C1E
+        )
 
-        static let backgroundCard = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.133, green: 0.133, blue: 0.149, alpha: 1)   // #222226
-                : UIColor.white
-        })
+        // Elevated surfaces (cards, sheets, rows). Lighter than canvas in dark = elevation.
+        static let backgroundCard = dyn(
+            light: UIColor.white,                                              // #FFFFFF
+            dark:  UIColor(red: 0.141, green: 0.141, blue: 0.149, alpha: 1)    // #242426
+        )
 
-        static let textPrimary = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.941, green: 0.929, blue: 0.910, alpha: 1)   // #F0EDE8
-                : UIColor(red: 0.102, green: 0.102, blue: 0.102, alpha: 1)   // #1A1A1A
-        })
+        static let textPrimary = dyn(
+            light: UIColor(red: 0.067, green: 0.067, blue: 0.067, alpha: 1),   // #111111
+            dark:  UIColor(red: 0.961, green: 0.961, blue: 0.973, alpha: 1)    // #F5F5F8
+        )
 
-        static let textSecondary = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.608, green: 0.596, blue: 0.565, alpha: 1)   // #9B9890
-                : UIColor(red: 0.420, green: 0.420, blue: 0.420, alpha: 1)   // #6B6B6B
-        })
+        static let textSecondary = dyn(
+            light: UIColor(red: 0.431, green: 0.431, blue: 0.451, alpha: 1),   // #6E6E73 (iOS secondaryLabel)
+            dark:  UIColor(red: 0.596, green: 0.596, blue: 0.624, alpha: 1)    // #98989F
+        )
 
-        static let textTertiary = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.502, green: 0.490, blue: 0.463, alpha: 1)
-                : UIColor(red: 0.608, green: 0.608, blue: 0.608, alpha: 1)   // #9B9B9B
-        })
+        static let textTertiary = dyn(
+            light: UIColor(red: 0.682, green: 0.682, blue: 0.698, alpha: 1),   // #AEAEB2 (iOS tertiaryLabel)
+            dark:  UIColor(red: 0.431, green: 0.431, blue: 0.451, alpha: 1)    // #6E6E73
+        )
 
-        static let accent = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.176, green: 0.831, blue: 0.667, alpha: 1)   // #2DD4AA
-                : UIColor(red: 0.102, green: 0.478, blue: 0.427, alpha: 1)   // #1A7A6D
-        })
+        // Brand tint — vivid in dark, deeper in light; legible (WCAG AA) on both canvases.
+        static let accent = dyn(
+            light: UIColor(red: 0.071, green: 0.490, blue: 0.435, alpha: 1),   // #127D6F
+            dark:  UIColor(red: 0.176, green: 0.831, blue: 0.667, alpha: 1)    // #2DD4AA
+        )
 
-        static let accentSecondary = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.910, green: 0.659, blue: 0.298, alpha: 1)   // #E8A84C
-                : UIColor(red: 0.776, green: 0.537, blue: 0.247, alpha: 1)   // #C6893F
-        })
+        static let accentSecondary = dyn(
+            light: UIColor(red: 0.776, green: 0.537, blue: 0.247, alpha: 1),   // #C6893F
+            dark:  UIColor(red: 0.910, green: 0.659, blue: 0.298, alpha: 1)    // #E8A84C
+        )
 
-        static let success = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.420, green: 0.612, blue: 0.431, alpha: 1)
-                : UIColor(red: 0.361, green: 0.541, blue: 0.369, alpha: 1)   // #5C8A5E
-        })
+        static let success = dyn(
+            light: UIColor(red: 0.204, green: 0.541, blue: 0.337, alpha: 1),
+            dark:  UIColor(red: 0.392, green: 0.808, blue: 0.553, alpha: 1)
+        )
 
-        static let warning = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.839, green: 0.675, blue: 0.310, alpha: 1)
-                : UIColor(red: 0.769, green: 0.604, blue: 0.235, alpha: 1)   // #C49A3C
-        })
+        static let warning = dyn(
+            light: UIColor(red: 0.769, green: 0.604, blue: 0.235, alpha: 1),
+            dark:  UIColor(red: 0.910, green: 0.722, blue: 0.337, alpha: 1)
+        )
 
-        static let error = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.796, green: 0.400, blue: 0.380, alpha: 1)
-                : UIColor(red: 0.722, green: 0.329, blue: 0.314, alpha: 1)   // #B85450
-        })
+        static let error = dyn(
+            light: UIColor(red: 0.792, green: 0.255, blue: 0.255, alpha: 1),
+            dark:  UIColor(red: 0.920, green: 0.420, blue: 0.404, alpha: 1)
+        )
+
+        // MARK: New semantic helpers (additive)
+
+        /// Hairline separators (translucent, adapts automatically).
+        static let separator = Color(uiColor: .separator)
+
+        /// Soft tinted background for selected chips / accent wells.
+        static let accentSoft = dyn(
+            light: UIColor(red: 0.071, green: 0.490, blue: 0.435, alpha: 0.10),
+            dark:  UIColor(red: 0.176, green: 0.831, blue: 0.667, alpha: 0.16)
+        )
+
+        /// Neutral fill for unselected chips / capsules.
+        static let fill = Color(uiColor: .secondarySystemFill)
+
+        // Internal: build a light/dark dynamic Color.
+        private static func dyn(light: UIColor, dark: UIColor) -> Color {
+            Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })
+        }
     }
 
-    // MARK: - Spacing (8-point grid)
+    // MARK: - Spacing (8-pt grid)
 
     enum Spacing {
         static let micro: CGFloat = 4
@@ -89,41 +114,61 @@ enum DS {
         static let xl: CGFloat = 32
         static let xxl: CGFloat = 48
         static let xxxl: CGFloat = 64
-        static let screenH: CGFloat = 20
+        static let screenH: CGFloat = 20   // fixed horizontal screen margin
     }
 
-    // MARK: - Corner Radius
+    // MARK: - Corner Radius (use with .continuous everywhere)
 
     enum Radius {
-        static let button: CGFloat = 10
-        static let card: CGFloat = 14
-        static let sheet: CGFloat = 24
-        static let hero: CGFloat = 20
+        static let chip: CGFloat = 10
+        static let button: CGFloat = 14
+        static let control: CGFloat = 12
+        static let card: CGFloat = 18
+        static let hero: CGFloat = 24
+        static let sheet: CGFloat = 28
     }
 
-    // MARK: - Typography (SF Pro)
+    // MARK: - Typography
+    //
+    // Built on Dynamic Type text styles so everything scales for accessibility and
+    // gets Apple's optical sizing (SF Text vs Display) for free. Same token names.
 
     enum Font {
         static let display    = SwiftUI.Font.system(size: 40, weight: .bold, design: .rounded)
-        static let largeTitle = SwiftUI.Font.system(size: 34, weight: .bold)
-        static let title1     = SwiftUI.Font.system(size: 28, weight: .bold)
-        static let title2     = SwiftUI.Font.system(size: 22, weight: .semibold)
-        static let title3     = SwiftUI.Font.system(size: 20, weight: .semibold)
-        static let headline   = SwiftUI.Font.system(size: 17, weight: .semibold)
-        static let body       = SwiftUI.Font.system(size: 17, weight: .regular)
-        static let callout    = SwiftUI.Font.system(size: 16, weight: .regular)
-        static let subheadline = SwiftUI.Font.system(size: 15, weight: .regular)
-        static let footnote   = SwiftUI.Font.system(size: 13, weight: .regular)
-        static let caption1   = SwiftUI.Font.system(size: 12, weight: .medium)
-        static let caption2   = SwiftUI.Font.system(size: 11, weight: .medium)
+        static let largeTitle = SwiftUI.Font.system(.largeTitle, design: .default).weight(.bold)
+        static let title1     = SwiftUI.Font.system(.title, design: .default).weight(.bold)
+        static let title2     = SwiftUI.Font.system(.title2, design: .default).weight(.semibold)
+        static let title3     = SwiftUI.Font.system(.title3, design: .default).weight(.semibold)
+        static let headline   = SwiftUI.Font.system(.headline)                     // 17 semibold
+        static let body       = SwiftUI.Font.system(.body)                          // 17 regular
+        static let callout    = SwiftUI.Font.system(.callout)                       // 16 regular
+        static let subheadline = SwiftUI.Font.system(.subheadline)                  // 15 regular
+        static let footnote   = SwiftUI.Font.system(.footnote)                      // 13 regular
+        static let caption1   = SwiftUI.Font.system(.caption).weight(.medium)       // 12 medium
+        static let caption2   = SwiftUI.Font.system(.caption2).weight(.medium)      // 11 medium
+    }
+
+    // MARK: - Motion (iOS-17 spring presets)
+    //
+    // Coherent, interruptible, physics-based. Use these instead of ad-hoc curves.
+
+    enum Motion {
+        static let press   = SwiftUI.Animation.spring(response: 0.28, dampingFraction: 0.68)
+        static let snappy  = SwiftUI.Animation.snappy(duration: 0.32, extraBounce: 0.04)
+        static let smooth  = SwiftUI.Animation.smooth(duration: 0.40)
+        static let bouncy  = SwiftUI.Animation.bouncy(duration: 0.48, extraBounce: 0.12)
+        static let gentle  = SwiftUI.Animation.spring(response: 0.55, dampingFraction: 0.85)
+
+        /// Cross-fade fallback to use when Reduce Motion is on.
+        static let reduced = SwiftUI.Animation.easeInOut(duration: 0.22)
     }
 
     enum ButtonSize {
-        static let height: CGFloat = 50
+        static let height: CGFloat = 52
     }
 }
 
-// MARK: - Shadow Modifier
+// MARK: - Shadow / Card Modifiers
 
 struct DSCardShadow: ViewModifier {
     @Environment(\.colorScheme) var colorScheme
@@ -133,30 +178,34 @@ struct DSCardShadow: ViewModifier {
     func body(content: Content) -> some View {
         if colorScheme == .light {
             content
-                .shadow(color: Color.black.opacity(elevated ? 0.10 : 0.05), radius: elevated ? 16 : 8, x: 0, y: elevated ? 6 : 2)
+                .shadow(color: Color.black.opacity(elevated ? 0.10 : 0.06),
+                        radius: elevated ? 18 : 10, x: 0, y: elevated ? 8 : 4)
         } else {
+            // Dark mode: a hairline rim reads as elevation; shadows mostly vanish.
             content.overlay(
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .stroke(Color.white.opacity(elevated ? 0.12 : 0.06), lineWidth: elevated ? 1 : 0.5)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(elevated ? 0.10 : 0.06),
+                                  lineWidth: elevated ? 1 : 0.5)
             )
         }
     }
 }
 
-// MARK: - Card Modifier
-
 private struct DSCardModifier: ViewModifier {
+    var padding: CGFloat = DS.Spacing.md
     func body(content: Content) -> some View {
         content
-            .padding(DS.Spacing.md)
+            .padding(padding)
             .background(DS.Colors.backgroundCard)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
             .modifier(DSCardShadow())
     }
 }
 
 extension View {
-    func dsCard() -> some View { modifier(DSCardModifier()) }
+    func dsCard(padding: CGFloat = DS.Spacing.md) -> some View {
+        modifier(DSCardModifier(padding: padding))
+    }
     func dsCardShadow(cornerRadius: CGFloat = DS.Radius.card) -> some View {
         modifier(DSCardShadow(cornerRadius: cornerRadius))
     }
@@ -173,24 +222,19 @@ struct DSPrimaryButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(DS.Font.headline)
-            .foregroundColor(.white)
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .frame(height: DS.ButtonSize.height)
             .background(
-                isDisabled
-                    ? AnyShapeStyle(DS.Colors.accent.opacity(0.3))
-                    : AnyShapeStyle(
-                        LinearGradient(
-                            colors: [DS.Colors.accent, DS.Colors.accent.opacity(0.85)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                isDisabled ? AnyShapeStyle(DS.Colors.accent.opacity(0.35))
+                           : AnyShapeStyle(DS.Colors.accent),
+                in: RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous)
             )
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
-            .shadow(color: DS.Colors.accent.opacity(0.25), radius: 8, x: 0, y: 4)
+            .shadow(color: DS.Colors.accent.opacity(isDisabled ? 0 : 0.28),
+                    radius: configuration.isPressed ? 4 : 10, x: 0, y: configuration.isPressed ? 2 : 5)
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+            .brightness(configuration.isPressed ? -0.04 : 0)
+            .animation(DS.Motion.press, value: configuration.isPressed)
     }
 }
 
@@ -198,15 +242,13 @@ struct DSSecondaryButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(DS.Font.headline)
-            .foregroundColor(DS.Colors.accent)
+            .foregroundStyle(DS.Colors.accent)
             .frame(maxWidth: .infinity)
             .frame(height: DS.ButtonSize.height)
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.card)
-                    .stroke(DS.Colors.accent, lineWidth: 1.5)
-            )
+            .background(DS.Colors.accentSoft,
+                        in: RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-            .animation(.easeInOut(duration: 0.12), value: configuration.isPressed)
+            .animation(DS.Motion.press, value: configuration.isPressed)
     }
 }
 
@@ -214,19 +256,19 @@ struct DSTertiaryButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(DS.Font.headline)
-            .foregroundColor(DS.Colors.accent)
-            .opacity(configuration.isPressed ? 0.6 : 1.0)
+            .foregroundStyle(DS.Colors.accent)
+            .opacity(configuration.isPressed ? 0.55 : 1.0)
+            .animation(DS.Motion.press, value: configuration.isPressed)
     }
 }
 
-// MARK: - Tap Bounce Button Style
-
+/// Subtle tactile press for tappable cards/chips/icons.
 struct DSTapBounce: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
-            .opacity(configuration.isPressed ? 0.9 : 1.0)
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+            .opacity(configuration.isPressed ? 0.92 : 1.0)
+            .animation(DS.Motion.press, value: configuration.isPressed)
     }
 }
 
@@ -234,29 +276,31 @@ struct DSTapBounce: ButtonStyle {
 
 /// Haptics with long-lived, pre-warmed generators.
 ///
-/// The old version allocated a brand-new generator on every call and fired it
-/// without `prepare()`. On a real device the Taptic Engine powers down when idle,
-/// so the first hit after a pause had to cold-start the engine *synchronously on
-/// the main thread* — which stalled the very tap that triggered it (the onboarding
-/// "1-2s lag before anything happens"). Reusing prepared generators and calling
-/// `prepare()` again right after each fire keeps the engine warm, so taps are
-/// instant. `@MainActor` because feedback generators must be used from the main thread.
+/// Allocating a fresh generator per call and firing without `prepare()` makes the
+/// Taptic Engine cold-start synchronously on the main thread after any idle — which
+/// stalls the very tap that triggered it. Reusing prepared generators and
+/// re-preparing after each fire keeps the engine warm so taps stay instant.
+/// `@MainActor` because feedback generators must be used from the main thread.
 @MainActor
 enum Haptics {
     private static let impactLight  = UIImpactFeedbackGenerator(style: .light)
     private static let impactMedium = UIImpactFeedbackGenerator(style: .medium)
+    private static let impactSoft   = UIImpactFeedbackGenerator(style: .soft)
     private static let notification = UINotificationFeedbackGenerator()
     private static let selectionGen = UISelectionFeedbackGenerator()
 
     static func light()     { impactLight.impactOccurred();  impactLight.prepare() }
     static func medium()    { impactMedium.impactOccurred(); impactMedium.prepare() }
+    static func soft()      { impactSoft.impactOccurred();   impactSoft.prepare() }
     static func success()   { notification.notificationOccurred(.success); notification.prepare() }
+    static func warning()   { notification.notificationOccurred(.warning); notification.prepare() }
     static func selection() { selectionGen.selectionChanged(); selectionGen.prepare() }
 
     /// Warm the Taptic Engine ahead of an expected tap (call from `.onAppear`).
     static func prepare() {
         impactLight.prepare()
         impactMedium.prepare()
+        impactSoft.prepare()
         notification.prepare()
         selectionGen.prepare()
     }
@@ -279,9 +323,11 @@ enum ColorMapping {
         case "purple": return .purple
         case "brown": return .brown
         case "gray", "grey": return .gray
-        case "navy": return Color(red: 0, green: 0, blue: 0.5)
-        case "beige": return Color(red: 0.96, green: 0.96, blue: 0.86)
-        case "cream": return Color(red: 1, green: 0.99, blue: 0.82)
+        case "silver": return Color(red: 0.75, green: 0.75, blue: 0.76)
+        case "gold": return Color(red: 0.83, green: 0.69, blue: 0.22)
+        case "navy": return Color(red: 0.10, green: 0.16, blue: 0.36)
+        case "beige": return Color(red: 0.90, green: 0.86, blue: 0.76)
+        case "cream": return Color(red: 0.98, green: 0.96, blue: 0.88)
         case "maroon": return Color(red: 0.5, green: 0, blue: 0)
         case "teal": return .teal
         case "olive": return Color(red: 0.5, green: 0.5, blue: 0)
@@ -297,31 +343,29 @@ enum ColorMapping {
     }
 }
 
-// MARK: - Glass Effect Helpers
-// Stand-ins using system materials. When iOS 26 SDK is available,
-// swap with .glassEffect(.regular), .glassEffect(.clear), etc.
+// MARK: - Glass Effect Helpers (system materials)
 
 extension View {
     func dsGlassCard(cornerRadius: CGFloat = DS.Radius.sheet) -> some View {
-        self.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+        self.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     func dsGlassClear(cornerRadius: CGFloat = DS.Radius.card) -> some View {
-        self.background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+        self.background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     func dsGlassChipSelected() -> some View {
         self
-            .background(DS.Colors.accent.opacity(0.18), in: Capsule())
-            .overlay(Capsule().stroke(DS.Colors.accent.opacity(0.25), lineWidth: 1))
+            .background(DS.Colors.accentSoft, in: Capsule(style: .continuous))
+            .overlay(Capsule(style: .continuous).strokeBorder(DS.Colors.accent.opacity(0.30), lineWidth: 1))
     }
 
     func dsGlassChipUnselected() -> some View {
-        self.background(DS.Colors.backgroundSecondary, in: Capsule())
+        self.background(.ultraThinMaterial, in: Capsule(style: .continuous))
     }
 
     func dsGlassBar(cornerRadius: CGFloat = DS.Spacing.md) -> some View {
-        self.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+        self.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     func dsGlassCircle() -> some View {
