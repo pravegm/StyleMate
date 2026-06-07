@@ -20,13 +20,15 @@ struct LoginView: View {
                 VStack(spacing: DS.Spacing.lg) {
                     ZStack {
                         Circle()
-                            .fill(DS.Colors.backgroundSecondary)
-                            .frame(width: 110, height: 110)
-
+                            .fill(DS.Colors.accentSoft)
+                            .frame(width: 116, height: 116)
+                        Circle()
+                            .strokeBorder(DS.Colors.accent.opacity(0.18), lineWidth: 1)
+                            .frame(width: 116, height: 116)
                         Image(systemName: "tshirt.fill")
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 52, height: 52)
+                            .frame(width: 50, height: 50)
                             .foregroundStyle(DS.Colors.accent)
                     }
 
@@ -53,7 +55,7 @@ struct LoginView: View {
                 Spacer()
 
                 // MARK: - Sign In Buttons (preserved exactly)
-                VStack(spacing: 14) {
+                VStack(spacing: DS.Spacing.sm) {
                     SignInWithAppleButton(.signIn) { request in
                         request.requestedScopes = [.fullName, .email]
                     } onCompletion: { result in
@@ -71,8 +73,8 @@ struct LoginView: View {
                             GoogleLogoView()
                                 .frame(width: 20, height: 20)
                             Text("Sign in with Google")
-                                .font(.system(size: 17, weight: .medium))
-                                .foregroundColor(DS.Colors.textPrimary)
+                                .font(DS.Font.body.weight(.medium))
+                                .foregroundStyle(DS.Colors.textPrimary)
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)

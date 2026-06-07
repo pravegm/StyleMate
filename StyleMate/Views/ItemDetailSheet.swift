@@ -51,18 +51,19 @@ struct ItemDetailSheet: View {
                     Image(uiImage: img)
                         .resizable()
                         .scaledToFit()
+                        .padding(DS.Spacing.md)
                 } else {
-                    RoundedRectangle(cornerRadius: DS.Radius.hero)
-                        .fill(DS.Colors.backgroundSecondary)
-                        .overlay(
-                            Image(systemName: "photo")
-                                .font(.system(size: 32))
-                                .foregroundColor(DS.Colors.textTertiary)
-                        )
+                    Image(systemName: "photo")
+                        .font(.system(size: 34))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(DS.Colors.textTertiary)
                 }
             }
-            .frame(maxHeight: 260)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero))
+            .frame(maxWidth: .infinity)
+            .frame(height: 280)
+            .background(DS.Colors.backgroundCard)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
+            .dsCardShadow(cornerRadius: DS.Radius.hero)
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
@@ -105,13 +106,11 @@ struct ItemDetailSheet: View {
             FlowLayout(spacing: DS.Spacing.xs) {
                 ForEach(chips, id: \.self) { chip in
                     Text(chip)
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.textPrimary)
+                        .font(DS.Font.footnote.weight(.medium))
+                        .foregroundStyle(DS.Colors.textPrimary)
                         .padding(.horizontal, DS.Spacing.sm)
                         .padding(.vertical, DS.Spacing.xs)
-                        .background(DS.Colors.backgroundSecondary)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(DS.Colors.textTertiary.opacity(0.2), lineWidth: 0.5))
+                        .background(.ultraThinMaterial, in: Capsule(style: .continuous))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -149,9 +148,10 @@ struct ItemDetailSheet: View {
     private var colorsSection: some View {
         if !item.colors.isEmpty {
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                Text("Colors")
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textTertiary)
+                Text("COLORS")
+                    .font(DS.Font.footnote.weight(.semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(DS.Colors.textTertiary)
 
                 HStack(spacing: DS.Spacing.sm) {
                     ForEach(item.colors, id: \.self) { colorName in
@@ -177,9 +177,10 @@ struct ItemDetailSheet: View {
     private var detailsSection: some View {
         if let details = item.details, !details.isEmpty {
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                Text("Details")
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textTertiary)
+                Text("DETAILS")
+                    .font(DS.Font.footnote.weight(.semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(DS.Colors.textTertiary)
 
                 Text(details)
                     .font(DS.Font.subheadline)

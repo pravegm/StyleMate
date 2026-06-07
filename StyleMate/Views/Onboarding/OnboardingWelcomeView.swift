@@ -14,9 +14,6 @@ struct OnboardingWelcomeView: View {
     @State private var pill2Visible = false
     @State private var pill3Visible = false
     @State private var buttonVisible = false
-    @State private var shimmerX: CGFloat = -100
-
-    private let shimmerTimer = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
 
     private struct CardSpec: Identifiable {
         let id: Int
@@ -143,11 +140,11 @@ struct OnboardingWelcomeView: View {
                 .foregroundColor(DS.Colors.accent)
             Text(label)
                 .font(DS.Font.caption1)
-                .foregroundColor(DS.Colors.textSecondary)
+                .foregroundStyle(DS.Colors.textSecondary)
         }
         .padding(.horizontal, DS.Spacing.sm)
         .padding(.vertical, DS.Spacing.xs)
-        .background(DS.Colors.backgroundSecondary, in: Capsule())
+        .background(.ultraThinMaterial, in: Capsule(style: .continuous))
         .offset(y: visible ? 0 : 15)
         .opacity(visible ? 1 : 0)
         .animation(.spring(response: 0.45, dampingFraction: 0.75), value: visible)
@@ -160,32 +157,15 @@ struct OnboardingWelcomeView: View {
             Haptics.medium()
             onAdvance()
         } label: {
-            Text("Get Started")
-                .overlay(
-                    GeometryReader { btnGeo in
-                        LinearGradient(
-                            colors: [.clear, Color.white.opacity(0.08), .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: 30)
-                        .offset(x: shimmerX)
-                        .frame(width: btnGeo.size.width, alignment: .leading)
-                    }
-                    .clipped()
-                    .allowsHitTesting(false)
-                )
+            HStack(spacing: DS.Spacing.xs) {
+                Text("Get Started")
+                Image(systemName: "arrow.right")
+            }
         }
         .buttonStyle(DSPrimaryButton())
         .offset(y: buttonVisible ? 0 : 20)
         .opacity(buttonVisible ? 1 : 0)
         .animation(.spring(response: 0.55, dampingFraction: 0.8), value: buttonVisible)
-        .onReceive(shimmerTimer) { _ in
-            shimmerX = -100
-            withAnimation(.linear(duration: 0.6)) {
-                shimmerX = 400
-            }
-        }
     }
 
     // MARK: - Choreography
