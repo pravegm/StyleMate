@@ -24,22 +24,26 @@ enum DS {
     // near-blacks in dark, never pure #000/#FFF) with a single teal brand tint.
 
     enum Colors {
-        // Canvas → the app background.
+        // Canvas → the app background. Deliberately a clear gray in light and a
+        // near-black in dark so white/elevated cards visibly FLOAT off it (the
+        // classic iOS "grouped" depth). This contrast is the main thing that makes
+        // the app read as layered and premium rather than flat.
         static let backgroundPrimary = dyn(
-            light: UIColor(red: 0.969, green: 0.969, blue: 0.976, alpha: 1),   // #F7F7F9
-            dark:  UIColor(red: 0.043, green: 0.043, blue: 0.047, alpha: 1)    // #0B0B0C
+            light: UIColor(red: 0.922, green: 0.922, blue: 0.941, alpha: 1),   // #EBEBF0
+            dark:  UIColor(red: 0.027, green: 0.027, blue: 0.031, alpha: 1)    // #070708
         )
 
         // Recessed fills (chips, segmented tracks, subtle wells).
         static let backgroundSecondary = dyn(
-            light: UIColor(red: 0.925, green: 0.925, blue: 0.937, alpha: 1),   // #ECECEF
-            dark:  UIColor(red: 0.110, green: 0.110, blue: 0.118, alpha: 1)    // #1C1C1E
+            light: UIColor(red: 0.882, green: 0.882, blue: 0.910, alpha: 1),   // #E1E1E8
+            dark:  UIColor(red: 0.141, green: 0.141, blue: 0.149, alpha: 1)    // #242426
         )
 
-        // Elevated surfaces (cards, sheets, rows). Lighter than canvas in dark = elevation.
+        // Elevated surfaces (cards, sheets, rows). Clearly lighter than canvas in
+        // dark = elevation; pure white in light = maximum lift off the gray canvas.
         static let backgroundCard = dyn(
             light: UIColor.white,                                              // #FFFFFF
-            dark:  UIColor(red: 0.141, green: 0.141, blue: 0.149, alpha: 1)    // #242426
+            dark:  UIColor(red: 0.114, green: 0.114, blue: 0.125, alpha: 1)    // #1D1D20
         )
 
         static let textPrimary = dyn(
@@ -177,16 +181,20 @@ struct DSCardShadow: ViewModifier {
 
     func body(content: Content) -> some View {
         if colorScheme == .light {
+            // Stronger, soft shadow so cards clearly lift off the gray canvas.
             content
-                .shadow(color: Color.black.opacity(elevated ? 0.10 : 0.06),
-                        radius: elevated ? 18 : 10, x: 0, y: elevated ? 8 : 4)
+                .shadow(color: Color.black.opacity(elevated ? 0.14 : 0.09),
+                        radius: elevated ? 24 : 14, x: 0, y: elevated ? 12 : 6)
         } else {
-            // Dark mode: a hairline rim reads as elevation; shadows mostly vanish.
-            content.overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(elevated ? 0.10 : 0.06),
-                                  lineWidth: elevated ? 1 : 0.5)
-            )
+            // Dark mode: a hairline rim + soft black drop reads as elevation.
+            content
+                .shadow(color: Color.black.opacity(elevated ? 0.5 : 0.35),
+                        radius: elevated ? 18 : 10, x: 0, y: elevated ? 8 : 4)
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Color.white.opacity(elevated ? 0.12 : 0.08),
+                                      lineWidth: elevated ? 1 : 0.6)
+                )
         }
     }
 }

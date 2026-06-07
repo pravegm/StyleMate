@@ -4,7 +4,7 @@ import PhotosUI
 struct MyWardrobeView: View {
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @Binding var showAddSheet: Bool
-    private let columns = [GridItem(.adaptive(minimum: 150), spacing: DS.Spacing.sm)]
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: DS.Spacing.md)]
     @State private var selectedCategory: Category?
     @State private var editingItem: WardrobeItem? = nil
     @State private var showEditSheet = false
@@ -80,7 +80,7 @@ struct MyWardrobeView: View {
                         filterChips
                             .padding(.horizontal, DS.Spacing.screenH)
 
-                        LazyVGrid(columns: columns, spacing: DS.Spacing.sm) {
+                        LazyVGrid(columns: columns, spacing: DS.Spacing.md) {
                             ForEach(Array(filteredCategories.enumerated()), id: \.element) { index, category in
                                 let categoryItems = wardrobeViewModel.items.filter { $0.category == category }
                                 Button {
@@ -116,6 +116,7 @@ struct MyWardrobeView: View {
                 .padding(.bottom, DS.Spacing.lg)
             }
             .navigationTitle("Wardrobe")
+            .navigationBarTitleDisplayMode(.large)
             .onAppear { withAnimation { appeared = true } }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {

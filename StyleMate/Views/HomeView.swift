@@ -35,7 +35,7 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         // MARK: - Hero Greeting + Weather
                         heroGreetingSection
-                            .padding(.top, DS.Spacing.md)
+                            .padding(.top, DS.Spacing.lg)
                             .opacity(appeared ? 1 : 0)
                             .offset(y: appeared ? 0 : 20)
                             .animation(.easeOut(duration: 0.5), value: appeared)
@@ -72,7 +72,7 @@ struct HomeView: View {
 
                         // MARK: - Style Me Hero Card
                         styleMeHeroCard
-                            .padding(.top, DS.Spacing.lg)
+                            .padding(.top, DS.Spacing.xl)
                             .opacity(appeared ? 1 : 0)
                             .offset(y: appeared ? 0 : 20)
                             .animation(.easeOut(duration: 0.5).delay(0.1), value: appeared)
@@ -182,16 +182,16 @@ struct HomeView: View {
 
     @ViewBuilder
     private var heroGreetingSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            Text(greeting + ",")
-                .font(DS.Font.title2)
-                .foregroundColor(DS.Colors.textSecondary)
+        VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+            Text(greeting)
+                .font(DS.Font.title1)
+                .foregroundStyle(DS.Colors.textSecondary)
 
             if let firstName = authService.user?.name.components(separatedBy: " ").first,
                !firstName.isEmpty, firstName.lowercased() != "user" {
                 Text(firstName)
                     .font(DS.Font.display)
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundStyle(DS.Colors.textPrimary)
             }
 
             WeatherInlineRow(
