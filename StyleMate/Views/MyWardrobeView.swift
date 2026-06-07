@@ -49,16 +49,21 @@ struct MyWardrobeView: View {
                     VStack(spacing: DS.Spacing.md) {
                         if wardrobeViewModel.items.isEmpty {
                             VStack(spacing: DS.Spacing.md) {
-                                Image(systemName: "camera.fill")
-                                    .font(.system(size: 44))
-                                    .foregroundColor(DS.Colors.accent)
+                                ZStack {
+                                    Circle().fill(DS.Colors.accentSoft).frame(width: 88, height: 88)
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 32, weight: .regular))
+                                        .symbolRenderingMode(.hierarchical)
+                                        .foregroundStyle(DS.Colors.accent)
+                                }
                                 Text("Start building your wardrobe")
                                     .font(DS.Font.title3)
-                                    .foregroundColor(DS.Colors.textPrimary)
-                                Text("Take a photo or pick from your gallery to add your first items")
+                                    .foregroundStyle(DS.Colors.textPrimary)
+                                Text("Take a photo or pick from your gallery to add your first items.")
                                     .font(DS.Font.subheadline)
-                                    .foregroundColor(DS.Colors.textSecondary)
+                                    .foregroundStyle(DS.Colors.textSecondary)
                                     .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Button(action: { Haptics.medium(); showAddSheet = true }) {
                                     HStack(spacing: DS.Spacing.xs) {
                                         Image(systemName: "plus")
@@ -66,7 +71,7 @@ struct MyWardrobeView: View {
                                     }
                                 }
                                 .buttonStyle(DSPrimaryButton())
-                                .padding(.horizontal, DS.Spacing.xl)
+                                .frame(maxWidth: 280)
                             }
                             .padding(DS.Spacing.xl)
                             .frame(maxWidth: .infinity)
@@ -101,16 +106,9 @@ struct MyWardrobeView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundStyle(.white)
                         .frame(width: 58, height: 58)
-                        .background(
-                            LinearGradient(
-                                colors: [DS.Colors.accent, DS.Colors.accent.opacity(0.85)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .clipShape(Circle())
+                        .background(DS.Colors.accent, in: Circle())
                         .shadow(color: DS.Colors.accent.opacity(0.35), radius: 12, x: 0, y: 6)
                 }
                 .buttonStyle(DSTapBounce())
@@ -195,22 +193,19 @@ struct MyWardrobeView: View {
                 Text(label)
                     .font(DS.Font.subheadline)
             }
-            .foregroundColor(isSelected ? DS.Colors.accent : DS.Colors.textPrimary)
+            .foregroundColor(isSelected ? DS.Colors.accent : DS.Colors.textSecondary)
             .padding(.horizontal, DS.Spacing.md)
             .padding(.vertical, DS.Spacing.xs)
         }
         .buttonStyle(.plain)
-        .background(
-            isSelected
-                ? DS.Colors.accent.opacity(0.15)
-                : DS.Colors.backgroundSecondary,
-            in: Capsule()
-        )
-        .overlay(
-            isSelected
-                ? Capsule().stroke(DS.Colors.accent, lineWidth: 1)
-                : nil
-        )
+        .background {
+            if isSelected {
+                Capsule(style: .continuous).fill(DS.Colors.accentSoft)
+                Capsule(style: .continuous).strokeBorder(DS.Colors.accent.opacity(0.30), lineWidth: 1)
+            } else {
+                Capsule(style: .continuous).fill(.ultraThinMaterial)
+            }
+        }
     }
 }
 
@@ -271,14 +266,14 @@ struct CategoryTile: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 120)
                     .background(DS.Colors.backgroundSecondary)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
             } else if thumbs.count < 4 {
                 Image(uiImage: thumbs[0])
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(maxWidth: .infinity)
                     .frame(height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
             } else {
                 let gridSize: CGFloat = 120
                 let halfSize = (gridSize - 2) / 2
@@ -293,7 +288,7 @@ struct CategoryTile: View {
                     }
                 }
                 .frame(height: gridSize)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
             }
 
             HStack {
@@ -313,7 +308,7 @@ struct CategoryTile: View {
         }
         .padding(DS.Spacing.xs)
         .background(DS.Colors.backgroundCard)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         .dsCardShadow()
         .opacity(count > 0 ? 1.0 : 0.5)
         .onAppear { loadThumbsIfNeeded() }
@@ -358,6 +353,7 @@ struct CategoryDetailView: View {
     @State private var isReplacingPhoto = false
     @State private var selectedDetailItem: WardrobeItem? = nil
     @State private var detailAppeared = false
+    @Namespace private var zoomNS
 
     private func normalizedProduct(_ product: String) -> String {
         let lower = product.lowercased().trimmingCharacters(in: .whitespaces)
@@ -381,20 +377,11 @@ struct CategoryDetailView: View {
     var body: some View {
         Group {
             if items.isEmpty {
-                VStack(spacing: DS.Spacing.md) {
-                    Image(systemName: category.iconName)
-                        .font(.system(size: 48))
-                        .foregroundColor(DS.Colors.textTertiary)
-
-                    Text("No \(category.rawValue) yet")
-                        .font(DS.Font.title3)
-                        .foregroundColor(DS.Colors.textPrimary)
-
-                    Text("Add your first \(category.rawValue.lowercased()) item to get started.")
-                        .font(DS.Font.body)
-                        .foregroundColor(DS.Colors.textSecondary)
-                        .multilineTextAlignment(.center)
-                }
+                DSEmptyState(
+                    icon: category.iconName,
+                    title: "No \(category.rawValue) yet",
+                    message: "Add your first \(category.rawValue.lowercased()) item to get started."
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.top, DS.Spacing.xxxl)
             } else {
@@ -424,6 +411,7 @@ struct CategoryDetailView: View {
                                             itemCardView(item)
                                         }
                                         .buttonStyle(DSTapBounce())
+                                        .matchedTransitionSource(id: item.id, in: zoomNS)
                                     }
                                 }
                             }
@@ -473,8 +461,10 @@ struct CategoryDetailView: View {
                     }
                 }
             )
+            .navigationTransition(.zoom(sourceID: item.id, in: zoomNS))
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+            .presentationCornerRadius(DS.Radius.sheet)
         }
         .sheet(item: $editingItem) { item in
             EditWardrobeItemView(item: item) { updatedItem in
@@ -567,7 +557,7 @@ struct CategoryDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(DS.Colors.backgroundCard)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         .dsCardShadow()
     }
 

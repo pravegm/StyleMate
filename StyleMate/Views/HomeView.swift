@@ -14,7 +14,7 @@ struct HomeView: View {
     @State private var showWeatherWarning = false
     @State private var showScanReview = false
     @State private var appeared = false
-    @State private var sparkleScale: CGFloat = 1.0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
@@ -220,17 +220,12 @@ struct HomeView: View {
             HStack(spacing: DS.Spacing.xs) {
                 Image(systemName: "sparkles")
                     .font(DS.Font.title3)
-                    .foregroundColor(DS.Colors.accent)
-                    .scaleEffect(sparkleScale)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-                            sparkleScale = 1.1
-                        }
-                    }
+                    .foregroundStyle(DS.Colors.accent)
+                    .symbolEffect(.pulse, options: reduceMotion ? .nonRepeating : .repeating)
 
                 Text("Style me for today")
                     .font(DS.Font.title2)
-                    .foregroundColor(DS.Colors.textPrimary)
+                    .foregroundStyle(DS.Colors.textPrimary)
             }
 
             OutfitTypeChipRow(
@@ -300,28 +295,40 @@ struct HomeView: View {
                                 )
                             }
                             .buttonStyle(DSTapBounce())
+                            .scrollTransition(.interactive, axis: .horizontal) { content, phase in
+                                content
+                                    .opacity(phase.isIdentity ? 1 : 0.7)
+                                    .scaleEffect(phase.isIdentity ? 1 : 0.94)
+                            }
                         }
                     }
                     .padding(.horizontal, DS.Spacing.micro)
+                    .padding(.vertical, DS.Spacing.micro)
                 }
+                .scrollClipDisabled()
             }
         } else {
             VStack(spacing: DS.Spacing.md) {
-                Image(systemName: "hanger")
-                    .font(.system(size: 40))
-                    .foregroundColor(DS.Colors.textTertiary)
+                ZStack {
+                    Circle().fill(DS.Colors.accentSoft).frame(width: 84, height: 84)
+                    Image(systemName: "hanger")
+                        .font(.system(size: 34, weight: .regular))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(DS.Colors.accent)
+                }
                 Text("Your wardrobe is empty")
-                    .font(DS.Font.headline)
-                    .foregroundColor(DS.Colors.textPrimary)
-                Text("Add your first items to get personalized outfit suggestions")
+                    .font(DS.Font.title3)
+                    .foregroundStyle(DS.Colors.textPrimary)
+                Text("Add items from the Wardrobe tab to get personalized outfit suggestions.")
                     .font(DS.Font.subheadline)
-                    .foregroundColor(DS.Colors.textSecondary)
+                    .foregroundStyle(DS.Colors.textSecondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity)
             .padding(DS.Spacing.xl)
             .background(DS.Colors.backgroundCard)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero))
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
             .dsCardShadow(cornerRadius: DS.Radius.hero)
         }
     }
@@ -329,15 +336,15 @@ struct HomeView: View {
     // MARK: - Section Header
 
     private func sectionHeader(_ title: String, trailing: String? = nil) -> some View {
-        HStack {
+        HStack(alignment: .firstTextBaseline) {
             Text(title)
-                .font(DS.Font.title3)
-                .foregroundColor(DS.Colors.textPrimary)
+                .font(DS.Font.title2)
+                .foregroundStyle(DS.Colors.textPrimary)
             Spacer()
             if let trailing = trailing {
                 Text(trailing)
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textTertiary)
+                    .font(DS.Font.footnote)
+                    .foregroundStyle(DS.Colors.textTertiary)
             }
         }
     }
@@ -364,17 +371,17 @@ private struct WardrobeCategoryCard: View {
 
             Text(category.rawValue)
                 .font(DS.Font.headline)
-                .foregroundColor(DS.Colors.textPrimary)
+                .foregroundStyle(DS.Colors.textPrimary)
                 .lineLimit(1)
 
             Text("\(count) items")
-                .font(DS.Font.caption1)
-                .foregroundColor(DS.Colors.textSecondary)
+                .font(DS.Font.footnote)
+                .foregroundStyle(DS.Colors.textSecondary)
         }
         .frame(width: 130)
         .padding(.vertical, DS.Spacing.sm)
         .background(DS.Colors.backgroundCard)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         .dsCardShadow()
         .onAppear { loadThumbsIfNeeded() }
         .onChange(of: items.count) { _ in loadThumbsIfNeeded() }
@@ -389,7 +396,7 @@ private struct WardrobeCategoryCard: View {
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
                 }
             }
         } else if thumbs.count == 1 {
@@ -397,12 +404,17 @@ private struct WardrobeCategoryCard: View {
                 .resizable()
                 .aspectRatio(contentMode: .fill)
                 .frame(width: 80, height: 80)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
         } else {
-            Image(systemName: category.iconName)
-                .font(.system(size: 32))
-                .foregroundColor(DS.Colors.accent)
-                .frame(width: 80, height: 80)
+            ZStack {
+                RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                    .fill(DS.Colors.accentSoft)
+                    .frame(width: 80, height: 80)
+                Image(systemName: category.iconName)
+                    .font(.system(size: 30))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(DS.Colors.accent)
+            }
         }
     }
 
