@@ -54,6 +54,7 @@ struct OnboardingView: View {
                 FaceReferenceBuilderView(userId: userId, isPresented: $showReferenceBuilder)
             }
         }
+        .onAppear { Haptics.prepare() }   // warm the Taptic Engine so the first tap is instant
     }
 
     /// After photo permission: if granted, let the user build their face

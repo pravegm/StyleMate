@@ -232,11 +232,34 @@ struct DSTapBounce: ButtonStyle {
 
 // MARK: - Haptic Feedback
 
+/// Haptics with long-lived, pre-warmed generators.
+///
+/// The old version allocated a brand-new generator on every call and fired it
+/// without `prepare()`. On a real device the Taptic Engine powers down when idle,
+/// so the first hit after a pause had to cold-start the engine *synchronously on
+/// the main thread* — which stalled the very tap that triggered it (the onboarding
+/// "1-2s lag before anything happens"). Reusing prepared generators and calling
+/// `prepare()` again right after each fire keeps the engine warm, so taps are
+/// instant. `@MainActor` because feedback generators must be used from the main thread.
+@MainActor
 enum Haptics {
-    static func light()     { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-    static func medium()    { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
-    static func success()   { UINotificationFeedbackGenerator().notificationOccurred(.success) }
-    static func selection() { UISelectionFeedbackGenerator().selectionChanged() }
+    private static let impactLight  = UIImpactFeedbackGenerator(style: .light)
+    private static let impactMedium = UIImpactFeedbackGenerator(style: .medium)
+    private static let notification = UINotificationFeedbackGenerator()
+    private static let selectionGen = UISelectionFeedbackGenerator()
+
+    static func light()     { impactLight.impactOccurred();  impactLight.prepare() }
+    static func medium()    { impactMedium.impactOccurred(); impactMedium.prepare() }
+    static func success()   { notification.notificationOccurred(.success); notification.prepare() }
+    static func selection() { selectionGen.selectionChanged(); selectionGen.prepare() }
+
+    /// Warm the Taptic Engine ahead of an expected tap (call from `.onAppear`).
+    static func prepare() {
+        impactLight.prepare()
+        impactMedium.prepare()
+        notification.prepare()
+        selectionGen.prepare()
+    }
 }
 
 // MARK: - Color Name Mapping
