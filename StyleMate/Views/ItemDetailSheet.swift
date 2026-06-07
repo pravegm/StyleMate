@@ -124,19 +124,19 @@ struct ItemDetailSheet: View {
         if let material = item.material, !material.isEmpty {
             chips.append(material)
         }
-        if let fit = item.fit, fit != .regular {
+        if let fit = item.fit, fit != .regular, item.category.supportsFit {
             chips.append(fit.rawValue)
         }
         if item.pattern != .solid {
             chips.append(item.pattern.rawValue)
         }
-        if let neckline = item.neckline {
+        if let neckline = item.neckline, item.category.supportsNeckline {
             chips.append(neckline.rawValue)
         }
-        if let sleeve = item.sleeveLength {
+        if let sleeve = item.sleeveLength, item.category.supportsSleeves {
             chips.append(sleeve.rawValue)
         }
-        if let length = item.garmentLength {
+        if let length = item.garmentLength, item.category.supportsLength {
             chips.append(length.rawValue)
         }
 

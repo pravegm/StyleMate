@@ -1044,16 +1044,19 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
                 let garmentLengthVal = matchGarmentLength(garmentLengthStr)
 
                 if let category = category, let product = product, let pattern = pattern, !colors.isEmpty {
+                    // Gate garment-only attributes by category: drop anything the
+                    // model hallucinated for an accessory/footwear item (e.g. a
+                    // sleeve length or neckline on sunglasses) so it's never stored.
                     validResults.append(ClassifiedItem(
                         category: category,
                         product: product,
                         colors: colors,
                         pattern: pattern,
                         material: materialStr,
-                        fit: fitVal,
-                        neckline: necklineVal,
-                        sleeveLength: sleeveLengthVal,
-                        garmentLength: garmentLengthVal,
+                        fit: category.supportsFit ? fitVal : nil,
+                        neckline: category.supportsNeckline ? necklineVal : nil,
+                        sleeveLength: category.supportsSleeves ? sleeveLengthVal : nil,
+                        garmentLength: category.supportsLength ? garmentLengthVal : nil,
                         details: detailsStr,
                         brand: brandStr
                     ))

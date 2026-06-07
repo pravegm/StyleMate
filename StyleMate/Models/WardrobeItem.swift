@@ -109,14 +109,14 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
 
         if let material = material, !material.isEmpty { parts.append(material) }
 
-        if let neckline = neckline {
+        if let neckline = neckline, category.supportsNeckline {
             let isDefaultNeckline = (neckline == .crewNeck && ["T-Shirts", "Graphic Tees", "Sweatshirts"].contains(product))
             if !isDefaultNeckline { parts.append(neckline.rawValue) }
         }
 
-        if let fit = fit, fit != .regular { parts.append(fit.rawValue) }
+        if let fit = fit, fit != .regular, category.supportsFit { parts.append(fit.rawValue) }
 
-        if let sleeve = sleeveLength {
+        if let sleeve = sleeveLength, category.supportsSleeves {
             let isDefaultSleeve = (sleeve == .longSleeve && [.midLayers, .outerwear].contains(category))
                 || (sleeve == .shortSleeve && ["T-Shirts", "Polo T-Shirts", "Graphic Tees"].contains(product))
             if !isDefaultSleeve { parts.append(sleeve.rawValue) }
@@ -127,6 +127,27 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
         parts.append(displayProduct)
 
         return parts.joined(separator: " ")
+    }
+
+    /// Returns a copy with garment-only attributes cleared when they don't apply
+    /// to this item's category — repairs items saved before category gating, so a
+    /// sunglasses item can't keep a stale "Collared" / "Short Sleeve" value.
+    func sanitizedAttributes() -> WardrobeItem {
+        let needsClean = (fit != nil && !category.supportsFit)
+            || (neckline != nil && !category.supportsNeckline)
+            || (sleeveLength != nil && !category.supportsSleeves)
+            || (garmentLength != nil && !category.supportsLength)
+        guard needsClean else { return self }
+        return WardrobeItem(
+            id: id, category: category, product: product, colors: colors, brand: brand,
+            pattern: pattern, imagePath: imagePath, croppedImagePath: croppedImagePath,
+            thumbnailPath: thumbnailPath, material: material,
+            fit: category.supportsFit ? fit : nil,
+            neckline: category.supportsNeckline ? neckline : nil,
+            sleeveLength: category.supportsSleeves ? sleeveLength : nil,
+            garmentLength: category.supportsLength ? garmentLength : nil,
+            details: details
+        )
     }
 
     var detailsSubtitle: String? {

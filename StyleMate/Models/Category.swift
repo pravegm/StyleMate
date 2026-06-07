@@ -29,6 +29,18 @@ enum Category: String, CaseIterable, Identifiable, Hashable {
         case .footwear:     return 6
         }
     }
+
+    // MARK: - Which garment attributes apply to this category
+    //
+    // Single source of truth so classification, display, and the editors all
+    // agree. Without this, Gemini occasionally tags an accessory (sunglasses,
+    // a bracelet) with garment-only fields like "Short Sleeve" / "Collared",
+    // and they get stored and shown — which makes no sense. These gate it out.
+    // (Mirrors the picker visibility already used in the edit/review screens.)
+    var supportsFit: Bool      { ![.footwear, .accessories].contains(self) }
+    var supportsNeckline: Bool { [.tops, .midLayers, .onePieces, .outerwear].contains(self) }
+    var supportsSleeves: Bool  { [.tops, .midLayers, .outerwear, .onePieces, .activewear].contains(self) }
+    var supportsLength: Bool   { [.bottoms, .onePieces, .outerwear].contains(self) }
 }
 
 // Shared wardrobe view model
@@ -56,7 +68,10 @@ class WardrobeViewModel: ObservableObject {
         }
         do {
             let decoded = try JSONDecoder().decode([WardrobeItemCodable].self, from: data)
-            items = decoded.compactMap { $0.toWardrobeItem() }
+            // Sanitize on load: clears garment fields wrongly attached to
+            // accessories/footwear in older data. The didSet re-saves the cleaned
+            // set, so this self-heals once.
+            items = decoded.compactMap { $0.toWardrobeItem()?.sanitizedAttributes() }
         } catch {
             items = []
         }
