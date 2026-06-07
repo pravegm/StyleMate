@@ -57,7 +57,7 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and show up 
 - **Authentication** — Sign in with Apple and Sign in with Google.
 - **CloudKit sync** — private database, custom `WardrobeZone`, per-item records with image assets. Local files win on conflict.
 - **Gemini consent** — explicit per-user opt-in (`GeminiConsentView`) before any image leaves the device for classification. Face matching never does.
-- **Design system** — `DesignSystem.swift` (DS): 8-pt grid, light/dark tokens, custom button styles, haptics, glass surfaces.
+- **Design system** — a Modern iOS-native premium language in `DesignSystem.swift` (DS) + `DSComponents.swift`: semantic light/dark color tokens (gray-canvas/white-card depth in light, layered near-blacks in dark), Dynamic-Type typography, continuous (squircle) corners, spring-based motion presets, system materials/glass, and pre-warmed haptics. Reusable parts include section headers, designed empty states, shimmer skeletons, and chips; the wardrobe item detail opens with a matched-geometry zoom transition.
 
 ## Architecture
 
