@@ -413,17 +413,21 @@ struct TodayOutfitSheet: View {
         let feet = items.filter { $0.category == .footwear }
         let accessories = items.filter { $0.category == .accessories }
 
-        VStack(spacing: DS.Spacing.lg) {
-            if !upper.isEmpty { flatLayRow(upper, maxHeight: 184) }
-            if !lower.isEmpty { flatLayRow(lower, maxHeight: 160) }
-            if !feet.isEmpty { flatLayRow(feet, maxHeight: 104) }
+        VStack(spacing: DS.Spacing.xl) {
+            if !upper.isEmpty { flatLayRow(upper, maxHeight: 188) }
+            if !lower.isEmpty { flatLayRow(lower, maxHeight: 156) }
+            if !feet.isEmpty { flatLayRow(feet, maxHeight: 92) }
             if !accessories.isEmpty {
-                HStack(spacing: DS.Spacing.lg) {
-                    ForEach(accessories) { flatLayPiece($0, maxHeight: 66) }
+                HStack(spacing: DS.Spacing.xl) {
+                    ForEach(accessories) { flatLayPiece($0, maxHeight: 56) }
                 }
             }
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, DS.Spacing.xl)
+        .padding(.horizontal, DS.Spacing.lg)
+        .background(DS.Colors.styleBoard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
     }
 
     private func flatLayRow(_ items: [WardrobeItem], maxHeight: CGFloat) -> some View {

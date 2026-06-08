@@ -101,6 +101,12 @@ enum DS {
         /// Neutral fill for unselected chips / capsules.
         static let fill = Color(uiColor: .secondarySystemFill)
 
+        /// Always-light "styling board" surface for outfit looks. Garment cutouts are
+        /// saved on a WHITE background (no alpha), so they only blend seamlessly on a
+        /// near-white surface. Keeping this light in BOTH light and dark mode lets the
+        /// flat-lay read as a lookbook page instead of white rectangles on a dark card.
+        static let styleBoard = Color(red: 0.988, green: 0.984, blue: 0.976)   // #FCFBF9
+
         // Internal: build a light/dark dynamic Color.
         private static func dyn(light: UIColor, dark: UIColor) -> Color {
             Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })

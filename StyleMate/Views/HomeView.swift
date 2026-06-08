@@ -296,11 +296,15 @@ struct HomeView: View {
                             )
                     }
                 }
-                .frame(height: 108)
+                .frame(height: 104)
                 .frame(maxWidth: .infinity)
             }
         }
-        .frame(height: 108)
+        .frame(height: 104)
+        .padding(.vertical, DS.Spacing.sm)
+        .padding(.horizontal, DS.Spacing.md)
+        .background(DS.Colors.styleBoard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
     }
 
     private var heroSkeleton: some View {

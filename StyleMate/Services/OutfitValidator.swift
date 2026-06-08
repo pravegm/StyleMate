@@ -18,8 +18,17 @@ enum OutfitValidator {
     /// Categories that can serve as the upper "base" of an outfit.
     private static let upperBaseCategories: Set<Category> = [.tops, .onePieces, .ethnicWear, .activewear]
 
-    /// At most one of each of these may appear in a single outfit.
-    private static let singletonCategories: Set<Category> = [.bottoms, .footwear, .onePieces]
+    /// At most one of each of these may appear in a single outfit. Bottoms /
+    /// footwear / one-piece are physical singletons; mid-layers and outerwear are
+    /// the "≤1 per layer tier" rule (two sweaters or two coats at once is wrong).
+    /// NOTE: .tops is deliberately NOT here — a base tee under a button-down is a
+    /// valid two-item upper layering.
+    private static let singletonCategories: Set<Category> = [.bottoms, .footwear, .onePieces, .midLayers, .outerwear]
+
+    /// Accessories are "points", not structural pieces — two looks that differ only
+    /// by an accessory aren't meaningfully different, so they're excluded from the
+    /// de-dup signature.
+    private static let coreRoleExclusions: Set<Category> = [.accessories]
 
     private static let neutralColors: Set<String> = [
         "black", "white", "gray", "grey", "navy", "beige", "cream",
@@ -63,6 +72,13 @@ enum OutfitValidator {
                                requireUpper: Bool, requireBottom: Bool, requireFootwear: Bool) -> Outfit? {
         // 1) Strip impossible doubles (keep the first of each singleton category).
         var items = dropImpossibleDoubles(outfit.items)
+
+        // 1b) A one-piece (dress/jumpsuit) already covers the lower body — a separate
+        // bottom alongside it is invalid, so drop any bottoms when a one-piece exists.
+        if items.contains(where: { $0.category == .onePieces }) {
+            items.removeAll { $0.category == .bottoms }
+        }
+
         var usedIDs = Set(items.map { $0.id })
 
         // 2) Upper base (skip if a one-piece is present — it covers the torso).
@@ -118,6 +134,10 @@ enum OutfitValidator {
     }
 
     private static func dedupKey(_ outfit: Outfit) -> String {
-        outfit.items.map { $0.id.uuidString }.sorted().joined(separator: "|")
+        outfit.items
+            .filter { !coreRoleExclusions.contains($0.category) }   // ignore accessories
+            .map { $0.id.uuidString }
+            .sorted()
+            .joined(separator: "|")
     }
 }
