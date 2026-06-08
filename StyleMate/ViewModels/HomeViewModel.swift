@@ -128,10 +128,13 @@ class HomeViewModel: ObservableObject {
                     return Outfit(items: wardrobeItems, explanation: suggestion.explanation)
                 }
 
-                outfitBatch = batch
+                // Guarantee every shown look is wearable: complete (upper + lower/
+                // one-piece + footwear), no impossible doubles, and distinct.
+                let validated = OutfitValidator.validateAndRepair(batch, wardrobe: items)
+                outfitBatch = validated
                 batchIndex = 0
 
-                if let first = batch.first {
+                if let first = validated.first {
                     todayOutfit = first
                     showOutfitSheet = true
                 } else {
