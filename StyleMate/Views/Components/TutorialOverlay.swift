@@ -37,12 +37,21 @@ enum CoachTarget: Equatable {
     case center           // no spotlight, centered card
 }
 
+/// An illustrated method shown inside a coach card (e.g. the 3 ways to add clothes).
+struct CoachMethod: Identifiable {
+    let id = UUID()
+    let icon: String
+    let title: String
+    let detail: String
+}
+
 struct CoachStep: Identifiable {
     let id = UUID()
     let title: String
     let message: String
     let target: CoachTarget
     var cta: String = "Next"
+    var methods: [CoachMethod] = []
 }
 
 extension CoachStep {
@@ -55,9 +64,17 @@ extension CoachStep {
         CoachStep(title: "Dressing for something?",
                   message: "Tell StyleMate the occasion — or type your own — and get five full looks in seconds.",
                   target: .anchor(CoachAnchor.styleMe)),
-        CoachStep(title: "Your closet, organized",
-                  message: "Everything you own, auto-tagged. The more you add, the smarter your outfits get.",
-                  target: .tab(1)),
+        CoachStep(title: "Build your closet",
+                  message: "Tap + in your Wardrobe to add clothes three ways:",
+                  target: .tab(1),
+                  methods: [
+                    CoachMethod(icon: "wand.and.stars", title: "Auto-scan",
+                                detail: "Find your clothes in your camera roll automatically"),
+                    CoachMethod(icon: "photo.on.rectangle", title: "Upload from gallery",
+                                detail: "Pick existing photos of your clothes"),
+                    CoachMethod(icon: "camera.fill", title: "Take a photo",
+                                detail: "Snap an item right now")
+                  ]),
         CoachStep(title: "Plan your week",
                   message: "Save looks you love and map them to a calendar, so mornings are already decided.",
                   target: .tab(2)),
@@ -214,6 +231,29 @@ struct CoachMarkOverlay: View {
                 .font(DS.Font.subheadline)
                 .foregroundStyle(DS.Colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if !step.methods.isEmpty {
+                VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                    ForEach(step.methods) { method in
+                        HStack(spacing: DS.Spacing.sm) {
+                            Image(systemName: method.icon)
+                                .font(DS.Font.callout)
+                                .foregroundStyle(DS.Colors.accent)
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(method.title)
+                                    .font(DS.Font.subheadline.weight(.semibold))
+                                    .foregroundStyle(DS.Colors.textPrimary)
+                                Text(method.detail)
+                                    .font(DS.Font.footnote)
+                                    .foregroundStyle(DS.Colors.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, DS.Spacing.micro)
+            }
 
             HStack {
                 if tutorial.stepIndex > 0 {
