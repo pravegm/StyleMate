@@ -49,11 +49,11 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and show up 
 
 ## Major features
 
-- **Onboarding** — welcome → about you (name / age / gender) → photo-scan explainer → selfie capture → photo library permission → reference builder → optional initial library scan. The auto-scan that follows can be paused/resumed from the home banner.
+- **Onboarding** — welcome → about you (name / age / gender) → photo-scan explainer (the initial auto-scan starts with the last month of photos; you can scan further back anytime) → selfie capture → photo library permission → reference builder → optional initial library scan. The auto-scan that follows can be paused/resumed from the home banner. The first time you land on Home, a one-time, skippable coach-mark tour introduces the main features (replayable anytime from Profile).
 - **Home** — time-aware greeting, weather card, wardrobe-summary widget, "Style Me" launcher, scan progress banner, last-scan results.
 - **My Wardrobe** — grid grouped by category (sorted by item count), tap into category → product subgroups → item detail. Add via the custom bottom sheet (Camera / Gallery / Auto-scan), edit any field, delete with CloudKit cleanup.
 - **My Outfits** — calendar of logged outfits, day detail with edit/delete, manual outfit composer.
-- **Profile** — name, email, optional gender/age, preferred styles, cloud sync status, data deletion.
+- **Profile** — name, email, optional gender/age, preferred styles, cloud sync status, replay the app tour, data deletion.
 - **Authentication** — Sign in with Apple and Sign in with Google.
 - **CloudKit sync** — private database, custom `WardrobeZone`, per-item records with image assets. Local files win on conflict.
 - **Gemini consent** — explicit per-user opt-in (`GeminiConsentView`) before any image leaves the device for classification. Face matching never does.

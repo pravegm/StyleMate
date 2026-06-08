@@ -8,6 +8,7 @@ struct StyleMateApp: App {
     @StateObject private var authService = AuthService()
     @StateObject private var wardrobeVM = WardrobeViewModel()
     @StateObject private var onboardingManager = OnboardingManager()
+    @StateObject private var tutorialManager = TutorialManager()
     let persistenceController = PersistenceController.shared
 
     var body: some Scene {
@@ -16,6 +17,7 @@ struct StyleMateApp: App {
                 .environmentObject(authService)
                 .environmentObject(wardrobeVM)
                 .environmentObject(onboardingManager)
+                .environmentObject(tutorialManager)
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .onOpenURL { url in
                     GIDSignIn.sharedInstance.handle(url)

@@ -188,7 +188,7 @@ struct OnboardingPhotoExplanationView: View {
         VStack(spacing: DS.Spacing.sm) {
             trustRow(icon: "faceid", text: "Quick selfie to find your photos",
                      emphasized: false, visible: trust1Visible)
-            trustRow(icon: "clock.fill", text: "Scans your last month of photos",
+            trustRow(icon: "clock.fill", text: "Starts with your last month of photos — scan further back anytime",
                      emphasized: false, visible: trust2Visible)
             trustRow(icon: "lock.shield.fill", text: "Everything stays on your device",
                      emphasized: true, visible: trust3Visible)

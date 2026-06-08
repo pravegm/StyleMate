@@ -3,6 +3,8 @@ import SwiftUI
 struct MainTabView: View {
     @State private var selectedTab = 0
     @Binding var showAddSheet: Bool
+    @EnvironmentObject private var authService: AuthService
+    @EnvironmentObject private var tutorialManager: TutorialManager
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -36,7 +38,29 @@ struct MainTabView: View {
         }
         .tint(DS.Colors.accent)
         .sensoryFeedback(.selection, trigger: selectedTab)
-        .onAppear { Haptics.prepare() }
+        // Host the coach-mark tour over the whole tab UI. It reads the Home
+        // elements' frames (anchors) from the selected tab's content.
+        .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
+            GeometryReader { geo in
+                if tutorialManager.isActive {
+                    CoachMarkOverlay(tutorial: tutorialManager, anchors: anchors, proxy: geo)
+                }
+            }
+        }
+        // The tour spotlights Home elements + tabs, so make sure we're on Home.
+        .onChange(of: tutorialManager.isActive) { active in
+            if active { selectedTab = 0 }
+        }
+        .onAppear {
+            Haptics.prepare()
+            if let uid = authService.user?.id {
+                tutorialManager.configure(forUser: uid)
+                // Let Home render (and the hero start generating) before the tour.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    tutorialManager.startIfFirstTime()
+                }
+            }
+        }
     }
 }
 
@@ -46,4 +70,5 @@ struct MainTabView: View {
         .environmentObject(AuthService())
         .environmentObject(MyOutfitsViewModel())
         .environmentObject(OnboardingManager())
+        .environmentObject(TutorialManager())
 }

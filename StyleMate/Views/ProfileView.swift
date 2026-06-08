@@ -4,6 +4,7 @@ struct ProfileView: View {
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var onboardingManager: OnboardingManager
+    @EnvironmentObject private var tutorialManager: TutorialManager
     @ObservedObject private var cloudKitService = CloudKitService.shared
     @State private var showingSignOutAlert = false
     @State private var showEmptyConfirmation = false
@@ -273,6 +274,21 @@ struct ProfileView: View {
                 }
 
                 Section("App Information") {
+                    Button {
+                        Haptics.light()
+                        tutorialManager.start()
+                    } label: {
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image(systemName: "sparkles")
+                            Text("Replay app tour")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(DS.Colors.textTertiary)
+                        }
+                        .foregroundColor(DS.Colors.accent)
+                    }
+
                     HStack {
                         Text("Version")
                         Spacer()
@@ -611,6 +627,7 @@ struct StylePreferencesSheet: View {
         .environmentObject(AuthService())
         .environmentObject(WardrobeViewModel())
         .environmentObject(OnboardingManager())
+        .environmentObject(TutorialManager())
 }
 
 // MARK: - Retake Selfie Sheet

@@ -73,6 +73,7 @@ struct HomeView: View {
                         // MARK: - Today's Outfit Hero
                         if homeVM.heroOutfit != nil || homeVM.isGeneratingHero {
                             todaysOutfitHero
+                                .coachAnchor(CoachAnchor.todayOutfit)
                                 .padding(.top, DS.Spacing.xl)
                                 .opacity(appeared ? 1 : 0)
                                 .offset(y: appeared ? 0 : 20)
@@ -81,6 +82,7 @@ struct HomeView: View {
 
                         // MARK: - Style Me Hero Card
                         styleMeHeroCard
+                            .coachAnchor(CoachAnchor.styleMe)
                             .padding(.top, DS.Spacing.xl)
                             .opacity(appeared ? 1 : 0)
                             .offset(y: appeared ? 0 : 20)
