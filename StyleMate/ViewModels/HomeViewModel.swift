@@ -163,6 +163,97 @@ class HomeViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Today's Outfit Hero
+    //
+    // One ready "pick of the day" shown on Home so the app opens on an answer, not
+    // a form. Generated once per day when weather is ready, then cached (item IDs +
+    // reason) so re-opening is instant and costs nothing.
+
+    @Published var heroOutfit: Outfit?
+    @Published var isGeneratingHero = false
+
+    private static let heroCacheKey = "todayHeroOutfit"
+
+    private struct HeroCache: Codable {
+        let dayKey: Double          // startOfDay reference time — one hero per calendar day
+        let itemIDs: [String]
+        let explanation: String
+    }
+
+    private var todayKey: Double {
+        Calendar.current.startOfDay(for: Date()).timeIntervalSinceReferenceDate
+    }
+
+    /// Loads today's cached hero (if any) and, if none exists yet, generates one —
+    /// but only when we have enough wardrobe and a weather reading. Safe to call on
+    /// every Home appear; it no-ops once a hero is set for the day.
+    func ensureHero(wardrobe: [WardrobeItem], user: User?) {
+        if heroOutfit != nil { return }
+        if loadHeroFromCache(wardrobe: wardrobe) { return }
+        // Wait until weather has resolved one way or another (loaded OR failed), so
+        // we don't generate a weather-blind pick while a reading is still incoming.
+        guard wardrobe.count >= 3, (weather != nil || weatherError != nil), !isGeneratingHero else { return }
+        generateHero(wardrobe: wardrobe, user: user)
+    }
+
+    @discardableResult
+    private func loadHeroFromCache(wardrobe: [WardrobeItem]) -> Bool {
+        guard let data = UserDefaults.standard.data(forKey: Self.heroCacheKey),
+              let cache = try? JSONDecoder().decode(HeroCache.self, from: data),
+              cache.dayKey == todayKey else { return false }
+        let byID = Dictionary(wardrobe.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { a, _ in a })
+        let items = cache.itemIDs.compactMap { byID[$0] }
+        guard items.count == cache.itemIDs.count, !items.isEmpty else { return false }
+        heroOutfit = Outfit(items: items, explanation: cache.explanation)
+        return true
+    }
+
+    /// Force a fresh pick of the day (e.g. a "regenerate" tap).
+    func generateHero(wardrobe: [WardrobeItem], user: User?) {
+        guard !isGeneratingHero, wardrobe.count >= 3 else { return }
+        isGeneratingHero = true
+        Task {
+            defer { isGeneratingHero = false }
+            let type = selectedOutfitType ?? user?.preferredStyles.first ?? .everyday
+            let result = await ImageAnalysisService.shared.suggestOutfitBatch(
+                from: wardrobe, outfitType: type, customDescription: nil, weather: weather, user: user
+            )
+            guard case .success(let suggestions) = result else { return }
+            let batch: [Outfit] = suggestions.compactMap { suggestion in
+                let items = suggestion.items.compactMap { idx -> WardrobeItem? in
+                    (idx >= 0 && idx < wardrobe.count) ? wardrobe[idx] : nil
+                }
+                return items.isEmpty ? nil : Outfit(items: items, explanation: suggestion.explanation)
+            }
+            let validated = OutfitValidator.validateAndRepair(batch, wardrobe: wardrobe)
+            if let hero = validated.first {
+                heroOutfit = hero
+                persistHero(hero)
+            }
+        }
+    }
+
+    private func persistHero(_ outfit: Outfit) {
+        let cache = HeroCache(dayKey: todayKey,
+                              itemIDs: outfit.items.map { $0.id.uuidString },
+                              explanation: outfit.explanation)
+        if let data = try? JSONEncoder().encode(cache) {
+            UserDefaults.standard.set(data, forKey: Self.heroCacheKey)
+        }
+    }
+
+    /// Opens the hero look in the swipe sheet so the user can refine (lock/shuffle)
+    /// and save it.
+    func openHeroInDeck() {
+        guard let hero = heroOutfit else { return }
+        savedCount = 0
+        skippedCount = 0
+        outfitBatch = [hero]
+        batchIndex = 0
+        todayOutfit = hero
+        showOutfitSheet = true
+    }
+
     // MARK: - Swipe Navigation
 
     func advanceToNextOutfit() {

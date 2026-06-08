@@ -70,12 +70,21 @@ struct HomeView: View {
                             }
                         }
 
+                        // MARK: - Today's Outfit Hero
+                        if homeVM.heroOutfit != nil || homeVM.isGeneratingHero {
+                            todaysOutfitHero
+                                .padding(.top, DS.Spacing.xl)
+                                .opacity(appeared ? 1 : 0)
+                                .offset(y: appeared ? 0 : 20)
+                                .animation(.easeOut(duration: 0.5).delay(0.1), value: appeared)
+                        }
+
                         // MARK: - Style Me Hero Card
                         styleMeHeroCard
                             .padding(.top, DS.Spacing.xl)
                             .opacity(appeared ? 1 : 0)
                             .offset(y: appeared ? 0 : 20)
-                            .animation(.easeOut(duration: 0.5).delay(0.1), value: appeared)
+                            .animation(.easeOut(duration: 0.5).delay(0.15), value: appeared)
 
                         // MARK: - Your Wardrobe
                         wardrobeSection
@@ -147,7 +156,14 @@ struct HomeView: View {
                 if homeVM.weather == nil && !homeVM.isWeatherLoading {
                     homeVM.requestWeatherForCurrentLocation()
                 }
+                homeVM.ensureHero(wardrobe: wardrobeViewModel.items, user: authService.user)
                 withAnimation { appeared = true }
+            }
+            .onChange(of: homeVM.weather?.temperature2m) { _ in
+                homeVM.ensureHero(wardrobe: wardrobeViewModel.items, user: authService.user)
+            }
+            .onChange(of: homeVM.weatherError) { _ in
+                homeVM.ensureHero(wardrobe: wardrobeViewModel.items, user: authService.user)
             }
             .onChange(of: homeVM.isLoading) { isLoading in
                 if isLoading {
@@ -210,6 +226,106 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Today's Outfit Hero
+
+    @ViewBuilder
+    private var todaysOutfitHero: some View {
+        if let hero = homeVM.heroOutfit {
+            Button {
+                Haptics.medium()
+                homeVM.openHeroInDeck()
+            } label: {
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Today's Outfit")
+                            .font(DS.Font.title2)
+                            .foregroundStyle(DS.Colors.textPrimary)
+                        Spacer()
+                        HStack(spacing: 2) {
+                            Text("Style it")
+                                .font(DS.Font.subheadline.weight(.semibold))
+                            Image(systemName: "chevron.right")
+                                .font(DS.Font.footnote.weight(.semibold))
+                        }
+                        .foregroundStyle(DS.Colors.accent)
+                    }
+
+                    heroPreviewRow(hero)
+
+                    if !hero.explanation.isEmpty {
+                        HStack(alignment: .top, spacing: DS.Spacing.xs) {
+                            Image(systemName: "sparkles")
+                                .font(DS.Font.footnote)
+                                .foregroundStyle(DS.Colors.accent)
+                                .padding(.top, 1)
+                            Text(hero.explanation)
+                                .font(DS.Font.subheadline)
+                                .foregroundStyle(DS.Colors.textSecondary)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(DS.Spacing.lg)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DS.Colors.backgroundCard)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
+                .dsElevatedShadow(cornerRadius: DS.Radius.hero)
+            }
+            .buttonStyle(DSTapBounce())
+        } else if homeVM.isGeneratingHero {
+            heroSkeleton
+        }
+    }
+
+    private func heroPreviewRow(_ outfit: Outfit) -> some View {
+        let items = outfit.items.sorted { $0.category.wearingOrder < $1.category.wearingOrder }
+        return HStack(spacing: DS.Spacing.sm) {
+            ForEach(items.prefix(5)) { item in
+                Group {
+                    if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                            .fill(DS.Colors.backgroundSecondary)
+                            .overlay(
+                                Image(systemName: item.category.iconName)
+                                    .foregroundStyle(DS.Colors.textTertiary)
+                            )
+                    }
+                }
+                .frame(height: 108)
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(height: 108)
+    }
+
+    private var heroSkeleton: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            Text("Today's Outfit")
+                .font(DS.Font.title2)
+                .foregroundStyle(DS.Colors.textPrimary)
+            HStack(spacing: DS.Spacing.sm) {
+                ForEach(0..<3, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                        .fill(DS.Colors.backgroundSecondary)
+                        .frame(height: 108)
+                        .frame(maxWidth: .infinity)
+                        .shimmering()
+                }
+            }
+            SkeletonBlock(width: 220, height: 13)
+        }
+        .padding(DS.Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
+        .dsElevatedShadow(cornerRadius: DS.Radius.hero)
+    }
+
     // MARK: - Style Me Hero Card
 
     @ViewBuilder
@@ -223,7 +339,7 @@ struct HomeView: View {
                     .foregroundStyle(DS.Colors.accent)
                     .symbolEffect(.pulse, options: reduceMotion ? .nonRepeating : .repeating)
 
-                Text("Style me for today")
+                Text("Style for an occasion")
                     .font(DS.Font.title2)
                     .foregroundStyle(DS.Colors.textPrimary)
             }
