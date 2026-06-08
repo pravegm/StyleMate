@@ -75,38 +75,38 @@ extension CoachStep {
     /// Post-onboarding tour. It NAVIGATES to each tab and spotlights a real element
     /// there — generator → add clothes → plan → profile — in natural-journey order.
     static let homeTour: [CoachStep] = [
-        CoachStep(title: "Style on demand",
-                  message: "Tap an occasion, or type your own — 'gym', 'date night', 'outdoor wedding'. What you type takes priority. Then Generate for five looks.",
+        CoachStep(title: "Get an outfit, instantly",
+                  message: "Pick an occasion, or type your own like 'gym' or 'beach wedding', and StyleMate builds 5 complete looks from your own clothes.",
                   tab: 0, anchor: CoachAnchor.styleMe),
-        CoachStep(title: "Build your closet",
-                  message: "Tap + to add clothes three ways:",
+        CoachStep(title: "Add your clothes",
+                  message: "Your outfits come from your wardrobe. We're already adding clothes from your photos. Tap + to add more, three ways:",
                   tab: 1, anchor: CoachAnchor.addFAB,
                   methods: [
                     CoachMethod(icon: "wand.and.stars", title: "Auto-scan",
-                                detail: "Find your clothes in your camera roll automatically"),
+                                detail: "Finds your clothes across your camera roll"),
                     CoachMethod(icon: "photo.on.rectangle", title: "Upload from gallery",
-                                detail: "Pick existing photos of your clothes"),
+                                detail: "Pick photos of clothes you already have"),
                     CoachMethod(icon: "camera.fill", title: "Take a photo",
                                 detail: "Snap an item right now")
                   ]),
-        CoachStep(title: "Plan your week",
-                  message: "Save looks you love and map them to a calendar, so mornings are already decided.",
+        CoachStep(title: "Save & plan outfits",
+                  message: "Looks you save show up here on a calendar. Plan what to wear this week, or look back at what you wore.",
                   tab: 2, anchor: CoachAnchor.outfitsCalendar),
-        CoachStep(title: "Make it yours",
-                  message: "Tune your style, manage your face match, and replay this tour anytime — here.",
+        CoachStep(title: "Your profile & settings",
+                  message: "Set your style preferences, redo your face match, manage iCloud backup, and replay this tour anytime.",
                   tab: 3, anchor: CoachAnchor.profileHeader, cta: "Start styling")
     ]
 
     /// First-generation tour — runs once when the outfit result sheet first opens.
     static let generationTour: [CoachStep] = [
-        CoachStep(title: "Your look, head to toe",
-                  message: "A complete outfit from your closet. Tap a piece to zoom — each one has a lock to keep it and a swap icon to change just that piece.",
+        CoachStep(title: "Your outfit",
+                  message: "A full head-to-toe look from your closet. Tap any piece to see it bigger. The lock keeps a piece you like; the swap icon changes just that one.",
                   anchor: CoachAnchor.genLook),
-        CoachStep(title: "Keep what you like",
-                  message: "Lock the pieces you love, then tap Shuffle for a fresh take on everything else.",
+        CoachStep(title: "Shuffle the rest",
+                  message: "Lock the pieces you love, then tap Shuffle to swap everything else for a fresh combination.",
                   anchor: CoachAnchor.genShuffle),
         CoachStep(title: "Save, skip, or tweak",
-                  message: "Save logs the look for today, Skip shows the next one, + adds a missing piece, and the calendar saves it to a date. You can also swipe right to save, left to skip.",
+                  message: "Save keeps this look for today. Skip shows the next idea. Use + to add a missing piece, or the calendar to save it to a specific day. (Or swipe: right to save, left to skip.)",
                   anchor: CoachAnchor.genActions, cta: "Got it")
     ]
 }
@@ -335,7 +335,7 @@ struct CoachMarkOverlay: View {
 
     private func bubblePlacement(spot: CGRect?) -> BubblePlacement {
         let margin: CGFloat = 16
-        let gap: CGFloat = 12
+        let gap: CGFloat = 16
         guard let spot else {
             return BubblePlacement(center: CGPoint(x: size.width / 2, y: size.height / 2),
                                    tailEdge: .top, arrowOffset: 0, hasTail: false)
@@ -349,11 +349,23 @@ struct CoachMarkOverlay: View {
         // home indicator / tab bar.
         let safeTop: CGFloat = 56
         let safeBottom = size.height - 44
-        let placeBelow = (safeBottom - spot.maxY) >= h + gap
+        // Put the bubble on whichever side of the target actually has room; this is
+        // what keeps it OFF the target (e.g. a + button in the bottom-right corner
+        // gets the bubble above it, never on top of it).
+        let spaceBelow = safeBottom - spot.maxY
+        let spaceAbove = spot.minY - safeTop
+        let placeBelow = spaceBelow >= (h + gap) || (spaceAbove < (h + gap) && spaceBelow >= spaceAbove)
         let tailEdge: Edge = placeBelow ? .top : .bottom
         let centerX = min(max(spot.midX, margin + w / 2), size.width - margin - w / 2)
         var centerY = placeBelow ? spot.maxY + gap + h / 2 : spot.minY - gap - h / 2
-        centerY = min(max(centerY, safeTop + h / 2), safeBottom - h / 2)
+        // Never let the clamp pull the bubble back over the target.
+        if placeBelow {
+            centerY = max(centerY, spot.maxY + gap + h / 2)
+            centerY = min(centerY, safeBottom - h / 2)
+        } else {
+            centerY = min(centerY, spot.minY - gap - h / 2)
+            centerY = max(centerY, safeTop + h / 2)
+        }
         let maxOff = max(0, w / 2 - 22)
         let arrowOffset = min(max(spot.midX - centerX, -maxOff), maxOff)
         return BubblePlacement(center: CGPoint(x: centerX, y: centerY),
