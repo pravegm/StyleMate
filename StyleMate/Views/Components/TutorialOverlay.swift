@@ -199,20 +199,17 @@ struct CoachMarkOverlay: View {
     // MARK: Scrim with a soft, shape-matched cutout
 
     private func scrim(spot: CGRect?) -> some View {
-        ZStack {
-            Color.black.opacity(0.55)
-            if let spot {
-                RoundedRectangle(cornerRadius: corner(for: spot), style: .continuous)
-                    .frame(width: spot.width, height: spot.height)
-                    .position(x: spot.midX, y: spot.midY)
-                    .blendMode(.destinationOut)
-                    .blur(radius: 2)               // soft cutout edge
+        Color.black.opacity(0.55)
+            .reverseMask {
+                if let spot {
+                    RoundedRectangle(cornerRadius: corner(for: spot), style: .continuous)
+                        .frame(width: spot.width, height: spot.height)
+                        .position(x: spot.midX, y: spot.midY)
+                }
             }
-        }
-        .compositingGroup()                        // required for destinationOut
-        .ignoresSafeArea()
-        .contentShape(Rectangle())
-        .onTapGesture { Haptics.light(); tutorial.next() }   // tap anywhere to advance
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .onTapGesture { Haptics.light(); tutorial.next() }   // tap anywhere to advance
     }
 
     // MARK: Glowing, breathing spotlight ring
@@ -264,7 +261,6 @@ struct CoachMarkOverlay: View {
                 }
             }
             .position(x: place.center.x, y: place.center.y)
-            .opacity(bubbleSize == .zero ? 0 : 1)   // hide until measured (avoids a position jump)
             .id(step.id)                             // fresh fade per step
             .transition(.opacity)
     }
@@ -338,11 +334,14 @@ struct CoachMarkOverlay: View {
     private func bubblePlacement(spot: CGRect?) -> BubblePlacement {
         let margin: CGFloat = 16
         let gap: CGFloat = 12
-        guard let spot, bubbleSize != .zero else {
+        guard let spot else {
             return BubblePlacement(center: CGPoint(x: size.width / 2, y: size.height / 2),
                                    tailEdge: .top, arrowOffset: 0, hasTail: false)
         }
-        let w = bubbleSize.width, h = bubbleSize.height
+        // Use measured size when available, otherwise a sensible estimate so the
+        // bubble is positioned adjacent to the target immediately (never invisible).
+        let w = bubbleSize.width > 1 ? bubbleSize.width : 280
+        let h = bubbleSize.height > 1 ? bubbleSize.height : 180
         let safeTop = proxy.safeAreaInsets.top + margin
         let safeBottom = size.height - proxy.safeAreaInsets.bottom - margin
         let placeBelow = (safeBottom - spot.maxY) >= h + gap

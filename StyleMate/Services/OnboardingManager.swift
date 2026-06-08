@@ -15,6 +15,10 @@ class OnboardingManager: ObservableObject {
 
     func complete(forUser userId: String) {
         UserDefaults.standard.set(true, forKey: key(for: userId))
+        // Re-arm the feature tours so the post-onboarding tour reliably shows after
+        // (re-)onboarding, even if a flag lingered from an earlier run.
+        UserDefaults.standard.set(false, forKey: "tour_home_\(userId)")
+        UserDefaults.standard.set(false, forKey: "tour_generation_\(userId)")
         withAnimation(.easeInOut(duration: 0.3)) {
             hasCompletedOnboarding = true
         }
