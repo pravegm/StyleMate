@@ -163,6 +163,8 @@ struct CoachMarkOverlay: View {
     let anchors: [String: Anchor<CGRect>]
     let proxy: GeometryProxy
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var bubbleSize: CGSize = .zero
+    @State private var pulse = false
 
     private var size: CGSize { proxy.size }
 
@@ -181,83 +183,96 @@ struct CoachMarkOverlay: View {
     var body: some View {
         if tutorial.activeTour == tour, let step = tutorial.current {
             let spot = spotlightRect()
+            let place = bubblePlacement(spot: spot)
             ZStack(alignment: .topLeading) {
-                // Dimmed scrim with a cutout over the target.
-                Color.black.opacity(0.62)
-                    .reverseMask {
-                        if let spot {
-                            RoundedRectangle(cornerRadius: corner(for: spot), style: .continuous)
-                                .frame(width: spot.width, height: spot.height)
-                                .position(x: spot.midX, y: spot.midY)
-                        }
-                    }
-                    .contentShape(Rectangle())   // block taps to the UI underneath
-
-                // Spotlight ring.
-                if let spot {
-                    RoundedRectangle(cornerRadius: corner(for: spot), style: .continuous)
-                        .strokeBorder(.white.opacity(0.9), lineWidth: 2)
-                        .frame(width: spot.width, height: spot.height)
-                        .position(x: spot.midX, y: spot.midY)
-                        .allowsHitTesting(false)
-
-                    // Arrow pointing from the card's side toward the target.
-                    let cardOnTop = spot.midY > size.height * 0.55
-                    Image(systemName: cardOnTop ? "arrow.down" : "arrow.up")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.5), radius: 4)
-                        .position(x: min(max(spot.midX, 40), size.width - 40),
-                                  y: cardOnTop ? spot.minY - 22 : spot.maxY + 22)
-                        .allowsHitTesting(false)
-                }
-
-                calloutContainer(step: step, spot: spot)
+                scrim(spot: spot)
+                if let spot { halo(spot) }
+                bubble(step: step, place: place)
             }
             .frame(width: size.width, height: size.height)
             .ignoresSafeArea()
-            .animation(reduceMotion ? nil : DS.Motion.smooth, value: tutorial.stepIndex)
-            .transition(.opacity)
+            .animation(reduceMotion ? .none : .spring(response: 0.45, dampingFraction: 0.85),
+                       value: tutorial.stepIndex)
         }
     }
 
-    @ViewBuilder
-    private func calloutContainer(step: CoachStep, spot: CGRect?) -> some View {
-        // Dock the card to the edge away from the spotlight so they never overlap.
-        let dockTop = (spot?.midY ?? size.height / 2) > size.height * 0.55
-        let centered = (spot == nil)
+    // MARK: Scrim with a soft, shape-matched cutout
 
-        VStack(spacing: 0) {
-            if centered {
-                Spacer(minLength: 0); calloutCard(step: step); Spacer(minLength: 0)
-            } else if dockTop {
-                calloutCard(step: step); Spacer(minLength: 0)
-            } else {
-                Spacer(minLength: 0); calloutCard(step: step)
+    private func scrim(spot: CGRect?) -> some View {
+        ZStack {
+            Color.black.opacity(0.55)
+            if let spot {
+                RoundedRectangle(cornerRadius: corner(for: spot), style: .continuous)
+                    .frame(width: spot.width, height: spot.height)
+                    .position(x: spot.midX, y: spot.midY)
+                    .blendMode(.destinationOut)
+                    .blur(radius: 2)               // soft cutout edge
             }
         }
-        .frame(width: size.width, height: size.height)
-        .padding(.horizontal, DS.Spacing.lg)
-        .padding(.top, dockTop ? proxy.safeAreaInsets.top + DS.Spacing.lg : 0)
-        .padding(.bottom, !dockTop && !centered ? proxy.safeAreaInsets.bottom + DS.Spacing.xxl + 60 : 0)
+        .compositingGroup()                        // required for destinationOut
+        .ignoresSafeArea()
+        .contentShape(Rectangle())
+        .onTapGesture { Haptics.light(); tutorial.next() }   // tap anywhere to advance
     }
 
-    private func calloutCard(step: CoachStep) -> some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            HStack(spacing: 6) {
-                ForEach(0..<tutorial.steps.count, id: \.self) { i in
-                    Capsule()
-                        .fill(i == tutorial.stepIndex ? DS.Colors.accent : DS.Colors.textTertiary.opacity(0.35))
-                        .frame(width: i == tutorial.stepIndex ? 18 : 6, height: 6)
+    // MARK: Glowing, breathing spotlight ring
+
+    private func halo(_ spot: CGRect) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: corner(for: spot), style: .continuous)
+                .stroke(DS.Colors.accent.opacity(0.35), lineWidth: 6)
+                .blur(radius: 9)
+            RoundedRectangle(cornerRadius: corner(for: spot), style: .continuous)
+                .stroke(DS.Colors.accent.opacity(0.9), lineWidth: 2)
+        }
+        .frame(width: spot.width, height: spot.height)
+        .scaleEffect(pulse ? 1.05 : 1.0)
+        .opacity(pulse ? 0.55 : 1.0)
+        .position(x: spot.midX, y: spot.midY)
+        .allowsHitTesting(false)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) { pulse = true }
+        }
+    }
+
+    // MARK: Tooltip bubble with an integrated tail, anchored adjacent to the target
+
+    private func bubble(step: CoachStep, place: BubblePlacement) -> some View {
+        bubbleContent(step: step)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .padding(place.tailEdge == .top ? .top : .bottom, place.hasTail ? 9 : 0)
+            .frame(maxWidth: 290)
+            .background {
+                if place.hasTail {
+                    TooltipShape(edge: place.tailEdge, arrowOffset: place.arrowOffset)
+                        .fill(DS.Colors.backgroundCard)
+                        .shadow(color: .black.opacity(0.22), radius: 22, x: 0, y: 10)
+                } else {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(DS.Colors.backgroundCard)
+                        .shadow(color: .black.opacity(0.22), radius: 22, x: 0, y: 10)
                 }
-                Spacer()
-                Button("Skip") { Haptics.light(); tutorial.skip() }
-                    .font(DS.Font.subheadline)
-                    .foregroundStyle(DS.Colors.textTertiary)
             }
+            .background(GeometryReader { g in
+                Color.clear.preference(key: BubbleSizeKey.self, value: g.size)
+            })
+            .onPreferenceChange(BubbleSizeKey.self) { newSize in
+                withAnimation(reduceMotion ? .none : .spring(response: 0.4, dampingFraction: 0.85)) {
+                    bubbleSize = newSize
+                }
+            }
+            .position(x: place.center.x, y: place.center.y)
+            .opacity(bubbleSize == .zero ? 0 : 1)   // hide until measured (avoids a position jump)
+            .id(step.id)                             // fresh fade per step
+            .transition(.opacity)
+    }
 
+    private func bubbleContent(step: CoachStep) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             Text(step.title)
-                .font(DS.Font.title3)
+                .font(DS.Font.headline)
                 .foregroundStyle(DS.Colors.textPrimary)
             Text(step.message)
                 .font(DS.Font.subheadline)
@@ -271,7 +286,7 @@ struct CoachMarkOverlay: View {
                             Image(systemName: method.icon)
                                 .font(DS.Font.callout)
                                 .foregroundStyle(DS.Colors.accent)
-                                .frame(width: 28)
+                                .frame(width: 26)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(method.title)
                                     .font(DS.Font.subheadline.weight(.semibold))
@@ -284,37 +299,118 @@ struct CoachMarkOverlay: View {
                         }
                     }
                 }
-                .padding(.top, DS.Spacing.micro)
+                .padding(.top, 2)
             }
 
-            HStack {
-                if tutorial.stepIndex > 0 {
-                    Button {
-                        Haptics.light(); tutorial.back()
-                    } label: {
-                        Text("Back").font(DS.Font.subheadline.weight(.medium))
-                            .foregroundStyle(DS.Colors.textSecondary)
+            // Controls row: progress dots · Back · Skip · Next
+            HStack(spacing: DS.Spacing.sm) {
+                HStack(spacing: 6) {
+                    ForEach(0..<tutorial.steps.count, id: \.self) { i in
+                        Capsule()
+                            .fill(i == tutorial.stepIndex ? DS.Colors.accent : DS.Colors.textTertiary.opacity(0.3))
+                            .frame(width: i == tutorial.stepIndex ? 16 : 6, height: 6)
                     }
                 }
-                Spacer()
-                Button {
-                    Haptics.medium(); tutorial.next()
-                } label: {
+                Spacer(minLength: DS.Spacing.xs)
+                if tutorial.stepIndex > 0 {
+                    Button("Back") { Haptics.light(); tutorial.back() }
+                        .font(DS.Font.footnote.weight(.medium))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                }
+                Button("Skip") { Haptics.light(); tutorial.skip() }
+                    .font(DS.Font.footnote)
+                    .foregroundStyle(DS.Colors.textTertiary)
+                Button { Haptics.medium(); tutorial.next() } label: {
                     Text(step.cta)
                         .font(DS.Font.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, DS.Spacing.lg)
-                        .padding(.vertical, DS.Spacing.sm)
+                        .padding(.horizontal, DS.Spacing.md)
+                        .padding(.vertical, 8)
                         .background(DS.Colors.accent, in: Capsule(style: .continuous))
                 }
             }
-            .padding(.top, DS.Spacing.micro)
+            .padding(.top, DS.Spacing.xs)
         }
-        .padding(DS.Spacing.lg)
-        .frame(maxWidth: 380)
-        .background(DS.Colors.backgroundCard)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
-        .dsElevatedShadow(cornerRadius: DS.Radius.hero)
+    }
+
+    // MARK: Placement (adjacent to the target, tail tracking it after clamping)
+
+    private func bubblePlacement(spot: CGRect?) -> BubblePlacement {
+        let margin: CGFloat = 16
+        let gap: CGFloat = 12
+        guard let spot, bubbleSize != .zero else {
+            return BubblePlacement(center: CGPoint(x: size.width / 2, y: size.height / 2),
+                                   tailEdge: .top, arrowOffset: 0, hasTail: false)
+        }
+        let w = bubbleSize.width, h = bubbleSize.height
+        let safeTop = proxy.safeAreaInsets.top + margin
+        let safeBottom = size.height - proxy.safeAreaInsets.bottom - margin
+        let placeBelow = (safeBottom - spot.maxY) >= h + gap
+        let tailEdge: Edge = placeBelow ? .top : .bottom
+        let centerX = min(max(spot.midX, margin + w / 2), size.width - margin - w / 2)
+        var centerY = placeBelow ? spot.maxY + gap + h / 2 : spot.minY - gap - h / 2
+        centerY = min(max(centerY, safeTop + h / 2), safeBottom - h / 2)
+        let maxOff = max(0, w / 2 - 22)
+        let arrowOffset = min(max(spot.midX - centerX, -maxOff), maxOff)
+        return BubblePlacement(center: CGPoint(x: centerX, y: centerY),
+                               tailEdge: tailEdge, arrowOffset: arrowOffset, hasTail: true)
+    }
+}
+
+// MARK: - Tooltip bubble shape (rounded rect + integrated tail)
+
+struct BubblePlacement {
+    var center: CGPoint
+    var tailEdge: Edge
+    var arrowOffset: CGFloat
+    var hasTail: Bool
+}
+
+private struct BubbleSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
+}
+
+/// A rounded-rectangle bubble with a tail on `edge`, whose tip sits at
+/// `arrowOffset` from the bubble's horizontal center (so it keeps pointing at the
+/// target even after the bubble is clamped to the screen).
+struct TooltipShape: Shape {
+    var edge: Edge
+    var arrowOffset: CGFloat
+    var cornerRadius: CGFloat = 18
+    var tailWidth: CGFloat = 18
+    var tailHeight: CGFloat = 9
+
+    var animatableData: CGFloat {
+        get { arrowOffset }
+        set { arrowOffset = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let body: CGRect
+        switch edge {
+        case .top:
+            body = CGRect(x: rect.minX, y: rect.minY + tailHeight, width: rect.width, height: rect.height - tailHeight)
+        default:
+            body = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height - tailHeight)
+        }
+        var p = Path(roundedRect: body, cornerRadius: cornerRadius, style: .continuous)
+
+        let tipX = min(max(rect.midX + arrowOffset, body.minX + cornerRadius + tailWidth / 2),
+                       body.maxX - cornerRadius - tailWidth / 2)
+        var tail = Path()
+        if edge == .top {
+            tail.move(to: CGPoint(x: tipX - tailWidth / 2, y: body.minY))
+            tail.addQuadCurve(to: CGPoint(x: tipX + tailWidth / 2, y: body.minY),
+                              control: CGPoint(x: tipX, y: rect.minY))   // rounded tip
+        } else {
+            tail.move(to: CGPoint(x: tipX - tailWidth / 2, y: body.maxY))
+            tail.addQuadCurve(to: CGPoint(x: tipX + tailWidth / 2, y: body.maxY),
+                              control: CGPoint(x: tipX, y: rect.maxY))
+        }
+        tail.closeSubpath()
+        p.addPath(tail)
+        return p
     }
 }
 
