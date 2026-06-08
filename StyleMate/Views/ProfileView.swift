@@ -83,6 +83,7 @@ struct ProfileView: View {
                                     .font(.system(size: 28, weight: .bold, design: .rounded))
                                     .foregroundStyle(.white)
                             }
+                            .coachAnchor(CoachAnchor.profileHeader)
 
                             Text(user.name)
                                 .font(DS.Font.title2)

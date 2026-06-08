@@ -14,6 +14,10 @@ enum CoachAnchor {
     // Home
     static let todayOutfit = "todayOutfit"
     static let styleMe = "styleMe"
+    // Other tabs (the tour navigates to these)
+    static let addFAB = "addFAB"
+    static let outfitsCalendar = "outfitsCalendar"
+    static let profileHeader = "profileHeader"
     // Generation result sheet
     static let genLook = "genLook"
     static let genShuffle = "genShuffle"
@@ -49,12 +53,6 @@ extension View {
 
 // MARK: Step model
 
-enum CoachTarget: Equatable {
-    case anchor(String)   // spotlight a registered Home element
-    case tab(Int)         // spotlight a bottom tab-bar item (0-based)
-    case center           // no spotlight, centered card
-}
-
 /// An illustrated method shown inside a coach card (e.g. the 3 ways to add clothes).
 struct CoachMethod: Identifiable {
     let id = UUID()
@@ -67,24 +65,22 @@ struct CoachStep: Identifiable {
     let id = UUID()
     let title: String
     let message: String
-    let target: CoachTarget
+    var tab: Int = 0           // Home tour: which tab to navigate to for this step
+    var anchor: String? = nil  // element to spotlight (nil = a centered card)
     var cta: String = "Next"
     var methods: [CoachMethod] = []
 }
 
 extension CoachStep {
-    /// The post-onboarding Home tour — payoff → on-demand value → foundation →
-    /// planning → control, in natural journey order. Copy is benefit-led and short.
+    /// Post-onboarding tour. It NAVIGATES to each tab and spotlights a real element
+    /// there — generator → add clothes → plan → profile — in natural-journey order.
     static let homeTour: [CoachStep] = [
-        CoachStep(title: "Today's look, ready",
-                  message: "We built a head-to-toe outfit for today's weather. Tap it to shuffle or lock the pieces you love.",
-                  target: .anchor(CoachAnchor.todayOutfit)),
-        CoachStep(title: "Dressing for something?",
-                  message: "Tap an occasion, or type your own in the box — 'gym', 'date night', 'outdoor wedding'. What you type takes priority. Then Generate for five looks.",
-                  target: .anchor(CoachAnchor.styleMe)),
+        CoachStep(title: "Style on demand",
+                  message: "Tap an occasion, or type your own — 'gym', 'date night', 'outdoor wedding'. What you type takes priority. Then Generate for five looks.",
+                  tab: 0, anchor: CoachAnchor.styleMe),
         CoachStep(title: "Build your closet",
-                  message: "Tap + in your Wardrobe to add clothes three ways:",
-                  target: .tab(1),
+                  message: "Tap + to add clothes three ways:",
+                  tab: 1, anchor: CoachAnchor.addFAB,
                   methods: [
                     CoachMethod(icon: "wand.and.stars", title: "Auto-scan",
                                 detail: "Find your clothes in your camera roll automatically"),
@@ -95,24 +91,23 @@ extension CoachStep {
                   ]),
         CoachStep(title: "Plan your week",
                   message: "Save looks you love and map them to a calendar, so mornings are already decided.",
-                  target: .tab(2)),
+                  tab: 2, anchor: CoachAnchor.outfitsCalendar),
         CoachStep(title: "Make it yours",
-                  message: "Tune your style, manage your face match, and replay this tour anytime — right here.",
-                  target: .tab(3), cta: "Start styling")
+                  message: "Tune your style, manage your face match, and replay this tour anytime — here.",
+                  tab: 3, anchor: CoachAnchor.profileHeader, cta: "Start styling")
     ]
 
-    /// First-generation tour — runs once when the outfit result sheet first opens,
-    /// explaining the controls that only exist there.
+    /// First-generation tour — runs once when the outfit result sheet first opens.
     static let generationTour: [CoachStep] = [
         CoachStep(title: "Your look, head to toe",
                   message: "A complete outfit from your closet. Tap a piece to zoom — each one has a lock to keep it and a swap icon to change just that piece.",
-                  target: .anchor(CoachAnchor.genLook)),
+                  anchor: CoachAnchor.genLook),
         CoachStep(title: "Keep what you like",
                   message: "Lock the pieces you love, then tap Shuffle for a fresh take on everything else.",
-                  target: .anchor(CoachAnchor.genShuffle)),
+                  anchor: CoachAnchor.genShuffle),
         CoachStep(title: "Save, skip, or tweak",
                   message: "Save logs the look for today, Skip shows the next one, + adds a missing piece, and the calendar saves it to a date. You can also swipe right to save, left to skip.",
-                  target: .anchor(CoachAnchor.genActions), cta: "Got it")
+                  anchor: CoachAnchor.genActions, cta: "Got it")
     ]
 }
 
@@ -172,25 +167,15 @@ struct CoachMarkOverlay: View {
     private var size: CGSize { proxy.size }
 
     private func spotlightRect() -> CGRect? {
-        guard let step = tutorial.current else { return nil }
-        switch step.target {
-        case .center:
-            return nil
-        case .anchor(let id):
-            guard let a = anchors[id] else { return nil }
-            return proxy[a].insetBy(dx: -12, dy: -12)
-        case .tab(let index):
-            let count: CGFloat = 4
-            let w = size.width / count
-            let cx = w * (CGFloat(index) + 0.5)
-            let cy = size.height - max(proxy.safeAreaInsets.bottom, 0) - 25
-            let halfW: CGFloat = 34, halfH: CGFloat = 30
-            return CGRect(x: cx - halfW, y: cy - halfH, width: halfW * 2, height: halfH * 2)
-        }
+        guard let step = tutorial.current, let id = step.anchor, let a = anchors[id] else { return nil }
+        return proxy[a].insetBy(dx: -10, dy: -10)
     }
 
     private func corner(for rect: CGRect) -> CGFloat {
-        min(rect.width, rect.height) > 100 ? DS.Radius.hero : 16
+        // Round small squarish targets (FAB, avatar) into circles; cards get a card radius.
+        let squarish = abs(rect.width - rect.height) < 28
+        if squarish && min(rect.width, rect.height) < 130 { return min(rect.width, rect.height) / 2 }
+        return rect.height > 130 ? DS.Radius.hero : 16
     }
 
     var body: some View {
@@ -214,6 +199,16 @@ struct CoachMarkOverlay: View {
                         .strokeBorder(.white.opacity(0.9), lineWidth: 2)
                         .frame(width: spot.width, height: spot.height)
                         .position(x: spot.midX, y: spot.midY)
+                        .allowsHitTesting(false)
+
+                    // Arrow pointing from the card's side toward the target.
+                    let cardOnTop = spot.midY > size.height * 0.55
+                    Image(systemName: cardOnTop ? "arrow.down" : "arrow.up")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.5), radius: 4)
+                        .position(x: min(max(spot.midX, 40), size.width - 40),
+                                  y: cardOnTop ? spot.minY - 22 : spot.maxY + 22)
                         .allowsHitTesting(false)
                 }
 

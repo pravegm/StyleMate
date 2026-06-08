@@ -47,9 +47,16 @@ struct MainTabView: View {
                 }
             }
         }
-        // The Home tour spotlights Home elements + tabs, so make sure we're on Home.
+        // The Home tour navigates between tabs; follow the current step's tab, and
+        // return to Home when it ends.
         .onChange(of: tutorialManager.activeTour) { tour in
-            if tour == .home { selectedTab = 0 }
+            if tour == .home { selectedTab = tutorialManager.current?.tab ?? 0 }
+            else if tour == nil { selectedTab = 0 }
+        }
+        .onChange(of: tutorialManager.stepIndex) { _ in
+            if tutorialManager.activeTour == .home {
+                selectedTab = tutorialManager.current?.tab ?? 0
+            }
         }
         .onAppear {
             Haptics.prepare()

@@ -112,6 +112,7 @@ struct MyWardrobeView: View {
                         .shadow(color: DS.Colors.accent.opacity(0.35), radius: 12, x: 0, y: 6)
                 }
                 .buttonStyle(DSTapBounce())
+                .coachAnchor(CoachAnchor.addFAB)
                 .padding(.trailing, DS.Spacing.screenH)
                 .padding(.bottom, DS.Spacing.lg)
             }

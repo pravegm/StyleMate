@@ -35,6 +35,7 @@ struct MyOutfitsView: View {
                     .background(DS.Colors.backgroundCard)
                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
                     .dsCardShadow()
+                    .coachAnchor(CoachAnchor.outfitsCalendar)
 
                     VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                         HStack {
