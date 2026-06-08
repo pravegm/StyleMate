@@ -11,8 +11,26 @@ import SwiftUI
 
 /// Stable IDs for the on-screen elements the tour can spotlight.
 enum CoachAnchor {
+    // Home
     static let todayOutfit = "todayOutfit"
     static let styleMe = "styleMe"
+    // Generation result sheet
+    static let genLook = "genLook"
+    static let genShuffle = "genShuffle"
+    static let genActions = "genActions"
+}
+
+/// The tours the app can run, each with its own "seen" flag.
+enum TourID: String {
+    case home
+    case generation
+
+    var steps: [CoachStep] {
+        switch self {
+        case .home:       return CoachStep.homeTour
+        case .generation: return CoachStep.generationTour
+        }
+    }
 }
 
 struct CoachAnchorKey: PreferenceKey {
@@ -62,7 +80,7 @@ extension CoachStep {
                   message: "We built a head-to-toe outfit for today's weather. Tap it to shuffle or lock the pieces you love.",
                   target: .anchor(CoachAnchor.todayOutfit)),
         CoachStep(title: "Dressing for something?",
-                  message: "Tell StyleMate the occasion — or type your own — and get five full looks in seconds.",
+                  message: "Tap an occasion, or type your own in the box — 'gym', 'date night', 'outdoor wedding'. What you type takes priority. Then Generate for five looks.",
                   target: .anchor(CoachAnchor.styleMe)),
         CoachStep(title: "Build your closet",
                   message: "Tap + in your Wardrobe to add clothes three ways:",
@@ -82,45 +100,63 @@ extension CoachStep {
                   message: "Tune your style, manage your face match, and replay this tour anytime — right here.",
                   target: .tab(3), cta: "Start styling")
     ]
+
+    /// First-generation tour — runs once when the outfit result sheet first opens,
+    /// explaining the controls that only exist there.
+    static let generationTour: [CoachStep] = [
+        CoachStep(title: "Your look, head to toe",
+                  message: "A complete outfit from your closet. Tap a piece to zoom — each one has a lock to keep it and a swap icon to change just that piece.",
+                  target: .anchor(CoachAnchor.genLook)),
+        CoachStep(title: "Keep what you like",
+                  message: "Lock the pieces you love, then tap Shuffle for a fresh take on everything else.",
+                  target: .anchor(CoachAnchor.genShuffle)),
+        CoachStep(title: "Save, skip, or tweak",
+                  message: "Save logs the look for today, Skip shows the next one, + adds a missing piece, and the calendar saves it to a date. You can also swipe right to save, left to skip.",
+                  target: .anchor(CoachAnchor.genActions), cta: "Got it")
+    ]
 }
 
 // MARK: Manager
 
 @MainActor
 final class TutorialManager: ObservableObject {
-    @Published var isActive = false
+    @Published var activeTour: TourID? = nil
     @Published var stepIndex = 0
 
-    let steps: [CoachStep] = CoachStep.homeTour
     private var userKey = ""
 
     func configure(forUser userID: String) { userKey = userID }
 
-    private var seenKey: String { "homeTutorialSeen_\(userKey)" }
-    var hasSeen: Bool { UserDefaults.standard.bool(forKey: seenKey) }
-    private func markSeen() { UserDefaults.standard.set(true, forKey: seenKey) }
+    private func seenKey(_ tour: TourID) -> String { "tour_\(tour.rawValue)_\(userKey)" }
+    func hasSeen(_ tour: TourID) -> Bool { UserDefaults.standard.bool(forKey: seenKey(tour)) }
+    private func markSeen(_ tour: TourID) { UserDefaults.standard.set(true, forKey: seenKey(tour)) }
+    func resetSeen(_ tour: TourID) { UserDefaults.standard.set(false, forKey: seenKey(tour)) }
 
-    /// Auto-run the very first time (after onboarding). No-op once seen.
-    func startIfFirstTime() {
-        guard !userKey.isEmpty, !hasSeen, !isActive else { return }
-        start()
+    var steps: [CoachStep] { activeTour?.steps ?? [] }
+    var current: CoachStep? {
+        guard activeTour != nil, stepIndex < steps.count else { return nil }
+        return steps[stepIndex]
     }
 
-    /// Replay (e.g. from Profile) — always starts, ignoring the seen flag.
-    func start() {
+    /// Auto-run a tour the very first time. No-op once seen, or if a tour is running.
+    func startIfFirstTime(_ tour: TourID) {
+        guard !userKey.isEmpty, !hasSeen(tour), activeTour == nil else { return }
+        start(tour)
+    }
+
+    /// Force-start a tour (e.g. replay from Profile), ignoring the seen flag.
+    func start(_ tour: TourID) {
         stepIndex = 0
-        withAnimation(.easeInOut(duration: 0.25)) { isActive = true }
+        withAnimation(.easeInOut(duration: 0.25)) { activeTour = tour }
     }
-
-    var current: CoachStep? { isActive && stepIndex < steps.count ? steps[stepIndex] : nil }
 
     func next() { stepIndex < steps.count - 1 ? (stepIndex += 1) : finish() }
     func back() { if stepIndex > 0 { stepIndex -= 1 } }
     func skip() { finish() }
 
     func finish() {
-        markSeen()
-        withAnimation(.easeInOut(duration: 0.25)) { isActive = false }
+        if let tour = activeTour { markSeen(tour) }
+        withAnimation(.easeInOut(duration: 0.25)) { activeTour = nil }
     }
 }
 
@@ -128,6 +164,7 @@ final class TutorialManager: ObservableObject {
 
 struct CoachMarkOverlay: View {
     @ObservedObject var tutorial: TutorialManager
+    let tour: TourID
     let anchors: [String: Anchor<CGRect>]
     let proxy: GeometryProxy
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -157,7 +194,7 @@ struct CoachMarkOverlay: View {
     }
 
     var body: some View {
-        if let step = tutorial.current {
+        if tutorial.activeTour == tour, let step = tutorial.current {
             let spot = spotlightRect()
             ZStack(alignment: .topLeading) {
                 // Dimmed scrim with a cutout over the target.

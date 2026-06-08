@@ -276,7 +276,8 @@ struct ProfileView: View {
                 Section("App Information") {
                     Button {
                         Haptics.light()
-                        tutorialManager.start()
+                        tutorialManager.resetSeen(.generation)   // re-arm the result-screen tour too
+                        tutorialManager.start(.home)
                     } label: {
                         HStack(spacing: DS.Spacing.xs) {
                             Image(systemName: "sparkles")

@@ -7,6 +7,7 @@ struct HomeView: View {
     @EnvironmentObject var outfitsVM: MyOutfitsViewModel
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var authService: AuthService
+    @EnvironmentObject var tutorialManager: TutorialManager
     @State private var loadingProgress: Double = 0.0
     @State private var loadingTimer: Timer? = nil
     @State private var selectedCategory: Category? = nil
@@ -113,6 +114,7 @@ struct HomeView: View {
                         .environmentObject(wardrobeViewModel)
                         .environmentObject(outfitsVM)
                         .environmentObject(authService)
+                        .environmentObject(tutorialManager)
                 }
             }
             .alert("Outfit Suggestion", isPresented: $homeVM.showOutfitErrorAlert) {

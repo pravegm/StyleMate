@@ -7,6 +7,7 @@ struct TodayOutfitSheet: View {
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var outfitsVM: MyOutfitsViewModel
     @EnvironmentObject var authService: AuthService
+    @EnvironmentObject var tutorialManager: TutorialManager
 
     @State private var previewImage: PreviewImage? = nil
     @State private var lockedItemIDs: Set<UUID> = []
@@ -221,6 +222,21 @@ struct TodayOutfitSheet: View {
         .onChange(of: homeVM.isLoading) { loading in
             if !loading { isAddingProduct = false }
         }
+        // First-generation coach tour, hosted over this sheet (its controls only
+        // exist here). Reads the look / shuffle / actions anchors below.
+        .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
+            GeometryReader { geo in
+                if tutorialManager.activeTour == .generation {
+                    CoachMarkOverlay(tutorial: tutorialManager, tour: .generation, anchors: anchors, proxy: geo)
+                }
+            }
+        }
+        .onAppear {
+            guard currentOutfit != nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                if currentOutfit != nil { tutorialManager.startIfFirstTime(.generation) }
+            }
+        }
     }
 
     // MARK: - Header
@@ -329,10 +345,12 @@ struct TodayOutfitSheet: View {
                         }
 
                         lookToolbar
+                            .coachAnchor(CoachAnchor.genShuffle)
                             .padding(.horizontal, DS.Spacing.md)
                             .padding(.top, DS.Spacing.xs)
 
                         flatLay(for: outfit)
+                            .coachAnchor(CoachAnchor.genLook)
                             .padding(.horizontal, DS.Spacing.lg)
                             .padding(.top, DS.Spacing.xs)
                             .padding(.bottom, 96)
@@ -390,6 +408,7 @@ struct TodayOutfitSheet: View {
         )
         .overlay(alignment: .bottom) {
             bottomActionBar
+                .coachAnchor(CoachAnchor.genActions)
                 .padding(.horizontal, DS.Spacing.sm)
                 .padding(.bottom, DS.Spacing.sm)
         }
@@ -570,6 +589,9 @@ struct TodayOutfitSheet: View {
     // MARK: - First-Time Swipe Hint
 
     private func playSwipeHintIfNeeded() {
+        // The first-generation coach tour explains swiping; don't also play the
+        // wiggle hint at the same time. Only play it once the tour has been seen.
+        guard tutorialManager.hasSeen(.generation) else { return }
         guard !UserDefaults.standard.bool(forKey: "hasSeenSwipeHint") else { return }
         guard !isPlayingHint else { return }
 

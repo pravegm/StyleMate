@@ -42,14 +42,14 @@ struct MainTabView: View {
         // elements' frames (anchors) from the selected tab's content.
         .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
             GeometryReader { geo in
-                if tutorialManager.isActive {
-                    CoachMarkOverlay(tutorial: tutorialManager, anchors: anchors, proxy: geo)
+                if tutorialManager.activeTour == .home {
+                    CoachMarkOverlay(tutorial: tutorialManager, tour: .home, anchors: anchors, proxy: geo)
                 }
             }
         }
-        // The tour spotlights Home elements + tabs, so make sure we're on Home.
-        .onChange(of: tutorialManager.isActive) { active in
-            if active { selectedTab = 0 }
+        // The Home tour spotlights Home elements + tabs, so make sure we're on Home.
+        .onChange(of: tutorialManager.activeTour) { tour in
+            if tour == .home { selectedTab = 0 }
         }
         .onAppear {
             Haptics.prepare()
@@ -57,7 +57,7 @@ struct MainTabView: View {
                 tutorialManager.configure(forUser: uid)
                 // Let Home render (and the hero start generating) before the tour.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    tutorialManager.startIfFirstTime()
+                    tutorialManager.startIfFirstTime(.home)
                 }
             }
         }
