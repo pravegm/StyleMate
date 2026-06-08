@@ -41,11 +41,10 @@ class ImageAnalysisService {
             // Tiny accessories (watch, ring, glasses) are the hardest localization
             // task — a little reasoning materially improves the bounding box.
             case .focusedBBox:           return "low"
-            case .classify:              return "low"
-            // Outfit suggestion is a heavily constrained reasoning task (a long
-            // styling rulebook + a per-outfit self-check), so a bit more thinking
-            // materially improves rule adherence and the quality of the picks.
-            case .outfit:                return "medium"
+            // Outfit suggestion has a long rulebook + self-check, but "medium" thinking
+            // made generation/shuffle feel slow; "low" keeps it responsive and the
+            // prompt self-check + the deterministic validator still guard quality.
+            case .classify, .outfit:     return "low"
             }
         }
     }

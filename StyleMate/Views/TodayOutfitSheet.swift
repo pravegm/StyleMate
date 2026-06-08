@@ -105,7 +105,10 @@ struct TodayOutfitSheet: View {
                 .offset(x: dragOffset.width)
                 .rotationEffect(.degrees(cardRotation))
                 .opacity(cardOpacity)
-                .highPriorityGesture(
+                // simultaneous (not highPriority) so the flat-lay can scroll
+                // vertically; the direction guard below keeps the card from moving
+                // unless the drag is clearly horizontal.
+                .simultaneousGesture(
                     DragGesture(minimumDistance: 30)
                         .onChanged { value in
                             guard abs(value.translation.width) > abs(value.translation.height) else { return }
@@ -326,37 +329,37 @@ struct TodayOutfitSheet: View {
                 .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 4)
 
             VStack(spacing: 0) {
-                ScrollView {
-                    VStack(spacing: DS.Spacing.lg) {
-                        if !outfit.explanation.isEmpty {
-                            HStack(alignment: .top, spacing: DS.Spacing.xs) {
-                                Image(systemName: "sparkles")
-                                    .font(DS.Font.footnote)
-                                    .foregroundStyle(DS.Colors.accent)
-                                    .padding(.top, 2)
+                // Pinned so the AI summary stays visible while the look scrolls.
+                if !outfit.explanation.isEmpty {
+                    HStack(alignment: .top, spacing: DS.Spacing.xs) {
+                        Image(systemName: "sparkles")
+                            .font(DS.Font.footnote)
+                            .foregroundStyle(DS.Colors.accent)
+                            .padding(.top, 2)
 
-                                Text(outfit.explanation)
-                                    .font(DS.Font.subheadline)
-                                    .foregroundStyle(DS.Colors.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .padding(DS.Spacing.md)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(DS.Colors.accentSoft)
-                        }
-
-                        lookToolbar
-                            .coachAnchor(CoachAnchor.genShuffle)
-                            .padding(.horizontal, DS.Spacing.md)
-                            .padding(.top, DS.Spacing.xs)
-
-                        flatLay(for: outfit)
-                            .coachAnchor(CoachAnchor.genLook)
-                            .padding(.horizontal, DS.Spacing.lg)
-                            .padding(.top, DS.Spacing.xs)
-                            .padding(.bottom, 96)
+                        Text(outfit.explanation)
+                            .font(DS.Font.subheadline)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .padding(DS.Spacing.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(DS.Colors.accentSoft)
                 }
+
+                lookToolbar
+                    .coachAnchor(CoachAnchor.genShuffle)
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.vertical, DS.Spacing.sm)
+
+                ScrollView {
+                    flatLay(for: outfit)
+                        .coachAnchor(CoachAnchor.genLook)
+                        .padding(.horizontal, DS.Spacing.lg)
+                        .padding(.top, DS.Spacing.xs)
+                        .padding(.bottom, 96)
+                }
+                .scrollIndicators(.hidden)
             }
             .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
 

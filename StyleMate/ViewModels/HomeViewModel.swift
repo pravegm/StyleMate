@@ -172,6 +172,9 @@ class HomeViewModel: ObservableObject {
     @Published var heroOutfit: Outfit?
     @Published var isGeneratingHero = false
 
+    /// The wardrobe must be this rich before we surface a "Today's Outfit" on Home.
+    static let minItemsForHero = 30
+
     private static let heroCacheKey = "todayHeroOutfit"
 
     private struct HeroCache: Codable {
@@ -188,11 +191,14 @@ class HomeViewModel: ObservableObject {
     /// but only when we have enough wardrobe and a weather reading. Safe to call on
     /// every Home appear; it no-ops once a hero is set for the day.
     func ensureHero(wardrobe: [WardrobeItem], user: User?) {
+        // Don't surface a Today's Outfit until the wardrobe is rich enough to style
+        // from — below the threshold, hide it entirely.
+        guard wardrobe.count >= Self.minItemsForHero else { heroOutfit = nil; return }
         if heroOutfit != nil { return }
         if loadHeroFromCache(wardrobe: wardrobe) { return }
         // Wait until weather has resolved one way or another (loaded OR failed), so
         // we don't generate a weather-blind pick while a reading is still incoming.
-        guard wardrobe.count >= 3, (weather != nil || weatherError != nil), !isGeneratingHero else { return }
+        guard (weather != nil || weatherError != nil), !isGeneratingHero else { return }
         generateHero(wardrobe: wardrobe, user: user)
     }
 
@@ -210,7 +216,7 @@ class HomeViewModel: ObservableObject {
 
     /// Force a fresh pick of the day (e.g. a "regenerate" tap).
     func generateHero(wardrobe: [WardrobeItem], user: User?) {
-        guard !isGeneratingHero, wardrobe.count >= 3 else { return }
+        guard !isGeneratingHero, wardrobe.count >= Self.minItemsForHero else { return }
         isGeneratingHero = true
         Task {
             defer { isGeneratingHero = false }
