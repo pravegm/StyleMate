@@ -217,6 +217,47 @@ class HomeViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Shuffle Whole Look (Keeping Locked Pieces)
+
+    /// Regenerates the current look, keeping any locked pieces, via one coherent
+    /// Gemini call (then re-validated). Replaces just the current card.
+    func reshuffleKeepingLocked(lockedIDs: Set<UUID>, wardrobe: [WardrobeItem], user: User?) {
+        guard let current = todayOutfit else { return }
+        let lockedItems = current.items.filter { lockedIDs.contains($0.id) }
+        Task {
+            isLoading = true
+            defer { isLoading = false }
+
+            let result = await ImageAnalysisService.shared.suggestOutfitBatch(
+                from: wardrobe,
+                outfitType: selectedOutfitType,
+                customDescription: customOutfitDescription,
+                weather: weather,
+                user: user,
+                lockedItems: lockedItems
+            )
+
+            switch result {
+            case .success(let suggestions):
+                let batch: [Outfit] = suggestions.compactMap { suggestion in
+                    let items = suggestion.items.compactMap { idx -> WardrobeItem? in
+                        (idx >= 0 && idx < wardrobe.count) ? wardrobe[idx] : nil
+                    }
+                    return items.isEmpty ? nil : Outfit(items: items, explanation: suggestion.explanation)
+                }
+                let validated = OutfitValidator.validateAndRepair(batch, wardrobe: wardrobe)
+                if let fresh = validated.first {
+                    todayOutfit = fresh
+                    if batchIndex < outfitBatch.count { outfitBatch[batchIndex] = fresh }
+                }
+            case .failure(.rateLimited):
+                showRateLimitAlert = true
+            case .failure:
+                break
+            }
+        }
+    }
+
     // MARK: - Add Product to Outfit (Index-Based)
 
     func addProductToOutfit(category: Category, productType: String, wardrobe: [WardrobeItem], user: User?) {

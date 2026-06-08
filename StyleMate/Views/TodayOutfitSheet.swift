@@ -9,6 +9,7 @@ struct TodayOutfitSheet: View {
     @EnvironmentObject var authService: AuthService
 
     @State private var previewImage: PreviewImage? = nil
+    @State private var lockedItemIDs: Set<UUID> = []
     @State private var showDatePickerSheet = false
     @State private var selectedDate = Calendar.current.startOfDay(for: Date())
     @State private var showSavedOverlay = false
@@ -214,6 +215,9 @@ struct TodayOutfitSheet: View {
         .onChange(of: addProductStep) { newValue in
             if newValue == nil { showAddProductSheet = false }
         }
+        .onChange(of: homeVM.batchIndex) { _ in
+            lockedItemIDs.removeAll()   // locks are per-look; clear when swiping to the next
+        }
         .onChange(of: homeVM.isLoading) { loading in
             if !loading { isAddingProduct = false }
         }
@@ -324,6 +328,10 @@ struct TodayOutfitSheet: View {
                             .background(DS.Colors.accentSoft)
                         }
 
+                        lookToolbar
+                            .padding(.horizontal, DS.Spacing.md)
+                            .padding(.top, DS.Spacing.xs)
+
                         flatLay(for: outfit)
                             .padding(.horizontal, DS.Spacing.lg)
                             .padding(.top, DS.Spacing.xs)
@@ -427,47 +435,96 @@ struct TodayOutfitSheet: View {
 
     private func flatLayPiece(_ item: WardrobeItem, maxHeight: CGFloat) -> some View {
         let image = item.croppedImage ?? item.image
-        return ZStack(alignment: .topTrailing) {
-            Group {
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                } else {
-                    RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
-                        .fill(DS.Colors.backgroundSecondary)
-                        .aspectRatio(0.8, contentMode: .fit)
-                        .overlay(
-                            Image(systemName: item.category.iconName)
-                                .font(.system(size: 24))
-                                .foregroundStyle(DS.Colors.textTertiary)
-                        )
-                }
+        let isLocked = lockedItemIDs.contains(item.id)
+        return Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                    .fill(DS.Colors.backgroundSecondary)
+                    .aspectRatio(0.8, contentMode: .fit)
+                    .overlay(
+                        Image(systemName: item.category.iconName)
+                            .font(.system(size: 24))
+                            .foregroundStyle(DS.Colors.textTertiary)
+                    )
             }
-            .frame(maxHeight: maxHeight)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if let image { previewImage = PreviewImage(image: image) }
-            }
-
+        }
+        .frame(maxHeight: maxHeight)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let image { previewImage = PreviewImage(image: image) }
+        }
+        // Lock toggle (top-left): "keep this piece" when you hit Shuffle.
+        .overlay(alignment: .topLeading) {
             Button {
-                Haptics.light()
-                homeVM.shuffleItemInOutfit(
-                    itemToShuffle: item,
+                Haptics.selection()
+                if isLocked { lockedItemIDs.remove(item.id) } else { lockedItemIDs.insert(item.id) }
+            } label: {
+                Image(systemName: isLocked ? "lock.fill" : "lock.open")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(isLocked ? DS.Colors.accent : DS.Colors.textTertiary)
+                    .padding(6)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(DSTapBounce())
+        }
+        // Per-slot shuffle (top-right): re-roll just this piece. Hidden when locked.
+        .overlay(alignment: .topTrailing) {
+            if !isLocked {
+                Button {
+                    Haptics.light()
+                    homeVM.shuffleItemInOutfit(
+                        itemToShuffle: item,
+                        wardrobe: wardrobeViewModel.items,
+                        user: authService.user
+                    )
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(DS.Colors.accent)
+                        .padding(6)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(DSTapBounce())
+                .disabled(homeVM.isLoading)
+            }
+        }
+    }
+
+    // MARK: - Look toolbar (lock + shuffle)
+
+    private var lookToolbar: some View {
+        HStack(spacing: DS.Spacing.micro) {
+            Image(systemName: lockedItemIDs.isEmpty ? "lock.open" : "lock.fill")
+                .font(DS.Font.caption1)
+            Text(lockedItemIDs.isEmpty ? "Tap a piece to keep it" : "\(lockedItemIDs.count) kept")
+                .font(DS.Font.footnote)
+            Spacer()
+            Button {
+                Haptics.medium()
+                homeVM.reshuffleKeepingLocked(
+                    lockedIDs: lockedItemIDs,
                     wardrobe: wardrobeViewModel.items,
                     user: authService.user
                 )
             } label: {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(DS.Colors.accent)
-                    .padding(7)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().strokeBorder(DS.Colors.accent.opacity(0.18), lineWidth: 0.5))
+                HStack(spacing: DS.Spacing.micro) {
+                    Image(systemName: "shuffle")
+                    Text("Shuffle")
+                }
+                .font(DS.Font.subheadline.weight(.semibold))
+                .foregroundStyle(DS.Colors.accent)
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.vertical, DS.Spacing.xs)
+                .background(DS.Colors.accentSoft, in: Capsule(style: .continuous))
             }
             .buttonStyle(DSTapBounce())
             .disabled(homeVM.isLoading)
         }
+        .foregroundStyle(lockedItemIDs.isEmpty ? DS.Colors.textTertiary : DS.Colors.accent)
     }
 
     // MARK: - Dismiss & Reset

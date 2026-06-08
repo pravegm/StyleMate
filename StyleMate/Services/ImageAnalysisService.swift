@@ -1348,7 +1348,7 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
 
     // MARK: - Suggest Outfit Batch (Index-Based)
 
-    func suggestOutfitBatch(from wardrobe: [WardrobeItem], outfitType: OutfitType? = nil, customDescription: String? = nil, weather: Weather? = nil, user: User? = nil, retryCount: Int = 0) async -> Result<[SuggestedOutfit], OutfitSuggestError> {
+    func suggestOutfitBatch(from wardrobe: [WardrobeItem], outfitType: OutfitType? = nil, customDescription: String? = nil, weather: Weather? = nil, user: User? = nil, lockedItems: [WardrobeItem] = [], retryCount: Int = 0) async -> Result<[SuggestedOutfit], OutfitSuggestError> {
         guard wardrobe.count >= 3 else {
             print("[StyleMate] suggestOutfitBatch: wardrobe too small (\(wardrobe.count) items)")
             return .failure(.emptyWardrobe)
@@ -1408,6 +1408,16 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             typeInstruction = "The user wants an everyday casual outfit."
         }
 
+        // Lock constraint: when the user has locked pieces, every returned outfit
+        // must keep them (referenced by their wardrobe index).
+        let lockedIndices = lockedItems.compactMap { locked in
+            wardrobe.firstIndex(where: { $0.id == locked.id })
+        }
+        var lockedInstruction = ""
+        if !lockedIndices.isEmpty {
+            lockedInstruction = "\n\nLOCKED ITEMS (HARD CONSTRAINT): The user locked these items in. EVERY outfit you return MUST include ALL of these exact indices: \(lockedIndices). Build the rest of each outfit around them while still obeying every rule above."
+        }
+
         var categoryIsolationNote = ""
         if !isEthnicRequest {
             categoryIsolationNote += "\nNOTE: Items from the \"Ethnic Wear\" category are included in the wardrobe list but should NOT be used for this request type. Ignore all Ethnic Wear items."
@@ -1461,7 +1471,7 @@ You are an expert fashion stylist creating outfits from a real person's wardrobe
 
 WARDROBE:
 \(wardrobeSummary)
-\(categoryIsolationNote)
+\(categoryIsolationNote)\(lockedInstruction)
 
 CONTEXT:
 \(typeInstruction)
@@ -1565,16 +1575,18 @@ VARIETY:
 OUTPUT FORMAT:
 Return a JSON array of 5 outfit objects. Each object has:
 - "items": array of integer indices referencing the wardrobe items above (e.g., [0, 5, 12, 23])
-- "explanation": a 1-2 sentence explanation of why this outfit works. MUST include:
-  * The color or styling principle used (e.g., "monochromatic navy", "earth-tone layers", "complementary contrast").
-  * A reference to the weather/location context if weather was provided (e.g., "Light layers perfect for the 22°C mild afternoon in London", "Cozy wool layers to handle the 5°C chill in Delhi").
-  * A reference to the occasion/vibe if one was specified (e.g., "polished enough for a date night", "relaxed for an everyday weekend").
-  Keep it conversational, specific, and useful. The user should feel that the AI understood their situation.
+- "explanation": ONE punchy sentence (max ~22 words) in the voice of a sharp, confident stylist friend talking straight to the user ("you"). Specific, vivid, a little witty — never hedging or generic. Naturally weave in the styling/color principle, the temperature/weather if provided, and the occasion/vibe if specified — but it must read like a person, not a checklist.
+  BANNED clichés: "effortlessly chic", "perfect for any occasion", "make a statement", "elevate your look", "timeless". Be concrete instead.
+  Voice examples:
+    * "Monochrome navy with the denim jacket on top — sharp for the date, warm enough for the 12° evening."
+    * "Earth tones doing the work here: olive chinos anchor it, the boots mean business."
+    * "White tee, dark denim, clean sneakers — the no-brainer that always lands."
+    * "Linen shirt + shorts because 31° is no joke; keep the sunglasses on."
 
 Return ONLY the JSON array. Example format:
 [
-  {"items": [0, 5, 12], "explanation": "Monochromatic navy palette with textural contrast — light cotton layers ideal for the 20°C afternoon in Mumbai..."},
-  {"items": [3, 7, 15, 22], "explanation": "Earth-tone layers built around the olive chinos, perfect for a relaxed weekend outing..."}
+  {"items": [0, 5, 12], "explanation": "All-navy with cotton texture so it breathes — easy in the 20° Mumbai afternoon."},
+  {"items": [3, 7, 15, 22], "explanation": "Earth tones built on the olive chinos; relaxed but pulled-together for a weekend out."}
 ]
 """
 
@@ -1635,7 +1647,7 @@ Return ONLY the JSON array. Example format:
                     let delay = UInt64(pow(2.0, Double(retryCount + 1))) * 1_000_000_000
                     print("[StyleMate] suggestOutfitBatch: rate limited, waiting \(delay / 1_000_000_000)s (attempt \(retryCount + 1))")
                     try? await Task.sleep(nanoseconds: delay)
-                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, retryCount: retryCount + 1)
+                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, lockedItems: lockedItems, retryCount: retryCount + 1)
                 }
                 print("[StyleMate] suggestOutfitBatch: rate limited after all retries")
                 return .failure(.rateLimited)
@@ -1645,7 +1657,7 @@ Return ONLY the JSON array. Example format:
                 print("[StyleMate] suggestOutfitBatch: HTTP \(httpResponse.statusCode)")
                 if retryCount < 1 {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, retryCount: retryCount + 1)
+                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, lockedItems: lockedItems, retryCount: retryCount + 1)
                 }
                 return .failure(.networkError)
             }
@@ -1656,7 +1668,7 @@ Return ONLY the JSON array. Example format:
                 print("[StyleMate] suggestOutfitBatch: failed to extract text from response")
                 if retryCount < 1 {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, retryCount: retryCount + 1)
+                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, lockedItems: lockedItems, retryCount: retryCount + 1)
                 }
                 return .failure(.parseError)
             }
@@ -1665,7 +1677,7 @@ Return ONLY the JSON array. Example format:
                 print("[StyleMate] suggestOutfitBatch: JSON decode failed for SuggestedOutfit array")
                 if retryCount < 1 {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, retryCount: retryCount + 1)
+                    return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, lockedItems: lockedItems, retryCount: retryCount + 1)
                 }
                 return .failure(.parseError)
             }
@@ -1677,7 +1689,7 @@ Return ONLY the JSON array. Example format:
             print("[StyleMate] suggestOutfitBatch: network error: \(error.localizedDescription)")
             if retryCount < 1 {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
-                return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, retryCount: retryCount + 1)
+                return await suggestOutfitBatch(from: wardrobe, outfitType: outfitType, customDescription: customDescription, weather: weather, user: user, lockedItems: lockedItems, retryCount: retryCount + 1)
             }
             return .failure(.networkError)
         }
