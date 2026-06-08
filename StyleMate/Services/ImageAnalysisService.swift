@@ -41,7 +41,11 @@ class ImageAnalysisService {
             // Tiny accessories (watch, ring, glasses) are the hardest localization
             // task — a little reasoning materially improves the bounding box.
             case .focusedBBox:           return "low"
-            case .classify, .outfit:     return "low"
+            case .classify:              return "low"
+            // Outfit suggestion is a heavily constrained reasoning task (a long
+            // styling rulebook + a per-outfit self-check), so a bit more thinking
+            // materially improves rule adherence and the quality of the picks.
+            case .outfit:                return "medium"
             }
         }
     }
@@ -1388,16 +1392,21 @@ Return a JSON array of objects. Use EXACT strings from the lists above for enum 
             || (customDescription?.lowercased().contains("active") == true)
 
         let typeInstruction: String
-        if let custom = customDescription, !custom.isEmpty {
+        let trimmedCustom = customDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let custom = trimmedCustom, !custom.isEmpty {
+            var occasionHint = ""
+            if let outfitType = outfitType {
+                occasionHint = "\n(The user also tapped the \"\(outfitType.rawValue)\" occasion as a hint. The typed request above OUTRANKS it — follow the typed request wherever the two differ.)"
+            }
             typeInstruction = """
-            PRIORITY INSTRUCTION: The user has specifically described what they need: "\(custom)"
-            This is the MOST IMPORTANT context for your suggestions. Every outfit must be appropriate for this specific scenario. Interpret the user's words carefully:
-            - If they mention a place (e.g., "beach", "office", "wedding"), dress for that venue's dress code.
-            - If they mention an activity (e.g., "hiking", "dinner", "interview"), dress for that activity's requirements.
-            - If they mention a mood or style (e.g., "edgy", "cozy", "minimalist"), reflect that aesthetic.
-            - If they mention weather or season (e.g., "cold evening", "summer"), layer accordingly even if it contradicts the current weather data.
-            - If they mention people or formality (e.g., "meeting parents", "casual hangout"), match the social formality.
-            All 5 outfit suggestions must directly serve this description. Do not suggest generic everyday outfits that ignore what the user typed.
+            ★★★ TOP-PRIORITY USER REQUEST — this outranks every other preference, including the occasion chip and your own defaults: "\(custom)"
+            This is the single most important input. ALL 5 outfits MUST directly and specifically serve this request. Read it carefully:
+            - A place ("beach", "office", "wedding") → dress for that venue's dress code.
+            - An activity ("hiking", "dinner", "interview") → dress for that activity's needs.
+            - A mood or style ("edgy", "cozy", "minimalist") → reflect that aesthetic.
+            - Weather or season they name ("cold evening", "summer") → layer for it, even if it contradicts the live weather data below.
+            - People or formality ("meeting his parents", "casual hangout") → match that social formality.
+            Never fall back to generic everyday looks that ignore what the user typed.\(occasionHint)
             """
         } else if let outfitType = outfitType {
             typeInstruction = "The user wants an outfit for: \(outfitType.rawValue). Tailor suggestions for this context."
@@ -1567,10 +1576,29 @@ Mid-layers, outerwear, and accessories are OPTIONAL additions on top of these re
 - For ethnic wear, ensure the combination is culturally complete (e.g., kurta needs a bottom like churidar, jeans, or salwar).
 - Never suggest just accessories + outerwear without a core outfit underneath.
 
+PHYSICALLY IMPOSSIBLE COMBINATIONS — never output an outfit containing any of these:
+- Two bottoms (e.g. jeans + trousers, or two skirts), or more than one pair of footwear.
+- A one-piece (dress, jumpsuit, romper, gown) together with a SEPARATE bottom — the one-piece already covers the lower body.
+- A one-piece together with a separate base top — the one-piece already covers the torso (a jacket or cardigan layered OVER it is fine).
+- Two mid-layers at once (e.g. a sweater AND a hoodie), or two pieces of outerwear (two coats / two jackets).
+
 VARIETY:
 - Each of the 5 outfits must be meaningfully different from the others: different color palette, different vibe, or different key pieces.
 - Try to use a wide range of the wardrobe. Don't reuse the same item in more than 2 outfits.
 - If the wardrobe supports it, vary the style across outfits (one casual, one smart casual, etc.) unless the user specified a single occasion.
+- Each outfit must differ from the others in at least one CORE piece (the top, the bottom, or the shoes) — swapping only an accessory does NOT count as a different outfit.
+
+SELF-CHECK (run this before you answer): For EACH of the 5 outfits, silently verify every line below and FIX or REPLACE any outfit that fails — return only outfits that pass ALL of them:
+- Exactly one top OR one one-piece (never both).
+- Exactly one bottom — unless a one-piece is used (then no separate bottom).
+- Exactly one pair of footwear.
+- At most one item per layer tier (base / shirt / mid-layer / outerwear); at most 3 upper-body layers total.
+- At most 3 non-neutral color families, and at most one statement pattern.
+- Consistent formality (no blazer with sweatpants; no formal shoes with athletic shorts).
+- Appropriate for the temperature and time of day stated above.
+- Directly serves the user's request / occasion.
+- Differs from the other four in at least one core piece (top, bottom, or shoes).
+- Uses only wardrobe indices that actually appear in the list above.
 
 OUTPUT FORMAT:
 Return a JSON array of 5 outfit objects. Each object has:

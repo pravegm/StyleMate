@@ -566,57 +566,62 @@ private struct OutfitTypeChipRow: View {
         authService.user?.preferredStyles ?? Array(OutfitType.allCases.prefix(6))
     }
 
+    private var hasCustom: Bool {
+        !(customOutfitDescription ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var customText: Binding<String> {
+        Binding(
+            get: { customOutfitDescription ?? "" },
+            set: { customOutfitDescription = $0.isEmpty ? nil : $0 }
+        )
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            // Occasion chips (a quick starting point).
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: DS.Spacing.xs) {
                     ForEach(preferredStyles, id: \.self) { type in
                         ChipButton(
                             label: type.rawValue,
                             icon: type.icon,
-                            isSelected: selectedOutfitType == type && customOutfitDescription == nil,
+                            isSelected: selectedOutfitType == type,
                             action: {
                                 Haptics.light()
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    selectedOutfitType = type
-                                    customOutfitDescription = nil
-                                }
+                                withAnimation(DS.Motion.snappy) { selectedOutfitType = type }
                             }
                         )
                     }
-
-                    ChipButton(
-                        label: "Other",
-                        icon: "ellipsis.bubble",
-                        isSelected: selectedOutfitType == nil && customOutfitDescription != nil,
-                        action: {
-                            Haptics.light()
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                if selectedOutfitType == nil && customOutfitDescription != nil {
-                                    selectedOutfitType = preferredStyles.first
-                                    customOutfitDescription = nil
-                                } else {
-                                    selectedOutfitType = nil
-                                    customOutfitDescription = customOutfitDescription ?? ""
-                                }
-                            }
-                        }
-                    )
                 }
                 .padding(.horizontal, DS.Spacing.micro)
             }
 
-            if selectedOutfitType == nil && customOutfitDescription != nil {
-                TextField("e.g. Outdoor wedding in summer evening", text: Binding(
-                    get: { customOutfitDescription ?? "" },
-                    set: { customOutfitDescription = $0 }
-                ))
-                .font(DS.Font.body)
+            // Always-visible free text — what the user types here takes priority.
+            VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                Text("Describe your own occasion or add details")
+                    .font(DS.Font.footnote)
+                    .foregroundStyle(hasCustom ? DS.Colors.accent : DS.Colors.textTertiary)
+
+                HStack(alignment: .top, spacing: DS.Spacing.xs) {
+                    Image(systemName: "text.bubble")
+                        .font(DS.Font.subheadline)
+                        .foregroundStyle(hasCustom ? DS.Colors.accent : DS.Colors.textTertiary)
+                        .padding(.top, 2)
+
+                    TextField("e.g. outdoor wedding, summer evening, smart but comfy", text: customText, axis: .vertical)
+                        .font(DS.Font.subheadline)
+                        .lineLimit(1...3)
+                        .foregroundStyle(DS.Colors.textPrimary)
+                        .submitLabel(.done)
+                }
                 .padding(DS.Spacing.sm)
-                .background(DS.Colors.backgroundSecondary)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-                .foregroundColor(DS.Colors.textPrimary)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .background {
+                    RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                        .fill(DS.Colors.backgroundSecondary)
+                    RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                        .strokeBorder(hasCustom ? DS.Colors.accent.opacity(0.4) : Color.clear, lineWidth: 1)
+                }
             }
         }
     }
