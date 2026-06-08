@@ -299,8 +299,6 @@ struct TodayOutfitSheet: View {
 
     @ViewBuilder
     private func outfitCard(for outfit: Outfit) -> some View {
-        let sortedItems = outfit.items.sorted { $0.category.wearingOrder < $1.category.wearingOrder }
-
         ZStack {
             RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                 .fill(DS.Colors.backgroundCard)
@@ -308,51 +306,29 @@ struct TodayOutfitSheet: View {
 
             VStack(spacing: 0) {
                 ScrollView {
-                    VStack(spacing: 0) {
+                    VStack(spacing: DS.Spacing.lg) {
                         if !outfit.explanation.isEmpty {
                             HStack(alignment: .top, spacing: DS.Spacing.xs) {
                                 Image(systemName: "sparkles")
-                                    .font(DS.Font.caption1)
-                                    .foregroundColor(DS.Colors.accent)
+                                    .font(DS.Font.footnote)
+                                    .foregroundStyle(DS.Colors.accent)
                                     .padding(.top, 2)
 
                                 Text(outfit.explanation)
                                     .font(DS.Font.subheadline)
-                                    .foregroundColor(DS.Colors.textSecondary)
+                                    .foregroundStyle(DS.Colors.textSecondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             .padding(DS.Spacing.md)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(DS.Colors.accent.opacity(0.06))
+                            .background(DS.Colors.accentSoft)
                         }
 
-                        ForEach(Array(sortedItems.enumerated()), id: \.element.id) { index, item in
-                            OutfitItemRow(
-                                item: item,
-                                onTap: {
-                                    if let img = item.croppedImage ?? item.image {
-                                        previewImage = PreviewImage(image: img)
-                                    }
-                                },
-                                onShuffle: {
-                                    Haptics.light()
-                                    homeVM.shuffleItemInOutfit(
-                                        itemToShuffle: item,
-                                        wardrobe: wardrobeViewModel.items,
-                                        user: authService.user
-                                    )
-                                },
-                                isLoading: homeVM.isLoading
-                            )
-
-                            if index < sortedItems.count - 1 {
-                                Divider()
-                                    .padding(.leading, 70 + DS.Spacing.md + DS.Spacing.md)
-                                    .padding(.trailing, DS.Spacing.md)
-                            }
-                        }
+                        flatLay(for: outfit)
+                            .padding(.horizontal, DS.Spacing.lg)
+                            .padding(.top, DS.Spacing.xs)
+                            .padding(.bottom, 96)
                     }
-                    .padding(.bottom, 80)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
@@ -408,6 +384,89 @@ struct TodayOutfitSheet: View {
             bottomActionBar
                 .padding(.horizontal, DS.Spacing.sm)
                 .padding(.bottom, DS.Spacing.sm)
+        }
+    }
+
+    // MARK: - Flat-lay canvas
+    //
+    // Presents the outfit as a styled "look": background-removed cutouts arranged
+    // top → bottom → shoes, with accessories beneath — instead of a row list. Each
+    // piece can be tapped to zoom or shuffled via its badge.
+
+    private static let upperZone: Set<Category> =
+        [.outerwear, .midLayers, .tops, .onePieces, .activewear, .ethnicWear, .innerwear]
+
+    @ViewBuilder
+    private func flatLay(for outfit: Outfit) -> some View {
+        let items = outfit.items
+        let upper = items.filter { Self.upperZone.contains($0.category) }
+            .sorted { $0.category.wearingOrder < $1.category.wearingOrder }
+        let lower = items.filter { $0.category == .bottoms }
+        let feet = items.filter { $0.category == .footwear }
+        let accessories = items.filter { $0.category == .accessories }
+
+        VStack(spacing: DS.Spacing.lg) {
+            if !upper.isEmpty { flatLayRow(upper, maxHeight: 184) }
+            if !lower.isEmpty { flatLayRow(lower, maxHeight: 160) }
+            if !feet.isEmpty { flatLayRow(feet, maxHeight: 104) }
+            if !accessories.isEmpty {
+                HStack(spacing: DS.Spacing.lg) {
+                    ForEach(accessories) { flatLayPiece($0, maxHeight: 66) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func flatLayRow(_ items: [WardrobeItem], maxHeight: CGFloat) -> some View {
+        HStack(alignment: .bottom, spacing: DS.Spacing.lg) {
+            ForEach(items) { flatLayPiece($0, maxHeight: maxHeight) }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func flatLayPiece(_ item: WardrobeItem, maxHeight: CGFloat) -> some View {
+        let image = item.croppedImage ?? item.image
+        return ZStack(alignment: .topTrailing) {
+            Group {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                        .fill(DS.Colors.backgroundSecondary)
+                        .aspectRatio(0.8, contentMode: .fit)
+                        .overlay(
+                            Image(systemName: item.category.iconName)
+                                .font(.system(size: 24))
+                                .foregroundStyle(DS.Colors.textTertiary)
+                        )
+                }
+            }
+            .frame(maxHeight: maxHeight)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if let image { previewImage = PreviewImage(image: image) }
+            }
+
+            Button {
+                Haptics.light()
+                homeVM.shuffleItemInOutfit(
+                    itemToShuffle: item,
+                    wardrobe: wardrobeViewModel.items,
+                    user: authService.user
+                )
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(DS.Colors.accent)
+                    .padding(7)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(DS.Colors.accent.opacity(0.18), lineWidth: 0.5))
+            }
+            .buttonStyle(DSTapBounce())
+            .disabled(homeVM.isLoading)
         }
     }
 
