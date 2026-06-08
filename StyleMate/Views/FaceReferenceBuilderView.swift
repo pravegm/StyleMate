@@ -61,18 +61,37 @@ struct FaceReferenceBuilderView: View {
     // MARK: - Scanning
 
     private var scanningState: some View {
-        VStack(spacing: DS.Spacing.lg) {
+        VStack(spacing: DS.Spacing.md) {
             Spacer()
+            ZStack {
+                Circle().fill(DS.Colors.accentSoft).frame(width: 96, height: 96)
+                Image(systemName: "person.crop.rectangle.stack")
+                    .font(.system(size: 34))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(DS.Colors.accent)
+                    .symbolEffect(.variableColor.iterative, options: .repeating)
+            }
+
+            Text("Finding photos of you")
+                .font(DS.Font.title3)
+                .foregroundStyle(DS.Colors.textPrimary)
+
+            Text("StyleMate is scanning your Selfies & Portraits to learn what you look like. This lets it recognize you in photos with other people — and only ever pull out your clothes, never theirs.")
+                .font(DS.Font.subheadline)
+                .foregroundStyle(DS.Colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, DS.Spacing.lg)
+
             ProgressView(value: vm.progress)
                 .progressViewStyle(.linear)
                 .tint(DS.Colors.accent)
-                .frame(width: 200)
-            Text("Looking through your photos…")
-                .font(DS.Font.headline)
-                .foregroundColor(DS.Colors.textPrimary)
-            Text("This happens entirely on your device.")
-                .font(DS.Font.caption1)
-                .foregroundColor(DS.Colors.textSecondary)
+                .frame(width: 220)
+                .padding(.top, DS.Spacing.xs)
+
+            Label("Runs entirely on your device", systemImage: "lock.shield.fill")
+                .font(DS.Font.footnote)
+                .foregroundStyle(DS.Colors.textTertiary)
             Spacer()
         }
         .padding()
@@ -107,16 +126,28 @@ struct FaceReferenceBuilderView: View {
     }
 
     private func candidateCell(_ candidate: FaceCandidate) -> some View {
-        Image(uiImage: candidate.thumbnail)
-            .resizable()
-            .aspectRatio(contentMode: .fill)
-            .frame(minHeight: 110)
-            .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.button)
+        // A uniform square cell: the clear square sizes to the column width, the
+        // thumbnail fills + clips inside it. Avoids the variable-height / overflow
+        // that made rows overlap.
+        Rectangle()
+            .fill(Color.clear)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                Image(uiImage: candidate.thumbnail)
+                    .resizable()
+                    .scaledToFill()
+            }
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+            .overlay {
+                if !candidate.isSelected {
+                    RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                        .fill(Color.black.opacity(0.25))
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
                     .stroke(candidate.isSelected ? DS.Colors.accent : Color.clear, lineWidth: 3)
-            )
+            }
             .overlay(alignment: .topTrailing) {
                 if candidate.isSelected {
                     Image(systemName: "checkmark.circle.fill")
@@ -125,13 +156,7 @@ struct FaceReferenceBuilderView: View {
                         .padding(6)
                 }
             }
-            .overlay {
-                if !candidate.isSelected {
-                    RoundedRectangle(cornerRadius: DS.Radius.button)
-                        .fill(Color.black.opacity(0.25))
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.button))
+            .contentShape(Rectangle())
             .onTapGesture {
                 Haptics.light()
                 vm.toggle(candidate.id)

@@ -54,15 +54,7 @@ struct OnboardingView: View {
                 FaceReferenceBuilderView(userId: userId, isPresented: $showReferenceBuilder)
             }
         }
-        .onAppear {
-            Haptics.prepare()         // warm the Taptic Engine so the first tap is instant
-            // Warm the keyboard during idle reading time on the Welcome step — NOT
-            // synchronously here, so its one-time load can't stall this screen's
-            // entrance. By the time the user reaches "About you", it's hot.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                KeyboardWarmer.warm()
-            }
-        }
+        .onAppear { Haptics.prepare() }   // warm the Taptic Engine so the first tap is instant
     }
 
     /// After photo permission: if granted, let the user build their face
@@ -81,19 +73,12 @@ struct OnboardingView: View {
     private var progressDots: some View {
         HStack(spacing: DS.Spacing.xs) {
             ForEach(0..<totalSteps, id: \.self) { index in
-                Circle()
+                Capsule()
                     .fill(dotColor(for: index))
-                    .frame(width: 8, height: 8)
-                    .scaleEffect(index == currentStep ? 1.15 : 1.0)
-                    .animation(
-                        index == currentStep
-                            ? .easeInOut(duration: 1.5).repeatForever(autoreverses: true)
-                            : .spring(response: 0.35, dampingFraction: 0.7),
-                        value: currentStep
-                    )
+                    .frame(width: index == currentStep ? 22 : 8, height: 8)
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: currentStep)
+        .animation(DS.Motion.snappy, value: currentStep)
     }
 
     private func dotColor(for index: Int) -> Color {
