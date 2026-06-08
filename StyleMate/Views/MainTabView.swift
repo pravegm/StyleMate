@@ -55,8 +55,9 @@ struct MainTabView: View {
             Haptics.prepare()
             if let uid = authService.user?.id {
                 tutorialManager.configure(forUser: uid)
-                // Let Home render (and the hero start generating) before the tour.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                // Brief beat so the tour doesn't start mid-entrance-animation; the
+                // spotlight targets are already measured on first render.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     tutorialManager.startIfFirstTime(.home)
                 }
             }

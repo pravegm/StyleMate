@@ -233,7 +233,8 @@ struct TodayOutfitSheet: View {
         }
         .onAppear {
             guard currentOutfit != nil else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            // Brief beat for the card's entry animation to settle, then start.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 if currentOutfit != nil { tutorialManager.startIfFirstTime(.generation) }
             }
         }
