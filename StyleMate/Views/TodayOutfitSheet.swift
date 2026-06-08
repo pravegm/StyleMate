@@ -233,6 +233,7 @@ struct TodayOutfitSheet: View {
                     CoachMarkOverlay(tutorial: tutorialManager, tour: .generation, anchors: anchors, proxy: geo)
                 }
             }
+            .ignoresSafeArea()   // full-screen geo so anchors + scrim align
         }
         .onAppear {
             guard currentOutfit != nil else { return }

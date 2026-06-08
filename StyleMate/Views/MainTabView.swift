@@ -46,6 +46,7 @@ struct MainTabView: View {
                     CoachMarkOverlay(tutorial: tutorialManager, tour: .home, anchors: anchors, proxy: geo)
                 }
             }
+            .ignoresSafeArea()   // full-screen geo: anchors + scrim share one coordinate space
         }
         // The Home tour navigates between tabs; follow the current step's tab, and
         // return to Home when it ends.

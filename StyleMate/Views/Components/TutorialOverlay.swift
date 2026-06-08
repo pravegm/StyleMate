@@ -216,15 +216,17 @@ struct CoachMarkOverlay: View {
 
     private func halo(_ spot: CGRect) -> some View {
         ZStack {
+            // Breathing outer glow.
             RoundedRectangle(cornerRadius: corner(for: spot), style: .continuous)
-                .stroke(DS.Colors.accent.opacity(0.35), lineWidth: 6)
+                .stroke(DS.Colors.accent.opacity(0.45), lineWidth: 7)
                 .blur(radius: 9)
+                .scaleEffect(pulse ? 1.06 : 1.0)
+                .opacity(pulse ? 0.3 : 0.7)
+            // Steady crisp ring — always visible.
             RoundedRectangle(cornerRadius: corner(for: spot), style: .continuous)
-                .stroke(DS.Colors.accent.opacity(0.9), lineWidth: 2)
+                .stroke(DS.Colors.accent, lineWidth: 2.5)
         }
         .frame(width: spot.width, height: spot.height)
-        .scaleEffect(pulse ? 1.05 : 1.0)
-        .opacity(pulse ? 0.55 : 1.0)
         .position(x: spot.midX, y: spot.midY)
         .allowsHitTesting(false)
         .onAppear {
@@ -342,8 +344,11 @@ struct CoachMarkOverlay: View {
         // bubble is positioned adjacent to the target immediately (never invisible).
         let w = bubbleSize.width > 1 ? bubbleSize.width : 280
         let h = bubbleSize.height > 1 ? bubbleSize.height : 180
-        let safeTop = proxy.safeAreaInsets.top + margin
-        let safeBottom = size.height - proxy.safeAreaInsets.bottom - margin
+        // The overlay ignores safe area (so anchors + scrim align), so safeAreaInsets
+        // read 0 here — use fixed clearances to keep the bubble off the status bar /
+        // home indicator / tab bar.
+        let safeTop: CGFloat = 56
+        let safeBottom = size.height - 44
         let placeBelow = (safeBottom - spot.maxY) >= h + gap
         let tailEdge: Edge = placeBelow ? .top : .bottom
         let centerX = min(max(spot.midX, margin + w / 2), size.width - margin - w / 2)
