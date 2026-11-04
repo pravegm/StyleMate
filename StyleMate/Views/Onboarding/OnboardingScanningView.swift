@@ -81,7 +81,7 @@ struct OnboardingScanningView: View {
 
     private var header: some View {
         VStack(spacing: DS.Spacing.xs) {
-            Text(handingOff ? "Your closet is ready" : (mode == .samples ? "Building a sample closet" : "Building your closet"))
+            Text(headline)
                 .font(DS.Font.title1)
                 .foregroundStyle(DS.Colors.textPrimary)
                 .multilineTextAlignment(.center)
@@ -99,11 +99,24 @@ struct OnboardingScanningView: View {
         }
     }
 
+    private var headline: String {
+        if handingOff && scan.itemsFound == 0 { return "You're all set" }
+        if handingOff { return "Your closet is ready" }
+        return mode == .samples ? "Building a sample closet" : "Building your closet"
+    }
+
     private var statusLine: String {
-        if handingOff { return "StyleMate keeps looking through your photos while you explore." }
+        if case .error = scan.scanState, mode == .library {
+            // Almost always: the selfie was skipped, so nobody can be recognised yet.
+            return "Take a selfie in Profile and StyleMate will start finding your outfits. Until then, add clothes with the camera or from a photo."
+        }
+        if handingOff {
+            return mode == .samples
+                ? "The rest of the sample photos finish in the background."
+                : "StyleMate keeps looking through your photos while you explore."
+        }
         if mode == .samples { return "Cutting out the clothes in a few sample street-style photos, on your iPhone." }
         if scan.isRankingFirstLook { return "Picking your best outfit photos first…" }
-        if case .error(let message) = scan.scanState { return message }
         return "Finding you in your photos and cutting out what you wear. Nothing leaves your iPhone."
     }
 
