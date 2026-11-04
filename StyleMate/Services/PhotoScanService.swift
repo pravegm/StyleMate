@@ -109,6 +109,11 @@ class PhotoScanService: ObservableObject {
     /// background, background time used up). nil when running or user-paused.
     @Published private(set) var systemPauseReason: String?
     @Published var pendingReviewCount: Int = 0
+    /// Photos actually looked at (thumbnail, identity, extraction) in this run —
+    /// the "in 23 photos" of the first-run counter. Skipped screenshots don't count.
+    @Published private(set) var photosExamined: Int = 0
+    /// True while the first run ranks the last 90 days for its best outfit photos.
+    @Published private(set) var isRankingFirstLook = false
 
     /// "1,204 of 5,310 photos · About 12 min left" — for the progress banner.
     var progressDetail: String {
@@ -280,10 +285,16 @@ class PhotoScanService: ObservableObject {
         return try? JSONDecoder().decode(ScanProgress.self, from: data)
     }
 
+    /// Checkpoint writes (asset ids + pending-review embeddings, easily MBs) are
+    /// encoded and written off the main actor, in order, on one serial queue.
+    private nonisolated static let progressWriter = DispatchQueue(label: "StyleMate.scanProgressWriter", qos: .utility)
+
     private func writeProgress(_ progress: ScanProgress, forUser userId: String) {
         let fileURL = Self.progressFileURL(forUser: userId)
-        if let data = try? JSONEncoder().encode(progress) {
-            try? data.write(to: fileURL, options: .atomic)
+        Self.progressWriter.async {
+            if let data = try? JSONEncoder().encode(progress) {
+                try? data.write(to: fileURL, options: .atomic)
+            }
         }
     }
 
@@ -339,7 +350,8 @@ class PhotoScanService: ObservableObject {
         dateRange: ScanDateRange,
         userGender: String?,
         wardrobeViewModel: WardrobeViewModel,
-        trigger: ScanTrigger = .user
+        trigger: ScanTrigger = .user,
+        firstLook: Bool = false
     ) async {
         guard !isRunning else {
             print("[StyleMate] Scan already in progress, ignoring")
@@ -348,7 +360,8 @@ class PhotoScanService: ObservableObject {
         lastScanContext = ScanContext(userId: userId, dateRange: dateRange, userGender: userGender)
         let bounds = dateRange.bounds()
         let job = ScanJob(rangeStart: bounds.start, rangeEnd: bounds.end, extraAssetIDs: nil,
-                          isAutomatic: trigger == .automatic, createdAt: Date())
+                          isAutomatic: trigger == .automatic, createdAt: Date(),
+                          firstLook: firstLook ? true : nil)
         await run(job, forUser: userId, userGender: userGender, wardrobeViewModel: wardrobeViewModel,
                   extendsCoverage: true)
     }
@@ -411,6 +424,7 @@ class PhotoScanService: ObservableObject {
             scanState = .scanning
             photosScanned = 0
             totalPhotosToScan = 0
+            photosExamined = 0
         }
 
         print("[StyleMate] Auto-scan starting for user: \(userId)\(quiet ? " (automatic)" : "")")
@@ -456,7 +470,7 @@ class PhotoScanService: ObservableObject {
         for info in pending {
             if ScanAssetFilter.skipReason(for: info) != nil { skipped.append(info.id) } else { candidates.append(info) }
         }
-        let units = BurstGrouper.group(candidates)
+        var units = BurstGrouper.group(candidates)
         let doneBefore = job.photosDone
         updateProgress(forUser: userId) { p in
             p.markDone(skipped)
@@ -486,6 +500,18 @@ class PhotoScanService: ObservableObject {
         updateTimeRemaining(eta, unitsLeft: units.count)
 
         let assetsByID = Dictionary(library.assets.map { ($0.localIdentifier, $0) }, uniquingKeysWith: { a, _ in a })
+
+        // First run: the best ~40 outfit photos of the last 90 days go first.
+        var firstLookCount = 0
+        if job.firstLook == true {
+            let ranked = await rankFirstLook(units, assets: assetsByID, generation: generation)
+            guard isCurrent(generation) else { return }
+            units = ranked.order.map { units[$0] }
+            firstLookCount = ranked.priorityCount
+            if firstLookCount == 0 { updateProgress(forUser: userId) { $0.activeJob?.firstLook = nil } }
+            currentPhase = "Scanning your photos..."
+        }
+
         let cacheWindow = 48
         var cachedUpTo = 0
         func cacheThumbnails(from index: Int) {
@@ -522,7 +548,13 @@ class PhotoScanService: ObservableObject {
             }
 
             await consume(prepared, userId: userId, userGender: userGender, wardrobeViewModel: wardrobeViewModel)
+            guard isCurrent(generation) else { queue.forEach { $0.cancel() }; return }
             consumed += 1
+            photosExamined += prepared.memberIDs.count
+            if firstLookCount > 0, consumed == firstLookCount {
+                updateProgress(forUser: userId) { $0.activeJob?.firstLook = nil }
+                print("[StyleMate] Auto-scan: first-look pass done (\(itemsFound) items so far)")
+            }
 
             updateProgress(forUser: userId) { p in
                 p.markDone(prepared.doneIDs)
@@ -598,6 +630,9 @@ class PhotoScanService: ObservableObject {
         }
         let memberIDs: [String]
         var outcome: Outcome = .skip
+        /// The photo behind an `.analyze` outcome (for "Wore this on Tue?").
+        var photoID: String?
+        var photoDate: Date?
         /// Photos that couldn't be loaded and should be retried on a later scan.
         var failedIDs: [String] = []
         var doneIDs: [String] { memberIDs.filter { !failedIDs.contains($0) } }
@@ -661,6 +696,8 @@ class PhotoScanService: ObservableObject {
                 continue
             case .analyze(let image):
                 result.outcome = .analyze(image)
+                result.photoID = id
+                result.photoDate = asset.creationDate
                 return result          // the whole group is covered by this frame
             case let .review(sim, embedding, faceBox, faceCount):
                 result.outcome = .review(PendingFaceReview(
@@ -691,33 +728,53 @@ class PhotoScanService: ObservableObject {
             }
             pendingReviewCount = loadProgress(forUser: userId).pendingReviews?.count ?? 0
         case .analyze(let image):
-            let added = await extractItems(from: image, userGender: userGender, wardrobeViewModel: wardrobeViewModel)
-            if !added.isEmpty {
-                updateProgress(forUser: userId) { p in added.forEach { p.recordAdded($0) } }
+            let outcome = await extractItems(from: image, userId: userId, userGender: userGender,
+                                             wardrobeViewModel: wardrobeViewModel)
+            if !outcome.added.isEmpty {
+                updateProgress(forUser: userId) { p in outcome.added.forEach { p.recordAdded($0) } }
+            }
+            // A recent photo of the user wearing closet items: offer to log the
+            // look on that day ("Wore this on Tue?"), so the calendar fills itself.
+            if let photoID = prepared.photoID, let date = prepared.photoDate {
+                WearLogSuggestions.shared.consider(photoID: photoID, date: date,
+                                                   itemIDs: outcome.added + outcome.matched,
+                                                   wardrobe: wardrobeViewModel.items, userId: userId)
             }
         }
     }
 
     // MARK: - Extraction
 
-    /// Runs the on-device garment extractor on an image of the user and adds every
-    /// new item to the wardrobe (duplicates of items already there are skipped).
-    @discardableResult
-    func extractAndAdd(from image: UIImage, userGender: String?,
-                       wardrobeViewModel: WardrobeViewModel) async -> Int {
-        await extractItems(from: image, userGender: userGender, wardrobeViewModel: wardrobeViewModel).count
+    /// What one photo gave the wardrobe.
+    struct ExtractionOutcome {
+        /// New items added.
+        var added: [UUID] = []
+        /// Items already in the wardrobe that this photo shows again.
+        var matched: [UUID] = []
+        /// Items StyleMate wasn't sure about, held for "tap to add".
+        var held = 0
     }
 
-    /// `extractAndAdd`, returning the ids of the items added.
-    private func extractItems(from image: UIImage, userGender: String?,
-                              wardrobeViewModel: WardrobeViewModel) async -> [UUID] {
+    /// Runs the on-device garment extractor on an image of the user and adds every
+    /// new item it's sure about to the wardrobe. Duplicates of items already there
+    /// are matched (and may upgrade the stored image); uncertain items (fragments,
+    /// poor views, tiny jewelry — `ItemTrust`) are held for the user to add.
+    /// Nothing lands if the profile changed meanwhile.
+    private func extractItems(from image: UIImage, userId: String, userGender: String?, holdUncertain: Bool = true,
+                              wardrobeViewModel: WardrobeViewModel) async -> ExtractionOutcome {
         await extractionGate.acquire()
         let results = await ImageAnalysisService.shared.analyzeAndSegment(image: image, userGender: userGender)
         await extractionGate.release()
-        var added: [UUID] = []
+        var outcome = ExtractionOutcome()
         for seg in results {
+            // The profile was reset / deleted while this photo was being analysed.
+            guard wardrobeViewModel.currentUserEmail == userId else {
+                print("[StyleMate] Auto-scan: profile changed mid-extraction, dropping results")
+                return ExtractionOutcome()
+            }
             guard let cat = seg.category, let prod = seg.product,
                   let pat = seg.pattern, !seg.colors.isEmpty else { continue }
+            let doubt = ItemTrust.doubt(seg)
 
             let isDup = DuplicateDetector.shared.findBestMatch(
                 category: cat, product: prod, colors: seg.colors,
@@ -728,21 +785,32 @@ class PhotoScanService: ObservableObject {
                 featurePrint: seg.featurePrint
             )
             if let dup = isDup {
-                upgradeImageIfBetter(dup.existingItem, with: seg, wardrobeViewModel: wardrobeViewModel)
+                // An uncertain view never replaces a good image.
+                if doubt == nil {
+                    await upgradeImageIfBetter(dup.existingItem, with: seg, wardrobeViewModel: wardrobeViewModel)
+                    outcome.matched.append(dup.existingItem.id)
+                }
                 continue
             }
 
             guard let garmentImage = seg.maskImage else { continue }
-            // Disk I/O inside autoreleasepool to release intermediate Data/UIImage refs
-            let (imagePath, thumbnailPath) = autoreleasepool {
-                let ip = WardrobeImageFileHelper.saveImageAsPNG(garmentImage)
-                    ?? WardrobeImageFileHelper.saveImage(garmentImage) ?? ""
-                let tp = WardrobeImageFileHelper.saveThumbnail(garmentImage)
-                return (ip, tp)
+            // PNG + thumbnail encodes off the main actor.
+            let (imagePath, thumbnailPath) = await Task.detached(priority: .utility) {
+                autoreleasepool {
+                    let ip = WardrobeImageFileHelper.saveImageAsPNG(garmentImage)
+                        ?? WardrobeImageFileHelper.saveImage(garmentImage) ?? ""
+                    let tp = WardrobeImageFileHelper.saveThumbnail(garmentImage)
+                    return (ip, tp)
+                }
+            }.value
+            guard wardrobeViewModel.currentUserEmail == userId else {
+                WardrobeImageFileHelper.deleteImage(at: imagePath)
+                WardrobeImageFileHelper.deleteImage(at: thumbnailPath)
+                return ExtractionOutcome()
             }
 
             // Apple Intelligence devices: on-device details + visible brand.
-            let notes = await GarmentDescriber.describe(garmentImage, product: prod, colors: seg.colors)
+            let notes = doubt == nil ? await GarmentDescriber.describe(garmentImage, product: prod, colors: seg.colors) : nil
             let wardrobeItem = WardrobeItem(
                 category: cat,
                 product: prod,
@@ -760,6 +828,19 @@ class PhotoScanService: ObservableObject {
                 details: (notes?.details).flatMap { $0.isEmpty ? nil : $0 } ?? seg.details
             )
 
+            if let doubt {
+                guard holdUncertain else {
+                    WardrobeImageFileHelper.deleteImage(at: imagePath)
+                    WardrobeImageFileHelper.deleteImage(at: thumbnailPath)
+                    continue
+                }
+                // Not sure enough to add by itself: "We weren't sure about 1 item — tap to add".
+                UncertainItemsStore.shared.hold(wardrobeItem, embedding: seg.featurePrint, quality: seg.quality,
+                                                doubt: doubt, forUser: userId)
+                outcome.held += 1
+                print("[StyleMate] Auto-scan: held uncertain \(prod) (\(doubt.rawValue), q \(String(format: "%.2f", seg.quality)))")
+                continue
+            }
             if let fp = seg.featurePrint {
                 ItemEmbeddingStore.shared.set(fp, quality: seg.quality, for: wardrobeItem.id)
             }
@@ -768,10 +849,10 @@ class PhotoScanService: ObservableObject {
             wardrobeViewModel.syncItemToCloud(wardrobeItem)
             scanAddedItemIDs.append(wardrobeItem.id)
             itemsFound = scanAddedItemIDs.count
-            added.append(wardrobeItem.id)
+            outcome.added.append(wardrobeItem.id)
             print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe")
         }
-        return added
+        return outcome
     }
 
     /// The same garment shows up in many photos. Keep the best view of it: when
@@ -779,20 +860,28 @@ class PhotoScanService: ObservableObject {
     /// cut off) than the one in the wardrobe, swap the image — the item, its
     /// metadata and any edits the user made stay as they are.
     private func upgradeImageIfBetter(_ existing: WardrobeItem, with seg: ImageAnalysisService.SegmentedItem,
-                                      wardrobeViewModel: WardrobeViewModel) {
+                                      wardrobeViewModel: WardrobeViewModel) async {
         guard let cutout = seg.maskImage, let fp = seg.featurePrint else { return }
         let store = ItemEmbeddingStore.shared
         // Items from before the on-device pipeline have no score: any new cutout wins.
         let current = store.quality(for: existing.id) ?? 0
-        guard seg.quality > current + 0.08,
-              let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == existing.id }) else { return }
-        let ip = WardrobeImageFileHelper.saveImageAsPNG(cutout) ?? ""
+        guard seg.quality > current + 0.08 else { return }
+        // PNG + thumbnail encodes off the main actor.
+        let (ip, tp) = await Task.detached(priority: .utility) {
+            autoreleasepool { (WardrobeImageFileHelper.saveImageAsPNG(cutout) ?? "", WardrobeImageFileHelper.saveThumbnail(cutout)) }
+        }.value
         guard !ip.isEmpty else { return }
-        let tp = WardrobeImageFileHelper.saveThumbnail(cutout)
-        WardrobeImageFileHelper.deleteImage(at: existing.imagePath)
-        if existing.croppedImagePath != existing.imagePath { WardrobeImageFileHelper.deleteImage(at: existing.croppedImagePath) }
-        WardrobeImageFileHelper.deleteImage(at: existing.thumbnailPath)
-        let updated = existing.withImages(imagePath: ip, croppedImagePath: ip, thumbnailPath: tp)
+        // Re-find it after the await: the wardrobe may have changed meanwhile.
+        guard let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == existing.id }) else {
+            WardrobeImageFileHelper.deleteImage(at: ip)
+            WardrobeImageFileHelper.deleteImage(at: tp)
+            return
+        }
+        let live = wardrobeViewModel.items[idx]
+        WardrobeImageFileHelper.deleteImage(at: live.imagePath)
+        if live.croppedImagePath != live.imagePath { WardrobeImageFileHelper.deleteImage(at: live.croppedImagePath) }
+        WardrobeImageFileHelper.deleteImage(at: live.thumbnailPath)
+        let updated = live.withImages(imagePath: ip, croppedImagePath: ip, thumbnailPath: tp)
         wardrobeViewModel.items[idx] = updated
         wardrobeViewModel.syncItemToCloud(updated)
         store.set(fp, quality: seg.quality, for: existing.id)
@@ -836,7 +925,8 @@ class PhotoScanService: ObservableObject {
             }.value
             await identityGate.release()
             guard let image else { continue }
-            addedIDs += await extractItems(from: image, userGender: userGender, wardrobeViewModel: wardrobeViewModel)
+            addedIDs += await extractItems(from: image, userId: userId, userGender: userGender,
+                                           wardrobeViewModel: wardrobeViewModel).added
         }
 
         let addedStrings = addedIDs.map(\.uuidString)
@@ -945,9 +1035,136 @@ class PhotoScanService: ObservableObject {
         if isRunning { cancelScan() }
         progressCache.removeValue(forKey: userId)
         dirtyProgressUsers.remove(userId)
-        try? FileManager.default.removeItem(at: Self.progressFileURL(forUser: userId))
+        let url = Self.progressFileURL(forUser: userId)
+        // Through the writer queue, so a checkpoint still in flight can't recreate it.
+        Self.progressWriter.async { try? FileManager.default.removeItem(at: url) }
         UserDefaults.standard.removeObject(forKey: "scanProgress_\(userId)")
         pendingReviewCount = 0
+    }
+
+    /// The profile is being reset or deleted: stop everything and forget every
+    /// cached checkpoint, so nothing found for the old profile can land in the
+    /// new one (`extractItems` also checks the user id before adding).
+    func resetForProfileChange() {
+        if isRunning { cancelScan() }
+        flushProgress()
+        progressCache.removeAll()
+        dirtyProgressUsers.removeAll()
+        lastScanContext = nil
+        scanAddedItemIDs = []
+        pendingReviewCount = 0
+        photosExamined = 0
+        isRankingFirstLook = false
+        dismissCompleted()
+        NotificationCenter.default.post(name: .styleMateProfileWillReset, object: nil)
+    }
+
+    // MARK: - First run: best outfit photos first
+
+    /// Measures the thumbnails of the newest units inside the last 90 days
+    /// (bounded by count and time) and returns the scan order: the best ~40
+    /// outfit-like moments first (`FirstLook.order`), then the rest as before.
+    private func rankFirstLook(_ units: [[ScanAssetInfo]], assets: [String: PHAsset],
+                               generation: Int) async -> (order: [Int], priorityCount: Int) {
+        let now = Date()
+        let window = units.indices.filter { FirstLook.inWindow(units[$0].first?.creationDate, now: now) }
+            .prefix(FirstLook.maxRankedUnits)
+        guard !window.isEmpty else { return (Array(units.indices), 0) }
+        isRankingFirstLook = true
+        currentPhase = "Picking your best outfit photos…"
+        defer { isRankingFirstLook = false }
+
+        let deadline = now.addingTimeInterval(FirstLook.rankingBudget)
+        var scores: [Int: Double] = [:]
+        let manager = thumbnailManager
+        let batchSize = 12
+        var start = window.startIndex
+        while start < window.endIndex, Date() < deadline, isCurrent(generation) {
+            let end = min(start + batchSize, window.endIndex)
+            let batch = Array(window[start..<end])
+            start = end
+            // The middle frame of a burst stands for the moment.
+            let picks: [(Int, PHAsset)] = batch.compactMap { idx in
+                let unit = units[idx]
+                guard let asset = assets[unit[unit.count / 2].id] else { return nil }
+                return (idx, asset)
+            }
+            let measured: [(Int, Double?)] = await withTaskGroup(of: (Int, Double?).self) { group in
+                for (idx, asset) in picks {
+                    group.addTask {
+                        guard let cg = await Self.rankingThumbnail(asset, manager: manager) else { return (idx, nil) }
+                        return (idx, FirstLook.score(ThumbnailAnalyzer.firstLookSignals(for: cg)))
+                    }
+                }
+                var out: [(Int, Double?)] = []
+                for await r in group { out.append(r) }
+                return out
+            }
+            for (idx, score) in measured { if let score { scores[idx] = score } }
+        }
+        let result = FirstLook.order(unitCount: units.count, scores: scores)
+        print("[StyleMate] Auto-scan: first look ranked \(scores.count) outfit photos in the last \(FirstLook.windowDays) days, " +
+              "\(result.priorityCount) go first")
+        return result
+    }
+
+    /// A small (~320 px) local thumbnail for ranking. No network: an iCloud-only
+    /// photo without a local preview just isn't ranked (it's still scanned later).
+    private nonisolated static func rankingThumbnail(_ asset: PHAsset, manager: PHImageManager) async -> CGImage? {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .fastFormat
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = false
+        options.isSynchronous = false
+        let gate = ResumeGate()
+        return await withCheckedContinuation { continuation in
+            manager.requestImage(for: asset, targetSize: CGSize(width: 320, height: 320),
+                                 contentMode: .aspectFit, options: options) { image, _ in
+                guard gate.claim() else { return }
+                continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true).cgImage })
+            }
+        }
+    }
+
+    // MARK: - Sample photos
+
+    /// "Try with sample photos": runs the normal on-device extraction on the
+    /// bundled CC0 street-style photos (strangers, so no identity step) and
+    /// shows it through the same counters and banner as a library scan. The
+    /// items are tagged as samples (`SampleLibrary`) and removable in one tap.
+    func runSampleImport(images: [UIImage], userId: String, wardrobeViewModel: WardrobeViewModel) async {
+        guard !isRunning, !images.isEmpty else { return }
+        isRunning = true
+        scanGeneration += 1
+        let generation = scanGeneration
+        scanState = .scanning
+        isPaused = false
+        systemPauseReason = nil
+        scanAddedItemIDs = []
+        itemsFound = 0
+        photosScanned = 0
+        photosExamined = 0
+        totalPhotosToScan = images.count
+        currentPhase = "Finding clothes in the sample photos…"
+        timeRemainingText = nil
+        for image in images {
+            guard isCurrent(generation) else { return }
+            let outcome = await extractItems(from: image, userId: userId, userGender: nil, holdUncertain: false,
+                                             wardrobeViewModel: wardrobeViewModel)
+            guard isCurrent(generation) else {
+                // Removed / cancelled while this photo was being analysed: drop what it found.
+                SampleLibrary.deleteItems(Set(outcome.added), from: wardrobeViewModel)
+                return
+            }
+            SampleLibrary.recordSampleItems(outcome.added, forUser: userId)
+            photosScanned += 1
+            photosExamined += 1
+        }
+        guard isCurrent(generation) else { return }
+        isRunning = false
+        scanState = .completed
+        currentPhase = scanAddedItemIDs.isEmpty ? "No clothes found in the samples" : "Sample closet ready"
+        print("[StyleMate] Sample import: \(scanAddedItemIDs.count) items from \(images.count) photos")
     }
 
     // MARK: - Photo Count Estimation
@@ -1120,4 +1337,11 @@ class PhotoScanService: ObservableObject {
             image.draw(in: CGRect(origin: .zero, size: size))
         }
     }
+}
+
+extension Notification.Name {
+    /// Posted when the local profile is reset or deleted, after the scan has
+    /// stopped. Long-running work for the old profile (e.g. a studio render
+    /// queue) should cancel on it.
+    static let styleMateProfileWillReset = Notification.Name("StyleMate.profileWillReset")
 }

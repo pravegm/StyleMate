@@ -29,6 +29,22 @@ enum ThumbnailAnalyzer {
                                 sharpness: sharpness(of: image))
     }
 
+    /// Signals for the first run's "best outfit photos first" ranking
+    /// (`FirstLook`): how many people, how much of the tallest one is in view,
+    /// and whether there's a face to recognise. Two cheap Vision requests on a
+    /// small thumbnail; documents, food and scenery have no person and drop out.
+    static func firstLookSignals(for image: CGImage) -> FirstLookSignals {
+        let humans = VNDetectHumanRectanglesRequest()
+        humans.upperBodyOnly = false
+        let faces = VNDetectFaceRectanglesRequest()
+        try? VNImageRequestHandler(cgImage: image, options: [:]).perform([humans, faces])
+        let people = (humans.results ?? []).filter { $0.confidence > 0.5 }
+        guard !people.isEmpty else { return .none }
+        let body = people.map { Double($0.boundingBox.height) }.max() ?? 0
+        let face = (faces.results ?? []).map { Double($0.boundingBox.width * $0.boundingBox.height) }.max() ?? 0
+        return FirstLookSignals(personCount: people.count, bodyHeight: body, faceArea: face)
+    }
+
     // MARK: - Sharpness
 
     /// 0...1 sharpness: variance of the Laplacian on a small grayscale copy,

@@ -1,51 +1,55 @@
 import SwiftUI
 import Photos
 
+/// Four screens to a filling closet: welcome/privacy → three-frame selfie →
+/// photo permission → Find yourself → scanning ("First 40"), then Home.
+/// "Try with sample photos" on the welcome screen skips straight to a sample
+/// scan. No account, no "about you" form (it lives in Profile), no tour.
 struct OnboardingView: View {
     @EnvironmentObject var onboardingManager: OnboardingManager
     @EnvironmentObject var authService: AuthService
 
-    @State private var currentStep = 0
-    @State private var selfieImage: UIImage? = nil
+    private enum Step: Int, CaseIterable {
+        case welcome, selfie, permission, findYourself, scanning
+    }
 
-    /// welcome → about you → photo explainer → selfie → photo access → find yourself.
-    /// Completing the last step marks onboarding done, which starts the first library scan.
-    private let totalSteps = 6
+    @State private var step: Step = .welcome
+    @State private var scanMode: OnboardingScanningView.Mode = .library
+    @State private var selfieImage: UIImage? = nil
 
     var body: some View {
         ZStack {
             DS.Colors.backgroundPrimary.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                progressDots
-                    .padding(.top, DS.Spacing.lg)
+                if scanMode == .library {
+                    progressDots
+                        .padding(.top, DS.Spacing.lg)
+                }
 
                 ZStack {
                     Group {
-                        switch currentStep {
-                        case 0:
-                            OnboardingWelcomeView(onAdvance: advance)
-                        case 1:
-                            OnboardingProfileView(onAdvance: advance)
-                        case 2:
-                            OnboardingPhotoExplanationView(onAdvance: advance, onSkip: skipToEnd)
-                        case 3:
+                        switch step {
+                        case .welcome:
+                            OnboardingWelcomeView(onAdvance: { go(to: .selfie) },
+                                                  onTrySamples: trySamplesAction)
+                        case .selfie:
                             OnboardingSelfieView(
                                 selfieImage: $selfieImage,
-                                onAdvance: advance,
-                                onSkip: { advance() }
+                                onAdvance: { go(to: .permission) },
+                                onSkip: { go(to: .permission) }
                             )
-                        case 4:
+                        case .permission:
                             OnboardingPhotoPermissionView(onComplete: handlePhotoPermissionDone)
-                        case 5:
+                        case .findYourself:
                             FindYourselfView(userId: authService.user?.id ?? "", mode: .onboarding) { _ in
-                                completeOnboarding()
+                                go(to: .scanning)
                             }
-                        default:
-                            EmptyView()
+                        case .scanning:
+                            OnboardingScanningView(mode: scanMode, onDone: completeOnboarding)
                         }
                     }
-                    .id(currentStep)
+                    .id(step)
                     .transition(.asymmetric(
                         insertion: .move(edge: .trailing).combined(with: .opacity),
                         removal: .move(edge: .leading).combined(with: .opacity)
@@ -57,55 +61,53 @@ struct OnboardingView: View {
         .onAppear { Haptics.prepare() }   // warm the Taptic Engine so the first tap is instant
     }
 
-    /// After photo permission: if granted, "Find yourself" builds a strong face reference from
-    /// the library before onboarding finishes (and the first scan starts).
+    /// Granted (fully or limited) → Find yourself, then the scan. Denied → Home
+    /// (camera and the photo picker still work).
     private func handlePhotoPermissionDone() {
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        if status == .authorized || status == .limited {
-            advance()
+        if PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan {
+            go(to: .findYourself)
         } else {
             completeOnboarding()
         }
+    }
+
+    private var trySamplesAction: (() -> Void)? {
+        guard SampleLibrary.isAvailable else { return nil }
+        return { startSamples() }
+    }
+
+    private func startSamples() {
+        scanMode = .samples
+        go(to: .scanning)
     }
 
     // MARK: - Progress Dots
 
     private var progressDots: some View {
         HStack(spacing: DS.Spacing.xs) {
-            ForEach(0..<totalSteps, id: \.self) { index in
+            ForEach(Step.allCases, id: \.self) { s in
                 Capsule()
-                    .fill(dotColor(for: index))
-                    .frame(width: index == currentStep ? 22 : 8, height: 8)
+                    .fill(dotColor(for: s))
+                    .frame(width: s == step ? 22 : 8, height: 8)
             }
         }
-        .animation(DS.Motion.snappy, value: currentStep)
+        .animation(DS.Motion.snappy, value: step)
+        .accessibilityElement()
+        .accessibilityLabel("Step \(step.rawValue + 1) of \(Step.allCases.count)")
     }
 
-    private func dotColor(for index: Int) -> Color {
-        if index == currentStep {
-            return DS.Colors.accent
-        } else if index < currentStep {
-            return DS.Colors.accent.opacity(0.5)
-        } else {
-            return DS.Colors.textTertiary.opacity(0.25)
-        }
+    private func dotColor(for s: Step) -> Color {
+        if s == step { return DS.Colors.accent }
+        if s.rawValue < step.rawValue { return DS.Colors.accent.opacity(0.5) }
+        return DS.Colors.textTertiary.opacity(0.25)
     }
 
     // MARK: - Navigation
 
-    private func advance() {
+    private func go(to next: Step) {
         Haptics.light()
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-            currentStep += 1
-        }
-        print("[StyleMate] Onboarding: advancing to step \(currentStep)")
-    }
-
-    private func skipToEnd() {
-        Haptics.medium()
-        guard let userId = authService.user?.id else { return }
-        onboardingManager.complete(forUser: userId)
-        print("[StyleMate] Onboarding: skipped to end")
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) { step = next }
+        print("[StyleMate] Onboarding: step \(next)")
     }
 
     private func completeOnboarding() {

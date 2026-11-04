@@ -1,12 +1,16 @@
 import SwiftUI
+import CoreData
+import UserNotifications
 
 struct ProfileView: View {
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var onboardingManager: OnboardingManager
     @EnvironmentObject private var tutorialManager: TutorialManager
+    @EnvironmentObject private var outfitsVM: MyOutfitsViewModel
     @ObservedObject private var cloudKitService = CloudKitService.shared
-    @State private var showingSignOutAlert = false
+    @ObservedObject private var morningLook = MorningLookScheduler.shared
+    @State private var showRemoveSamplesAlert = false
     @State private var showEmptyConfirmation = false
     @State private var showDeleteProfileAlert = false
     @State private var showStyleSheet = false
@@ -26,8 +30,19 @@ struct ProfileView: View {
     private let maxStyles = 6
     private let allStyles = OutfitType.allCases
 
+    private var sampleCount: Int {
+        SampleLibrary.sampleCount(in: wardrobeViewModel.items, userId: authService.user?.id ?? "")
+    }
+
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = info?["CFBundleVersion"] as? String ?? ""
+        return build.isEmpty ? version : "\(version) (\(build))"
+    }
+
     private var initials: String {
-        guard let name = authService.user?.name else { return "?" }
+        guard let name = authService.user?.name else { return "" }
         let parts = name.components(separatedBy: " ").filter { !$0.isEmpty }
         if parts.count >= 2 {
             return String(parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
@@ -79,15 +94,25 @@ struct ProfileView: View {
                                     .frame(width: 76, height: 76)
                                     .shadow(color: DS.Colors.accent.opacity(0.30), radius: 10, x: 0, y: 5)
 
-                                Text(initials)
-                                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.white)
+                                if initials.isEmpty {
+                                    Image(systemName: "person.fill")
+                                        .font(.system(size: 30, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                } else {
+                                    Text(initials)
+                                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                                        .foregroundStyle(.white)
+                                }
                             }
                             .coachAnchor(CoachAnchor.profileHeader)
 
-                            Text(user.name)
+                            Text(user.name.isEmpty ? "Your profile" : user.name)
                                 .font(DS.Font.title2)
                                 .foregroundColor(DS.Colors.textPrimary)
+
+                            Text("On this iPhone · no account needed")
+                                .font(DS.Font.caption1)
+                                .foregroundColor(DS.Colors.textTertiary)
 
                             if let email = user.email, !email.isEmpty {
                                 Text(email)
@@ -106,7 +131,7 @@ struct ProfileView: View {
                         .listRowBackground(Color.clear)
                     }
 
-                    Section("Personal Information") {
+                    Section {
                         // Fields are seeded once (see .onAppear below) and saved on a
                         // debounce. Do NOT write authService.user per keystroke or
                         // re-seed via per-field .onAppear — that re-rendered the Form
@@ -128,6 +153,11 @@ struct ProfileView: View {
                                 editAge = String(newAge.filter(\.isNumber).prefix(3))
                                 scheduleProfileSave()
                             }
+                    } header: {
+                        Text("About you")
+                    } footer: {
+                        Text("Optional. Helps StyleMate name your clothes and pick looks. Stays on this iPhone.")
+                            .font(DS.Font.caption2)
                     }
 
                     Section("Style Preferences") {
@@ -169,9 +199,42 @@ struct ProfileView: View {
                             }
                         }
 
-                        Toggle("Enable Notifications", isOn: .constant(user.notificationsEnabled))
-                            .disabled(true)
-                            .tint(DS.Colors.accent)
+                    }
+
+                    Section {
+                        Toggle(isOn: Binding(
+                            get: { morningLook.isEnabled },
+                            set: { on in
+                                Haptics.light()
+                                if on, morningLook.authorization != .authorized {
+                                    Task { await morningLook.requestAndEnable() }
+                                } else {
+                                    morningLook.setEnabled(on)
+                                }
+                            }
+                        )) {
+                            Label("Morning outfit", systemImage: "sun.horizon.fill")
+                        }
+                        .tint(DS.Colors.accent)
+                        .accessibilityIdentifier("profile.morningLook")
+
+                        if morningLook.isEnabled {
+                            DatePicker("Time", selection: Binding(
+                                get: { morningLook.time },
+                                set: { morningLook.setTime($0) }
+                            ), displayedComponents: .hourAndMinute)
+                        }
+                        if morningLook.authorization == .denied {
+                            Button("Turn on notifications in Settings") {
+                                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                            }
+                            .foregroundColor(DS.Colors.accent)
+                        }
+                    } header: {
+                        Text("Notifications")
+                    } footer: {
+                        Text("Each morning: the weather and a look from your closet, styled on your iPhone. Tap it to open Today's Outfit.")
+                            .font(DS.Font.caption2)
                     }
 
                     Section("iCloud Backup") {
@@ -217,12 +280,19 @@ struct ProfileView: View {
                         }
                     }
 
-                    Section("Subscription") {
-                        HStack {
-                            Text("Plan")
-                            Spacer()
-                            Text("Free")
-                                .foregroundColor(DS.Colors.textSecondary)
+                    if sampleCount > 0 {
+                        Section {
+                            Button(role: .destructive) {
+                                showRemoveSamplesAlert = true
+                            } label: {
+                                Label("Remove sample clothes (\(sampleCount))", systemImage: "photo.stack")
+                            }
+                            .accessibilityIdentifier("profile.removeSamples")
+                        } header: {
+                            Text("Sample clothes")
+                        } footer: {
+                            Text("These came from the bundled sample photos, not your own.")
+                                .font(DS.Font.caption2)
                         }
                     }
                 }
@@ -277,23 +347,24 @@ struct ProfileView: View {
                         }
                     }
                     .accessibilityElement(children: .combine)
+
+                    Link(destination: LegalLinks.privacyPolicy) {
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image(systemName: "hand.raised.fill")
+                            Text("Privacy Policy")
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(DS.Colors.textTertiary)
+                        }
+                        .foregroundColor(DS.Colors.accent)
+                    }
+                    .accessibilityIdentifier("profile.privacyPolicy")
                 } header: {
                     Text("Privacy")
                 } footer: {
-                    Text("Finding you in your photos, cutting out your clothes and suggesting outfits all run on this device. The photo scan keeps going in the background and overnight while your phone charges. Your wardrobe is backed up only to your own iCloud.")
+                    Text("There's no account and no StyleMate server. Finding you in your photos, cutting out your clothes and suggesting outfits all run on this device. The photo scan keeps going in the background and overnight while your phone charges. Your wardrobe is backed up only to your own iCloud.")
                         .font(DS.Font.caption2)
-                }
-
-                Section {
-                    Button(role: .destructive) {
-                        showingSignOutAlert = true
-                    } label: {
-                        HStack {
-                            Spacer()
-                            Text("Sign Out")
-                            Spacer()
-                        }
-                    }
                 }
 
                 Section("App Information") {
@@ -313,10 +384,16 @@ struct ProfileView: View {
                         .foregroundColor(DS.Colors.accent)
                     }
 
+                    NavigationLink {
+                        SamplePhotoCreditsView()
+                    } label: {
+                        Text("Sample photo credits")
+                    }
+
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0")
+                        Text(appVersion)
                             .foregroundColor(DS.Colors.textSecondary)
                     }
                 }
@@ -367,11 +444,13 @@ struct ProfileView: View {
                 commitProfileEdits()
                 didSeedFields = false
             }
-            .alert("Sign Out", isPresented: $showingSignOutAlert) {
+            .alert("Remove sample clothes?", isPresented: $showRemoveSamplesAlert) {
                 Button("Cancel", role: .cancel) {}
-                Button("Sign Out", role: .destructive) { authService.signOut() }
+                Button("Remove", role: .destructive) {
+                    if let id = authService.user?.id { SampleLibrary.removeSamples(from: wardrobeViewModel, userId: id) }
+                }
             } message: {
-                Text("Are you sure you want to sign out?")
+                Text("Removes the \(sampleCount) items that came from the sample photos. Your own clothes stay.")
             }
             .alert("Are you sure you want to empty your wardrobe?", isPresented: $showEmptyConfirmation) {
                 Button("Cancel", role: .cancel) {}
@@ -426,42 +505,62 @@ struct ProfileView: View {
                     deleteProfile()
                 }
             } message: {
-                Text("This will permanently delete your profile, wardrobe items, saved outfits, selfie data, and sign you out. You'll go through onboarding again on next sign-in. This cannot be undone.")
+                Text("This permanently deletes your wardrobe, saved outfits, selfie and face data from this iPhone and from your iCloud backup. StyleMate starts fresh. This cannot be undone.")
             }
         }
     }
 
     // MARK: - Delete Profile
 
+    /// "Delete Profile & All Data": everything StyleMate stored, on the phone and
+    /// in the user's iCloud, then a brand-new local profile (back to onboarding).
     private func deleteProfile() {
         guard let userId = authService.user?.id else { return }
 
         Haptics.medium()
 
-        wardrobeViewModel.clear()
+        // 1. Stop all work for this profile first, so nothing found for it can
+        //    land afterwards (the scan also re-checks the user id per item).
+        PhotoScanService.shared.resetForProfileChange()
+        PhotoScanService.shared.forgetProgress(forUser: userId)
+        MorningLookScheduler.shared.setEnabled(false)
 
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        if let files = try? FileManager.default.contentsOfDirectory(atPath: documentsPath.path) {
+        // 2. Wardrobe: items (the real storage key), embeddings, held items.
+        let itemIDs = wardrobeViewModel.items.map(\.id)
+        wardrobeViewModel.clear()
+        UserDefaults.standard.removeObject(forKey: Self.wardrobeStorageKey(for: userId))
+        ItemEmbeddingStore.shared.remove(itemIDs)
+        UncertainItemsStore.shared.forget(forUser: userId)
+        WearLogSuggestions.shared.forget(forUser: userId)
+        MorningLookStore.forgetAll()
+
+        // 3. Files: wardrobe images + selfie (Documents), face gallery, scan state, embeddings.
+        let fm = FileManager.default
+        let documentsPath = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
+        if let files = try? fm.contentsOfDirectory(atPath: documentsPath.path) {
             for file in files {
-                let filePath = documentsPath.appendingPathComponent(file)
-                try? FileManager.default.removeItem(at: filePath)
+                try? fm.removeItem(at: documentsPath.appendingPathComponent(file))
             }
         }
-
-        // Delete the on-device face reference gallery (in-memory + persisted file).
         FaceMatchingService.shared.clearReference(forUser: userId)
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        try? fm.removeItem(at: appSupport.appendingPathComponent("FaceReference/faceReference_\(userId).json"))
+        try? fm.removeItem(at: appSupport.appendingPathComponent("WardrobeEmbeddings"))
 
-        // Stop any scan and delete its progress (in memory and on disk), then the
-        // face reference file in Application Support.
-        PhotoScanService.shared.forgetProgress(forUser: userId)
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        try? FileManager.default.removeItem(at: appSupport.appendingPathComponent("FaceReference/faceReference_\(userId).json"))
+        // 4. The outfit calendar (Core Data has no per-user scope: it's this phone's log).
+        Self.deleteOutfitHistory()
+        outfitsVM.fetchAllOutfits()
 
         let keysToRemove = [
             "hasCompletedOnboarding_\(userId)",
             "selfieReferencePath_\(userId)",
             "wardrobeData_\(userId)",
             "wardrobe_\(userId)",
+            "sampleItemIDs_\(userId)",
+            "tour_home_\(userId)",
+            "tour_generation_\(userId)",
+            "todayHeroOutfit",
+            "lastCloudKitSync",
             "scanProgress_\(userId)",
             "hasCompletedInitialScan_\(userId)",
             "hasSeenSwipeHint",
@@ -477,19 +576,37 @@ struct ProfileView: View {
             UserDefaults.standard.removeObject(forKey: key)
         }
 
+        // 5. iCloud: delete the zone, check, and retry a couple of times (a
+        //    flaky network shouldn't leave the backup behind).
         Task {
-            await CloudKitService.shared.deleteAllData()
+            for attempt in 0..<3 {
+                await CloudKitService.shared.deleteAllData()
+                let left = await CloudKitService.shared.fetchAll(userID: userId)
+                if left.isEmpty { break }
+                print("[StyleMate] Cloud delete: \(left.count) records left, retrying (\(attempt + 1))")
+                try? await Task.sleep(nanoseconds: UInt64(2 + attempt * 6) * 1_000_000_000)
+            }
         }
 
-        var profiles = AuthService.loadUserProfiles()
-        profiles.removeValue(forKey: userId)
-        AuthService.saveUserProfiles(profiles)
-
+        // 6. A fresh local profile → onboarding again.
         onboardingManager.reset(forUser: userId)
-
-        authService.signOut()
+        authService.resetLocalProfile()
 
         print("[StyleMate] Profile deleted for user: \(userId)")
+    }
+
+    /// Same derivation as `WardrobeViewModel.storageKey(for:)` ("." and "@" → "_").
+    static func wardrobeStorageKey(for userId: String) -> String {
+        "wardrobe_\(userId.replacingOccurrences(of: "@", with: "_").replacingOccurrences(of: ".", with: "_"))"
+    }
+
+    private static func deleteOutfitHistory() {
+        let context = PersistenceController.shared.container.viewContext
+        for entity in ["OutfitItem", "DatedOutfit"] {
+            let request = NSFetchRequest<NSManagedObject>(entityName: entity)
+            if let objects = try? context.fetch(request) { objects.forEach { context.delete($0) } }
+        }
+        if context.hasChanges { try? context.save() }
     }
 
     // MARK: - Stat Badge
@@ -652,6 +769,34 @@ struct StylePreferencesSheet: View {
         .environmentObject(WardrobeViewModel())
         .environmentObject(OnboardingManager())
         .environmentObject(TutorialManager())
+        .environmentObject(MyOutfitsViewModel())
+}
+
+// MARK: - Sample photo credits
+
+private struct SamplePhotoCreditsView: View {
+    var body: some View {
+        List {
+            Section {
+                ForEach(SampleLibrary.credits) { credit in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(credit.title)
+                            .font(DS.Font.subheadline)
+                            .foregroundColor(DS.Colors.textPrimary)
+                        if let url = URL(string: credit.source) {
+                            Link("Wikimedia Commons", destination: url)
+                                .font(DS.Font.caption1)
+                        }
+                    }
+                }
+            } footer: {
+                Text("\"Try with sample photos\" uses these photos, all \(SampleLibrary.licence).")
+                    .font(DS.Font.caption2)
+            }
+        }
+        .navigationTitle("Sample photos")
+        .navigationBarTitleDisplayMode(.inline)
+    }
 }
 
 // MARK: - Retake Selfie Sheet

@@ -71,6 +71,8 @@ struct HomeView: View {
                             }
                         }
 
+                        HomeFirstRunCards(homeVM: homeVM)   // samples, held items, "Wore this?", morning-look ask
+
                         // MARK: - Today's Outfit Hero
                         if homeVM.heroOutfit != nil || homeVM.isGeneratingHero {
                             todaysOutfitHero

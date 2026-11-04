@@ -280,6 +280,14 @@ class HomeViewModel: ObservableObject {
     /// but only when we have enough wardrobe and a weather reading. Safe to call on
     /// every Home appear; it no-ops once a hero is set for the day.
     func ensureHero(wardrobe: [WardrobeItem], user: User?) {
+        // The morning notification promised a look today: show exactly that one.
+        if let user, let morning = morningLook(for: Date(), wardrobe: wardrobe, userId: user.id) {
+            if heroOutfit == nil {
+                heroOutfit = morning
+                persistHero(morning)
+            }
+            return
+        }
         // Don't surface a Today's Outfit until the wardrobe is rich enough to style
         // from — below the threshold, hide it entirely.
         guard wardrobe.count >= Self.minItemsForHero else { heroOutfit = nil; return }
@@ -337,6 +345,30 @@ class HomeViewModel: ObservableObject {
                               explanation: outfit.explanation)
         if let data = try? JSONEncoder().encode(cache) {
             UserDefaults.standard.set(data, forKey: Self.heroCacheKey)
+        }
+    }
+
+    /// The look precomputed for `date`'s morning notification (MorningLookStore),
+    /// if all its pieces are still in the wardrobe.
+    func morningLook(for date: Date, wardrobe: [WardrobeItem], userId: String) -> Outfit? {
+        guard let look = MorningLookStore.look(for: date, userId: userId) else { return nil }
+        let byID = Dictionary(wardrobe.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let items = look.itemIDs.compactMap { byID[$0] }
+        guard !items.isEmpty, items.count == look.itemIDs.count else { return nil }
+        return Outfit(items: items, explanation: look.explanation)
+    }
+
+    /// Hook for the morning notification: opens Today's Outfit on that day's
+    /// precomputed look (or today's hero / a fresh one when it's gone).
+    func openMorningLook(dayKey: Double, wardrobe: [WardrobeItem], user: User?) {
+        let date = Date(timeIntervalSinceReferenceDate: dayKey)
+        if let user, let look = morningLook(for: date, wardrobe: wardrobe, userId: user.id) {
+            heroOutfit = look
+        }
+        if heroOutfit != nil {
+            openHeroInDeck(user: user)
+        } else if !wardrobe.isEmpty {
+            suggestTodayOutfit(from: wardrobe, user: user)
         }
     }
 
