@@ -304,6 +304,17 @@ struct AddItemReviewView: View {
 
     // MARK: - Analysis
 
+    /// Every extraction goes through the shared `ExtractionGate` (also meant for the library
+    /// scan), so adding 15 photos runs 1–2 extractions at a time instead of 15 at once — each
+    /// holds ~100–200 MB, which is what got the app jetsammed.
+    private static func gatedAnalysis(_ image: UIImage, userGender: String?) async -> [ImageAnalysisService.SegmentedItem] {
+        await ExtractionGate.shared.acquire()
+        let results = await ImageAnalysisService.shared.analyzeAndSegment(
+            image: image, userGender: userGender, describe: true)
+        await ExtractionGate.shared.release()
+        return results
+    }
+
     private func analyzeAllImages() {
         isAnalyzing = true
 
@@ -320,11 +331,7 @@ struct AddItemReviewView: View {
             await withTaskGroup(of: (Int, [ReviewItem]).self) { group in
                 for (idx, image) in images.enumerated() {
                     group.addTask {
-                        let results = await ImageAnalysisService.shared.analyzeAndSegment(
-                            image: image,
-                            userGender: userGender,
-                            describe: true
-                        )
+                        let results = await Self.gatedAnalysis(image, userGender: userGender)
                         var items = results.compactMap { seg -> ReviewItem? in
                             guard let cat = seg.category, let prod = seg.product,
                                   let pattern = seg.pattern, !seg.colors.isEmpty else { return nil }
@@ -381,11 +388,7 @@ struct AddItemReviewView: View {
 
         Task {
             let image = images[sectionIndex]
-            let results = await ImageAnalysisService.shared.analyzeAndSegment(
-                image: image,
-                userGender: authService.user?.gender,
-                describe: true
-            )
+            let results = await Self.gatedAnalysis(image, userGender: authService.user?.gender)
 
             var items = results.compactMap { seg -> ReviewItem? in
                 guard let cat = seg.category, let prod = seg.product,

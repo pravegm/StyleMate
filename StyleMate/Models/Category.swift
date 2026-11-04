@@ -43,7 +43,11 @@ enum Category: String, CaseIterable, Identifiable, Hashable {
     var supportsLength: Bool   { [.bottoms, .onePieces, .outerwear].contains(self) }
 }
 
+
 // Shared wardrobe view model
+//
+// Threading: `items` is published UI state — mutate it on the main thread. The cloud and
+// migration entry points hop to the main actor themselves.
 class WardrobeViewModel: ObservableObject {
     @Published var items: [WardrobeItem] = [] {
         didSet {
@@ -54,29 +58,33 @@ class WardrobeViewModel: ObservableObject {
     }
     private(set) var currentUserEmail: String = ""
     private var suspendSaving = false
-    
-    private func storageKey(for email: String) -> String {
-        "wardrobe_\(email.replacingOccurrences(of: "@", with: "_").replacingOccurrences(of: ".", with: "_"))"
+
+    /// The UserDefaults key a user's wardrobe is stored under. Apple ids / emails contain
+    /// dots, so the raw id is NOT the key — anything that deletes or reads the wardrobe
+    /// outside this class must use this function (or `deleteAllLocalData(forUser:)`).
+    static func storageKey(for userId: String) -> String {
+        "wardrobe_\(userId.replacingOccurrences(of: "@", with: "_").replacingOccurrences(of: ".", with: "_"))"
     }
-    
+
+    private func storageKey(for email: String) -> String { WardrobeViewModel.storageKey(for: email) }
+
     func load(forUser email: String) {
         currentUserEmail = email
-        let key = storageKey(for: email)
-        guard let data = UserDefaults.standard.data(forKey: key) else {
-            items = []
-            return
-        }
-        do {
-            let decoded = try JSONDecoder().decode([WardrobeItemCodable].self, from: data)
-            // Sanitize on load: clears garment fields wrongly attached to
-            // accessories/footwear in older data. The didSet re-saves the cleaned
-            // set, so this self-heals once.
-            items = decoded.compactMap { $0.toWardrobeItem()?.sanitizedAttributes() }
-        } catch {
-            items = []
-        }
+        ledger = SyncLedger.load(userKey: WardrobeViewModel.storageKey(for: email))
+        items = WardrobeViewModel.loadItems(forUser: email)
     }
-    
+
+    /// Decodes a user's stored wardrobe (empty when there is none).
+    static func loadItems(forUser email: String) -> [WardrobeItem] {
+        guard let data = UserDefaults.standard.data(forKey: storageKey(for: email)),
+              let decoded = try? JSONDecoder().decode([WardrobeItemCodable].self, from: data) else {
+            return []
+        }
+        // Sanitize on load: clears garment fields wrongly attached to accessories/footwear
+        // in older data. The didSet re-saves the cleaned set, so this self-heals once.
+        return decoded.compactMap { $0.toWardrobeItem()?.sanitizedAttributes() }
+    }
+
     func save(forUser email: String) {
         guard !email.isEmpty else { return }
         let key = storageKey(for: email)
@@ -85,276 +93,392 @@ class WardrobeViewModel: ObservableObject {
             UserDefaults.standard.set(data, forKey: key)
         }
     }
-    
+
     func clear() {
+        flushTask?.cancel()
+        flushTask = nil
         suspendSaving = true
         items = []
         suspendSaving = false
         currentUserEmail = ""
+        ledger = SyncLedger()
     }
 
     // MARK: - iCloud Sync
+    //
+    // See CloudKitService for the model. Every local change goes into the per-user ledger
+    // (pending upload / tombstone) first, then a coalesced flush sends it; the ledger entry
+    // is cleared only when CloudKit confirms. A pull never deletes a local item unless the
+    // server reported that record deleted.
 
+    /// Main-thread only.
+    private var ledger = SyncLedger()
+    private var flushTask: Task<Void, Never>?
+    private var isFlushing = false
+    private var isSyncing = false
+
+    private func saveLedger() {
+        guard !currentUserEmail.isEmpty else { return }
+        ledger.save(userKey: WardrobeViewModel.storageKey(for: currentUserEmail))
+    }
+
+    private static func onMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
+    }
+
+    /// Records a local add/edit and schedules its upload.
     func syncItemToCloud(_ item: WardrobeItem) {
         guard !currentUserEmail.isEmpty else { return }
-        Task {
-            _ = await CloudKitService.shared.uploadItem(item, userID: currentUserEmail)
+        let user = currentUserEmail
+        WardrobeViewModel.onMain { [weak self] in
+            guard let self, self.currentUserEmail == user else { return }
+            self.ledger.markPending(item.id)
+            self.saveLedger()
+            self.scheduleFlush()
         }
     }
 
+    /// Records a local delete (tombstone) and schedules the server deletion.
     func deleteItemFromCloud(_ item: WardrobeItem) {
-        Task {
-            await CloudKitService.shared.deleteItem(id: item.id)
+        guard !currentUserEmail.isEmpty else { return }
+        let user = currentUserEmail
+        WardrobeViewModel.onMain { [weak self] in
+            guard let self, self.currentUserEmail == user else { return }
+            self.ledger.markDeleted(item.id)
+            self.ledger.generation += 1
+            self.saveLedger()
+            self.scheduleFlush()
         }
     }
 
+    /// "Back up now": everything is re-sent.
     func backupToCloud() {
         guard !currentUserEmail.isEmpty else { return }
-        Task {
-            await CloudKitService.shared.uploadAll(items: items, userID: currentUserEmail)
+        WardrobeViewModel.onMain { [weak self] in
+            guard let self else { return }
+            for item in self.items { self.ledger.markPending(item.id) }
+            self.saveLedger()
+            Task { @MainActor [weak self] in await self?.flushPendingChanges() }
         }
     }
 
+    /// Coalesces bursts (a scan adds items one by one) into one batched upload.
+    private func scheduleFlush(after seconds: Double = 2) {
+        guard flushTask == nil else { return }
+        flushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            let generationAtStart = self.ledger.generation
+            await self.flushPendingChanges()
+            self.flushTask = nil
+            // Changes made while the flush ran get their own flush; failures wait for the
+            // next sync (no retry loop while offline).
+            if self.ledger.generation > generationAtStart, !self.currentUserEmail.isEmpty {
+                self.scheduleFlush()
+            }
+        }
+    }
+
+    /// Sends tombstones and pending uploads. Entries stay in the ledger unless confirmed.
+    @MainActor
+    func flushPendingChanges() async {
+        guard !currentUserEmail.isEmpty, !isFlushing else { return }
+        isFlushing = true
+        defer { isFlushing = false }
+        let user = currentUserEmail
+        let cloud = CloudKitService.shared
+
+        let dead = ledger.tombstoneIDs
+        if !dead.isEmpty {
+            let done = await cloud.deleteRecords(ids: dead)
+            guard currentUserEmail == user else { return }
+            for id in done { ledger.confirmDeleted(id) }
+            saveLedger()
+        }
+
+        let snapshot = ledger.pending
+        guard !snapshot.isEmpty else { return }
+        var byID: [UUID: WardrobeItem] = [:]
+        for item in items { byID[item.id] = item }
+        var toUpload: [WardrobeItem] = []
+        for key in snapshot.keys {
+            if let id = UUID(uuidString: key), let item = byID[id] {
+                toUpload.append(item)
+            } else {
+                ledger.pending[key] = nil   // no longer in the wardrobe (deleted: tombstoned)
+            }
+        }
+        let confirmed = await cloud.uploadBatch(toUpload, userID: user)
+        guard currentUserEmail == user else { return }
+        for id in confirmed { ledger.confirmUpload(id, generation: snapshot[id.uuidString]) }
+        saveLedger()
+        dlog("[Sync] Flushed: \(confirmed.count)/\(toUpload.count) uploads confirmed, \(ledger.pending.count) pending, \(ledger.tombstones.count) tombstones")
+    }
+
+    /// Two-way sync: push pending local changes, then pull the server's changes since the
+    /// last token and merge them (local wins; only server deletions delete). Safe to call
+    /// on every foreground; concurrent calls collapse into one.
     func restoreFromCloud() async {
-        guard !currentUserEmail.isEmpty else { return }
-        let cloudItems = await CloudKitService.shared.fetchAll(userID: currentUserEmail)
-        guard !cloudItems.isEmpty else { return }
+        await syncWithCloud()
+    }
 
-        await MainActor.run {
-            let localByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
-            var changed = false
-            suspendSaving = true
+    @MainActor
+    private func syncWithCloud() async {
+        guard !currentUserEmail.isEmpty, !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+        let user = currentUserEmail
+        let cloud = CloudKitService.shared
 
-            for cloudItem in cloudItems {
-                if let localItem = localByID[cloudItem.id] {
-                    let metadataChanged = localItem.category != cloudItem.category
-                        || localItem.product != cloudItem.product
-                        || localItem.colors != cloudItem.colors
-                        || localItem.brand != cloudItem.brand
-                        || localItem.pattern != cloudItem.pattern
-                        || localItem.material != cloudItem.material
-                        || localItem.fit != cloudItem.fit
-                        || localItem.neckline != cloudItem.neckline
-                        || localItem.sleeveLength != cloudItem.sleeveLength
-                        || localItem.garmentLength != cloudItem.garmentLength
-                        || localItem.details != cloudItem.details
+        if ledger.pendingZoneWipe {
+            guard await cloud.deleteAllData(), currentUserEmail == user else { return }
+            ledger.pendingZoneWipe = false
+            ledger.token = nil
+            saveLedger()
+        }
 
-                    if metadataChanged, let idx = items.firstIndex(where: { $0.id == cloudItem.id }) {
-                        let finalImagePath = WardrobeImageFileHelper.imageExists(at: localItem.imagePath)
-                            ? localItem.imagePath : cloudItem.imagePath
-                        let finalCroppedPath: String? = {
-                            if let localCropped = localItem.croppedImagePath,
-                               WardrobeImageFileHelper.imageExists(at: localCropped) {
-                                return localCropped
-                            }
-                            return cloudItem.croppedImagePath
-                        }()
+        await flushPendingChanges()
+        guard currentUserEmail == user else { return }
 
-                        items[idx] = WardrobeItem(
-                            id: cloudItem.id,
-                            category: cloudItem.category,
-                            product: cloudItem.product,
-                            colors: cloudItem.colors,
-                            brand: cloudItem.brand,
-                            pattern: cloudItem.pattern,
-                            imagePath: finalImagePath,
-                            croppedImagePath: finalCroppedPath,
-                            thumbnailPath: localItem.thumbnailPath ?? cloudItem.thumbnailPath,
-                            material: cloudItem.material,
-                            fit: cloudItem.fit,
-                            neckline: cloudItem.neckline,
-                            sleeveLength: cloudItem.sleeveLength,
-                            garmentLength: cloudItem.garmentLength,
-                            details: cloudItem.details
-                        )
-                        changed = true
-                    }
-                } else {
-                    items.append(cloudItem)
-                    changed = true
+        switch await cloud.fetchChanges(userID: user, since: ledger.token) {
+        case .failed:
+            return
+
+        case .zoneMissing:
+            // Nothing in iCloud (never backed up, or the zone was deleted elsewhere). Local
+            // items are kept and queued so the backup is rebuilt.
+            guard currentUserEmail == user else { return }
+            ledger.token = nil
+            for item in items where !ledger.isPending(item.id) { ledger.markPending(item.id) }
+            saveLedger()
+            await flushPendingChanges()
+
+        case .changes(let changes):
+            guard currentUserEmail == user else { return }
+            let outcome = CloudMerge.apply(changes, to: items, ledger: ledger,
+                                           fileExists: { WardrobeImageFileHelper.imageExists(at: $0) })
+            if outcome.changed { items = outcome.items }   // one write
+            if !outcome.removed.isEmpty {
+                let doomed = outcome.removed
+                ItemEmbeddingStore.shared.remove(doomed.map(\.id))
+                Task.detached(priority: .utility) {
+                    for item in doomed { WardrobeViewModel.deleteFiles(of: item) }
+                }
+                dlog("[Sync] Applied \(doomed.count) server-side deletions")
+            }
+            for id in outcome.confirmedDeletions { ledger.confirmDeleted(id) }
+            if changes.isFullFetch {
+                // Heal: items only on this phone (e.g. an upload that failed in an older
+                // build) are uploaded rather than ever being treated as deleted.
+                let cloudIDs = Set(changes.modified.map(\.id))
+                for item in items where !cloudIDs.contains(item.id) && !ledger.isPending(item.id) {
+                    ledger.markPending(item.id)
                 }
             }
-
-            // Remove local items that no longer exist in cloud
-            let cloudIDs = Set(cloudItems.map { $0.id })
-            let toRemove = items.filter { !cloudIDs.contains($0.id) }
-            for item in toRemove {
-                WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-                WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
-                WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
-                changed = true
-            }
-            items.removeAll { !cloudIDs.contains($0.id) }
-
-            suspendSaving = false
-            if changed {
-                save(forUser: currentUserEmail)
-            }
+            ledger.token = changes.newToken
+            saveLedger()
+            if !ledger.pending.isEmpty { await flushPendingChanges() }
+            guard currentUserEmail == user else { return }
+            await hydrateMissingImages(priority: outcome.needAssets, user: user)
         }
     }
 
+    /// Fetches image assets (off-main) for items whose files aren't on this phone — new
+    /// items from the cloud, and any earlier download that failed — and makes thumbnails
+    /// for items that have images but none.
+    @MainActor
+    private func hydrateMissingImages(priority: [WardrobeItem], user: String) async {
+        let snapshot = items.map { (id: $0.id, image: $0.imagePath, cropped: $0.croppedImagePath, thumb: $0.thumbnailPath) }
+        let priorityIDs = Set(priority.map(\.id))
+        // Existence checks off the main thread (one stat per item).
+        let (missingImage, missingThumb) = await Task.detached(priority: .utility) { () -> ([UUID], [UUID]) in
+            var noImage: [UUID] = [], noThumb: [UUID] = []
+            for s in snapshot {
+                let hasImage = WardrobeImageFileHelper.imageExists(at: s.image)
+                    || (s.cropped.map { WardrobeImageFileHelper.imageExists(at: $0) } ?? false)
+                if !hasImage {
+                    noImage.append(s.id)
+                } else if s.thumb.map({ !WardrobeImageFileHelper.imageExists(at: $0) }) ?? true {
+                    noThumb.append(s.id)
+                }
+            }
+            return (noImage, noThumb)
+        }.value
+        guard currentUserEmail == user, !(missingImage.isEmpty && missingThumb.isEmpty) else { return }
+
+        var updates: [UUID: CloudKitService.FetchedFiles] = [:]
+        if !missingImage.isEmpty {
+            // New cloud items first; at most 200 per sync (the rest next time).
+            let ordered = missingImage.sorted { priorityIDs.contains($0) && !priorityIDs.contains($1) }
+            let wanted = Set(ordered.prefix(200))
+            let toFetch = items.filter { wanted.contains($0.id) }
+            updates = await CloudKitService.shared.fetchAssets(for: toFetch)
+        }
+        if !missingThumb.isEmpty {
+            let wanted = Set(missingThumb)
+            let sources = items.filter { wanted.contains($0.id) }.map { (id: $0.id, src: $0.croppedImagePath ?? $0.imagePath) }
+            let thumbs = await Task.detached(priority: .utility) { () -> [UUID: String] in
+                var out: [UUID: String] = [:]
+                for s in sources {
+                    if let t = WardrobeImageFileHelper.makeThumbnail(fromFile: s.src) { out[s.id] = t }
+                }
+                return out
+            }.value
+            for (id, t) in thumbs { updates[id, default: CloudKitService.FetchedFiles()].thumbnailPath = t }
+        }
+        guard currentUserEmail == user, !updates.isEmpty else { return }
+        var copy = items
+        for (i, item) in copy.enumerated() {
+            guard let f = updates[item.id] else { continue }
+            copy[i] = item.withImages(imagePath: f.imagePath ?? item.imagePath,
+                                      croppedImagePath: f.croppedImagePath ?? item.croppedImagePath,
+                                      thumbnailPath: f.thumbnailPath ?? item.thumbnailPath)
+        }
+        items = copy
+        dlog("[Sync] Restored images for \(updates.count) items")
+    }
+
+    private static func deleteFiles(of item: WardrobeItem) {
+        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
+        if item.croppedImagePath != item.imagePath {
+            WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
+        }
+        WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
+    }
+
+    // MARK: - Delete everything (App Store 5.1.1(v))
+
+    /// Removes everything StyleMate stores on this phone for `userId`: the wardrobe (under
+    /// its real storage key), its image files, the item embeddings, the outfit history,
+    /// the selfie + face gallery, and the sync ledger. When `includingCloud`, the user's
+    /// iCloud zone is deleted too; if that fails (offline) the deletion is remembered and
+    /// retried before any later sync could restore the data.
+    ///
+    /// Call on the main thread, before signing out.
+    @MainActor
+    func deleteAllLocalData(forUser userId: String, includingCloud: Bool = true) {
+        guard !userId.isEmpty else { return }
+        let key = WardrobeViewModel.storageKey(for: userId)
+        let userItems = currentUserEmail == userId ? items : WardrobeViewModel.loadItems(forUser: userId)
+
+        if currentUserEmail == userId { clear() }
+        UserDefaults.standard.removeObject(forKey: key)
+        for legacy in ["wardrobe_\(userId)", "wardrobeData_\(userId)"] {
+            UserDefaults.standard.removeObject(forKey: legacy)
+        }
+        for flag in ["thumbnailMigrationComplete_", "thumbnailScaleMigration_v1_", "bgRemovalMigrationComplete_",
+                     "zoneCropMigrationComplete_", "hasMigratedBackgroundRemoval_", "hasMigratedThumbnails_",
+                     "hasMigratedZoneCrop_"] {
+            UserDefaults.standard.removeObject(forKey: flag + userId)
+        }
+
+        // Embeddings: drop this user's entries in memory and on disk first (the store
+        // would otherwise rewrite them on its next save).
+        ItemEmbeddingStore.shared.remove(userItems.map(\.id))
+
+        // Is anyone else's wardrobe on this phone? If not, wipe the shared folders whole
+        // (catches orphaned files too); otherwise delete only this user's files.
+        let otherWardrobes = UserDefaults.standard.dictionaryRepresentation().keys.contains {
+            $0.hasPrefix("wardrobe_") && $0 != key
+        }
+        let fm = FileManager.default
+        if otherWardrobes {
+            for item in userItems { WardrobeViewModel.deleteFiles(of: item) }
+        } else {
+            try? fm.removeItem(at: WardrobeImageFileHelper.folderURL)
+            try? fm.removeItem(at: LocalStore.documents.appendingPathComponent(WardrobeImageFileHelper.folderName))
+            try? fm.removeItem(at: LocalStore.applicationSupport.appendingPathComponent("WardrobeEmbeddings"))
+        }
+        WardrobeImageFileHelper.removeAllFromCache()
+
+        // Outfit history (Core Data), scoped to this user (+ legacy unscoped rows).
+        MyOutfitsViewModel.deleteOutfits(forUser: userId)
+
+        // Selfie + face gallery.
+        FaceMatchingService.shared.clearReference(forUser: userId)
+        LocalStore.deleteSelfie(userId: userId)
+
+        // Sync ledger, then the cloud copy.
+        SyncLedger.remove(userKey: key)
+        if includingCloud {
+            var wipe = SyncLedger()
+            wipe.pendingZoneWipe = true
+            wipe.save(userKey: key)
+            Task { @MainActor in
+                if await CloudKitService.shared.deleteAllData() {
+                    SyncLedger.remove(userKey: key)
+                }
+            }
+        }
+        dlog("[Wardrobe] Deleted all local data (\(userItems.count) items)")
+    }
+
+    // MARK: - One-time migrations
+
+    /// Regenerates thumbnails that are missing or oversized. Thumbnails used to be rendered
+    /// at the screen scale (3x), so the "480 px" thumbnails were 1440 px — bigger than the
+    /// cutouts, and ~8 MB each once decoded. Runs once per user, off the main thread, and
+    /// updates items by id (never by index), so it can't race the scan or a delete.
     func migrateThumbnails() {
-        let thumbnailKey = "thumbnailMigrationComplete_\(currentUserEmail)"
-        guard !UserDefaults.standard.bool(forKey: thumbnailKey) else { return }
-        guard !items.isEmpty else {
-            UserDefaults.standard.set(true, forKey: thumbnailKey)
+        let user = currentUserEmail
+        guard !user.isEmpty else { return }
+        let doneKey = "thumbnailScaleMigration_v1_\(user)"
+        guard !UserDefaults.standard.bool(forKey: doneKey) else { return }
+        let snapshot = items.map { (id: $0.id, src: $0.croppedImagePath ?? $0.imagePath, thumb: $0.thumbnailPath) }
+        guard !snapshot.isEmpty else {
+            UserDefaults.standard.set(true, forKey: doneKey)
             return
         }
 
-        Task {
-            var updated = false
-            for (index, item) in items.enumerated() {
-                guard item.thumbnailPath == nil else { continue }
-
-                guard let sourceImage = WardrobeImageFileHelper.loadImage(at: item.croppedImagePath ?? item.imagePath) else { continue }
-
-                let thumbPath = WardrobeImageFileHelper.saveThumbnail(sourceImage)
-
-                let updatedItem = WardrobeItem(
-                    id: item.id,
-                    category: item.category,
-                    product: item.product,
-                    colors: item.colors,
-                    brand: item.brand,
-                    pattern: item.pattern,
-                    imagePath: item.imagePath,
-                    croppedImagePath: item.croppedImagePath,
-                    thumbnailPath: thumbPath,
-                    material: item.material,
-                    fit: item.fit,
-                    neckline: item.neckline,
-                    sleeveLength: item.sleeveLength,
-                    garmentLength: item.garmentLength,
-                    details: item.details
-                )
-
-                await MainActor.run {
-                    self.items[index] = updatedItem
+        Task.detached(priority: .background) { [weak self] in
+            var made: [(id: UUID, old: String?, new: String)] = []
+            for s in snapshot {
+                autoreleasepool {
+                    guard WardrobeImageFileHelper.thumbnailNeedsRegeneration(s.thumb),
+                          let new = WardrobeImageFileHelper.makeThumbnail(fromFile: s.src) else { return }
+                    made.append((s.id, s.thumb, new))
                 }
-                updated = true
             }
-
+            let results = made
             await MainActor.run {
-                if updated {
-                    self.save(forUser: self.currentUserEmail)
+                guard let self, self.currentUserEmail == user else {
+                    for r in results { WardrobeImageFileHelper.deleteImage(at: r.new) }
+                    return
                 }
-                UserDefaults.standard.set(true, forKey: thumbnailKey)
+                var byID: [UUID: (old: String?, new: String)] = [:]
+                for r in results { byID[r.id] = (r.old, r.new) }
+                var copy = self.items
+                var replacedOld: [String] = []
+                var applied = Set<UUID>()
+                for (i, item) in copy.enumerated() {
+                    // Only if the item still has the thumbnail we replaced (not deleted /
+                    // re-photographed meanwhile).
+                    guard let r = byID[item.id], item.thumbnailPath == r.old else { continue }
+                    copy[i] = item.withImages(imagePath: item.imagePath,
+                                              croppedImagePath: item.croppedImagePath,
+                                              thumbnailPath: r.new)
+                    if let old = r.old { replacedOld.append(old) }
+                    applied.insert(item.id)
+                }
+                if !applied.isEmpty { self.items = copy }
+                for r in results where !applied.contains(r.id) { WardrobeImageFileHelper.deleteImage(at: r.new) }
+                for old in replacedOld { WardrobeImageFileHelper.deleteImage(at: old) }
+                UserDefaults.standard.set(true, forKey: doneKey)
+                dlog("[Wardrobe] Thumbnail migration: regenerated \(applied.count)")
             }
         }
     }
 
+    /// Retired. The pre-on-device-pipeline background-removal and zone-crop migrations
+    /// rewrote items by stale array index from a background task (index-out-of-range
+    /// crashes / the wrong item overwritten mid-scan) and turned transparent PNG cutouts
+    /// into JPEGs on white. Every cutout the current pipeline makes is already final, so
+    /// they are now just marked done. Kept so existing callers compile.
     func migrateBackgroundRemoval() {
-        let migrationKey = "bgRemovalMigrationComplete_\(currentUserEmail)"
-        guard !UserDefaults.standard.bool(forKey: migrationKey) else {
-            migrateZoneCrop()
-            return
-        }
-        guard !items.isEmpty else {
-            UserDefaults.standard.set(true, forKey: migrationKey)
-            migrateZoneCrop()
-            return
-        }
-
-        Task {
-            var updated = false
-            for (index, item) in items.enumerated() {
-                if let result = await BackgroundRemovalService.shared.processExistingItem(
-                    imagePath: item.imagePath,
-                    croppedImagePath: item.croppedImagePath
-                ) {
-                    WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-                    if let oldCropped = item.croppedImagePath {
-                        WardrobeImageFileHelper.deleteImage(at: oldCropped)
-                    }
-
-                    let updatedItem = WardrobeItem(
-                        id: item.id,
-                        category: item.category,
-                        product: item.product,
-                        colors: item.colors,
-                        brand: item.brand,
-                        pattern: item.pattern,
-                        imagePath: result.newImagePath,
-                        croppedImagePath: result.newCroppedPath ?? item.croppedImagePath,
-                        thumbnailPath: item.thumbnailPath,
-                        material: item.material,
-                        fit: item.fit,
-                        neckline: item.neckline,
-                        sleeveLength: item.sleeveLength,
-                        garmentLength: item.garmentLength,
-                        details: item.details
-                    )
-
-                    await MainActor.run {
-                        self.items[index] = updatedItem
-                    }
-                    updated = true
-                }
-            }
-
-            await MainActor.run {
-                if updated {
-                    self.save(forUser: self.currentUserEmail)
-                    self.backupToCloud()
-                }
-                UserDefaults.standard.set(true, forKey: migrationKey)
-                self.migrateZoneCrop()
-            }
-        }
-    }
-
-    func migrateZoneCrop() {
-        let zoneCropKey = "zoneCropMigrationComplete_\(currentUserEmail)"
-        guard !UserDefaults.standard.bool(forKey: zoneCropKey) else { return }
-        guard !items.isEmpty else {
-            UserDefaults.standard.set(true, forKey: zoneCropKey)
-            return
-        }
-
-        Task {
-            var updated = false
-            for (index, item) in items.enumerated() {
-                guard let fullImage = WardrobeImageFileHelper.loadImage(at: item.imagePath) else { continue }
-
-                let zoneCrop = BodyZone.cropToZone(image: fullImage, category: item.category)
-                let newCroppedPath = zoneCrop != nil ? WardrobeImageFileHelper.saveImage(zoneCrop!) : nil
-
-                if let oldCropped = item.croppedImagePath {
-                    WardrobeImageFileHelper.deleteImage(at: oldCropped)
-                }
-
-                let updatedItem = WardrobeItem(
-                    id: item.id,
-                    category: item.category,
-                    product: item.product,
-                    colors: item.colors,
-                    brand: item.brand,
-                    pattern: item.pattern,
-                    imagePath: item.imagePath,
-                    croppedImagePath: newCroppedPath,
-                    thumbnailPath: item.thumbnailPath,
-                    material: item.material,
-                    fit: item.fit,
-                    neckline: item.neckline,
-                    sleeveLength: item.sleeveLength,
-                    garmentLength: item.garmentLength,
-                    details: item.details
-                )
-
-                await MainActor.run {
-                    self.items[index] = updatedItem
-                }
-                updated = true
-            }
-
-            await MainActor.run {
-                if updated {
-                    self.save(forUser: self.currentUserEmail)
-                    self.backupToCloud()
-                }
-                UserDefaults.standard.set(true, forKey: zoneCropKey)
-            }
-        }
+        let user = currentUserEmail
+        guard !user.isEmpty else { return }
+        UserDefaults.standard.set(true, forKey: "bgRemovalMigrationComplete_\(user)")
+        UserDefaults.standard.set(true, forKey: "zoneCropMigrationComplete_\(user)")
     }
 }
 

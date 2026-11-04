@@ -46,11 +46,11 @@ final class FaceReferenceViewModel: ObservableObject {
         if status == .notDetermined {
             let newStatus = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
             guard newStatus == .authorized || newStatus == .limited else {
-                print("[FaceRef] Photo permission denied")
+                dlog("[FaceRef] Photo permission denied")
                 phase = .noPermission; return
             }
         } else if status != .authorized && status != .limited {
-            print("[FaceRef] Photo permission not granted (status=\(status.rawValue))")
+            dlog("[FaceRef] Photo permission not granted (status=\(status.rawValue))")
             phase = .noPermission; return
         }
 
@@ -60,12 +60,12 @@ final class FaceReferenceViewModel: ObservableObject {
 
         // Ensure the selfie anchor is loaded so similarity ranking has a reference.
         let hasAnchor = FaceMatchingService.shared.loadReference(forUser: userId)
-        print("[FaceRef] Scanning library (Selfies + Portraits); anchor loaded=\(hasAnchor), gallery=\(FaceMatchingService.shared.referenceCount)")
+        dlog("[FaceRef] Scanning library (Selfies + Portraits); anchor loaded=\(hasAnchor), gallery=\(FaceMatchingService.shared.referenceCount)")
 
         let assets = Self.fetchCandidateAssets(limit: candidateLimit)
-        print("[FaceRef] Found \(assets.count) candidate photos")
+        dlog("[FaceRef] Found \(assets.count) candidate photos")
         guard !assets.isEmpty else {
-            print("[FaceRef] No Selfies/Portrait photos found -> empty state")
+            dlog("[FaceRef] No Selfies/Portrait photos found -> empty state")
             phase = .empty; return
         }
 
@@ -91,7 +91,7 @@ final class FaceReferenceViewModel: ObservableObject {
             // orientation, so a rotated library photo would be fed sideways to the
             // detector and align rotated — never matching the upright selfie anchor.
             if index == 0, let o = image?.imageOrientation {
-                print("[FaceRef] first candidate imageOrientation = \(o.rawValue) (0 = up)")
+                dlog("[FaceRef] first candidate imageOrientation = \(o.rawValue) (0 = up)")
             }
             guard let cg = Self.uprightCGImage(image) else { continue }
 
@@ -109,7 +109,7 @@ final class FaceReferenceViewModel: ObservableObject {
         }
 
         guard !results.isEmpty else {
-            print("[FaceRef] No usable faces detected in \(assets.count) candidates -> empty state")
+            dlog("[FaceRef] No usable faces detected in \(assets.count) candidates -> empty state")
             phase = .empty; return
         }
 
@@ -129,11 +129,11 @@ final class FaceReferenceViewModel: ObservableObject {
             let b3 = results.filter { $0.similarity >= Self.referenceFloor }.count
             let topScores = results.map { $0.similarity }.sorted(by: >).prefix(12)
                 .map { String(format: "%.2f", $0) }.joined(separator: ",")
-            print("[FaceRef] facesDetected=\(before) | <0.10:\(b1)  0.10–\(Self.referenceFloor):\(b2)  >=\(Self.referenceFloor):\(b3) | top: \(topScores)")
+            dlog("[FaceRef] facesDetected=\(before) | <0.10:\(b1)  0.10–\(Self.referenceFloor):\(b2)  >=\(Self.referenceFloor):\(b3) | top: \(topScores)")
             results = results.filter { $0.similarity >= Self.referenceFloor }
-            print("[FaceRef] Kept \(results.count)/\(before) faces matching your selfie (>= \(Self.referenceFloor))")
+            dlog("[FaceRef] Kept \(results.count)/\(before) faces matching your selfie (>= \(Self.referenceFloor))")
             guard !results.isEmpty else {
-                print("[FaceRef] No library faces matched your selfie strongly enough -> empty")
+                dlog("[FaceRef] No library faces matched your selfie strongly enough -> empty")
                 phase = .empty; return
             }
         }
@@ -161,7 +161,7 @@ final class FaceReferenceViewModel: ObservableObject {
         phase = .ready
         let top = results.first?.similarity ?? 0
         let bottom = results.last?.similarity ?? 0
-        print("[FaceRef] Ready: \(results.count) distinct faces (\(removed) near-dupes removed), sim [\(String(format: "%.3f", bottom))..\(String(format: "%.3f", top))], pre-selected \(selectedCount)\(hasAnchor ? "" : " (no selfie anchor)")")
+        dlog("[FaceRef] Ready: \(results.count) distinct faces (\(removed) near-dupes removed), sim [\(String(format: "%.3f", bottom))..\(String(format: "%.3f", top))], pre-selected \(selectedCount)\(hasAnchor ? "" : " (no selfie anchor)")")
     }
 
     /// Returns the image's pixels with EXIF orientation baked in (upright). `.cgImage`
@@ -197,12 +197,12 @@ final class FaceReferenceViewModel: ObservableObject {
     func confirm(forUser userId: String) -> Int {
         let embeddings = candidates.filter { $0.isSelected }.map { $0.embedding }
         guard !embeddings.isEmpty else {
-            print("[FaceRef] Confirm tapped with 0 selected")
+            dlog("[FaceRef] Confirm tapped with 0 selected")
             return 0
         }
         let added = FaceMatchingService.shared.addReferenceEmbeddings(embeddings, forUser: userId)
         addedCount = added
-        print("[FaceRef] Confirmed \(embeddings.count) faces; \(added) new added; gallery now \(FaceMatchingService.shared.referenceCount)")
+        dlog("[FaceRef] Confirmed \(embeddings.count) faces; \(added) new added; gallery now \(FaceMatchingService.shared.referenceCount)")
         return added
     }
 

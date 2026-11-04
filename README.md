@@ -11,7 +11,7 @@ StyleMate finds the photos of *you* in your library, cuts out every garment and 
 - During onboarding you take a selfie (`SelfieCameraService`) and can confirm more of your own faces from your library ("tap the photos that are you") to build a reference **gallery**.
 - Faces are detected and 5-point-landmarked by the bundled **InsightFace SCRFD-10G** detector (Core ML), aligned to a canonical 112×112, and embedded with **AdaFace IR-101 (WebFace12M)** (bundled as `MobileFaceNet.mlpackage`, filename kept for history). Embeddings are tagged with the model version so an upgrade rebuilds the gallery.
 - Each library photo is matched by **cosine similarity** against the gallery with tiered confidence and a runner-up margin:
-  - **confident** → analysed straight away (in a multi-person photo only *your* body is isolated via a person-instance mask, so other people's clothes are never extracted); very confident matches also **teach the gallery** a new angle of your face;
+  - **confident** → analysed straight away (in a multi-person photo only *your* body is isolated via a person-instance mask, so other people's clothes are never extracted); very confident matches that also match your **selfie** (and clearly beat anyone else in the shot) **teach the gallery** a new angle of your face — learned faces are capped at half the gallery and never displace the selfie or faces you confirmed;
   - **probably you** → queued for an **"Is this you?"** review (home banner → `FaceReviewView`); confirming teaches the gallery and extracts those outfits;
   - anyone else → skipped.
 - The scan (`PhotoScanService` + `Services/Scan/`) starts with the **last 12 months**, newest first, with items appearing live ("All photos" is one tap away). It skips screenshots, tiny images and panoramas, keeps only the best frame of a burst / same-moment group, pipelines loading and identity ahead of extraction, and paces itself by thermal state and Low Power Mode.
@@ -31,7 +31,7 @@ For each photo of you, `WardrobeExtractor`:
 
 Then `DuplicateDetector` compares the item with the wardrobe using the visual embeddings (`ItemEmbeddingStore`) plus attribute gates. The same garment seen again in a **better** photo **upgrades** the wardrobe image instead of adding a duplicate.
 
-There are three ways to add items, all through the same pipeline: **Auto-scan** of a date range, **Photo picker** (up to 15 photos, with "which one is you?" when several people are in a shot), and **Camera**.
+There are three ways to add items, all through the same pipeline: **Auto-scan** of a date range, **Photo picker** (up to 15 photos, with "which one is you?" when several people are in a shot), and **Camera**. Picked photos are downsampled to 2048 px, and every extraction (manual or scan) goes through one shared gate (`ExtractionGate`, 1–2 at a time) so memory stays bounded.
 
 ### 3. "What should I wear today?" (on-device stylist — `Services/Outfits/`)
 
@@ -54,13 +54,13 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and appear i
 - **My Outfits**: calendar of logged outfits.
 - **Profile**: name, email, gender/age, preferred styles, cloud sync status, tour replay, data deletion.
 - **Authentication**: Sign in with Apple and Sign in with Google.
-- **CloudKit sync**: private database, custom `WardrobeZone`, per-item records with image assets.
+- **CloudKit sync**: private database, custom `WardrobeZone`, per-item records with image assets. Incremental: a persisted server change token, metadata-only pulls, image assets fetched lazily off the main thread. The phone is the source of truth — local changes are queued in a per-user ledger (pending uploads + tombstones) and retried until iCloud confirms them, local edits win, and a local item is only removed when the server reports its deletion.
 
 ## Architecture
 
 - **Language / UI**: Swift, SwiftUI (UIKit interop for `ImagePicker` and camera capture). MVVM.
 - **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder. Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
-- **Local persistence**: `UserDefaults` (wardrobe items per user), files under `Documents/wardrobe_images/`, item embeddings under `Application Support/WardrobeEmbeddings/`, Core Data (outfit history).
+- **Local persistence**: `UserDefaults` (wardrobe items per user, sync ledger), wardrobe images / thumbnails / outfit-history snapshots under `Application Support/wardrobe_images/`, the selfie under `Application Support/Selfie/`, the face gallery under `Application Support/FaceReference/` (with per-entry provenance: selfie / confirmed / learned), item embeddings under `Application Support/WardrobeEmbeddings/`, Core Data (outfit history, scoped per user; a damaged store is moved to `Application Support/CoreDataBackups/` instead of crashing). Personal files are excluded from iCloud Backup and use `completeUntilFirstUserAuthentication` file protection (`LocalStore`); older builds' `Documents/` files are moved there automatically.
 - **Cloud**: CloudKit private DB only (your own iCloud). No third-party AI services.
 - **Weather**: met.no primary with Open-Meteo fallback (no key).
 
@@ -106,7 +106,7 @@ To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
 
 ## Privacy
 
-- Face matching, garment extraction, classification and outfit styling all run **on the device**. Selfies, face embeddings and photos never leave the phone.
+- Face matching, garment extraction, classification and outfit styling all run **on the device**. Selfies, face embeddings and photos never leave the phone — they are also kept out of iCloud Backup. Release builds log no user or photo identifiers (verbose logs are DEBUG-only, `dlog`).
 - Apple's Foundation Models are used only through the on-device `SystemLanguageModel`.
 - Wardrobe data syncs only to the user's own private CloudKit database.
 

@@ -88,14 +88,14 @@ class SelfieCameraService: NSObject, ObservableObject {
             self.captureSession.commitConfiguration()
 
             self.captureSession.startRunning()
-            print("[StyleMate] Selfie camera session started")
+            dlog("[StyleMate] Selfie camera session started")
         }
     }
 
     func stop() {
         sessionQueue.async { [weak self] in
             self?.captureSession.stopRunning()
-            print("[StyleMate] Selfie camera session stopped")
+            dlog("[StyleMate] Selfie camera session stopped")
         }
     }
 
@@ -144,13 +144,12 @@ class SelfieCameraService: NSObject, ObservableObject {
 
     // nonisolated: pure image-encode + file write, no actor state — lets callers
     // run it off the main thread (avoids blocking the UI on confirm).
+    // Stored in Application Support (excluded from iCloud Backup, file-protected), at the
+    // path recorded under `selfieReferencePath_<userId>` that FaceMatchingService reads.
     nonisolated func saveSelfie(_ image: UIImage, userId: String) {
         guard let data = image.jpegData(compressionQuality: 0.95) else { return }
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let filePath = documentsPath.appendingPathComponent("selfie_reference_\(userId).jpg")
-        try? data.write(to: filePath)
-        UserDefaults.standard.set(filePath.path, forKey: "selfieReferencePath_\(userId)")
-        print("[StyleMate] Selfie saved for user: \(userId) at \(filePath.path)")
+        let saved = LocalStore.saveSelfie(data, userId: userId) != nil
+        dlog("[StyleMate] Selfie saved: \(saved)")
     }
 }
 
@@ -201,7 +200,7 @@ extension SelfieCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
                 captureState = .detected
                 lastFaceDetectionTime = Date()
                 faceDetectedDuration = 0
-                print("[StyleMate] Face detected with good quality, starting countdown")
+                dlog("[StyleMate] Face detected with good quality, starting countdown")
             }
 
             if let lastTime = lastFaceDetectionTime {
@@ -268,7 +267,7 @@ extension SelfieCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
             guard let self else { return }
             if !self.captureSession.isRunning {
                 self.captureSession.startRunning()
-                print("[StyleMate] Camera session restarted for retake")
+                dlog("[StyleMate] Camera session restarted for retake")
             }
         }
     }
@@ -297,17 +296,17 @@ extension SelfieCameraService: AVCapturePhotoCaptureDelegate {
             self.captureState = .captured
             self.isCapturing = false
             Haptics.success()
-            print("[StyleMate] Selfie captured & cropped to oval (\(Int(cropped.size.width))x\(Int(cropped.size.height)))")
+            dlog("[StyleMate] Selfie captured & cropped to oval (\(Int(cropped.size.width))x\(Int(cropped.size.height)))")
         }
     }
 
     /// Renders the image into a new bitmap with .up orientation,
     /// baking any rotation/mirroring into the pixel data.
     private nonisolated static func renderUpOrientation(_ image: UIImage) -> UIImage {
-        guard image.imageOrientation != .up, let cgImage = image.cgImage else { return image }
-        let size = image.size
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { _ in
+        guard image.imageOrientation != .up, image.cgImage != nil else { return image }
+        // Scale 1: the default renderer format uses the screen scale (9x the pixels).
+        let size = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        return ImageDownsampler.render(size: size) { _ in
             image.draw(in: CGRect(origin: .zero, size: size))
         }
     }
