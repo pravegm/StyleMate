@@ -42,7 +42,7 @@ final class WardrobeML {
         guard !loadAttempted else { return }
         loadAttempted = true
         let cfg = MLModelConfiguration()
-        cfg.computeUnits = .all
+        cfg.computeUnits = .cpuAndNeuralEngine   // no GPU: iOS forbids GPU work in the background (overnight scan)
         func load(_ name: String) -> MLModel? {
             guard let url = Bundle.main.url(forResource: name, withExtension: "mlmodelc") else {
                 print("[Wardrobe] ERROR: \(name).mlmodelc missing from the bundle")

@@ -83,9 +83,13 @@ struct ScanProgressBanner: View {
                 .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                Text(scanService.isPaused ? "Scan paused" : "Scanning your photos...")
+                Text(scanService.isPaused ? "Scan paused"
+                     : (scanService.systemPauseReason ?? "Building your wardrobe…"))
                     .font(DS.Font.headline)
                     .foregroundColor(DS.Colors.textPrimary)
+                Text(scanService.progressDetail)
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.textTertiary)
 
                 HStack(spacing: DS.Spacing.xs) {
                     ProgressView(

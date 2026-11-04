@@ -263,6 +263,28 @@ struct ProfileView: View {
                 }
 
                 Section {
+                    HStack(spacing: DS.Spacing.sm) {
+                        Image(systemName: "lock.shield.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(DS.Colors.accent)
+                        VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                            Text("Everything stays on your iPhone")
+                                .font(DS.Font.body)
+                                .foregroundColor(DS.Colors.textPrimary)
+                            Text("No photo, face or wardrobe item is sent to any AI service.")
+                                .font(DS.Font.caption1)
+                                .foregroundColor(DS.Colors.textSecondary)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                } header: {
+                    Text("Privacy")
+                } footer: {
+                    Text("Finding you in your photos, cutting out your clothes and suggesting outfits all run on this device. The photo scan keeps going in the background and overnight while your phone charges. Your wardrobe is backed up only to your own iCloud.")
+                        .font(DS.Font.caption2)
+                }
+
+                Section {
                     Button(role: .destructive) {
                         showingSignOutAlert = true
                     } label: {
@@ -429,9 +451,10 @@ struct ProfileView: View {
         // Delete the on-device face reference gallery (in-memory + persisted file).
         FaceMatchingService.shared.clearReference(forUser: userId)
 
-        // Delete scan progress + face reference files from Application Support.
+        // Stop any scan and delete its progress (in memory and on disk), then the
+        // face reference file in Application Support.
+        PhotoScanService.shared.forgetProgress(forUser: userId)
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        try? FileManager.default.removeItem(at: appSupport.appendingPathComponent("ScanProgress/scanProgress_\(userId).json"))
         try? FileManager.default.removeItem(at: appSupport.appendingPathComponent("FaceReference/faceReference_\(userId).json"))
 
         let keysToRemove = [
@@ -446,7 +469,6 @@ struct ProfileView: View {
             "hasMigratedBackgroundRemoval_\(userId)",
             "hasMigratedThumbnails_\(userId)",
             "hasMigratedZoneCrop_\(userId)",
-            "hasConsentedToGeminiScan_\(userId)",
             "bgRemovalMigrationComplete_\(userId)",
             "thumbnailMigrationComplete_\(userId)",
             "zoneCropMigrationComplete_\(userId)",

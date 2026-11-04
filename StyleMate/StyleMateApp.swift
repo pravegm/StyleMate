@@ -5,11 +5,22 @@ import GoogleSignIn
 
 @main
 struct StyleMateApp: App {
-    @StateObject private var authService = AuthService()
-    @StateObject private var wardrobeVM = WardrobeViewModel()
+    @StateObject private var authService: AuthService
+    @StateObject private var wardrobeVM: WardrobeViewModel
     @StateObject private var onboardingManager = OnboardingManager()
     @StateObject private var tutorialManager = TutorialManager()
     let persistenceController = PersistenceController.shared
+
+    init() {
+        // Created here (not lazily) so the background scan, which iOS may launch
+        // without any UI, works on the same objects the UI shows.
+        let auth = AuthService()
+        let wardrobe = WardrobeViewModel()
+        _authService = StateObject(wrappedValue: auth)
+        _wardrobeVM = StateObject(wrappedValue: wardrobe)
+        // Background task handlers must be registered before launch finishes.
+        BackgroundScanCoordinator.shared.configure(auth: auth, wardrobe: wardrobe)
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -42,15 +53,7 @@ struct RootView: View {
     @State private var showReview = false
     @State private var isLoadingImages = false
     @State private var showScanRangePicker = false
-    @State private var showGeminiConsent = false
-    @State private var geminiConsentPurpose: GeminiConsentPurpose = .manualAdd
     @Environment(\.scenePhase) private var scenePhase
-
-    private enum GeminiConsentPurpose {
-        case manualAdd
-        case autoScan
-        case scanRangePicker
-    }
 
     var userKey: String {
         authService.user?.id ?? "guest"
@@ -77,13 +80,7 @@ struct RootView: View {
                 onCamera: { showSourcePicker = false; showCamera = true },
                 onAutoScan: {
                     showSourcePicker = false
-                    let userId = authService.user?.id ?? ""
-                    if GeminiConsent.hasConsented(userId: userId) {
-                        showScanRangePicker = true
-                    } else {
-                        geminiConsentPurpose = .scanRangePicker
-                        showGeminiConsent = true
-                    }
+                    showScanRangePicker = true
                 },
                 showAutoScan: hasPhotoAccess
             )
@@ -107,13 +104,7 @@ struct RootView: View {
                 pickerItems = []
                 isLoadingImages = false
                 if !images.isEmpty {
-                    let userId = authService.user?.id ?? ""
-                    if GeminiConsent.hasConsented(userId: userId) {
-                        showReview = true
-                    } else {
-                        geminiConsentPurpose = .manualAdd
-                        showGeminiConsent = true
-                    }
+                    showReview = true
                 }
             }
         }
@@ -126,13 +117,7 @@ struct RootView: View {
                     if let image = img {
                         reviewImages = [image]
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            let userId = authService.user?.id ?? ""
-                            if GeminiConsent.hasConsented(userId: userId) {
-                                showReview = true
-                            } else {
-                                geminiConsentPurpose = .manualAdd
-                                showGeminiConsent = true
-                            }
+                            showReview = true
                         }
                     }
                 }
@@ -159,7 +144,8 @@ struct RootView: View {
                 onStartScan: { dateRange in
                     showScanRangePicker = false
                     let uid = authService.user?.id ?? ""
-                    PhotoScanService.shared.resetProgress(forUser: uid)
+                    // No progress reset: photos already scanned are skipped, so a
+                    // wider range just adds the photos not looked at yet.
                     Task {
                         await PhotoScanService.shared.startScan(
                             forUser: uid,
@@ -167,36 +153,6 @@ struct RootView: View {
                             userGender: authService.user?.gender,
                             wardrobeViewModel: wardrobeVM
                         )
-                    }
-                }
-            )
-        }
-        .sheet(isPresented: $showGeminiConsent) {
-            GeminiConsentView(
-                onConsent: {
-                    let userId = authService.user?.id ?? ""
-                    GeminiConsent.grant(userId: userId)
-                    showGeminiConsent = false
-                    switch geminiConsentPurpose {
-                    case .manualAdd:
-                        showReview = true
-                    case .scanRangePicker:
-                        showScanRangePicker = true
-                    case .autoScan:
-                        Task {
-                            await PhotoScanService.shared.startScan(
-                                forUser: userId,
-                                dateRange: .lastMonth,
-                                userGender: authService.user?.gender,
-                                wardrobeViewModel: wardrobeVM
-                            )
-                        }
-                    }
-                },
-                onDecline: {
-                    showGeminiConsent = false
-                    if geminiConsentPurpose == .manualAdd {
-                        reviewImages = []
                     }
                 }
             )
@@ -222,7 +178,7 @@ struct RootView: View {
             }
         }
         .onAppear {
-            hasPhotoAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
+            hasPhotoAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan
             authService.checkCredentialState()
             if authService.isAuthenticated, let id = authService.user?.id {
                 wardrobeVM.load(forUser: id)
@@ -241,27 +197,28 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { newPhase in
-            if newPhase == .active,
-               authService.isAuthenticated,
-               !wardrobeVM.currentUserEmail.isEmpty {
-                Task {
-                    let isAvailable = await CloudKitService.shared.checkAccountStatus()
-                    if isAvailable {
-                        await wardrobeVM.restoreFromCloud()
+            switch newPhase {
+            case .active:
+                if authService.isAuthenticated, !wardrobeVM.currentUserEmail.isEmpty {
+                    Task {
+                        let isAvailable = await CloudKitService.shared.checkAccountStatus()
+                        if isAvailable {
+                            await wardrobeVM.restoreFromCloud()
+                        }
                     }
                 }
-            }
-        }
-        .onChange(of: onboardingManager.hasCompletedOnboarding) { completed in
-            guard completed,
-                  authService.isAuthenticated,
-                  let userId = authService.user?.id, !userId.isEmpty,
-                  !UserDefaults.standard.bool(forKey: "hasCompletedInitialScan_\(userId)"),
-                  PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else { return }
-
-            if !GeminiConsent.hasConsented(userId: userId) {
-                geminiConsentPurpose = .autoScan
-                showGeminiConsent = true
+                // Continue an interrupted scan, or pick up photos added since the
+                // last one — the wardrobe keeps growing on its own. (Waits until
+                // the first scan after onboarding has been started below.)
+                if let userId = authService.user?.id, !userId.isEmpty,
+                   UserDefaults.standard.bool(forKey: "hasCompletedInitialScan_\(userId)")
+                    || PhotoScanService.shared.hasUnfinishedScan(forUser: userId) {
+                    BackgroundScanCoordinator.shared.appBecameActive()
+                }
+            case .background:
+                BackgroundScanCoordinator.shared.appDidEnterBackground()
+            default:
+                break
             }
         }
         .task(id: onboardingManager.hasCompletedOnboarding) {
@@ -272,18 +229,28 @@ struct RootView: View {
                   authService.isAuthenticated,
                   !userId.isEmpty,
                   !UserDefaults.standard.bool(forKey: scanKey),
-                  GeminiConsent.hasConsented(userId: userId),
-                  PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
+                  PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan,
+                  !PhotoScanService.shared.isWorking,
                   PhotoScanService.shared.scanState == .idle else { return }
 
+            // First scan: the last 12 months, newest first. Items appear in the
+            // wardrobe as they're found; the scan continues in the background and
+            // overnight, and Profile / Add → Auto-scan can extend it to every photo.
             print("[StyleMate] Auto-scan triggered after onboarding completion")
 
-            await PhotoScanService.shared.startScan(
-                forUser: userId,
-                dateRange: .lastMonth,
-                userGender: authService.user?.gender,
-                wardrobeViewModel: wardrobeVM
-            )
+            if PhotoScanService.shared.hasUnfinishedScan(forUser: userId) {
+                // Killed mid-way last time: pick up exactly where it stopped.
+                await PhotoScanService.shared.continueScanning(
+                    forUser: userId, userGender: authService.user?.gender, wardrobeViewModel: wardrobeVM)
+            } else {
+                await PhotoScanService.shared.startScan(
+                    forUser: userId,
+                    dateRange: .lastYear,
+                    userGender: authService.user?.gender,
+                    wardrobeViewModel: wardrobeVM,
+                    trigger: .initial
+                )
+            }
 
             if PhotoScanService.shared.scanState == .completed {
                 UserDefaults.standard.set(true, forKey: scanKey)
@@ -336,7 +303,7 @@ private struct AddSourceSheet: View {
                         icon: "sparkles.rectangle.stack.fill",
                         iconColor: .purple,
                         title: "Auto-Scan Photos",
-                        subtitle: "AI finds your outfits in your photo library",
+                        subtitle: "Finds your outfits in your photos, on your iPhone",
                         delay: 2,
                         action: onAutoScan
                     )

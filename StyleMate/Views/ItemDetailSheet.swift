@@ -1,232 +1,289 @@
 import SwiftUI
 
-struct ItemDetailSheet: View {
-    let item: WardrobeItem
-    var onEdit: () -> Void
-    var onReplacePhoto: () -> Void
-    var onDelete: () -> Void
-    var onImageTap: (UIImage) -> Void
+/// An item's page in the closet: the cutout large on the studio backdrop, its
+/// attributes as tidy chips, how often it's been worn, and edit / remove.
+/// Pushed with a zoom transition from the tile that opened it.
+///
+/// It reads the live item from the wardrobe by id, so an edit made here shows
+/// immediately; `onDelete` is the caller's job (it pops first, then removes, so
+/// the zoom can animate back to a tile that still exists).
+struct ItemDetailView: View {
+    let itemID: UUID
+    private let fallback: WardrobeItem
+    var wear: WearStat?
+    var onDelete: (WardrobeItem) -> Void
 
-    @State private var showDeleteConfirmation = false
-    @State private var sheetAppeared = false
+    @EnvironmentObject private var wardrobeViewModel: WardrobeViewModel
+    @State private var showEdit = false
+    @State private var confirmRemove = false
+    @State private var showFullImage = false
+    @State private var appeared = false
+
+    init(item: WardrobeItem, wear: WearStat?, onDelete: @escaping (WardrobeItem) -> Void) {
+        self.itemID = item.id
+        self.fallback = item
+        self.wear = wear
+        self.onDelete = onDelete
+    }
+
+    private var item: WardrobeItem {
+        wardrobeViewModel.items.first { $0.id == itemID } ?? fallback
+    }
 
     var body: some View {
+        let item = self.item
         ScrollView {
-            VStack(spacing: DS.Spacing.md) {
-                itemImage
-                itemHeader
-                attributeChips
-                colorsSection
-                detailsSection
-                actionButtons
+            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                hero(item)
+                header(item)
+                Group {
+                    colors(item)
+                    attributes(item)
+                    notes(item)
+                    actions
+                }
+                .dsAppear(appeared)
             }
             .padding(.horizontal, DS.Spacing.screenH)
-            .padding(.top, DS.Spacing.md)
-            .padding(.bottom, DS.Spacing.xl)
+            .padding(.top, DS.Spacing.xs)
+            .padding(.bottom, DS.Spacing.xxl)
         }
-        .background(DS.Colors.backgroundPrimary)
-        .opacity(sheetAppeared ? 1 : 0)
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.25).delay(0.15)) { sheetAppeared = true }
+        .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+        .navigationTitle(ClosetText.displayProduct(item.product))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button { showEdit = true } label: { Label("Edit details", systemImage: "pencil") }
+                    Button(role: .destructive) { confirmRemove = true } label: {
+                        Label("Not mine — remove", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("More actions")
+            }
         }
-        .alert("Delete Item?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) { onDelete() }
+        .onAppear { withAnimation(DS.Motion.gentle.delay(0.12)) { appeared = true } }
+        .sheet(isPresented: $showEdit) {
+            EditWardrobeItemView(item: item) { updated in
+                ClosetActions.update(updated, in: wardrobeViewModel)
+            }
+        }
+        .confirmationDialog("Remove this item?", isPresented: $confirmRemove, titleVisibility: .visible) {
+            Button("Remove from wardrobe", role: .destructive) {
+                Haptics.warning()
+                onDelete(item)
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will permanently remove this item from your wardrobe.")
+            Text("Use this when it isn't yours or was picked up by mistake. Your photos aren't touched.")
+        }
+        .fullScreenCover(isPresented: $showFullImage) {
+            FullItemImageViewer(path: item.fullImagePath, fallbackPath: item.gridImagePath, title: ClosetText.displayName(item))
         }
     }
 
-    // MARK: - Item Image
+    // MARK: - Hero
 
-    @ViewBuilder
-    private var itemImage: some View {
+    private func hero(_ item: WardrobeItem) -> some View {
         Button {
-            if let img = item.croppedImage ?? item.image {
-                onImageTap(img)
-            }
+            Haptics.light()
+            showFullImage = true
         } label: {
-            Group {
-                if let img = item.croppedImage ?? item.image {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFit()
-                        .padding(DS.Spacing.md)
-                } else {
-                    Image(systemName: "photo")
-                        .font(.system(size: 34))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(DS.Colors.textTertiary)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 280)
-            .background(DS.Colors.backgroundCard)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
-            .dsCardShadow(cornerRadius: DS.Radius.hero)
+            AsyncItemTile(path: item.gridImagePath, height: nil, cornerRadius: DS.Radius.hero,
+                          inset: 28, upgradePath: item.fullImagePath)
+                .dsCardShadow(cornerRadius: DS.Radius.hero)
         }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
+        .buttonStyle(DSTapBounce())
+        .accessibilityLabel("Photo of \(ClosetText.displayName(item))")
+        .accessibilityHint("Opens the photo full screen")
     }
 
     // MARK: - Header
 
-    @ViewBuilder
-    private var itemHeader: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-            Text(item.name)
-                .font(DS.Font.title3)
-                .foregroundColor(DS.Colors.textPrimary)
+    private func header(_ item: WardrobeItem) -> some View {
+        let section = ClosetSection.of(item)
+        return VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Label(section.title, systemImage: section.iconName)
+                .font(DS.Font.footnote.weight(.semibold))
+                .foregroundStyle(DS.Colors.accent)
+            Text(ClosetText.displayName(item))
+                .font(DS.Font.title2)
+                .foregroundStyle(DS.Colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(DS.Colors.accent)
-                    .frame(width: 6, height: 6)
-                Text(item.category.rawValue)
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.accent)
-            }
-
-            if !item.brand.isEmpty {
-                Text(item.brand)
-                    .font(DS.Font.subheadline)
-                    .foregroundColor(DS.Colors.textSecondary)
-            }
+                .accessibilityAddTraits(.isHeader)
+            Label(ClosetAttributes.wearSummary(wear), systemImage: "calendar")
+                .font(DS.Font.subheadline)
+                .foregroundStyle(DS.Colors.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Attribute Chips
-
-    @ViewBuilder
-    private var attributeChips: some View {
-        let chips = buildChips()
-        if !chips.isEmpty {
-            FlowLayout(spacing: DS.Spacing.xs) {
-                ForEach(chips, id: \.self) { chip in
-                    Text(chip)
-                        .font(DS.Font.footnote.weight(.medium))
-                        .foregroundStyle(DS.Colors.textPrimary)
-                        .padding(.horizontal, DS.Spacing.sm)
-                        .padding(.vertical, DS.Spacing.xs)
-                        .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func buildChips() -> [String] {
-        var chips: [String] = []
-
-        if let material = item.material, !material.isEmpty {
-            chips.append(material)
-        }
-        if let fit = item.fit, fit != .regular, item.category.supportsFit {
-            chips.append(fit.rawValue)
-        }
-        if item.pattern != .solid {
-            chips.append(item.pattern.rawValue)
-        }
-        if let neckline = item.neckline, item.category.supportsNeckline {
-            chips.append(neckline.rawValue)
-        }
-        if let sleeve = item.sleeveLength, item.category.supportsSleeves {
-            chips.append(sleeve.rawValue)
-        }
-        if let length = item.garmentLength, item.category.supportsLength {
-            chips.append(length.rawValue)
-        }
-
-        return chips
     }
 
     // MARK: - Colors
 
     @ViewBuilder
-    private var colorsSection: some View {
-        if !item.colors.isEmpty {
+    private func colors(_ item: WardrobeItem) -> some View {
+        let names = item.colors.map(ClosetColor.normalize).filter { !$0.isEmpty }
+        if !names.isEmpty {
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                Text("COLORS")
-                    .font(DS.Font.footnote.weight(.semibold))
-                    .tracking(0.6)
-                    .foregroundStyle(DS.Colors.textTertiary)
-
-                HStack(spacing: DS.Spacing.sm) {
-                    ForEach(item.colors, id: \.self) { colorName in
-                        HStack(spacing: DS.Spacing.micro) {
+                sectionLabel("Colors")
+                FlowLayout(spacing: DS.Spacing.xs) {
+                    ForEach(Array(names.enumerated()), id: \.offset) { _, name in
+                        HStack(spacing: 6) {
                             Circle()
-                                .fill(ColorMapping.color(for: colorName))
+                                .fill(ColorMapping.color(for: name))
                                 .frame(width: 16, height: 16)
-                                .overlay(Circle().stroke(Color.black.opacity(0.1), lineWidth: 1))
-                            Text(colorName)
-                                .font(DS.Font.subheadline)
-                                .foregroundColor(DS.Colors.textPrimary)
+                                .overlay(Circle().strokeBorder(DS.Colors.separator, lineWidth: 1))
+                            Text(name)
+                                .font(DS.Font.subheadline.weight(.medium))
+                                .foregroundStyle(DS.Colors.textPrimary)
                         }
+                        .padding(.horizontal, DS.Spacing.sm)
+                        .padding(.vertical, DS.Spacing.xs)
+                        .background(DS.Colors.backgroundCard, in: Capsule(style: .continuous))
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    // MARK: - Details
+    // MARK: - Attributes
+
+    private func attributes(_ item: WardrobeItem) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            sectionLabel("Details")
+            FlowLayout(spacing: DS.Spacing.xs) {
+                ForEach(ClosetAttributes.chips(for: item)) { chip in
+                    AttributeChip(attribute: chip)
+                }
+            }
+        }
+    }
 
     @ViewBuilder
-    private var detailsSection: some View {
-        if let details = item.details, !details.isEmpty {
+    private func notes(_ item: WardrobeItem) -> some View {
+        if let details = item.details?.trimmingCharacters(in: .whitespacesAndNewlines), !details.isEmpty {
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                Text("DETAILS")
-                    .font(DS.Font.footnote.weight(.semibold))
-                    .tracking(0.6)
-                    .foregroundStyle(DS.Colors.textTertiary)
-
+                sectionLabel("Notes")
                 Text(details)
                     .font(DS.Font.subheadline)
-                    .foregroundColor(DS.Colors.textSecondary)
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     // MARK: - Actions
 
-    @ViewBuilder
-    private var actionButtons: some View {
+    private var actions: some View {
         VStack(spacing: DS.Spacing.sm) {
-            HStack(spacing: DS.Spacing.sm) {
-                Button(action: onEdit) {
-                    HStack(spacing: DS.Spacing.xs) {
-                        Image(systemName: "pencil")
-                        Text("Edit")
-                    }
-                }
-                .buttonStyle(DSSecondaryButton())
-
-                Button(action: onReplacePhoto) {
-                    HStack(spacing: DS.Spacing.xs) {
-                        Image(systemName: "camera")
-                        Text("Replace Photo")
-                    }
-                }
-                .buttonStyle(DSSecondaryButton())
+            Button {
+                Haptics.light()
+                showEdit = true
+            } label: {
+                Label("Edit details", systemImage: "pencil")
             }
+            .buttonStyle(DSSecondaryButton())
 
-            Button(action: { showDeleteConfirmation = true }) {
-                HStack(spacing: DS.Spacing.xs) {
-                    Image(systemName: "trash")
-                    Text("Delete")
-                }
-                .foregroundColor(DS.Colors.error)
-                .padding(.horizontal, DS.Spacing.md)
-                .padding(.vertical, DS.Spacing.xs)
-                .background(DS.Colors.error.opacity(0.08))
-                .clipShape(Capsule())
+            Button {
+                confirmRemove = true
+            } label: {
+                Label("Not mine — remove", systemImage: "trash")
+                    .font(DS.Font.headline)
+                    .foregroundStyle(DS.Colors.error)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: DS.ButtonSize.height)
+                    .background(DS.Colors.error.opacity(0.10),
+                                in: RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
             }
             .buttonStyle(DSTapBounce())
-            .frame(height: 44)
+            .accessibilityHint("Removes this item from your wardrobe")
         }
         .padding(.top, DS.Spacing.xs)
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(DS.Font.footnote.weight(.semibold))
+            .tracking(0.6)
+            .foregroundStyle(DS.Colors.textTertiary)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// One attribute: a small caption label over its value, on a card capsule.
+private struct AttributeChip: View {
+    let attribute: ClosetAttribute
+
+    var body: some View {
+        HStack(spacing: DS.Spacing.xs) {
+            Image(systemName: attribute.icon)
+                .font(DS.Font.footnote.weight(.semibold))
+                .foregroundStyle(DS.Colors.accent)
+                .frame(minWidth: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(attribute.label)
+                    .font(DS.Font.caption2)
+                    .foregroundStyle(DS.Colors.textTertiary)
+                Text(attribute.value)
+                    .font(DS.Font.subheadline.weight(.medium))
+                    .foregroundStyle(DS.Colors.textPrimary)
+            }
+        }
+        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.vertical, DS.Spacing.xs)
+        .background(DS.Colors.backgroundCard,
+                    in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(attribute.label): \(attribute.value)")
+    }
+}
+
+/// Full-screen, pinch-to-zoom view of an item's cutout on the studio backdrop.
+struct FullItemImageViewer: View {
+    let path: String
+    var fallbackPath: String? = nil
+    var title: String = ""
+    @Environment(\.dismiss) private var dismiss
+    @State private var image: UIImage?
+
+    init(path: String, fallbackPath: String? = nil, title: String = "") {
+        self.path = path
+        self.fallbackPath = fallbackPath
+        self.title = title
+        _image = State(initialValue: ClosetImageLoader.shared.cached(path)
+                       ?? ClosetImageLoader.shared.cached(fallbackPath))
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            LinearGradient(colors: [DS.Colors.studioTop, DS.Colors.studioBottom],
+                           startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+            if let image {
+                ZoomableImage(image: image)
+                    .padding(DS.Spacing.lg)
+                    .accessibilityLabel(title.isEmpty ? "Item photo" : "Photo of \(title)")
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .frame(width: 40, height: 40)
+                    .dsGlassCircle()
+            }
+            .padding(DS.Spacing.md)
+            .accessibilityLabel("Close")
+        }
+        .task {
+            if let big = await ClosetImageLoader.shared.load(path) { image = big }
+            else if image == nil { image = await ClosetImageLoader.shared.load(fallbackPath) }
+        }
     }
 }

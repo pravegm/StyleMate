@@ -5,6 +5,8 @@ struct ItemRowView: View {
     @Binding var selectedItems: Set<WardrobeItem>
     @Binding var previewImage: PreviewImage?
 
+    private var isSelected: Bool { selectedItems.contains(item) }
+
     private func toggleSelection() {
         Haptics.light()
         if selectedItems.contains(item) {
@@ -17,41 +19,43 @@ struct ItemRowView: View {
     var body: some View {
         HStack(spacing: DS.Spacing.sm) {
             Button(action: toggleSelection) {
-                Image(systemName: selectedItems.contains(item) ? "checkmark.circle.fill" : "circle")
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(DS.Font.title3)
-                    .foregroundColor(selectedItems.contains(item) ? DS.Colors.accent : DS.Colors.textTertiary)
+                    .foregroundColor(isSelected ? DS.Colors.accent : DS.Colors.textTertiary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(ClosetText.displayName(item))
+            .accessibilityValue(isSelected ? "Selected" : "Not selected")
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-            Button(action: {
-                if let img = item.croppedImage ?? item.image {
-                    previewImage = PreviewImage(image: img)
+            Button {
+                Task {
+                    if let img = await ClosetImageLoader.shared.load(item.fullImagePath) {
+                        previewImage = PreviewImage(image: img)
+                    }
                 }
-            }) {
-                if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
-                    Image(uiImage: img)
-                        .resizable()
-                        .frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-                } else {
-                    RoundedRectangle(cornerRadius: DS.Radius.button)
-                        .fill(DS.Colors.backgroundSecondary)
-                        .frame(width: 44, height: 44)
-                }
+            } label: {
+                AsyncItemTile(path: item.gridImagePath, height: 48, cornerRadius: DS.Radius.chip, inset: 4)
+                    .frame(width: 48)
             }
-            .buttonStyle(PlainButtonStyle())
+            .buttonStyle(.plain)
+            .accessibilityLabel("Preview \(ClosetText.displayProduct(item.product))")
 
-            Text(item.name)
+            Text(ClosetText.displayName(item))
                 .font(DS.Font.body)
                 .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture { toggleSelection() }
-
-            Spacer()
+                .accessibilityHidden(true)
         }
         .padding(DS.Spacing.xs)
         .background(
-            RoundedRectangle(cornerRadius: DS.Radius.card)
-                .fill(selectedItems.contains(item) ? DS.Colors.accent.opacity(0.08) : DS.Colors.backgroundSecondary)
+            RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                .fill(isSelected ? DS.Colors.accentSoft : DS.Colors.backgroundSecondary)
         )
     }
 }
