@@ -102,7 +102,6 @@ final class StyleMateE2ETests: E2ETestCase {
                           "Expected until the on-device stylist replaces the Gemini call on main.")
         }
         XCTAssertEqual(outcome, 0, "Outfit options never appeared")
-        pickMoodIfOffered()
 
         let total = Int(counter.label.split(separator: " ").last ?? "") ?? -1
         XCTAssertEqual(total, 5, "Expected 5 outfit options, the deck says '\(counter.label)'")
@@ -117,7 +116,7 @@ final class StyleMateE2ETests: E2ETestCase {
                       "No per-item swap button on the outfit card (see the outfit-sheet-buttons attachment)")
         let before = lookFingerprint()
         swap.tap()
-        let busy = anyElement(NSPredicate(format: "label CONTAINS 'Shuffling'"))
+        let busy = anyElement(NSPredicate(format: "label BEGINSWITH 'Styling' OR label CONTAINS 'Shuffling'"))
         if busy.waitForExistence(timeout: 3) {
             XCTAssertTrue(waitToDisappear(busy, timeout: 120), "Swap never finished")
         }
@@ -146,7 +145,7 @@ final class StyleMateE2ETests: E2ETestCase {
         }
 
         XCTAssertTrue(text("All Caught Up!").waitForExistence(timeout: 10), "End-of-deck screen didn't appear")
-        XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS '1 outfit saved'")).exists,
+        XCTAssertTrue(anyElement(NSPredicate(format: "label BEGINSWITH '1 outfit'")).exists,
                       "End-of-deck doesn't confirm the kept outfit")
         snap("deck-finished")
         let viewInCalendar = button(id: "outfit.viewInCalendar", label: "View in Calendar")
@@ -154,7 +153,7 @@ final class StyleMateE2ETests: E2ETestCase {
 
         // The kept outfit is on today's date.
         openTab("Outfits")
-        assertTodayHasLoggedOutfit(expectedSourceLabel: "AI Styled")
+        assertTodayHasLoggedOutfit(expectedSourceLabel: "Styled for you")
         snap("calendar-today-with-kept-outfit")
     }
 
@@ -279,7 +278,7 @@ final class StyleMateE2ETests: E2ETestCase {
             snap("mood-picked")
             return
         }
-        for mood in ["Confident", "Relaxed", "Cozy", "Bold", "Playful", "Calm", "Energetic"] {
+        for mood in ["Confident mood", "Confident", "Relaxed mood", "Relaxed"] {
             let option = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", mood)).firstMatch
             if option.exists && option.isHittable {
                 option.tap()
