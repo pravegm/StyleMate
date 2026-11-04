@@ -104,6 +104,12 @@ To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
    The face embedder takes **BGR** input (handled in `createInputMultiArray`); see `scripts/convert_adaface.py`, `convert_scrfd.py` and `convert_wardrobe_models.py` (each parity-checks Core ML against PyTorch).
 4. `open StyleMate.xcodeproj`, set your signing team, and run (a real device for the selfie camera).
 
+### iPhone Duo
+
+StyleMate runs natively full screen on the iPhone Duo's inner and cover displays (no `UIRequiresFullScreen`, all iPhone orientations; build with **Xcode 27.1+** so the binary carries the iOS 27.1 SDK, or the Duo letterboxes it). `StyleMate/Views/Components/DuoLayout.swift` publishes `\.duoLayout` (wide layout, posture — flat / book / tabletop / closed — hinge angle and the fold's position, from `onHingeChange` and the `.division` reserved region) and provides `FoldAwareSplit`, a two-pane container that splits at the crease when the phone is half-open.
+
+`.github/workflows/duo.yml` (every push to `feat/duo`, or **Actions → Duo → Run workflow**) downloads the iOS 27.1 runtime, builds for an iPhone Duo simulator and runs `StyleMateUITests/DuoScreensTests`: the test navigates on the cover display and calls `scripts/duo_bridge.py`, which moves the simulated hinge (`brew install artemnovichkov/tap/hinge`) and captures every screen on the cover, inner flat (180°) and inner half-open (110°) displays, plus a seated (portrait) pass. Frames land in the `duo-screens` artifact with a `MANIFEST.txt`.
+
 ## Privacy
 
 - Face matching, garment extraction, classification and outfit styling all run **on the device**. Selfies, face embeddings and photos never leave the phone.

@@ -168,10 +168,11 @@ private struct DuoLayoutReader: ViewModifier {
     private func log() {
         #if DEBUG
         let c = state.creaseInGlobal.map { String(format: "%.0f,%.0f %.0fx%.0f", $0.minX, $0.minY, $0.width, $0.height) } ?? "none"
-        print(String(format: "[Duo] posture=%@ hinge=%@ angle=%@ crease=%@ active=%d window=%.0fx%.0f wide=%d",
-                     state.posture.rawValue, state.hinge.rawValue,
-                     state.hingeAngle.map { String(format: "%.0f", $0) } ?? "-", c, state.isCreaseActive ? 1 : 0,
-                     state.windowSize.width, state.windowSize.height, state.isWideLayout ? 1 : 0))
+        // NSLog (unified log), so the Duo CI can read it with `simctl spawn … log show` while XCUITest owns stdout.
+        NSLog("%@", String(format: "[Duo] posture=%@ hinge=%@ angle=%@ crease=%@ active=%d window=%.0fx%.0f wide=%d",
+                           state.posture.rawValue, state.hinge.rawValue,
+                           state.hingeAngle.map { String(format: "%.0f", $0) } ?? "-", c, state.isCreaseActive ? 1 : 0,
+                           state.windowSize.width, state.windowSize.height, state.isWideLayout ? 1 : 0))
         #endif
     }
 

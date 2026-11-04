@@ -219,7 +219,8 @@ jobs:
               for a in test.get("attachments", []):
                   src = os.path.join(raw, a.get("exportedFileName", ""))
                   name = a.get("suggestedHumanReadableName") or a.get("exportedFileName", "")
-                  if not os.path.isfile(src) or name.startswith("Debug description"):
+                  # Only the test's own snaps ("test01_DuoScreens-03-03-item-xcui"), not XCTest's automatic ones.
+                  if not os.path.isfile(src) or not name.startswith("test"):
                       continue
                   stem, ext = os.path.splitext(name)
                   stem = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", stem)
@@ -228,6 +229,17 @@ jobs:
                   n += 1
           print(f"Exported {n} attachments")
           PY
+
+      - name: The app's own Duo log (DuoLayout posture / crease, DebugOrientation)
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          gtimeout 180 xcrun simctl spawn "$UDID" log show --last 90m --style compact \
+            --predicate 'process == "StyleMate" AND eventMessage CONTAINS "[Duo]"' > "$OUT/logs/app-duo.txt" 2>&1 || true
+          echo "$(wc -l < "$OUT/logs/app-duo.txt") lines"; grep -E "posture=|orientation" "$OUT/logs/app-duo.txt" | tail -60 || true
 
       - name: Simulator diagnostics
         if: failure()

@@ -39,19 +39,10 @@ final class DuoScreensTests: E2ETestCase {
         XCTAssertTrue(count.waitForExistence(timeout: 20), "Closet doesn't show the seeded items")
         shoot("02-closet")
 
-        // Item page.
-        let tee = app.buttons.matching(NSPredicate(format: "label ENDSWITH 'T-Shirt'")).firstMatch
-        if scrollUntilHittable(tee, maxSwipes: 4) {
-            tee.tap()
-            let editDetails = button(id: "itemDetail.edit", label: "Edit details")
-            XCTAssertTrue(editDetails.waitForExistence(timeout: 15), "Item page didn't open")
+        // Item page (via the Tops chip, so the tile isn't half under the pinned filter bar).
+        if openFirstTee() {
             shoot("03-item")
-            let backByID = app.navigationBars.buttons["BackButton"]
-            let back = backByID.exists ? backByID : app.navigationBars.buttons.element(boundBy: 0)
-            if back.waitForExistence(timeout: 5) { back.tap() }
-            _ = waitToDisappear(editDetails, timeout: 10)
-        } else {
-            XCTFail("No T-shirt tile to open")
+            goBack()
         }
 
         // Add sheet (a fixed-height sheet: check it on every display).
@@ -102,11 +93,9 @@ final class DuoScreensTests: E2ETestCase {
         shoot("seated-01-home")
 
         openTab("Wardrobe")
-        let tee = app.buttons.matching(NSPredicate(format: "label ENDSWITH 'T-Shirt'")).firstMatch
-        if scrollUntilHittable(tee, maxSwipes: 4) {
-            tee.tap()
-            _ = button(id: "itemDetail.edit", label: "Edit details").waitForExistence(timeout: 15)
+        if openFirstTee() {
             shoot("seated-03-item")
+            goBack()
         }
 
         openTab("Home")
@@ -116,6 +105,38 @@ final class DuoScreensTests: E2ETestCase {
     }
 
     // MARK: - Steps
+
+    /// Closet -> Tops chip -> first T-shirt -> its item page. Leaves the filter on "Tops".
+    @MainActor
+    private func openFirstTee() -> Bool {
+        let topsChip = app.buttons.matching(NSPredicate(format:
+            "identifier == 'closet.filter.tops' OR label BEGINSWITH 'Tops,'")).firstMatch
+        if topsChip.waitForExistence(timeout: 10) { topsChip.tap() }
+        let tee = app.buttons.matching(NSPredicate(format: "label ENDSWITH 'T-Shirt'")).firstMatch
+        guard scrollUntilHittable(tee, maxSwipes: 4) else { XCTFail("No T-shirt tile to open"); return false }
+        tee.tap()
+        let editDetails = button(id: "itemDetail.edit", label: "Edit details")
+        if !editDetails.waitForExistence(timeout: 10) {
+            // One retry: the first tap can land while the grid is still settling after the scroll.
+            if tee.exists, tee.isHittable { tee.tap() }
+        }
+        guard editDetails.waitForExistence(timeout: 10) else {
+            snap("item-page-missing")
+            XCTFail("Item page didn't open")
+            return false
+        }
+        return true
+    }
+
+    /// Pops the item page (only call when it is open: the first nav-bar button elsewhere is "Select").
+    @MainActor
+    private func goBack() {
+        let editDetails = button(id: "itemDetail.edit", label: "Edit details")
+        let backByID = app.navigationBars.buttons["BackButton"]
+        let back = backByID.exists ? backByID : app.navigationBars.buttons.element(boundBy: 0)
+        if back.waitForExistence(timeout: 5) { back.tap() }
+        _ = waitToDisappear(editDetails, timeout: 10)
+    }
 
     /// Home -> occasion -> Generate -> the deck's "1 of N" (answering the weather prompt).
     @MainActor
@@ -180,20 +201,29 @@ final class DuoScreensTests: E2ETestCase {
         var request = URLRequest(url: url)
         request.timeoutInterval = 300
         let done = expectation(description: "bridge \(name)")
-        var reply = ""
+        let box = ReplyBox()
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error {
-                reply = "error: \(error.localizedDescription)"
+                box.set("error: \(error.localizedDescription)")
             } else {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                reply = "\(status) " + (data.flatMap { String(data: $0, encoding: .utf8) } ?? "")
+                box.set("\(status) " + (data.flatMap { String(data: $0, encoding: .utf8) } ?? ""))
             }
             done.fulfill()
         }.resume()
         wait(for: [done], timeout: 320)
+        let reply = box.value
         print("[DuoShot] \(name): \(reply)")
         XCTAssertTrue(reply.hasPrefix("200"), "Duo bridge failed for \(name): \(reply)")
         // The phone is closed again: the app is back on the cover display. Give it a beat to settle.
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 2.0)
     }
+}
+
+/// The bridge's reply, written on URLSession's queue and read after the wait.
+private final class ReplyBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var text = "no reply"
+    var value: String { lock.lock(); defer { lock.unlock() }; return text }
+    func set(_ s: String) { lock.lock(); text = s; lock.unlock() }
 }

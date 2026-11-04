@@ -25,14 +25,15 @@ enum DebugOrientation {
                 if portrait == (size.height > size.width) {
                     if lastOK != size {
                         lastOK = size
-                        print("[Duo] orientation \(raw) ok \(Int(size.width))x\(Int(size.height))")
+                        NSLog("%@", "[Duo] orientation \(raw) ok \(Int(size.width))x\(Int(size.height))")
                     }
                     continue
                 }
                 lastOK = nil
+                NSLog("%@", "[Duo] orientation \(raw) requested; window \(Int(size.width))x\(Int(size.height))")
                 window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
                 scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
-                    print("[Duo] orientation request error: \(error.localizedDescription)")
+                    NSLog("%@", "[Duo] orientation request error: \(error.localizedDescription)")
                 }
             }
         }
