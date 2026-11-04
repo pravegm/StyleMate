@@ -29,6 +29,8 @@ For each photo of you, `WardrobeExtractor`:
 4. **Names it** (`FashionClassifier`): **Marqo-FashionSigLIP** (Apache-2.0) embeds the cutout and is compared zero-shot against precomputed text embeddings (`FashionVocabulary.json`) for product (and therefore category), pattern, material, fit, sleeve, neckline and length; colours are *measured* by k-means over the fabric pixels in CIELAB. On Apple Intelligence devices (iOS 27+), Apple's **on-device** foundation model (`SystemLanguageModel`, never Private Cloud Compute) adds a short details line and any clearly readable brand (`GarmentDescriber`).
 5. **Scores the view** (size, sharpness, not cut off by the frame, little occlusion). Items too small or too poor to make a good wardrobe image are skipped — a better photo will catch them.
 
+6. **Studio image** (`Services/Wardrobe/Studio/`): every item gets a lifelike catalog photo made **on the iPhone** by a Stable Diffusion 1.5-class model (dreamshaper-8, Core ML on the Neural Engine). Tops, layers and dresses are *generated* as a flat-lay from their measured description, since a worn shirt's pose makes image-to-image draw mannequins. Trousers, shoes, bags and hats are *refined* from the cutout (image-to-image at ~0.5), which keeps their exact look. Anything cut off by the photo frame is generated. Several candidates are rendered and cut out of their white background (the largest object only, so props are dropped). Each is colour-matched to the real garment, then ranked by FashionSigLIP similarity to your actual item, by product type and plainness, and by penalties for body/mannequin pixels or being cut off. If no candidate is convincingly the same item, the clean cutout stays. Renders run in the background (`StudioQueue`), and the item page can flip between **Studio** and **From your photo**.
+
 Then `DuplicateDetector` compares the item with the wardrobe using the visual embeddings (`ItemEmbeddingStore`) plus attribute gates. The same garment seen again in a **better** photo **upgrades** the wardrobe image instead of adding a duplicate.
 
 There are three ways to add items, all through the same pipeline: **Auto-scan** of a date range, **Photo picker** (up to 15 photos, with "which one is you?" when several people are in a shot), and **Camera**.
@@ -59,7 +61,7 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and appear i
 ## Architecture
 
 - **Language / UI**: Swift, SwiftUI (UIKit interop for `ImagePicker` and camera capture). MVVM.
-- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder. Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
+- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder, and a Stable Diffusion 1.5-class studio renderer (~1 GB, 6-bit). Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
 - **Local persistence**: `UserDefaults` (wardrobe items per user), files under `Documents/wardrobe_images/`, item embeddings under `Application Support/WardrobeEmbeddings/`, Core Data (outfit history).
 - **Cloud**: CloudKit private DB only (your own iCloud). No third-party AI services.
 - **Weather**: met.no primary with Open-Meteo fallback (no key).
@@ -91,6 +93,8 @@ Declared in `Info.plist`: **Photos** (wardrobe building and scan), **Camera** (s
 ## Setup
 
 Nobody needs a local Mac build to work on StyleMate: **every branch push runs `.github/workflows/ci.yml`** on GitHub's Apple-silicon `xcode-27` runner. It regenerates all models into the Actions cache, builds the app, and runs the simulator tests (including end-to-end garment extraction on CC0 street photos in `StyleMateTests/Fixtures/`, whose cutouts are uploaded in the `ci-report` artifact).
+
+**End-to-end UI tests**: the `ui-tests` CI job drives the real app in the simulator with XCUITest (`StyleMateUITests/`). It covers the closet, "Style Me" (mood → 5 options → swap a piece → save → the look appears on today's date in the calendar), manual outfit logging, and a gallery import through the system photo picker into on-device extraction. DEBUG-only launch arguments (`-uiTestResetState`, `-uiTestDemoUser`, `-uiTestSkipOnboarding`, `-uiTestSeedWardrobe`, in `StyleMate/Debug/DebugLaunchSupport.swift`) sign in a demo user and seed a wardrobe. Screenshots of every step are uploaded as the `e2e-screens` artifact. The simulator build is ad-hoc signed so CloudKit's entitlements survive.
 
 To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
 
