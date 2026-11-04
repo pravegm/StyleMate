@@ -468,8 +468,10 @@ extension FaceMatchingTests {
     }
 
     @Test func findYourselfGroupsTheSamePersonAcrossPhotos() throws {
-        let photo = try findYouFixture("street_coat_cap.jpg")
-        let other = try findYouFixture("kurta_dhoti_turban.jpg")   // a clearly visible, different person
+        // The two clearest front-facing fixtures (the cap + sunglasses face in street_coat_cap is
+        // correctly rejected by the library quality gate).
+        let photo = try findYouFixture("kurta_dhoti_turban.jpg")
+        let other = try findYouFixture("casual_denim_jacket_hat.jpg")   // a clearly visible, different person
 
         // The library pass works on ~640 px thumbnails; report how that resolution fares.
         let thumbFaces = FaceSampleExtractor.scannedFaces(in: resized(photo, longSide: 640), assetId: "thumb",
