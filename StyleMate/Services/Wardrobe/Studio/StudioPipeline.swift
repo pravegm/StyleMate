@@ -68,7 +68,11 @@ enum StudioPipeline {
     // MARK: - Candidate evaluation
 
     static func evaluate(_ render: CGImage, reference: ColorStats?, embedding: [Float], plan: StudioPlan? = nil) -> Result? {
-        guard let cut = isolateProduct(render) else { return nil }
+        guard let cut = isolateProduct(render), cut.coverage < 0.85 else {
+            // Nothing separable from the background (a blank or full-bleed
+            // texture render) — not a product shot.
+            return nil
+        }
         var image = cut.image
         if let ref = reference, let matched = ColorStats.match(image, to: ref) { image = matched }
         let framed = GarmentCutout.frame(image)
@@ -92,17 +96,18 @@ enum StudioPipeline {
     /// The product, without its white background: Vision's foreground instance
     /// mask on device (largest instance only), or white-keying where Vision
     /// isn't available (simulator).
-    static func isolateProduct(_ render: CGImage) -> (image: CGImage, touchesFrame: Bool)? {
+    static func isolateProduct(_ render: CGImage) -> (image: CGImage, touchesFrame: Bool, coverage: Float)? {
         let w = render.width, h = render.height
         guard var px = GarmentCutout.rgbaPixels(render) else { return nil }
         var alpha = visionMask(render) ?? whiteKeyMask(px, w: w, h: h)
         keepLargestComponent(&alpha, w: w, h: h)
-        var any = false, touches = false
+        var any = false, touches = false, opaque = 0
         for y in 0..<h {
             for x in 0..<w {
                 let a = alpha[y * w + x]
                 guard a > 0 else { continue }
                 any = true
+                if a > 128 { opaque += 1 }
                 if a > 128 && (x <= 1 || y <= 1 || x >= w - 2 || y >= h - 2) { touches = true }
             }
         }
@@ -118,7 +123,7 @@ enum StudioPipeline {
                                   space: CGColorSpaceCreateDeviceRGB(),
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
               let img = ctx.makeImage() else { return nil }
-        return (img, touches)
+        return (img, touches, Float(opaque) / Float(w * h))
     }
 
     private static func visionMask(_ image: CGImage) -> [UInt8]? {
