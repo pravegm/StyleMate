@@ -116,6 +116,7 @@ class WardrobeViewModel: ObservableObject {
     private var flushTask: Task<Void, Never>?
     private var isFlushing = false
     private var isSyncing = false
+    private var hydrationAttempted = Set<UUID>()
 
     private func saveLedger() {
         guard !currentUserEmail.isEmpty else { return }
@@ -310,18 +311,25 @@ class WardrobeViewModel: ObservableObject {
             }
             return (noImage, noThumb)
         }.value
-        guard currentUserEmail == user, !(missingImage.isEmpty && missingThumb.isEmpty) else { return }
+        guard currentUserEmail == user else { return }
+        // Each item is tried once per launch (an item with no asset in iCloud must not
+        // cost a download request on every foreground).
+        let toDownload = missingImage.filter { !hydrationAttempted.contains($0) }
+        let toThumb = missingThumb.filter { !hydrationAttempted.contains($0) }
+        guard !(toDownload.isEmpty && toThumb.isEmpty) else { return }
 
         var updates: [UUID: CloudKitService.FetchedFiles] = [:]
-        if !missingImage.isEmpty {
+        if !toDownload.isEmpty {
             // New cloud items first; at most 200 per sync (the rest next time).
-            let ordered = missingImage.sorted { priorityIDs.contains($0) && !priorityIDs.contains($1) }
+            let ordered = toDownload.sorted { priorityIDs.contains($0) && !priorityIDs.contains($1) }
             let wanted = Set(ordered.prefix(200))
-            let toFetch = items.filter { wanted.contains($0.id) }
+            hydrationAttempted.formUnion(wanted)
+            let toFetch = items.filter { wanted.contains($0.id) && !$0.imagePath.isEmpty }
             updates = await CloudKitService.shared.fetchAssets(for: toFetch)
         }
-        if !missingThumb.isEmpty {
-            let wanted = Set(missingThumb)
+        if !toThumb.isEmpty {
+            let wanted = Set(toThumb)
+            hydrationAttempted.formUnion(wanted)
             let sources = items.filter { wanted.contains($0.id) }.map { (id: $0.id, src: $0.croppedImagePath ?? $0.imagePath) }
             let thumbs = await Task.detached(priority: .utility) { () -> [UUID: String] in
                 var out: [UUID: String] = [:]
