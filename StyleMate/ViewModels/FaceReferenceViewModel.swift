@@ -96,7 +96,7 @@ final class FaceReferenceViewModel: ObservableObject {
             status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         }
         guard status == .authorized || status == .limited else {
-            print("[FindYou] Photo access not granted (status=\(status.rawValue))")
+            dlog("[FindYou] Photo access not granted (status=\(status.rawValue))")
             phase = .noPermission
             return
         }
@@ -111,7 +111,7 @@ final class FaceReferenceViewModel: ObservableObject {
 
         let (assets, selfieIds) = LibraryFaceScanner.fetchCandidateAssets(limit: Self.scanLimit)
         totalToScan = assets.count
-        print("[FindYou] Looking at \(assets.count) photos (limited=\(isLimitedAccess), anchors=\(anchors.count))")
+        dlog("[FindYou] Looking at \(assets.count) photos (limited=\(isLimitedAccess), anchors=\(anchors.count))")
         guard !assets.isEmpty else {
             phase = .emptyLibrary
             return
@@ -177,13 +177,13 @@ final class FaceReferenceViewModel: ObservableObject {
                 canStopEarly = true
             }
             if hasSelfieAnchor, i + 1 >= Self.earlyStopMinPhotos, strong >= Self.earlyStopStrongFaces {
-                print("[FindYou] Early stop: \(strong) strong matches after \(i + 1) photos")
+                dlog("[FindYou] Early stop: \(strong) strong matches after \(i + 1) photos")
                 break
             }
         }
         next?.cancel()
         manager.stopCachingImagesForAllAssets()
-        print("[FindYou] Pass done: \(faces.count) faces in \(scannedCount) photos, \(strong) close to the selfie, \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
+        dlog("[FindYou] Pass done: \(faces.count) faces in \(scannedCount) photos, \(strong) close to the selfie, \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
         await buildOffers()
     }
 
@@ -237,7 +237,7 @@ final class FaceReferenceViewModel: ObservableObject {
         clusters = result.0
         offers = FaceClustering.offers(from: result.1)
         let summary = offers.map { "\($0.cluster.size)@\($0.anchorSimilarity.map { String(format: "%.2f", $0) } ?? "-")" }
-        print("[FindYou] \(clusters.count) groups (\(clusters.filter { $0.size >= 2 }.count) recurring); offers: \(summary)")
+        dlog("[FindYou] \(clusters.count) groups (\(clusters.filter { $0.size >= 2 }.count) recurring); offers: \(summary)")
         offerIndex = 0
         if offers.isEmpty {
             phase = .nothingFound
@@ -291,7 +291,7 @@ final class FaceReferenceViewModel: ObservableObject {
                 embeddings: faces.map(\.embedding), assetIds: faces.map(\.assetId),
                 excludeFaces: offeredFaces, excludeAssets: Set(confirmed.map { faces[$0].assetId }),
                 limit: Self.alsoYouLimit)
-            print("[FindYou] Confirmed \(selected.count); \(picks.count) 'also you?' candidates")
+            dlog("[FindYou] Confirmed \(selected.count); \(picks.count) 'also you?' candidates")
             if !picks.isEmpty {
                 offeredFaces.formUnion(picks.map(\.face))
                 show(picks, round: .alsoYou)
@@ -371,7 +371,7 @@ final class FaceReferenceViewModel: ObservableObject {
         }
         confirmedCount = confirmed.count
         addedCount = added
-        print("[FindYou] Saved: \(confirmed.count) confirmed (\(refinedCount) re-embedded at \(Int(LibraryFaceScanner.refineSide))px), \(added) added to the gallery")
+        dlog("[FindYou] Saved: \(confirmed.count) confirmed (\(refinedCount) re-embedded at \(Int(LibraryFaceScanner.refineSide))px), \(added) added to the gallery")
         phase = .finished
     }
 
