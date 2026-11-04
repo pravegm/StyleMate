@@ -31,6 +31,8 @@ For each photo of you, `WardrobeExtractor`:
 
 Then `DuplicateDetector` compares the item with the wardrobe using the visual embeddings (`ItemEmbeddingStore`) plus attribute gates. The same garment seen again in a **better** photo **upgrades** the wardrobe image instead of adding a duplicate.
 
+**Studio render (infrastructure, not yet in the UI)** — `Services/Studio/StudioRenderer` turns a cutout composited on white into a lifelike product photo with an on-device Stable Diffusion 1.5-class img2img model (**Lykon/dreamshaper-8**, CreativeML OpenRAIL-M): Core ML, 6-bit palettized, `SPLIT_EINSUM_V2` attention for the Neural Engine, 512×512, DPM-Solver++ (Karras), run by Apple's ml-stable-diffusion Swift pipeline (vendored, MIT, `Vendor/StableDiffusion/`). It loads each model only while it's used (`reduceMemory`), renders one image at a time off the main thread, and `unload()` frees it after a batch. Prompts / strength are still being tuned, so nothing calls it yet.
+
 There are three ways to add items, all through the same pipeline: **Auto-scan** of a date range, **Photo picker** (up to 15 photos, with "which one is you?" when several people are in a shot), and **Camera**.
 
 ### 3. "What should I wear today?" (on-device stylist — `Services/Outfits/`)
@@ -59,7 +61,7 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and appear i
 ## Architecture
 
 - **Language / UI**: Swift, SwiftUI (UIKit interop for `ImagePicker` and camera capture). MVVM.
-- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder. Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
+- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder, and the studio-render diffusion model (DreamShaper 8 img2img: text encoder, UNet, VAE encoder/decoder). Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
 - **Local persistence**: `UserDefaults` (wardrobe items per user), files under `Documents/wardrobe_images/`, item embeddings under `Application Support/WardrobeEmbeddings/`, Core Data (outfit history).
 - **Cloud**: CloudKit private DB only (your own iCloud). No third-party AI services.
 - **Weather**: met.no primary with Open-Meteo fallback (no key).
@@ -67,9 +69,11 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and appear i
 ```
 StyleMate/
 ├── Models/                      # WardrobeItem, Category (+ WardrobeViewModel), ProductType, OutfitType, User, Core Data model
-├── ML/                          # git-ignored: GarmentParser / GarmentLabeler / FashionEncoder .mlpackage + FashionVocabulary.json
+├── ML/                          # git-ignored: GarmentParser / GarmentLabeler / FashionEncoder .mlpackage + FashionVocabulary.json;
+│                                #   Studio/StudioModels.bundle (compiled diffusion .mlmodelc + tokenizer)
 ├── Services/
 │   ├── Wardrobe/                # WardrobeExtractor, WardrobeML, GarmentSegmenter, GarmentCutout, FashionClassifier, ColorNamer, GarmentDescriber, ItemEmbeddingStore
+│   ├── Studio/                  # StudioRenderer (on-device img2img product render)
 │   ├── Outfits/                 # OutfitEngine, StyleKnowledge, OutfitMood, StyleIntentParser, OnDeviceStylist
 │   ├── ImageAnalysisService     # thin entry point to the wardrobe pipeline
 │   ├── SCRFDDetector / FaceMatchingService   # face detection, alignment, AdaFace embeddings, identity resolution
@@ -79,6 +83,7 @@ StyleMate/
 │   ├── AuthService, CloudKitService, PersistenceController, OnboardingManager
 │   ├── SelfieCameraService, WeatherService, LocationService
 ├── ViewModels/                  # HomeViewModel, MyOutfitsViewModel, FaceReferenceViewModel
+├── Vendor/StableDiffusion/      # Apple ml-stable-diffusion Swift pipeline (MIT, vendored; see its README)
 ├── Views/                       # Home, TodayOutfitSheet, MyWardrobe, ItemDetail, AddItem*, MyOutfits, Profile, Login, Onboarding/, Components/
 ├── DesignSystem.swift
 └── StyleMateApp.swift
@@ -100,6 +105,7 @@ To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
    ```bash
    bash scripts/build_face_models.sh       # -> MobileFaceNet.mlpackage + SCRFD10G.mlpackage at the repo root
    bash scripts/build_wardrobe_models.sh   # -> StyleMate/ML/*.mlpackage + FashionVocabulary.json
+   bash scripts/build_studio_models.sh     # -> StyleMate/ML/Studio/StudioModels.bundle (macOS + Xcode, 30-90 min)
    ```
    The face embedder takes **BGR** input (handled in `createInputMultiArray`); see `scripts/convert_adaface.py`, `convert_scrfd.py` and `convert_wardrobe_models.py` (each parity-checks Core ML against PyTorch).
 4. `open StyleMate.xcodeproj`, set your signing team, and run (a real device for the selfie camera).
@@ -112,7 +118,7 @@ To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
 
 ## Licensing note
 
-The bundled model weights come with their own licences, several of which are research / non-commercial (SCRFD, AdaFace's training data, the SegFormer-based parsers). They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
+The bundled model weights come with their own licences, several of which are research / non-commercial (SCRFD, AdaFace's training data, the SegFormer-based parsers). The studio-render model (DreamShaper 8) is CreativeML OpenRAIL-M: commercial use is allowed, but its use restrictions must be passed on in the app's terms. They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
 
 ## License
 
