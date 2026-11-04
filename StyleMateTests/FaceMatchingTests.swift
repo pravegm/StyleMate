@@ -42,12 +42,37 @@ struct FaceMatchingTests {
         #expect(FaceMatchingService.shared.loadReference(forUser: Self.userId), "could not build a reference from the selfie")
     }
 
-    @Test func sameFaceMatchesAcrossReframing() throws {
-        let photo = try fixture("street_coat_cap.jpg")
+    /// Writes face diagnostics to $REPORT_DIR/faces.txt (print() from the test
+    /// host doesn't reach the xcodebuild log).
+    private func report(_ line: String) {
+        let base = ProcessInfo.processInfo.environment["REPORT_DIR"].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.temporaryDirectory
+        let url = base.appendingPathComponent("faces.txt")
+        let data = Data((line + "\n").utf8)
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() }
+        else { try? data.write(to: url) }
+    }
+
+    /// The whole pipeline (detect → align → embed) must be deterministic: the
+    /// identical photo scores ~1.0 against itself. If this fails, a model or
+    /// preprocessing step is broken, not a threshold.
+    @Test(arguments: ["kurta_dhoti_turban.jpg", "casual_denim_jacket_hat.jpg", "street_coat_cap.jpg"])
+    func identicalPhotoMatchesItself(_ name: String) throws {
+        let photo = try fixture(name)
+        try useAsSelfie(photo)
+        let match = FaceMatchingService.shared.findUserInPhoto(try #require(photo.cgImage))
+        report("identical \(name): sim=\(match.similarity ?? -1) faces=\(match.faceCount) gallery=\(FaceMatchingService.shared.referenceCount)")
+        #expect(match.faceCount >= 1, "SCRFD found no face in \(name)")
+        #expect((match.similarity ?? 0) > 0.9, "\(name) vs itself scored \(match.similarity ?? -1)")
+    }
+
+    @Test(arguments: ["kurta_dhoti_turban.jpg", "casual_denim_jacket_hat.jpg", "street_coat_cap.jpg"])
+    func sameFaceMatchesAcrossReframing(_ name: String) throws {
+        let photo = try fixture(name)
         try useAsSelfie(photo)
         let cg = try #require(variant(photo))
         let match = FaceMatchingService.shared.findUserInPhoto(cg)
-        print("[Report] face self-match after reframe: sim=\(match.similarity ?? -1) faces=\(match.faceCount)")
+        report("reframed \(name): sim=\(match.similarity ?? -1) faces=\(match.faceCount)")
         #expect(match.faceCount >= 1, "SCRFD found no face")
         #expect((match.similarity ?? 0) >= FaceMatchingService.highConfidenceThreshold,
                 "same face scored \(match.similarity ?? -1)")
