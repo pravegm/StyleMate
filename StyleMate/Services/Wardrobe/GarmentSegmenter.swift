@@ -64,8 +64,6 @@ enum GarmentSegmenter {
         1: "shirt", 2: "top", 3: "sweater", 4: "cardigan", 5: "jacket", 6: "vest", 7: "pants", 8: "shorts", 9: "skirt",
         10: "coat", 11: "dress", 12: "jumpsuit", 13: "cape", 14: "glasses", 15: "hat", 16: "headband", 17: "tie",
         18: "glove", 19: "watch", 20: "belt", 21: "leg warmer", 22: "tights", 23: "sock", 24: "shoe", 25: "bag", 26: "scarf"]
-    private static let outerSet: Set<Int> = [4, 5, 6, 10, 13]
-    private static let innerSet: Set<Int> = [1, 2, 3, 11, 12]
 
     /// Region → classes the labeler may assign inside it.
     private static let allowed: [(P, [Int])] = [
@@ -130,19 +128,11 @@ enum GarmentSegmenter {
 
             // Group pixels into items.
             var groups: [Int: [Int]] = [:]    // labeler class → grid indices
-            if region == .top {
-                let outer = idx.indices.filter { outerSet.contains(pixelClass[$0]) }
-                let inner = idx.indices.filter { !outerSet.contains(pixelClass[$0]) }
-                // An open coat usually dwarfs the strip of top showing under it,
-                // so the inner layer only needs to be a real garment-sized area.
-                let fo = Double(outer.count) / Double(idx.count)
-                let innerBigEnough = inner.count >= max(idx.count / 20, Int(Double(n) * 0.004))
-                if fo >= 0.15 && innerBigEnough {
-                    groups[majority(outer.map { pixelClass[$0] })] = outer.map { idx[$0] }
-                    groups[majority(inner.map { pixelClass[$0] })] = inner.map { idx[$0] }
-                } else {
-                    groups[majority(pixelClass)] = idx
-                }
+            if region == .top, let split = layerSplit(idx: idx, pixelClass: pixelClass) {
+                groups[split.outerClass] = split.outer
+                groups[split.innerClass] = split.inner
+            } else if region == .top {
+                groups[majority(pixelClass)] = idx
             } else {
                 groups[majority(pixelClass)] = idx
             }
@@ -156,6 +146,64 @@ enum GarmentSegmenter {
         }
         // Largest first: the hero garments lead the review list.
         return instances.sorted { $0.pixelCount > $1.pixelCount }
+    }
+
+    /// Layer rank of an upper-body class: what can be worn over what.
+    private static func layerRank(_ c: Int) -> Int {
+        switch c {
+        case 5, 10, 13: return 3      // jacket, coat, cape
+        case 4, 6: return 2           // cardigan, vest
+        case 1, 3: return 1           // shirt (worn open over a tee), sweater
+        default: return 0             // top / t-shirt, dress, jumpsuit
+        }
+    }
+
+    /// Splits the parser's single "top" region into an outer and an inner layer
+    /// when the labeler sees two substantial garments of different layer rank —
+    /// an open coat over a knit, a flannel shirt over a tee. Small stray blobs
+    /// (a sleeve patch the labeler got wrong) are moved to the layer they touch.
+    private static func layerSplit(idx: [Int], pixelClass: [Int])
+        -> (outerClass: Int, outer: [Int], innerClass: Int, inner: [Int])? {
+        let n = WardrobeML.gridCount
+        var counts: [Int: Int] = [:]
+        for c in pixelClass { counts[c, default: 0] += 1 }
+        let ranked = counts.sorted { $0.value > $1.value }
+        // An open coat usually dwarfs the strip of top showing under it, so the
+        // smaller layer only needs to be a real garment-sized area.
+        let minPart = max(idx.count / 20, Int(Double(n) * 0.004))
+        guard let a = ranked.first, a.value >= minPart,
+              let b = ranked.dropFirst().first(where: { layerRank($0.key) != layerRank(a.key) && $0.value >= minPart })
+        else { return nil }
+        let (outerClass, innerClass) = layerRank(a.key) > layerRank(b.key) ? (a.key, b.key) : (b.key, a.key)
+        let innerRank = layerRank(innerClass)
+        var isOuter = [UInt8](repeating: 0, count: n), isInner = [UInt8](repeating: 0, count: n)
+        for (k, i) in idx.enumerated() {
+            if layerRank(pixelClass[k]) > innerRank { isOuter[i] = 1 } else { isInner[i] = 1 }
+        }
+        absorbStrays(&isInner, into: &isOuter)
+        absorbStrays(&isOuter, into: &isInner)
+        let outer = idx.filter { isOuter[$0] != 0 }, inner = idx.filter { isInner[$0] != 0 }
+        guard outer.count >= minPart, inner.count >= minPart else { return nil }
+        return (outerClass, outer, innerClass, inner)
+    }
+
+    /// Moves components of `a` smaller than 20% of a's largest component into
+    /// `b` when they touch `b`.
+    private static func absorbStrays(_ a: inout [UInt8], into b: inout [UInt8]) {
+        let w = WardrobeML.gridW, h = WardrobeML.gridH
+        let (comp, sizes) = components(a, w: w, h: h)
+        guard let largest = sizes.max(), sizes.count > 1 else { return }
+        var touches = [Bool](repeating: false, count: sizes.count + 1)
+        for i in 0..<(w * h) where comp[i] != 0 {
+            let x = i % w, y = i / w
+            if (x > 0 && b[i - 1] != 0) || (x < w - 1 && b[i + 1] != 0) || (y > 0 && b[i - w] != 0) || (y < h - 1 && b[i + w] != 0) {
+                touches[comp[i]] = true
+            }
+        }
+        for i in 0..<(w * h) where comp[i] != 0 {
+            let id = comp[i]
+            if sizes[id - 1] < largest / 5 && touches[id] { a[i] = 0; b[i] = 1 }
+        }
     }
 
     private static func majority(_ xs: [Int]) -> Int {
