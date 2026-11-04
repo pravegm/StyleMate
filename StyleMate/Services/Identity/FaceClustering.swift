@@ -168,7 +168,8 @@ enum FaceClustering {
             }
             guard let best = pair else { break }
             let (a, b) = best
-            FaceMath.accumulate(&sums[a], sums[b])
+            let absorbed = sums[b]
+            FaceMath.accumulate(&sums[a], absorbed)
             centroids[a] = FaceMath.normalized(sums[a])
             members[a].append(contentsOf: members[b])
             assets[a].formUnion(assets[b])

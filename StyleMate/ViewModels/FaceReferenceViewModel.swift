@@ -378,9 +378,9 @@ final class FaceReferenceViewModel: ObservableObject {
     // MARK: - Limited access
 
     func shareMorePhotos() {
+        let uid = userId
         LibraryFaceScanner.presentLimitedLibraryPicker { [weak self] in
-            guard let self else { return }
-            Task { await self.scan(forUser: self.userId) }
+            Task { @MainActor in await self?.scan(forUser: uid) }
         }
     }
 }

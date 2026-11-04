@@ -45,7 +45,8 @@ struct FindYourselfView: View {
                 message: vm.hasSelfieAnchor
                     ? "That's okay. StyleMate keeps learning as it scans, and asks \"Is this you?\" whenever it isn't sure."
                     : "That's okay. Without a selfie StyleMate can't tell who you are yet. You can take one anytime in Profile.",
-                cta: continueTitle) { onFinish(0) }
+                cta: continueTitle,
+                action: { onFinish(0) })
         case .emptyLibrary:
             messageState(
                 icon: "photo.on.rectangle.angled",
@@ -53,17 +54,19 @@ struct FindYourselfView: View {
                 message: vm.isLimitedAccess
                     ? "Share some photos of yourself and StyleMate will learn what you look like."
                     : "Once you've taken a few photos, StyleMate will learn to spot you in them.",
-                cta: continueTitle) { onFinish(0) }
+                cta: continueTitle,
+                action: { onFinish(0) })
         case .noPermission:
             messageState(
                 icon: "lock.shield",
                 title: "Photo access is off",
                 message: "StyleMate needs your photos to find you and your outfits. They're only ever looked at on this phone.",
                 cta: "Open Settings",
+                action: {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                },
                 secondary: continueTitle,
-                onSecondary: { onFinish(0) }) {
-                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-            }
+                onSecondary: { onFinish(0) })
         }
     }
 
@@ -335,8 +338,8 @@ struct FindYourselfView: View {
     // MARK: - Message
 
     private func messageState(icon: String, title: String, message: String, cta: String,
-                              secondary: String? = nil, onSecondary: (() -> Void)? = nil,
-                              action: @escaping () -> Void) -> some View {
+                              action: @escaping () -> Void,
+                              secondary: String? = nil, onSecondary: (() -> Void)? = nil) -> some View {
         VStack(spacing: DS.Spacing.lg) {
             Spacer()
             DSEmptyState(icon: icon, title: title, message: message)
