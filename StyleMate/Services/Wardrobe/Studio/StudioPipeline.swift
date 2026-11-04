@@ -53,7 +53,7 @@ enum StudioPipeline {
                 raw = gen.render(startingImage: start, prompt: plan.prompt, negativePrompt: plan.negativePrompt,
                                  strength: strength, steps: StudioPlan.steps, guidance: StudioPlan.guidance, seed: seed)
             }
-            guard let raw, let candidate = autoreleasepool(invoking: { evaluate(raw, reference: reference, embedding: embedding) })
+            guard let raw, let candidate = autoreleasepool(invoking: { evaluate(raw, reference: reference, embedding: embedding, plan: plan) })
             else { continue }
             print("[Studio] candidate \(k): score=\(String(format: "%.3f", candidate.score)) sim=\(String(format: "%.3f", candidate.similarity))")
             if best == nil || candidate.score > best!.score { best = candidate }
@@ -67,7 +67,7 @@ enum StudioPipeline {
 
     // MARK: - Candidate evaluation
 
-    static func evaluate(_ render: CGImage, reference: ColorStats?, embedding: [Float]) -> Result? {
+    static func evaluate(_ render: CGImage, reference: ColorStats?, embedding: [Float], plan: StudioPlan? = nil) -> Result? {
         guard let cut = isolateProduct(render) else { return nil }
         var image = cut.image
         if let ref = reference, let matched = ColorStats.match(image, to: ref) { image = matched }
@@ -76,7 +76,16 @@ enum StudioPipeline {
               let e = WardrobeML.shared.embed(onWhite) else { return nil }
         let sim = WardrobeExtractor.cosine(e, embedding)
         let body = bodyFraction(render)
-        let score = sim - 0.6 * body - (cut.touchesFrame ? 0.12 : 0)
+        var score = sim - 0.6 * body - (cut.touchesFrame ? 0.12 : 0)
+        // Does it read as the right kind of product (and, for plain items, as
+        // plain)? Zero-shot against the bundled vocabulary — catches a "t-shirt"
+        // render that grew a white panel or turned into a stack of tees.
+        if let plan, let vocab = WardrobeML.shared.vocabulary {
+            for group in ["upper_inner", "upper_outer", "lower", "onepiece", "footwear", "bag", "headwear", "eyewear", "neckwear", "jewelry"] {
+                if let s = vocab.scores(in: group, for: e)[plan.productLabel] { score += 0.25 * s; break }
+            }
+            if plan.isSolid, let solid = vocab.scores(in: "pattern", for: e)["Solid"] { score += 0.15 * solid }
+        }
         return Result(image: framed, score: score, similarity: sim)
     }
 

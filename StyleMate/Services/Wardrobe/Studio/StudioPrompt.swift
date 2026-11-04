@@ -20,19 +20,25 @@ struct StudioPlan {
     let prompt: String
     let negativePrompt: String
     let candidates: Int
+    /// "Category|Product" — the FashionVocabulary label the render must look like.
+    var productLabel: String = ""
+    /// Plain items: penalise renders that add colour blocks / panels / prints.
+    var isSolid: Bool = false
 
     static let steps = 20
     static let guidance: Float = 7
 
     private static let baseNegative =
         "person, woman, man, model, mannequin, human, skin, arms, hands, legs, head, face, body, hanger, " +
-        "text, watermark, logo text, blurry, lowres, jpeg artifacts, deformed, cropped, cut off, frame, border"
+        "text, watermark, logo text, blurry, lowres, jpeg artifacts, deformed, cropped, cut off, frame, border, " +
+        "white patch, blank label square, colour block panel, two-tone"
 
     static func make(product: String, category: Category, colors: [String], pattern: Pattern,
                      material: String?, sleeve: SleeveLength?, neckline: Neckline?, details: String?,
                      kind: GarmentKind, truncated: Bool) -> StudioPlan {
         let desc = describe(product: product, colors: colors, pattern: pattern, material: material,
                             sleeve: sleeve, neckline: neckline, details: details)
+        let label = "\(category.rawValue)|\(product)", solid = pattern == .solid
         let layered: Set<GarmentKind> = [.innerTop, .outerLayer, .onePiece]
         if layered.contains(kind) || truncated {
             let pose: String
@@ -46,7 +52,7 @@ struct StudioPlan {
                 mode: .generate,
                 prompt: "flat lay product photo of a single \(desc), \(pose), on a pure white background, top-down view, soft shadow, catalog photography, high detail",
                 negativePrompt: baseNegative + ", other clothes, accessories, props, multiple items, folded stack",
-                candidates: 3)
+                candidates: 3, productLabel: label, isSolid: solid)
         }
         let view: String
         switch kind {
@@ -59,7 +65,7 @@ struct StudioPlan {
             mode: .refine(strength: kind == .lower ? 0.5 : 0.45),
             prompt: "professional e-commerce photo of \(view), centered, soft studio lighting, pure white background, high detail, sharp focus",
             negativePrompt: baseNegative,
-            candidates: 2)
+            candidates: 2, productLabel: label, isSolid: solid)
     }
 
     /// "red and black plaid flannel shirt, long sleeves, collar" from the item's attributes.
