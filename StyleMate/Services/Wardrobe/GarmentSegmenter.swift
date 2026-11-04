@@ -230,6 +230,9 @@ enum GarmentSegmenter {
             .filter { Double($0.element) >= Double(largest) * 0.12 }
             .sorted { $0.element > $1.element }
             .prefix(4).map { $0.offset + 1 })
+        // A tie is one solid piece; several small dark fragments labelled "tie"
+        // are hair or a shadow (seen in the e2e gallery test).
+        if labelerClass == 17, keep.count > 1 || Double(largest) < Double(n) * 0.002 { return nil }
         var count = 0
         var x0 = w, y0 = h, x1 = 0, y1 = 0
         for i in 0..<n {
