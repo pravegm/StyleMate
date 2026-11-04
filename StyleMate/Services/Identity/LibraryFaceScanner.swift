@@ -44,11 +44,12 @@ enum FaceSampleExtractor {
         let displayCrop: CGImage
     }
 
-    /// Every usable face in the image. A photo with a single face is embedded whole; with
-    /// several, each face is embedded from its own padded crop so we get all of them, not just
-    /// the one that best matches the gallery.
+    /// Every usable face in the image. Detected once (no padded retry: library photos rarely
+    /// have a face filling the frame, and most have no face at all) and each face embedded
+    /// from its own keypoints in the full image, so we get all of them, not just the one that
+    /// best matches the gallery, without a second detector pass per face.
     static func faces(in image: CGImage) -> [Extracted] {
-        let detected = SCRFDDetector.shared.detect(in: image)
+        let detected = SCRFDDetector.shared.detect(in: image, retryPadded: false)
         guard !detected.isEmpty else { return [] }
         let size = CGSize(width: image.width, height: image.height)
         let usable = detected
@@ -60,17 +61,9 @@ enum FaceSampleExtractor {
             .prefix(maxFacesPerPhoto)
 
         var out: [Extracted] = []
-        for face in usable {
-            let source: CGImage
-            if detected.count == 1 {
-                source = image
-            } else {
-                let rect = paddedSquare(around: face.boxPixels, imageSize: size, factor: cropFactor)
-                guard let crop = image.cropping(to: rect) else { continue }
-                source = crop
-            }
-            guard let r = FaceMatchingService.shared.evaluateFaceForReference(in: source) else { continue }
-            // A crop that also holds a neighbour can return the neighbour's face; keep one copy.
+        for r in FaceMatchingService.shared.embed(faces: Array(usable), in: image) {
+            let face = r.face
+            // Overlapping detections of one face: keep one copy.
             if out.contains(where: { FaceMath.dot($0.embedding, r.embedding) > 0.85 }) { continue }
             let shortSide = Float(min(face.boxPixels.width, face.boxPixels.height))
             out.append(Extracted(
@@ -92,8 +85,12 @@ enum FaceSampleExtractor {
         let px = CGRect(x: box.minX * size.width, y: box.minY * size.height,
                         width: box.width * size.width, height: box.height * size.height)
         let rect = paddedSquare(around: px, imageSize: size, factor: cropFactor)
+        // The crop holds the face at ~40% of its side: no padded retry needed. Of the faces in
+        // it (a neighbour may be partly in), take the one that agrees with the thumbnail's.
         guard let crop = cg.cropping(to: rect),
-              let r = FaceMatchingService.shared.evaluateFaceForReference(in: crop) else { return nil }
+              let r = FaceMatchingService.shared.embedFaces(in: crop, retryPadded: false)
+                .max(by: { FaceMath.dot($0.embedding, expected) < FaceMath.dot($1.embedding, expected) })
+        else { return nil }
         return FaceMath.dot(r.embedding, expected) >= 0.45 ? r.embedding : nil
     }
 

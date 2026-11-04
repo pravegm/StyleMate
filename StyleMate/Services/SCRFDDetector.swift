@@ -71,9 +71,13 @@ final class SCRFDDetector {
     /// that fills the whole frame (e.g. a tight selfie crop) is invisible to SCRFD,
     /// which needs the face to be a sub-region. (Verified offline: face-fills-frame
     /// crop → 0 detections; +40% margin → detected.)
-    func detect(in cgImage: CGImage, scoreThreshold: Float = 0.5) -> [DetectedFace] {
+    ///
+    /// `retryPadded: false` skips that second pass: for library / scan photos,
+    /// where a face filling the whole frame is rare and most photos have no
+    /// face at all, the retry (on a ~1.8x larger copy) doubled the cost.
+    func detect(in cgImage: CGImage, scoreThreshold: Float = 0.5, retryPadded: Bool = true) -> [DetectedFace] {
         let faces = detectCore(in: cgImage, scoreThreshold: scoreThreshold)
-        if !faces.isEmpty { return faces }
+        if !faces.isEmpty || !retryPadded { return faces }
 
         let mw = max(1, cgImage.width * 2 / 5)
         let mh = max(1, cgImage.height * 2 / 5)

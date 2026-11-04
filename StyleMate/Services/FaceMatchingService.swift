@@ -1250,3 +1250,37 @@ class FaceMatchingService {
         loadedUserId = nil
     }
 }
+
+// MARK: - Batch face embedding (one detector pass)
+
+/// A detected face (box in image pixels, 5 ArcFace keypoints, detector score)
+/// with its aligned AdaFace embedding and a padded display crop.
+struct EmbeddedFace {
+    let face: DetectedFace
+    let embedding: [Float]
+    let displayCrop: CGImage
+}
+
+extension FaceMatchingService {
+    /// Every face in the image, detected once and embedded from the full image
+    /// (keypoint-aligned, so no per-face crop and no second detector pass —
+    /// `evaluateFaceForReference` re-detects internally). Largest first.
+    /// `retryPadded: false` for library photos (see `SCRFDDetector.detect`).
+    func embedFaces(in cgImage: CGImage, retryPadded: Bool = true, maxFaces: Int = .max) -> [EmbeddedFace] {
+        let faces = SCRFDDetector.shared.detect(in: cgImage, retryPadded: retryPadded)
+            .sorted { $0.boxPixels.width * $0.boxPixels.height > $1.boxPixels.width * $1.boxPixels.height }
+        return embed(faces: Array(faces.prefix(maxFaces)), in: cgImage)
+    }
+
+    /// Embeds faces already detected in `cgImage` (in the given order).
+    func embed(faces: [DetectedFace], in cgImage: CGImage) -> [EmbeddedFace] {
+        let w = cgImage.width, h = cgImage.height
+        return faces.compactMap { face in
+            guard let aligned = warpAligned(image: cgImage, srcPoints: face.keypoints),
+                  let embedding = generateEmbedding(for: aligned),
+                  let crop = paddedFaceCrop(from: cgImage, bbox: face.normalizedBox(imageWidth: w, imageHeight: h))
+            else { return nil }
+            return EmbeddedFace(face: face, embedding: embedding, displayCrop: crop)
+        }
+    }
+}
