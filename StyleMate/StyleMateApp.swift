@@ -21,7 +21,7 @@ struct StyleMateApp: App {
         // Background task handlers must be registered before launch finishes.
         BackgroundScanCoordinator.shared.configure(auth: auth, wardrobe: wardrobe)
         // Morning outfit notification: refresh task + the tap router (a tap can cold-launch the app).
-        MorningLookScheduler.shared.configure(auth: auth, wardrobe: wardrobe)
+        if !AppRuntime.isUnitTestHost { MorningLookScheduler.shared.configure(auth: auth, wardrobe: wardrobe) }
         #if DEBUG
         DebugOrientation.startIfRequested()   // `-uiTestOrientation portrait` (Duo CI seated pass)
         #endif
@@ -170,7 +170,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { newPhase in
             switch newPhase {
             case .active:
-                if authService.isAuthenticated, !wardrobeVM.currentUserEmail.isEmpty {
+                if authService.isAuthenticated, !wardrobeVM.currentUserEmail.isEmpty, !AppRuntime.isUnitTestHost {
                     Task {
                         let isAvailable = await CloudKitService.shared.checkAccountStatus()
                         if isAvailable {
@@ -243,6 +243,8 @@ struct RootView: View {
         wardrobeVM.migrateBackgroundRemoval()
         wardrobeVM.migrateThumbnails()
 
+        // The unit-test host runs unsigned (no iCloud entitlement): CKContainer would trap.
+        guard !AppRuntime.isUnitTestHost else { return }
         Task {
             await CloudKitService.shared.setupZone()
             let isAvailable = await CloudKitService.shared.checkAccountStatus()
@@ -365,4 +367,12 @@ private struct AddSourceSheet: View {
             value: appeared
         )
     }
+}
+
+/// Where the app process is running.
+enum AppRuntime {
+    /// Hosting the unit tests (StyleMateTests): an unsigned build without the iCloud
+    /// entitlement, where touching CloudKit at launch would crash the host before the
+    /// tests connect. (UI tests launch a separately signed app without this variable.)
+    static let isUnitTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 }
