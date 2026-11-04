@@ -24,7 +24,7 @@ struct OnboardingProfileView: View {
                         Text("About you")
                             .font(DS.Font.largeTitle)
                             .foregroundColor(DS.Colors.textPrimary)
-                        Text("This helps StyleMate tailor outfit suggestions to you. You can change it anytime.")
+                        Text("This helps StyleMate tailor outfit suggestions to you. It's saved on your phone and you can change it anytime.")
                             .font(DS.Font.subheadline)
                             .foregroundColor(DS.Colors.textSecondary)
                     }
