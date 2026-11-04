@@ -17,7 +17,7 @@ Why a wrapper rather than calling `python -m ...torch2coreml` directly:
   * torch2coreml imports `diffusionkit` (only for SD3) at module level; we stub it instead of installing
     MLX & co.
   * Palettization loads each fp16 .mlpackage (which compiles it, ~2 GB of RAM for the UNet) only to read
-    its spec; we skip the load and use every core for k-means.
+    its spec; we skip the load.
   * The Swift CLI resource layout is a folder at the repo root; the app wants it inside a `.bundle`
     directory, which Xcode's synchronized group copies into the .app verbatim (a plain folder would be
     flattened and the .mlmodelc internals would collide).
@@ -41,8 +41,10 @@ ATTENTION = "SPLIT_EINSUM_V2"
 DEPLOYMENT_TARGET = "iOS17"  # app is iOS 18.4+; iOS17 opset is the newest torch2coreml maps without warnings
 MODEL_NAMES = ["TextEncoder", "Unet", "VAEEncoder", "VAEDecoder"]
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# WARNING globally: coremltools logs every converted op at INFO (tens of thousands of lines).
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("convert_studio_model")
+log.setLevel(logging.INFO)
 
 
 def _stub_diffusionkit():
@@ -91,8 +93,9 @@ def main():
         log.info(f"Palettizing {model_name} to {nbits} bits")
         t0 = time.time()
         mlmodel = ct.models.MLModel(out_path, compute_units=ct.ComputeUnit.CPU_ONLY, skip_model_load=True)
-        op_config = ct.optimize.coreml.OpPalettizerConfig(
-            mode="kmeans", nbits=nbits, num_kmeans_workers=max(1, os.cpu_count() or 1))
+        # num_kmeans_workers > 1 breaks on the second model in coremltools 8.3 ("Pool not running": the
+        # pass's process pool is shared and closed after the first model), so k-means stays single-process.
+        op_config = ct.optimize.coreml.OpPalettizerConfig(mode="kmeans", nbits=nbits)
         config = ct.optimize.coreml.OptimizationConfig(
             global_config=op_config,
             op_type_configs={"gather": None},  # keep the token embedding table exact (as Apple does)

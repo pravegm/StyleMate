@@ -86,7 +86,8 @@ jobs:
   test:
     needs: [models, studio-models]
     runs-on: xcode-27
-    timeout-minutes: 75
+    # 75 -> 120: the studio-render test runs SD img2img on the simulator's CPU.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - name: Restore face models

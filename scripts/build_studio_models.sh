@@ -15,7 +15,7 @@ command -v "$PY" >/dev/null || PY=python3
 source .studio_venv/bin/activate
 pip install -q --upgrade pip
 pip install -q "numpy<2" "torch==2.5.1" "coremltools==8.3.0" "diffusers==0.30.2" "transformers==4.44.2" \
-  "huggingface_hub==0.24.6" "accelerate==0.34.2" "safetensors" "scipy" "scikit-learn" "pytest" "requests" pillow
+  "huggingface_hub==0.24.6" "accelerate==0.34.2" "safetensors" "scipy" "scikit-learn==1.5.1" "pytest" "requests" pillow
 # --no-deps: its setup.py pulls diffusionkit (SD3 only; stubbed in convert_studio_model.py) and unpinned extras.
 pip install -q --no-deps "git+https://github.com/apple/ml-stable-diffusion.git@${MLSD_REF}"
 python convert_studio_model.py "$@"
