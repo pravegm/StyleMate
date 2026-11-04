@@ -133,8 +133,11 @@ enum GarmentSegmenter {
             if region == .top {
                 let outer = idx.indices.filter { outerSet.contains(pixelClass[$0]) }
                 let inner = idx.indices.filter { !outerSet.contains(pixelClass[$0]) }
+                // An open coat usually dwarfs the strip of top showing under it,
+                // so the inner layer only needs to be a real garment-sized area.
                 let fo = Double(outer.count) / Double(idx.count)
-                if fo >= 0.15 && fo <= 0.85 {
+                let innerBigEnough = inner.count >= max(idx.count / 20, Int(Double(n) * 0.004))
+                if fo >= 0.15 && innerBigEnough {
                     groups[majority(outer.map { pixelClass[$0] })] = outer.map { idx[$0] }
                     groups[majority(inner.map { pixelClass[$0] })] = inner.map { idx[$0] }
                 } else {

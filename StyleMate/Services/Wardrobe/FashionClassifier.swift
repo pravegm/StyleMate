@@ -33,10 +33,20 @@ enum FashionClassifier {
         }
 
         let isGarment = ![GarmentKind.footwear, .eyewear, .headwear, .bag, .belt, .jewelry].contains(kind)
-        let pattern = vocab.best(in: "pattern", for: emb)
-            .flatMap { $0.margin > 0.004 || $0.label == "Solid" ? Pattern(rawValue: $0.label) : nil } ?? .solid
-        let material: String? = [.eyewear, .jewelry].contains(kind) ? nil
-            : vocab.best(in: "material", for: emb).map { $0.label }
+        // A print must clearly beat "Solid" — zero-shot happily calls a plain grey
+        // jersey "houndstooth" by a hair.
+        var pattern: Pattern = .solid
+        let ps = vocab.scores(in: "pattern", for: emb)
+        if let solid = ps["Solid"], let best = ps.filter({ $0.key != "Solid" }).max(by: { $0.value < $1.value }),
+           best.value - solid > 0.02, let p = Pattern(rawValue: best.key) {
+            pattern = p
+        }
+        var material: String?
+        if let allowed = Self.materials(for: kind),
+           let m = vocab.best(in: "material", for: emb, allowed: { allowed.isEmpty || allowed.contains($0) }),
+           m.margin > 0.004 {
+            material = m.label
+        }
 
         func attr<T: RawRepresentable>(_ group: String, _ type: T.Type, when ok: Bool) -> T? where T.RawValue == String {
             guard ok, let b = vocab.best(in: group, for: emb), b.margin > 0.003 else { return nil }
@@ -45,12 +55,36 @@ enum FashionClassifier {
         let fit: Fit? = attr("fit", Fit.self, when: isGarment && category.supportsFit)
         let neckline: Neckline? = attr("neckline", Neckline.self, when: category.supportsNeckline && kind != .outerLayer)
         let sleeve: SleeveLength? = attr("sleeve", SleeveLength.self, when: category.supportsSleeves)
-        let length: GarmentLength? = attr("length", GarmentLength.self, when: category.supportsLength)
+        // Trouser-type bottoms have a length by definition; only skirts, dresses
+        // and coats really vary, so only they are asked.
+        let length: GarmentLength? = {
+            guard category.supportsLength else { return nil }
+            let p = product.lowercased()
+            if p.contains("short") { return .short }
+            if ["jeans", "trousers", "chinos", "cargo pants", "wide-leg pants", "palazzo pants", "linen pants",
+                "sweatpants", "joggers", "leggings", "track pants", "yoga pants", "salwar", "churidar"].contains(p) {
+                return .fullLength
+            }
+            return attr("length", GarmentLength.self, when: true)
+        }()
 
         let colors = ColorNamer.dominantColors(cg)
         return Attributes(category: category, product: product, colors: colors.isEmpty ? ["Black"] : colors,
                           pattern: pattern, material: material, fit: fit, neckline: neckline,
                           sleeveLength: sleeve, garmentLength: length, embedding: emb)
+    }
+
+    /// Plausible materials per kind (nil = don't name a material; empty = any).
+    private static func materials(for k: GarmentKind) -> Set<String>? {
+        switch k {
+        case .eyewear, .jewelry: return nil
+        case .footwear: return ["Leather", "Faux Leather", "Suede", "Canvas", "Mesh", "Knit", "Nylon"]
+        case .bag: return ["Leather", "Faux Leather", "Nylon", "Canvas", "Suede"]
+        case .belt: return ["Leather", "Faux Leather", "Canvas"]
+        case .headwear: return ["Cotton", "Wool", "Knit", "Canvas", "Denim", "Leather", "Suede", "Nylon", "Fleece"]
+        case .neckwear: return ["Silk", "Satin", "Wool", "Knit", "Cotton", "Polyester", "Linen"]
+        default: return []
+        }
     }
 
     private static func defaultCategory(_ k: GarmentKind) -> Category {
@@ -103,7 +137,11 @@ enum ColorNamer {
     private struct Named { let name: String; let lab: (Float, Float, Float) }
 
     // Reference colours tuned for real fabric under everyday light.
-    private static let palette: [Named] = [
+    private static let palette: [Named] = paletteRGB.map {
+        Named(name: $0.0, lab: ColorNamer.lab(Float($0.1) / 255, Float($0.2) / 255, Float($0.3) / 255))
+    }
+
+    private static let paletteRGB: [(String, Int, Int, Int)] = [
         ("Black", 20, 20, 22), ("Charcoal", 58, 60, 64), ("Gray", 128, 128, 130), ("Silver", 192, 192, 196),
         ("White", 244, 244, 240), ("Cream", 240, 232, 210), ("Beige", 214, 196, 164), ("Tan", 196, 160, 116),
         ("Khaki", 168, 152, 104), ("Brown", 110, 72, 44), ("Rust", 170, 78, 36), ("Orange", 236, 128, 40),
@@ -111,7 +149,7 @@ enum ColorNamer {
         ("Mint", 160, 220, 180), ("Teal", 30, 128, 128), ("Light Blue", 150, 186, 222), ("Blue", 46, 96, 180),
         ("Navy", 30, 40, 80), ("Lavender", 184, 160, 216), ("Purple", 110, 56, 140), ("Pink", 236, 150, 180),
         ("Coral", 240, 118, 96), ("Red", 196, 34, 44), ("Burgundy", 110, 26, 44), ("Maroon", 96, 20, 24)
-    ].map { Named(name: $0.0, lab: lab(Float($0.1) / 255, Float($0.2) / 255, Float($0.3) / 255)) }
+    ]
 
     /// 1–3 colour names, most dominant first; secondary colours need >= 15% share.
     static func dominantColors(_ image: CGImage) -> [String] {

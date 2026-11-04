@@ -371,11 +371,13 @@ class PhotoScanService: ObservableObject {
                 return (ip, tp)
             }
 
+            // Apple Intelligence devices: on-device details + visible brand.
+            let notes = await GarmentDescriber.describe(garmentImage, product: prod, colors: seg.colors)
             let wardrobeItem = WardrobeItem(
                 category: cat,
                 product: prod,
                 colors: seg.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
-                brand: seg.brand,
+                brand: notes?.brand ?? seg.brand,
                 pattern: pat,
                 imagePath: imagePath,
                 croppedImagePath: imagePath,
@@ -385,7 +387,7 @@ class PhotoScanService: ObservableObject {
                 neckline: seg.neckline,
                 sleeveLength: seg.sleeveLength,
                 garmentLength: seg.garmentLength,
-                details: seg.details
+                details: (notes?.details).flatMap { $0.isEmpty ? nil : $0 } ?? seg.details
             )
 
             if let fp = seg.featurePrint {

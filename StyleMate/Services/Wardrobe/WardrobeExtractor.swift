@@ -52,6 +52,13 @@ enum WardrobeExtractor {
             guard let cut = autoreleasepool(invoking: { GarmentCutout.render(crop: crop.image, cropPixels: cropPixels, instance: inst) }),
                   let attrs = FashionClassifier.classify(cut.image, kind: inst.kind),
                   !blockedProducts.contains(attrs.product) else { continue }
+            // Too few source pixels to make a decent wardrobe image (sunglasses
+            // 40 px wide in a group shot): skip — a closer photo will catch it.
+            let minSide: Float = inst.kind.isSmall || inst.kind == .headwear ? 56 : 110
+            guard cut.sourceSide >= minSide else {
+                print("[Wardrobe] drop tiny \(attrs.product) (\(Int(cut.sourceSide)) px)")
+                continue
+            }
             let q = quality(inst, cut: cut, crop: crop)
             guard q >= 0.22 else {
                 print("[Wardrobe] drop low-quality \(attrs.product) q=\(String(format: "%.2f", q))")

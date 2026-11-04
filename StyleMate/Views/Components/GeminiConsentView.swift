@@ -114,8 +114,11 @@ enum GeminiConsent {
         "hasConsentedToGeminiScan_\(userId)"
     }
 
+    /// Always true: wardrobe analysis now runs entirely on-device, so no photo
+    /// ever leaves the phone and there is nothing to consent to. (Kept so the
+    /// existing call sites compile; the consent sheet is never shown.)
     static func hasConsented(userId: String) -> Bool {
-        UserDefaults.standard.bool(forKey: key(for: userId))
+        true
     }
 
     static func grant(userId: String) {

@@ -100,20 +100,8 @@ struct ScanReviewView: View {
     private func itemCard(item: WardrobeItem) -> some View {
         VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             ZStack(alignment: .topTrailing) {
-                Group {
-                    if let img = item.croppedImage ?? item.image {
-                        Image(uiImage: img)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                    } else {
-                        Rectangle()
-                            .fill(DS.Colors.backgroundSecondary)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 150)
-                .background(DS.Colors.backgroundCard)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
+                ItemCutoutTile(image: item.thumbnailImage ?? item.croppedImage ?? item.image,
+                               height: 150, cornerRadius: DS.Radius.button)
 
                 Button {
                     Haptics.medium()

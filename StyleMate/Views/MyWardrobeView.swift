@@ -270,12 +270,7 @@ struct CategoryTile: View {
                     .background(DS.Colors.backgroundSecondary)
                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
             } else if thumbs.count < 4 {
-                Image(uiImage: thumbs[0])
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                ItemCutoutTile(image: thumbs[0], height: 120, cornerRadius: DS.Radius.control, inset: 10)
             } else {
                 let gridSize: CGFloat = 120
                 let halfSize = (gridSize - 2) / 2
@@ -319,11 +314,8 @@ struct CategoryTile: View {
 
     @ViewBuilder
     private func thumbnailCell(_ image: UIImage, size: CGFloat) -> some View {
-        Image(uiImage: image)
-            .resizable()
-            .aspectRatio(contentMode: .fill)
+        ItemCutoutTile(image: image, height: size, inset: 5)
             .frame(width: size, height: size)
-            .clipped()
     }
 }
 
@@ -521,21 +513,7 @@ struct CategoryDetailView: View {
     @ViewBuilder
     private func itemCardView(_ item: WardrobeItem) -> some View {
         VStack(spacing: 0) {
-            if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(height: 150)
-                    .clipped()
-            } else {
-                Rectangle()
-                    .fill(DS.Colors.backgroundSecondary)
-                    .frame(height: 150)
-                    .overlay(
-                        Image(systemName: "photo")
-                            .foregroundColor(DS.Colors.textTertiary)
-                    )
-            }
+            ItemCutoutTile(image: item.thumbnailImage ?? item.croppedImage ?? item.image, height: 150)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.product)

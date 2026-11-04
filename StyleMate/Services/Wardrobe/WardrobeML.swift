@@ -160,6 +160,18 @@ struct FashionVocabulary: Decodable {
     let model: String
     let groups: [String: Group]
 
+    /// Each label's best cosine score in a group.
+    func scores(in group: String, for embedding: [Float]) -> [String: Float] {
+        guard let g = groups[group] else { return [:] }
+        var byLabel: [String: Float] = [:]
+        for (label, e) in zip(g.labels, g.embeddings) {
+            var s: Float = 0
+            for i in 0..<min(e.count, embedding.count) { s += e[i] * embedding[i] }
+            byLabel[label] = max(byLabel[label] ?? -.infinity, s)
+        }
+        return byLabel
+    }
+
     /// Best label in a group for an image embedding, with its margin over the
     /// runner-up (a cosine gap; > ~0.01 is a meaningful preference for SigLIP).
     func best(in group: String, for embedding: [Float], allowed: ((String) -> Bool)? = nil) -> (label: String, margin: Float)? {

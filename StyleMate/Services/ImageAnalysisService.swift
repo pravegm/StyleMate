@@ -94,18 +94,28 @@ class ImageAnalysisService {
     /// Finds every garment and accessory in a photo and returns one clean cutout
     /// + attributes per item, entirely on-device (see `WardrobeExtractor`). Runs
     /// off the main thread; safe to call from any task.
-    func analyzeAndSegment(image: UIImage, userGender: String? = nil, retryCount: Int = 0) async -> [SegmentedItem] {
+    /// `describe`: also ask the on-device foundation model (Apple Intelligence
+    /// devices only) for each item's details/brand. The manual add flow does;
+    /// the background scan does it itself, only for items it actually keeps.
+    func analyzeAndSegment(image: UIImage, userGender: String? = nil, retryCount: Int = 0,
+                           describe: Bool = false) async -> [SegmentedItem] {
         let items = await Task.detached(priority: .utility) {
             WardrobeExtractor.extract(from: image)
         }.value
-        return items.map { item in
+        var out: [SegmentedItem] = []
+        for item in items {
             let a = item.attributes
-            return SegmentedItem(
+            var notes: GarmentDescriber.Description?
+            if describe { notes = await GarmentDescriber.describe(item.cutout, product: a.product, colors: a.colors) }
+            out.append(SegmentedItem(
                 category: a.category, product: a.product, colors: a.colors, pattern: a.pattern,
                 material: a.material, fit: a.fit, neckline: a.neckline, sleeveLength: a.sleeveLength,
-                garmentLength: a.garmentLength, details: nil, brand: "",
-                maskImage: item.cutout, featurePrint: a.embedding, quality: item.quality)
+                garmentLength: a.garmentLength,
+                details: (notes?.details).flatMap { $0.isEmpty ? nil : $0 },
+                brand: notes?.brand ?? "",
+                maskImage: item.cutout, featurePrint: a.embedding, quality: item.quality))
         }
+        return out
     }
 
     func padToSquare(_ image: UIImage) -> UIImage {

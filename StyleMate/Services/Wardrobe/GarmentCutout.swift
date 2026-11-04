@@ -59,6 +59,7 @@ enum GarmentCutout {
         }
 
         if holeFull != nil { pushPullFill(&buf, holes: holeMask, w: w, h: h) }
+        decontaminateEdges(&buf, w: w, h: h)
 
         let sharp = sharpness(buf, w: w, h: h)
         guard let img = makeImage(buf, w: w, h: h) else { return nil }
@@ -107,7 +108,7 @@ enum GarmentCutout {
         for i in 0..<(w * h) {
             // Sharpen the soft upsampled edge a touch so fabric edges stay crisp.
             let v = Float(px[i * 4]) / 255
-            let s = min(max((v - 0.18) / 0.64, 0), 1)
+            let s = min(max((v - 0.30) / 0.50, 0), 1)
             alpha[i] = UInt8(s * 255)
         }
         return alpha
@@ -115,12 +116,11 @@ enum GarmentCutout {
 
     // MARK: - Hole fill
 
-    /// Pyramid fill: averages the visible fabric down to a coarse level, then
-    /// pulls it back up into the holes. Smooth and seam-free on solid fabrics;
-    /// holes are small (a hand) so patterns hold up well enough.
-    private static func pushPullFill(_ buf: inout [Float], holes: [Float], w: Int, h: Int) {
+    /// Push-pull core: every pixel gets the (premultiplied) colour of the nearest
+    /// known pixels, smoothly. `src` alpha = how much each pixel is known.
+    private static func pyramidFill(_ src: [Float], w: Int, h: Int) -> [Float] {
         // Level 0: only real fabric contributes (alpha-weighted premultiplied colour).
-        var levels: [(data: [Float], w: Int, h: Int)] = [(buf, w, h)]
+        var levels: [(data: [Float], w: Int, h: Int)] = [(src, w, h)]
         while let last = levels.last, last.w > 1 || last.h > 1 {
             let nw = max(1, (last.w + 1) / 2), nh = max(1, (last.h + 1) / 2)
             var d = [Float](repeating: 0, count: nw * nh * 4)
@@ -143,26 +143,58 @@ enum GarmentCutout {
             levels.append((d, nw, nh))
             if levels.count > 14 { break }
         }
-        // Pull: composite each level over the upsampled coarser one.
+        // Pull: composite each level over the coarser one, sampled BILINEARLY —
+        // nearest-neighbour here showed up as visible blocks in large fills.
         for li in stride(from: levels.count - 2, through: 0, by: -1) {
             let coarse = levels[li + 1]
             var fine = levels[li]
             for y in 0..<fine.h {
+                let cy = max(0, min(Float(coarse.h - 1), (Float(y) + 0.5) / 2 - 0.5))
+                let y0 = Int(cy), y1 = min(y0 + 1, coarse.h - 1), fy = cy - Float(y0)
                 for x in 0..<fine.w {
                     let o = (y * fine.w + x) * 4
                     let a = fine.data[o + 3]
                     if a >= 0.999 { continue }
-                    let co = (min(y / 2, coarse.h - 1) * coarse.w + min(x / 2, coarse.w - 1)) * 4
+                    let cx = max(0, min(Float(coarse.w - 1), (Float(x) + 0.5) / 2 - 0.5))
+                    let x0 = Int(cx), x1 = min(x0 + 1, coarse.w - 1), fx = cx - Float(x0)
                     let t = 1 - a
-                    fine.data[o] += t * coarse.data[co]
-                    fine.data[o + 1] += t * coarse.data[co + 1]
-                    fine.data[o + 2] += t * coarse.data[co + 2]
-                    fine.data[o + 3] += t * coarse.data[co + 3]
+                    for c in 0..<4 {
+                        let v00 = coarse.data[(y0 * coarse.w + x0) * 4 + c], v10 = coarse.data[(y0 * coarse.w + x1) * 4 + c]
+                        let v01 = coarse.data[(y1 * coarse.w + x0) * 4 + c], v11 = coarse.data[(y1 * coarse.w + x1) * 4 + c]
+                        let v = v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy) + v01 * (1 - fx) * fy + v11 * fx * fy
+                        fine.data[o + c] += t * v
+                    }
                 }
             }
             levels[li] = fine
         }
-        let filled = levels[0].data
+        return levels[0].data
+    }
+
+    /// Colour decontamination: a soft edge pixel is part fabric, part whatever
+    /// was behind it (pavement, sky), which shows as a light/dark halo on the
+    /// studio backdrop. Re-colour every semi-transparent pixel with the nearby
+    /// solid fabric colour, keeping its alpha.
+    private static func decontaminateEdges(_ buf: inout [Float], w: Int, h: Int) {
+        var known = buf
+        for i in 0..<(w * h) where known[i * 4 + 3] < 0.95 {
+            known[i * 4] = 0; known[i * 4 + 1] = 0; known[i * 4 + 2] = 0; known[i * 4 + 3] = 0
+        }
+        let filled = pyramidFill(known, w: w, h: h)
+        for i in 0..<(w * h) {
+            let o = i * 4
+            let a = buf[o + 3]
+            guard a > 0.004, a < 0.95 else { continue }
+            let fa = max(filled[o + 3], 1e-4)
+            buf[o] = filled[o] / fa * a; buf[o + 1] = filled[o + 1] / fa * a; buf[o + 2] = filled[o + 2] / fa * a
+        }
+    }
+
+    /// Pyramid fill: averages the visible fabric down to a coarse level, then
+    /// pulls it back up into the holes. Smooth and seam-free on solid fabrics;
+    /// holes are small (a hand) so patterns hold up well enough.
+    private static func pushPullFill(_ buf: inout [Float], holes: [Float], w: Int, h: Int) {
+        let filled = pyramidFill(buf, w: w, h: h)
         for i in 0..<(w * h) {
             let hm = holes[i]
             guard hm > 0.02 else { continue }

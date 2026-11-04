@@ -21,11 +21,54 @@ struct ScanProgressBanner: View {
             case .error:
                 errorBanner
             case .idle:
-                EmptyView()
+                if scanService.pendingReviewCount > 0 { pendingReviewBanner } else { EmptyView() }
             }
         }
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: scanService.scanState)
+        .task(id: wardrobeViewModel.currentUserEmail) {
+            guard !wardrobeViewModel.currentUserEmail.isEmpty else { return }
+            _ = scanService.pendingReviews(forUser: wardrobeViewModel.currentUserEmail)
+        }
+        .sheet(isPresented: $showFaceReview) {
+            FaceReviewView(scanService: scanService, isPresented: $showFaceReview)
+                .environmentObject(wardrobeViewModel)
+        }
+    }
+
+    @State private var showFaceReview = false
+
+    // MARK: - "Is this you?" pending
+
+    private var pendingReviewBanner: some View {
+        Button {
+            Haptics.light()
+            showFaceReview = true
+        } label: {
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: "person.crop.circle.badge.questionmark")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(DS.Colors.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(scanService.pendingReviewCount) more photo\(scanService.pendingReviewCount == 1 ? "" : "s") might be you")
+                        .font(DS.Font.headline)
+                        .foregroundColor(DS.Colors.textPrimary)
+                    Text("Confirm them to add those outfits")
+                        .font(DS.Font.caption1)
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+            .padding(DS.Spacing.md)
+            .background(DS.Colors.backgroundCard)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            .dsCardShadow()
+        }
+        .buttonStyle(DSTapBounce())
+        .accessibilityHint("Opens a grid of photos to confirm")
     }
 
     // MARK: - Scanning State
@@ -107,7 +150,9 @@ struct ScanProgressBanner: View {
                     .foregroundColor(DS.Colors.success)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Added \(scanService.scanAddedItemIDs.count) items to your wardrobe!")
+                    Text(scanService.pendingReviewCount > 0
+                     ? "Added \(scanService.scanAddedItemIDs.count) items · \(scanService.pendingReviewCount) photos to confirm"
+                     : "Added \(scanService.scanAddedItemIDs.count) items to your wardrobe!")
                         .font(DS.Font.headline)
                         .foregroundColor(DS.Colors.textPrimary)
 

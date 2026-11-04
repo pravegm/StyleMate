@@ -45,6 +45,16 @@ enum DS {
             light: UIColor.white,                                              // #FFFFFF
             dark:  UIColor(red: 0.114, green: 0.114, blue: 0.125, alpha: 1)    // #1D1D20
         )
+        // Studio backdrop behind item cutouts (ItemCutoutTile): a soft warm-grey
+        // sweep like a product-photo cyclorama, so cutouts never sit on flat white.
+        static let studioTop = dyn(
+            light: UIColor(red: 0.965, green: 0.961, blue: 0.953, alpha: 1),   // #F6F5F3
+            dark:  UIColor(red: 0.165, green: 0.165, blue: 0.176, alpha: 1)
+        )
+        static let studioBottom = dyn(
+            light: UIColor(red: 0.925, green: 0.918, blue: 0.906, alpha: 1),   // #ECEAE7
+            dark:  UIColor(red: 0.125, green: 0.125, blue: 0.133, alpha: 1)
+        )
 
         static let textPrimary = dyn(
             light: UIColor(red: 0.067, green: 0.067, blue: 0.067, alpha: 1),   // #111111

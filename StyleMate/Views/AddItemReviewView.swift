@@ -255,7 +255,8 @@ struct AddItemReviewView: View {
                     group.addTask {
                         let results = await ImageAnalysisService.shared.analyzeAndSegment(
                             image: image,
-                            userGender: userGender
+                            userGender: userGender,
+                            describe: true
                         )
                         var items = results.compactMap { seg -> ReviewItem? in
                             guard let cat = seg.category, let prod = seg.product,
@@ -315,7 +316,8 @@ struct AddItemReviewView: View {
             let image = images[sectionIndex]
             let results = await ImageAnalysisService.shared.analyzeAndSegment(
                 image: image,
-                userGender: authService.user?.gender
+                userGender: authService.user?.gender,
+                describe: true
             )
 
             var items = results.compactMap { seg -> ReviewItem? in

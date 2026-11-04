@@ -258,7 +258,9 @@ class WardrobeImageFileHelper {
         try? FileManager.default.removeItem(at: url)
     }
 
-    static func saveThumbnail(_ image: UIImage, maxDimension: CGFloat = 200) -> String? {
+    /// 480 px: grid cards are ~170 pt wide, i.e. ~510 px on a 3x screen — the old
+    /// 200 px thumbnails looked soft next to the crisp cutouts.
+    static func saveThumbnail(_ image: UIImage, maxDimension: CGFloat = 480) -> String? {
         let size = image.size
         let scale: CGFloat
         if size.width > size.height {
