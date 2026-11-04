@@ -45,7 +45,14 @@ struct WardrobeExtractionTests {
         ("street_coat_cap.jpg", ["Outerwear", "Footwear", "Bottoms"]),
         ("street_coat_boots.jpg", ["Outerwear", "Footwear", "Bottoms"]),
         ("street_coat_backpack.jpg", ["Outerwear", "Footwear", "Bottoms"]),
-        ("street_back_view.jpg", ["Bottoms"])
+        ("street_back_view.jpg", ["Bottoms"]),
+        ("casual_denim_jacket_hat.jpg", ["Outerwear", "Bottoms"]),
+        ("pink_coat_boots.jpg", ["Outerwear", "Footwear"]),
+        ("kurta_dhoti_turban.jpg", []),
+        ("flannel_shirt_group.jpg", ["Tops"]),
+        ("jeans_white_shirt_halfbody.jpg", ["Bottoms"]),
+        ("ripped_jeans_belt_watch.jpg", ["Bottoms"]),
+        ("denim_shirt_small_fullbody.jpg", [])
     ]
 
     @Test(arguments: cases.map { $0.0 })
