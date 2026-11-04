@@ -36,18 +36,31 @@ class DuplicateDetector {
         neckline: Neckline?,
         sleeveLength: SleeveLength?,
         brand: String = "",
-        existingItems: [WardrobeItem]
+        existingItems: [WardrobeItem],
+        featurePrint: [Float]? = nil
     ) -> DuplicateMatch? {
         var bestMatch: WardrobeItem?
         var bestScore = 0
 
         for existing in existingItems {
-            let score = computeScore(
+            var score = computeScore(
                 newCategory: category, newProduct: product, newColors: colors,
                 newPattern: pattern, newMaterial: material, newFit: fit,
                 newNeckline: neckline, newSleeveLength: sleeveLength, newBrand: brand,
                 existing: existing
             )
+            // Visual check: both items have a FashionSigLIP embedding of their
+            // cutout. Seeing the same garment is far stronger evidence than
+            // matching labels, in both directions — it catches a duplicate the
+            // classifier named differently (Jackets vs Leather Jackets) and keeps
+            // apart two black tees that only share their labels.
+            if let fp = featurePrint, let other = ItemEmbeddingStore.shared.embedding(for: existing.id),
+               Self.compatible(category, existing.category) {
+                let cos = WardrobeExtractor.cosine(fp, other)
+                if cos >= Self.visualSame { score = max(score, 90) }
+                else if cos >= Self.visualMaybe { score = score >= Self.matchThreshold ? score : 0 }
+                else { score = 0 }
+            }
             if score > bestScore {
                 bestScore = score
                 bestMatch = existing
@@ -56,6 +69,20 @@ class DuplicateDetector {
 
         guard let match = bestMatch, bestScore >= Self.matchThreshold else { return nil }
         return DuplicateMatch(existingItem: match, score: bestScore)
+    }
+
+    /// Cosine of two FashionSigLIP cutout embeddings: at/above `visualSame` it's
+    /// the same garment; between the two bars the attribute gates decide; below
+    /// `visualMaybe` it's a different garment however the labels match.
+    static var visualSame: Float = 0.91
+    static var visualMaybe: Float = 0.82
+
+    /// Categories one garment can plausibly be filed under by the classifier.
+    private static func compatible(_ a: Category, _ b: Category) -> Bool {
+        if a == b { return true }
+        let upper: Set<Category> = [.tops, .midLayers, .outerwear, .activewear, .ethnicWear]
+        let lower: Set<Category> = [.bottoms, .activewear, .ethnicWear]
+        return (upper.contains(a) && upper.contains(b)) || (lower.contains(a) && lower.contains(b))
     }
 
     // MARK: - Scoring (gated)

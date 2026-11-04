@@ -19,6 +19,13 @@ enum IdentityResolution {
     case ambiguous([DetectedPerson])  // multi-person, unsure — ask the user
 }
 
+/// What the background scan should do with one photo.
+enum ScanIdentity {
+    case analyze(UIImage)       // confidently the user — extract (whole photo or isolated user)
+    case review(sim: Float, embedding: [Float], faceBox: CGRect, faceCount: Int)  // probably the user — ask
+    case skip                   // not the user / can't isolate
+}
+
 /// On-device face identity matching for the photo-library auto-scan.
 ///
 /// The bundled model (resource name "MobileFaceNet" for historical reasons) is
@@ -101,6 +108,9 @@ class FaceMatchingService {
         /// Best similarity of any OTHER face in the photo. Used to detect the
         /// "two people score close together" case where the pick is uncertain.
         var runnerUpSimilarity: Float? = nil
+        /// The matched face's embedding — used to grow the gallery from confident
+        /// scan matches and from faces the user confirms in review.
+        var matchedEmbedding: [Float]? = nil
 
         /// True when the photo should enter the pipeline at all (high or borderline).
         var isMatch: Bool { confidence == .high || confidence == .borderline }
@@ -318,16 +328,50 @@ class FaceMatchingService {
             referenceGallery.append(emb)
             added += 1
         }
-        let cap = 40
-        if referenceGallery.count > cap {
-            referenceGallery.removeFirst(referenceGallery.count - cap)
-        }
+        trimGallery()
         if added > 0 {
             loadedUserId = userId
             persistGallery(forUser: userId)
         }
         print("[FaceMatch] Added \(added) reference embeddings; gallery now \(referenceGallery.count)")
         return added
+    }
+
+    /// The selfie anchors (upright + mirror) are always the first two entries.
+    private static let anchorCount = 2
+    static let galleryCap = 60
+
+    /// Caps the gallery without ever dropping the selfie anchors: the oldest
+    /// learned/confirmed faces go first. (The old cap removed from the front,
+    /// which threw away the selfie itself once the gallery filled up.)
+    private func trimGallery() {
+        let overflow = referenceGallery.count - Self.galleryCap
+        guard overflow > 0 else { return }
+        let keep = min(Self.anchorCount, referenceGallery.count)
+        referenceGallery.removeSubrange(keep..<(keep + overflow))
+    }
+
+    // MARK: - Self-learning during the scan
+    //
+    // A single selfie only covers one angle and one lighting. Real photos of the
+    // user (profile, sunglasses, low light, years older) score 0.30–0.55 against it
+    // and were skipped. Faces the scan is *very* sure about are added to the
+    // gallery, so each confident match teaches the next angle — the same idea as
+    // Photos' face groups growing over time. The bar sits well above the
+    // impostor cloud (max ~0.18, a polluted partner ~0.515) so it can't drift.
+    static var autoLearnThreshold: Float = 0.62
+
+    /// Adds a confidently-matched face from the scan. Skips near-duplicates.
+    @discardableResult
+    func learnFromScan(_ embedding: [Float], similarity: Float, userId: String) -> Bool {
+        guard similarity >= Self.autoLearnThreshold else { return false }
+        loadReference(forUser: userId)
+        if referenceGallery.contains(where: { dotProduct($0, embedding) > 0.90 }) { return false }
+        referenceGallery.append(embedding)
+        trimGallery()
+        persistGallery(forUser: userId)
+        print("[FaceMatch] Learned a new view of the user (sim=\(String(format: "%.3f", similarity))); gallery now \(referenceGallery.count)")
+        return true
     }
 
     /// A square, padded crop around a face for display in the reference grid.
@@ -361,6 +405,7 @@ class FaceMatchingService {
         var bestSimilarity: Float = -.infinity
         var secondSimilarity: Float = -.infinity
         var bestRefIndex = -1
+        var bestEmbedding: [Float]?
         var allScores: [Float] = []
 
         let imgW = cgImage.width
@@ -381,6 +426,7 @@ class FaceMatchingService {
                 bestSimilarity = similarity
                 bestBox = face.normalizedBox(imageWidth: imgW, imageHeight: imgH)
                 bestRefIndex = refIdx
+                bestEmbedding = embedding
             } else if similarity > secondSimilarity {
                 secondSimilarity = similarity
             }
@@ -403,7 +449,8 @@ class FaceMatchingService {
             matchedFaceBox: confidence == .none ? nil : bestBox,
             faceCount: faces.count,
             similarity: bestSimilarity.isFinite ? bestSimilarity : nil,
-            runnerUpSimilarity: secondSimilarity.isFinite ? secondSimilarity : nil
+            runnerUpSimilarity: secondSimilarity.isFinite ? secondSimilarity : nil,
+            matchedEmbedding: bestEmbedding
         )
     }
 
@@ -494,36 +541,62 @@ class FaceMatchingService {
     /// in the loop, so anything less than a confident, unambiguous, cleanly-
     /// isolatable match is skipped (returns nil). Returns the image to analyze
     /// (whole for a confident solo match, isolated user for multi-person).
-    func resolveIdentityForScan(in cgImage: CGImage, fullImage: UIImage, userId: String) -> UIImage? {
+    func resolveIdentityForScan(in cgImage: CGImage, fullImage: UIImage, userId: String) -> ScanIdentity {
         _ = loadReference(forUser: userId)
         let match = findUserInPhoto(cgImage)
+        let sim = match.similarity ?? -1
         let simStr = match.similarity.map { String(format: "%.3f", $0) } ?? "-"
         let marginStr = match.margin == .greatestFiniteMagnitude ? "inf" : String(format: "%.3f", match.margin)
 
-        // Must be a high-confidence match that clearly beats any other face.
-        guard match.confidence == .high, match.margin >= Self.ambiguityMargin, match.matchedFaceBox != nil else {
-            print("[Scan] skip: not confidently the user (conf=\(match.confidence) sim=\(simStr) margin=\(marginStr) faces=\(match.faceCount))")
-            return nil
+        // "Probably you": ask instead of silently dropping it. Before, every photo
+        // between the borderline and high bars was skipped — which is most real
+        // photos when the gallery is just the selfie.
+        func review(_ why: String) -> ScanIdentity {
+            guard let box = match.matchedFaceBox, let emb = match.matchedEmbedding else { return .skip }
+            print("[Scan] review: \(why) (sim=\(simStr) margin=\(marginStr) faces=\(match.faceCount))")
+            return .review(sim: sim, embedding: emb, faceBox: box, faceCount: match.faceCount)
         }
+
+        guard match.confidence != .none, match.matchedFaceBox != nil else {
+            print("[Scan] skip: not the user (sim=\(simStr) faces=\(match.faceCount))")
+            return .skip
+        }
+        guard match.confidence == .high else { return review("borderline match") }
+        guard match.margin >= Self.ambiguityMargin else { return review("two faces score too close") }
 
         if match.faceCount > 1 {
             // Stricter bar for multi-person photos: a borderline match here, plus an
             // imperfect person-instance mask, risks extracting the wrong person's
             // clothes (e.g. a partner standing next to the user).
-            guard (match.similarity ?? 0) >= Self.multiPersonThreshold else {
-                print("[Scan] skip: multi-person match below the multi-person bar (sim=\(simStr) < \(Self.multiPersonThreshold), faces=\(match.faceCount))")
-                return nil
-            }
+            guard sim >= Self.multiPersonThreshold else { return review("multi-person match below the multi-person bar") }
             guard let isolated = isolateMatchedPerson(from: cgImage, matchResult: match) else {
                 print("[Scan] skip: confident match but couldn't isolate user (\(match.faceCount) people)")
-                return nil
+                return .skip
             }
+            if let emb = match.matchedEmbedding { learnFromScan(emb, similarity: sim, userId: userId) }
             print("[Scan] add: isolated user from \(match.faceCount) people (sim=\(simStr) margin=\(marginStr))")
-            return isolated
+            return .analyze(isolated)
         }
 
+        if let emb = match.matchedEmbedding { learnFromScan(emb, similarity: sim, userId: userId) }
         print("[Scan] add: confident solo match (sim=\(simStr))")
-        return fullImage
+        return .analyze(fullImage)
+    }
+
+    /// For a photo the user confirmed in scan review: learn the face, and return
+    /// the image to analyze (the isolated person when others are in the shot).
+    func imageForConfirmedReview(cgImage: CGImage, fullImage: UIImage, faceBox: CGRect,
+                                 embedding: [Float], faceCount: Int, userId: String) -> UIImage? {
+        addReferenceEmbeddings([embedding], forUser: userId)
+        guard faceCount > 1 else { return fullImage }
+        let mr = MatchResult(confidence: .high, matchedFaceBox: faceBox,
+                             faceCount: faceCount, similarity: nil)
+        return isolateMatchedPerson(from: cgImage, matchResult: mr)
+    }
+
+    /// Padded square face crop for the "Is this you?" review grid.
+    func reviewFaceCrop(from cgImage: CGImage, faceBox: CGRect) -> UIImage? {
+        paddedFaceCrop(from: cgImage, bbox: faceBox).map { UIImage(cgImage: $0) }
     }
 
     private func detectedPeople(in cgImage: CGImage, faces: [DetectedFace]) -> [DetectedPerson] {

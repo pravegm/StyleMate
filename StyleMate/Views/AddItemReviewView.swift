@@ -36,6 +36,9 @@ struct AddItemReviewView: View {
         var sleeveLength: SleeveLength?
         var garmentLength: GarmentLength?
         var details: String
+        /// FashionSigLIP embedding of the cutout (visual duplicate matching).
+        var featurePrint: [Float]? = nil
+        var quality: Float = 0
 
         var isDuplicate: Bool { duplicateMatch != nil }
     }
@@ -270,7 +273,9 @@ struct AddItemReviewView: View {
                                 neckline: seg.neckline,
                                 sleeveLength: seg.sleeveLength,
                                 garmentLength: seg.garmentLength,
-                                details: seg.details ?? ""
+                                details: seg.details ?? "",
+                                featurePrint: seg.featurePrint,
+                                quality: seg.quality
                             )
                         }
 
@@ -329,7 +334,9 @@ struct AddItemReviewView: View {
                     neckline: seg.neckline,
                     sleeveLength: seg.sleeveLength,
                     garmentLength: seg.garmentLength,
-                    details: seg.details ?? ""
+                    details: seg.details ?? "",
+                                featurePrint: seg.featurePrint,
+                                quality: seg.quality
                 )
             }
 
@@ -365,7 +372,8 @@ struct AddItemReviewView: View {
                         neckline: item.neckline,
                         sleeveLength: item.sleeveLength,
                         brand: item.brand,
-                        existingItems: existingItems
+                        existingItems: existingItems,
+                        featurePrint: item.featurePrint
                     )
             }
         }
@@ -453,6 +461,9 @@ struct AddItemReviewView: View {
                 garmentLength: item.garmentLength,
                 details: item.details.isEmpty ? nil : item.details
             )
+            if let fp = item.featurePrint {
+                ItemEmbeddingStore.shared.set(fp, quality: item.quality, for: wardrobeItem.id)
+            }
             wardrobeViewModel.items.append(wardrobeItem)
             wardrobeViewModel.syncItemToCloud(wardrobeItem)
         }

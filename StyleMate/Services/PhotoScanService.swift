@@ -21,6 +21,25 @@ struct ScanProgress: Codable {
     var scanEndDate: Date?
     var totalItemsFound: Int
     var lastScanAddedItemIDs: [String] = []
+    /// Photos that are probably the user but not certain enough to add silently.
+    /// Optional so progress files written before this field still decode.
+    var pendingReviews: [PendingFaceReview]?
+}
+
+/// One "Is this you?" question queued by the scan.
+struct PendingFaceReview: Codable, Identifiable, Hashable {
+    var id: String { assetId }
+    let assetId: String
+    let similarity: Float
+    let embedding: [Float]
+    /// Normalized face box, Vision convention (bottom-left origin): x, y, w, h.
+    let faceBox: [CGFloat]
+    let faceCount: Int
+
+    var faceRect: CGRect {
+        guard faceBox.count == 4 else { return .zero }
+        return CGRect(x: faceBox[0], y: faceBox[1], width: faceBox[2], height: faceBox[3])
+    }
 }
 
 // MARK: - Scan History Info
@@ -221,7 +240,7 @@ class PhotoScanService: ObservableObject {
                 if isPaused { guard await awaitWhilePaused() else { return } }
 
                 guard let thumbnail = thumbnail, let thumbCG = thumbnail.cgImage else {
-                    progress.scannedAssetIDs.insert(asset.localIdentifier)
+                    // Not marked as scanned, so a later scan retries it.
                     internalScannedCount += 1
                     throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
                     continue
@@ -245,7 +264,8 @@ class PhotoScanService: ObservableObject {
 
                 // Stage 2: Load full-res image for face matching + Gemini analysis
                 guard let fullImage = await loadFullImage(for: asset) else {
-                    progress.scannedAssetIDs.insert(asset.localIdentifier)
+                    // Not marked as scanned: it's usually an iCloud download that
+                    // failed or timed out (offline), so the next scan retries it.
                     internalScannedCount += 1
                     throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
                     continue
@@ -262,75 +282,28 @@ class PhotoScanService: ObservableObject {
                     continue
                 }
 
-                let imageForGemini: UIImage? = await Task.detached(priority: .utility) {
+                let identity: ScanIdentity = await Task.detached(priority: .utility) {
                     autoreleasepool {
                         FaceMatchingService.shared.resolveIdentityForScan(in: fullCG, fullImage: fullImage, userId: userId)
                     }
                 }.value
 
-                guard let imageForGemini else {
-                    progress.scannedAssetIDs.insert(asset.localIdentifier)
-                    internalScannedCount += 1
-                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
-                    continue
-                }
-
-                let results = await ImageAnalysisService.shared.analyzeAndSegment(
-                    image: imageForGemini,
-                    userGender: userGender
-                )
-
-                for seg in results {
-                    guard let cat = seg.category, let prod = seg.product,
-                          let pat = seg.pattern, !seg.colors.isEmpty else { continue }
-
-                    let isDup = DuplicateDetector.shared.findBestMatch(
-                        category: cat, product: prod, colors: seg.colors,
-                        pattern: pat, material: seg.material, fit: seg.fit,
-                        neckline: seg.neckline, sleeveLength: seg.sleeveLength,
-                        brand: seg.brand,
-                        existingItems: wardrobeViewModel.items
-                    )
-
-                    if isDup != nil {
-                        print("[StyleMate] Auto-scan: Skipping duplicate \(prod)")
-                        continue
+                switch identity {
+                case .skip:
+                    break
+                case let .review(sim, embedding, faceBox, faceCount):
+                    var pending = progress.pendingReviews ?? []
+                    if !pending.contains(where: { $0.assetId == asset.localIdentifier }) {
+                        pending.append(PendingFaceReview(
+                            assetId: asset.localIdentifier, similarity: sim, embedding: embedding,
+                            faceBox: [faceBox.origin.x, faceBox.origin.y, faceBox.width, faceBox.height],
+                            faceCount: faceCount))
+                        progress.pendingReviews = pending
+                        pendingReviewCount = pending.count
                     }
-
-                    let garmentImage = seg.maskImage ?? imageForGemini
-
-                    // Disk I/O inside autoreleasepool to release intermediate Data/UIImage refs
-                    let (imagePath, thumbnailPath) = autoreleasepool {
-                        let ip = WardrobeImageFileHelper.saveImageAsPNG(garmentImage)
-                            ?? WardrobeImageFileHelper.saveImage(garmentImage) ?? ""
-                        let tp = WardrobeImageFileHelper.saveThumbnail(garmentImage)
-                        return (ip, tp)
-                    }
-
-                    let wardrobeItem = WardrobeItem(
-                        category: cat,
-                        product: prod,
-                        colors: seg.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
-                        brand: seg.brand,
-                        pattern: pat,
-                        imagePath: imagePath,
-                        croppedImagePath: imagePath,
-                        thumbnailPath: thumbnailPath,
-                        material: seg.material,
-                        fit: seg.fit,
-                        neckline: seg.neckline,
-                        sleeveLength: seg.sleeveLength,
-                        garmentLength: seg.garmentLength,
-                        details: seg.details
-                    )
-
-                    wardrobeViewModel.items.append(wardrobeItem)
-                    wardrobeViewModel.syncItemToCloud(wardrobeItem)
-
-                    scanAddedItemIDs.append(wardrobeItem.id)
-                    itemsFound = scanAddedItemIDs.count
-
-                    print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe")
+                case .analyze(let imageToAnalyze):
+                    await extractAndAdd(from: imageToAnalyze, userGender: userGender,
+                                        wardrobeViewModel: wardrobeViewModel)
                 }
 
                 progress.scannedAssetIDs.insert(asset.localIdentifier)
@@ -361,6 +334,149 @@ class PhotoScanService: ObservableObject {
         scanState = .completed
         currentPhase = "Scan complete!"
         print("[StyleMate] Auto-scan complete: added \(scanAddedItemIDs.count) items from \(photosScanned) photos")
+    }
+
+    // MARK: - Extraction
+
+    /// Runs the on-device garment extractor on an image of the user and adds every
+    /// new item to the wardrobe (duplicates of items already there are skipped).
+    @discardableResult
+    func extractAndAdd(from image: UIImage, userGender: String?,
+                       wardrobeViewModel: WardrobeViewModel) async -> Int {
+        let results = await ImageAnalysisService.shared.analyzeAndSegment(image: image, userGender: userGender)
+        var added = 0
+        for seg in results {
+            guard let cat = seg.category, let prod = seg.product,
+                  let pat = seg.pattern, !seg.colors.isEmpty else { continue }
+
+            let isDup = DuplicateDetector.shared.findBestMatch(
+                category: cat, product: prod, colors: seg.colors,
+                pattern: pat, material: seg.material, fit: seg.fit,
+                neckline: seg.neckline, sleeveLength: seg.sleeveLength,
+                brand: seg.brand,
+                existingItems: wardrobeViewModel.items,
+                featurePrint: seg.featurePrint
+            )
+            if let dup = isDup {
+                upgradeImageIfBetter(dup.existingItem, with: seg, wardrobeViewModel: wardrobeViewModel)
+                continue
+            }
+
+            guard let garmentImage = seg.maskImage else { continue }
+            // Disk I/O inside autoreleasepool to release intermediate Data/UIImage refs
+            let (imagePath, thumbnailPath) = autoreleasepool {
+                let ip = WardrobeImageFileHelper.saveImageAsPNG(garmentImage)
+                    ?? WardrobeImageFileHelper.saveImage(garmentImage) ?? ""
+                let tp = WardrobeImageFileHelper.saveThumbnail(garmentImage)
+                return (ip, tp)
+            }
+
+            let wardrobeItem = WardrobeItem(
+                category: cat,
+                product: prod,
+                colors: seg.colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
+                brand: seg.brand,
+                pattern: pat,
+                imagePath: imagePath,
+                croppedImagePath: imagePath,
+                thumbnailPath: thumbnailPath,
+                material: seg.material,
+                fit: seg.fit,
+                neckline: seg.neckline,
+                sleeveLength: seg.sleeveLength,
+                garmentLength: seg.garmentLength,
+                details: seg.details
+            )
+
+            if let fp = seg.featurePrint {
+                ItemEmbeddingStore.shared.set(fp, quality: seg.quality, for: wardrobeItem.id)
+            }
+            wardrobeViewModel.items.append(wardrobeItem)
+            wardrobeViewModel.syncItemToCloud(wardrobeItem)
+            scanAddedItemIDs.append(wardrobeItem.id)
+            itemsFound = scanAddedItemIDs.count
+            added += 1
+            print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe")
+        }
+        return added
+    }
+
+    /// The same garment shows up in many photos. Keep the best view of it: when
+    /// this photo's cutout is clearly better (bigger, sharper, less occluded, not
+    /// cut off) than the one in the wardrobe, swap the image — the item, its
+    /// metadata and any edits the user made stay as they are.
+    private func upgradeImageIfBetter(_ existing: WardrobeItem, with seg: ImageAnalysisService.SegmentedItem,
+                                      wardrobeViewModel: WardrobeViewModel) {
+        guard let cutout = seg.maskImage, let fp = seg.featurePrint else { return }
+        let store = ItemEmbeddingStore.shared
+        // Items from before the on-device pipeline have no score: any new cutout wins.
+        let current = store.quality(for: existing.id) ?? 0
+        guard seg.quality > current + 0.08,
+              let idx = wardrobeViewModel.items.firstIndex(where: { $0.id == existing.id }) else { return }
+        let ip = WardrobeImageFileHelper.saveImageAsPNG(cutout) ?? ""
+        guard !ip.isEmpty else { return }
+        let tp = WardrobeImageFileHelper.saveThumbnail(cutout)
+        WardrobeImageFileHelper.deleteImage(at: existing.imagePath)
+        if existing.croppedImagePath != existing.imagePath { WardrobeImageFileHelper.deleteImage(at: existing.croppedImagePath) }
+        WardrobeImageFileHelper.deleteImage(at: existing.thumbnailPath)
+        let updated = existing.withImages(imagePath: ip, croppedImagePath: ip, thumbnailPath: tp)
+        wardrobeViewModel.items[idx] = updated
+        wardrobeViewModel.syncItemToCloud(updated)
+        store.set(fp, quality: seg.quality, for: existing.id)
+        print("[StyleMate] Auto-scan: better photo of \(existing.product) (q \(String(format: "%.2f→%.2f", current, seg.quality)))")
+    }
+
+    // MARK: - "Is this you?" review queue
+
+    @Published var pendingReviewCount: Int = 0
+
+    func pendingReviews(forUser userId: String) -> [PendingFaceReview] {
+        let list = loadProgress(forUser: userId).pendingReviews ?? []
+        pendingReviewCount = list.count
+        return list.sorted { $0.similarity > $1.similarity }
+    }
+
+    /// Applies the user's answers. Confirmed photos teach the face gallery and are
+    /// extracted; rejected ones are dropped. Returns how many items were added.
+    func resolveReviews(confirmed: [PendingFaceReview], rejected: [PendingFaceReview],
+                        forUser userId: String, userGender: String?,
+                        wardrobeViewModel: WardrobeViewModel) async -> Int {
+        var progress = loadProgress(forUser: userId)
+        let answered = Set((confirmed + rejected).map(\.assetId))
+        progress.pendingReviews = (progress.pendingReviews ?? []).filter { !answered.contains($0.assetId) }
+        saveProgress(progress, forUser: userId)
+        pendingReviewCount = progress.pendingReviews?.count ?? 0
+
+        scanAddedItemIDs = []
+        var added = 0
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: confirmed.map(\.assetId), options: nil)
+        var byId: [String: PHAsset] = [:]
+        assets.enumerateObjects { a, _, _ in byId[a.localIdentifier] = a }
+
+        for review in confirmed {
+            guard let asset = byId[review.assetId],
+                  let full = await loadFullImage(for: asset), let cg = full.cgImage else { continue }
+            let image: UIImage? = await Task.detached(priority: .userInitiated) {
+                FaceMatchingService.shared.imageForConfirmedReview(
+                    cgImage: cg, fullImage: full, faceBox: review.faceRect,
+                    embedding: review.embedding, faceCount: review.faceCount, userId: userId)
+            }.value
+            guard let image else { continue }
+            added += await extractAndAdd(from: image, userGender: userGender, wardrobeViewModel: wardrobeViewModel)
+        }
+
+        progress = loadProgress(forUser: userId)
+        progress.totalItemsFound += added
+        progress.lastScanAddedItemIDs = scanAddedItemIDs.map { $0.uuidString }
+        saveProgress(progress, forUser: userId)
+        return added
+    }
+
+    /// Loads the face crop shown in the review grid.
+    func reviewThumbnail(for review: PendingFaceReview) async -> UIImage? {
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [review.assetId], options: nil).firstObject,
+              let full = await loadFullImage(for: asset, maxDimension: 1200), let cg = full.cgImage else { return nil }
+        return FaceMatchingService.shared.reviewFaceCrop(from: cg, faceBox: review.faceRect)
     }
 
     /// Throttle @Published updates to ~150ms intervals to avoid SwiftUI layout thrashing.
@@ -469,7 +585,9 @@ class PhotoScanService: ObservableObject {
             let options = PHImageRequestOptions()
             options.deliveryMode = .fastFormat
             options.resizeMode = .fast
-            options.isNetworkAccessAllowed = false
+            // iCloud-only photos still have a small local preview, but allow the
+            // network so a missing one is fetched instead of the photo being lost.
+            options.isNetworkAccessAllowed = true
             options.isSynchronous = false
 
             for (index, asset) in assets.enumerated() {
@@ -500,46 +618,61 @@ class PhotoScanService: ObservableObject {
         }
     }
 
-    /// Uses requestImageDataAndOrientation which is guaranteed to call its handler exactly once.
+    /// Loads the photo at up to 2048px with EXIF orientation baked into the pixels.
     /// 2048 (not 1024): face recognition + person isolation need faces large enough
     /// to embed reliably. At 1024 the faces in multi-person photos are too small and
-    /// the wrong person can outscore the user — the upload flow gets this right
-    /// because it matches on the full-res picked image.
+    /// the wrong person can outscore the user.
+    ///
+    /// Network access is ON: with iCloud Photos' "Optimize iPhone Storage" (the
+    /// default for most people) the full-size original of almost every photo
+    /// older than a few weeks lives only in iCloud. With network access off, every
+    /// one of those came back nil and was silently skipped — the main reason the
+    /// scan "couldn't find me" in a real library. A timeout keeps one slow
+    /// download from stalling the whole scan.
     private func loadFullImage(for asset: PHAsset, maxDimension: CGFloat = 2048) async -> UIImage? {
-        await withCheckedContinuation { continuation in
-            let options = PHImageRequestOptions()
-            options.isNetworkAccessAllowed = false
-            options.isSynchronous = false
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .exact
+        options.version = .current
+        options.isSynchronous = false
 
-            PHImageManager.default().requestImageDataAndOrientation(
-                for: asset, options: options
-            ) { data, _, _, _ in
-                let result: UIImage? = autoreleasepool {
-                    guard let data, let fullImage = UIImage(data: data) else { return nil }
-                    // Always render through UIGraphicsImageRenderer to bake EXIF
-                    // orientation into pixels. Without this, .cgImage returns the
-                    // raw rotated bitmap and Vision face coordinates are wrong.
-                    let targetSize: CGSize
-                    let scale = min(maxDimension / max(fullImage.size.width, fullImage.size.height), 1.0)
-                    if scale < 1.0 {
-                        targetSize = CGSize(width: fullImage.size.width * scale,
-                                            height: fullImage.size.height * scale)
-                    } else {
-                        targetSize = fullImage.size
-                    }
-                    // scale = 1.0 so the output is targetSize in PIXELS. Without
-                    // this the renderer uses the screen's 3x scale, producing a
-                    // ~6144px image whose face embeds differently from the ~1600px
-                    // gallery faces — degrading the match (proven by the loader probe).
-                    let format = UIGraphicsImageRendererFormat.default()
-                    format.scale = 1.0
-                    let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
-                    return renderer.image { _ in
-                        fullImage.draw(in: CGRect(origin: .zero, size: targetSize))
-                    }
-                }
-                continuation.resume(returning: result)
+        let longSide = CGFloat(max(asset.pixelWidth, asset.pixelHeight))
+        let scale = longSide > 0 ? min(maxDimension / longSide, 1.0) : 1.0
+        let target = longSide > 0
+            ? CGSize(width: (CGFloat(asset.pixelWidth) * scale).rounded(),
+                     height: (CGFloat(asset.pixelHeight) * scale).rounded())
+            : CGSize(width: maxDimension, height: maxDimension)
+
+        let manager = PHImageManager.default()
+        let gate = ResumeGate()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<UIImage?, Never>) in
+            let requestID = manager.requestImage(for: asset, targetSize: target,
+                                                 contentMode: .aspectFit, options: options) { image, info in
+                if (info?[PHImageResultIsDegradedKey] as? Bool) == true { return }
+                let baked: UIImage? = autoreleasepool { image.map { Self.bakeOrientation($0, pixelScale: true) } }
+                if gate.claim() { continuation.resume(returning: baked) }
             }
+            Task {
+                try? await Task.sleep(nanoseconds: 45_000_000_000)
+                if gate.claim() {
+                    manager.cancelImageRequest(requestID)
+                    print("[StyleMate] Auto-scan: full image timed out (iCloud download?) for \(asset.localIdentifier)")
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
+    /// Resumes a continuation exactly once across a completion handler and a timeout.
+    private final class ResumeGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var done = false
+        func claim() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if done { return false }
+            done = true
+            return true
         }
     }
 
@@ -548,11 +681,20 @@ class PhotoScanService: ObservableObject {
     /// Renders any UIImage into a new bitmap with .up orientation,
     /// baking EXIF rotation/mirroring into the actual pixel data so
     /// that .cgImage returns correctly-oriented pixels for Vision.
-    private nonisolated static func bakeOrientation(_ image: UIImage) -> UIImage {
-        guard image.imageOrientation != .up, image.cgImage != nil else { return image }
-        let renderer = UIGraphicsImageRenderer(size: image.size)
+    /// `pixelScale`: render at scale 1 so the output's point size IS its pixel size
+    /// (otherwise the renderer uses the screen's 3x scale and the image balloons,
+    /// and faces embed differently from the gallery faces).
+    private nonisolated static func bakeOrientation(_ image: UIImage, pixelScale: Bool = false) -> UIImage {
+        guard image.imageOrientation != .up || (pixelScale && image.scale != 1),
+              image.cgImage != nil else { return image }
+        let format = UIGraphicsImageRendererFormat.default()
+        if pixelScale { format.scale = 1 }
+        let size = pixelScale
+            ? CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+            : image.size
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
         return renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: image.size))
+            image.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }

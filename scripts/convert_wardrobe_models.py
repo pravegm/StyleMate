@@ -21,7 +21,7 @@ StyleMate/ML/ (git-ignored; the Xcode synchronized group bundles whatever is the
   FashionVocabulary.json    Text embeddings for every label the app classifies
                             into, precomputed so no text tower ships.
 
-All three: fp16 compute, int8 weights, parity-checked vs PyTorch.
+fp16 compute; the two parsers have int8 weights (the encoder stays fp16), parity-checked vs PyTorch.
 """
 import json, os, sys
 from pathlib import Path
@@ -144,7 +144,8 @@ ml = ct.convert(
     minimum_deployment_target=ct.target.iOS17,
     compute_precision=ct.precision.FLOAT16,
 )
-ml = palettize(ml)
+# fp16, not int8: 8-bit weights moved the embedding (cos 0.989), and duplicate
+# matching compares embeddings against fixed cosine bars.
 ml.short_description = "Marqo-FashionSigLIP image encoder: 224x224 RGB -> normalized 768-d embedding"
 parity("FashionEncoder", ml, ref, {"image": sample_image(224, 224)}, "embedding", "cos")
 dst = OUT / "FashionEncoder.mlpackage"

@@ -340,6 +340,7 @@ enum ColorMapping {
         case "silver": return Color(red: 0.75, green: 0.75, blue: 0.76)
         case "gold": return Color(red: 0.83, green: 0.69, blue: 0.22)
         case "navy": return Color(red: 0.10, green: 0.16, blue: 0.36)
+        case "light blue": return Color(red: 0.59, green: 0.73, blue: 0.87)
         case "beige": return Color(red: 0.90, green: 0.86, blue: 0.76)
         case "cream": return Color(red: 0.98, green: 0.96, blue: 0.88)
         case "maroon": return Color(red: 0.5, green: 0, blue: 0)

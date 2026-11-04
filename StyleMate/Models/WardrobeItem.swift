@@ -150,6 +150,16 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
         )
     }
 
+    /// A copy pointing at new image files (same id and attributes).
+    func withImages(imagePath: String, croppedImagePath: String?, thumbnailPath: String?) -> WardrobeItem {
+        WardrobeItem(
+            id: id, category: category, product: product, colors: colors, brand: brand,
+            pattern: pattern, imagePath: imagePath, croppedImagePath: croppedImagePath,
+            thumbnailPath: thumbnailPath, material: material, fit: fit, neckline: neckline,
+            sleeveLength: sleeveLength, garmentLength: garmentLength, details: details
+        )
+    }
+
     var detailsSubtitle: String? {
         guard let details = details, !details.isEmpty else { return nil }
         return details
@@ -261,9 +271,14 @@ class WardrobeImageFileHelper {
         let thumbnailImage = renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: newSize))
         }
-        let filename = "thumb_" + UUID().uuidString + ".jpg"
+        // Cutouts are transparent: keep them PNG, or JPEG flattens the background to black.
+        let hasAlpha: Bool = {
+            guard let a = image.cgImage?.alphaInfo else { return false }
+            return ![.none, .noneSkipFirst, .noneSkipLast].contains(a)
+        }()
+        let filename = "thumb_" + UUID().uuidString + (hasAlpha ? ".png" : ".jpg")
         let url = folderURL.appendingPathComponent(filename)
-        guard let data = thumbnailImage.jpegData(compressionQuality: 0.7) else { return nil }
+        guard let data = hasAlpha ? thumbnailImage.pngData() : thumbnailImage.jpegData(compressionQuality: 0.7) else { return nil }
         do {
             try data.write(to: url)
             return filename
