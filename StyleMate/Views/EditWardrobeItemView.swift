@@ -1,6 +1,10 @@
 import SwiftUI
 import PhotosUI
 
+/// Edit an item's details, or give it a new photo. A replacement photo is cut out
+/// on-device like scanned items (just the garment, transparent PNG) and its
+/// visual embedding is refreshed for duplicate detection. Nothing on disk
+/// changes until Save: cancelling discards the new photo and keeps the old one.
 struct EditWardrobeItemView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var category: Category
@@ -8,176 +12,127 @@ struct EditWardrobeItemView: View {
     @State private var colors: [String]
     @State private var brand: String
     @State private var pattern: Pattern
-    @State private var imagePath: String
-    @State private var croppedImagePath: String?
-    @State private var thumbnailPath: String?
     @State private var material: String
     @State private var fit: Fit?
     @State private var neckline: Neckline?
     @State private var sleeveLength: SleeveLength?
     @State private var garmentLength: GarmentLength?
     @State private var details: String
-    let id: UUID
+    private let original: WardrobeItem
     var onSave: (WardrobeItem) -> Void
+
+    @State private var replacement: ReplacementCutout? = nil
+    @State private var replacementImage: UIImage? = nil
     @State private var showReplacePhotoSource = false
     @State private var showReplaceCamera = false
     @State private var showReplaceGallery = false
     @State private var replaceGallerySelection: [PhotosPickerItem] = []
     @State private var isReplacingPhoto = false
+    @State private var replaceFailed = false
+    @State private var saved = false
 
     init(item: WardrobeItem, onSave: @escaping (WardrobeItem) -> Void) {
         _category = State(initialValue: item.category)
         _product = State(initialValue: item.product)
-        _colors = State(initialValue: item.colors)
+        _colors = State(initialValue: item.colors.map(ClosetColor.normalize).filter { !$0.isEmpty })
         _brand = State(initialValue: item.brand)
         _pattern = State(initialValue: item.pattern)
-        _imagePath = State(initialValue: item.imagePath)
-        _croppedImagePath = State(initialValue: item.croppedImagePath)
-        _thumbnailPath = State(initialValue: item.thumbnailPath)
         _material = State(initialValue: item.material ?? "")
         _fit = State(initialValue: item.fit)
         _neckline = State(initialValue: item.neckline)
         _sleeveLength = State(initialValue: item.sleeveLength)
         _garmentLength = State(initialValue: item.garmentLength)
         _details = State(initialValue: item.details ?? "")
-        self.id = item.id
+        self.original = item
         self.onSave = onSave
     }
 
-    var productOptions: [String] {
-        productTypesByCategory[category] ?? []
-    }
+    private var productOptions: [String] { productTypesByCategory[category] ?? [] }
+
+    private var canSave: Bool { !product.isEmpty && !colors.isEmpty && !isReplacingPhoto }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    HStack {
-                        Spacer()
-                        if let img = WardrobeImageFileHelper.loadImage(at: croppedImagePath ?? imagePath) {
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(height: 160)
-                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-                        }
-                        Spacer()
-                    }
-                    .listRowBackground(Color.clear)
-
-                    Button {
-                        showReplacePhotoSource = true
-                    } label: {
-                        Label("Replace Photo", systemImage: "camera")
-                            .foregroundColor(DS.Colors.accent)
-                    }
+                    photoHeader
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
                 }
 
-                Picker("Category", selection: $category) {
-                    ForEach(Category.allCases) { cat in
-                        Text(cat.rawValue).tag(cat)
-                    }
-                }
-                .tint(DS.Colors.accent)
-
-                Picker("Product", selection: $product) {
-                    if !productOptions.contains(product) && !product.isEmpty {
-                        Text(product).tag(product)
-                    }
-                    ForEach(productOptions, id: \.self) { prod in
-                        Text(prod).tag(prod)
-                    }
-                }
-                .tint(DS.Colors.accent)
-
-                Section(header: Text("Colors")) {
-                    ForEach(colors.indices, id: \.self) { idx in
-                        HStack(spacing: DS.Spacing.xs) {
-                            colorSwatch(for: colors[idx])
-
-                            TextField("Color", text: Binding(
-                                get: { colors[idx] },
-                                set: { colors[idx] = $0 }
-                            ))
-
-                            if colors.count > 1 {
-                                Button(action: { colors.remove(at: idx) }) {
-                                    Image(systemName: "minus.circle.fill")
-                                        .foregroundColor(DS.Colors.error)
-                                }
-                            }
+                Section("Type") {
+                    Picker("Category", selection: $category) {
+                        ForEach(Category.allCases) { cat in
+                            Text(cat.rawValue).tag(cat)
                         }
                     }
-                    Button(action: { colors.append("") }) {
-                        Label("Add Color", systemImage: "plus.circle.fill")
-                            .foregroundColor(DS.Colors.success)
+                    Picker("Product", selection: $product) {
+                        if !productOptions.contains(product) && !product.isEmpty {
+                            Text(product).tag(product)
+                        }
+                        ForEach(productOptions, id: \.self) { prod in
+                            Text(prod).tag(prod)
+                        }
+                    }
+                    LabeledContent("Shelf") {
+                        Label(ClosetSection.of(category: category, product: product).title,
+                              systemImage: ClosetSection.of(category: category, product: product).iconName)
+                            .foregroundStyle(DS.Colors.textSecondary)
                     }
                 }
 
-                Picker("Pattern", selection: $pattern) {
-                    ForEach(Pattern.allCases) { pat in
-                        Text(pat.rawValue).tag(pat)
-                    }
+                Section {
+                    colorPicker
+                } header: {
+                    Text("Colors")
+                } footer: {
+                    Text(colors.isEmpty ? "Pick at least one color." : "Main color first: \(colors.joined(separator: ", "))")
                 }
-                .tint(DS.Colors.accent)
 
-                TextField("Brand (e.g. Nike)", text: $brand)
-
-                Section(header: Text("Attributes")) {
+                Section("Look") {
+                    Picker("Pattern", selection: $pattern) {
+                        ForEach(Pattern.allCases) { pat in
+                            Text(pat.rawValue).tag(pat)
+                        }
+                    }
                     TextField("Material (e.g. Cotton, Denim, Wool)", text: $material)
+                    TextField("Brand (e.g. Nike)", text: $brand)
+                        .textInputAutocapitalization(.words)
+                }
 
-                    if ![.footwear, .accessories].contains(category) {
-                        Picker("Fit", selection: Binding(
-                            get: { fit ?? .regular },
-                            set: { fit = $0 }
-                        )) {
-                            ForEach(Fit.allCases) { f in
-                                Text(f.rawValue).tag(f)
+                if category.supportsFit || category.supportsNeckline || category.supportsSleeves || category.supportsLength {
+                    Section("Cut") {
+                        if category.supportsFit {
+                            Picker("Fit", selection: Binding(get: { fit ?? .regular }, set: { fit = $0 })) {
+                                ForEach(Fit.allCases) { f in Text(f.rawValue).tag(f) }
                             }
                         }
-                        .tint(DS.Colors.accent)
-                    }
-
-                    if [.tops, .midLayers, .onePieces, .outerwear].contains(category) {
-                        Picker("Neckline", selection: Binding(
-                            get: { neckline ?? .crewNeck },
-                            set: { neckline = $0 }
-                        )) {
-                            ForEach(Neckline.allCases) { n in
-                                Text(n.rawValue).tag(n)
+                        if category.supportsNeckline {
+                            Picker("Neckline", selection: Binding(get: { neckline ?? .crewNeck }, set: { neckline = $0 })) {
+                                ForEach(Neckline.allCases) { n in Text(n.rawValue).tag(n) }
                             }
                         }
-                        .tint(DS.Colors.accent)
-                    }
-
-                    if [.tops, .midLayers, .outerwear, .onePieces, .activewear].contains(category) {
-                        Picker("Sleeve Length", selection: Binding(
-                            get: { sleeveLength ?? .longSleeve },
-                            set: { sleeveLength = $0 }
-                        )) {
-                            ForEach(SleeveLength.allCases) { s in
-                                Text(s.rawValue).tag(s)
+                        if category.supportsSleeves {
+                            Picker("Sleeve length", selection: Binding(get: { sleeveLength ?? .longSleeve }, set: { sleeveLength = $0 })) {
+                                ForEach(SleeveLength.allCases) { s in Text(s.rawValue).tag(s) }
                             }
                         }
-                        .tint(DS.Colors.accent)
-                    }
-
-                    if [.bottoms, .onePieces, .outerwear].contains(category) {
-                        Picker("Length", selection: Binding(
-                            get: { garmentLength ?? .fullLength },
-                            set: { garmentLength = $0 }
-                        )) {
-                            ForEach(GarmentLength.allCases) { l in
-                                Text(l.rawValue).tag(l)
+                        if category.supportsLength {
+                            Picker("Length", selection: Binding(get: { garmentLength ?? .fullLength }, set: { garmentLength = $0 })) {
+                                ForEach(GarmentLength.allCases) { l in Text(l.rawValue).tag(l) }
                             }
                         }
-                        .tint(DS.Colors.accent)
                     }
+                }
 
-                    TextField("Details (e.g. ribbed cuffs, front zip)", text: $details)
+                Section("Notes") {
+                    TextField("Details (e.g. ribbed cuffs, front zip)", text: $details, axis: .vertical)
+                        .lineLimit(1...4)
                 }
             }
             .tint(DS.Colors.accent)
+            .scrollContentBackground(.hidden)
+            .background(DS.Colors.backgroundPrimary)
             .navigationTitle("Edit Item")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -185,29 +140,9 @@ struct EditWardrobeItemView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        Haptics.medium()
-                        let updatedItem = WardrobeItem(
-                            id: id,
-                            category: category,
-                            product: product,
-                            colors: colors.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
-                            brand: brand,
-                            pattern: pattern,
-                            imagePath: imagePath,
-                            croppedImagePath: croppedImagePath,
-                            thumbnailPath: thumbnailPath,
-                            material: material.isEmpty ? nil : material,
-                            fit: fit,
-                            neckline: neckline,
-                            sleeveLength: sleeveLength,
-                            garmentLength: garmentLength,
-                            details: details.isEmpty ? nil : details
-                        )
-                        onSave(updatedItem)
-                        dismiss()
-                    }
-                    .disabled(product.isEmpty || colors.allSatisfy { $0.trimmingCharacters(in: .whitespaces).isEmpty })
+                    Button("Save") { save() }
+                        .fontWeight(.semibold)
+                        .disabled(!canSave)
                 }
             }
             .confirmationDialog("Replace Photo", isPresented: $showReplacePhotoSource) {
@@ -215,7 +150,12 @@ struct EditWardrobeItemView: View {
                 Button("Choose from Gallery") { showReplaceGallery = true }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Choose a new photo for this item")
+                Text("Use a photo of you wearing it, or of the item on its own.")
+            }
+            .alert("Couldn't use that photo", isPresented: $replaceFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Try another photo where the item is clearly visible.")
             }
             .sheet(isPresented: $showReplaceCamera) {
                 ImagePicker(image: Binding(
@@ -236,71 +176,122 @@ struct EditWardrobeItemView: View {
                     replaceGallerySelection = []
                 }
             }
-            .overlay {
+            .onChange(of: category) { newCategory in
+                // Keep the product valid for the new category.
+                let options = productTypesByCategory[newCategory] ?? []
+                if !options.contains(product), let first = options.first { product = first }
+            }
+            .onDisappear {
+                // Cancelled (or swiped away) after picking a new photo: drop it.
+                if !saved { replacement?.discard() }
+            }
+        }
+    }
+
+    // MARK: - Photo
+
+    private var photoHeader: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            ZStack {
+                if let replacementImage {
+                    ItemCutoutTile(image: replacementImage, height: 220, cornerRadius: DS.Radius.card, inset: 20)
+                } else {
+                    AsyncItemTile(path: original.gridImagePath, height: 220, cornerRadius: DS.Radius.card,
+                                  inset: 20, upgradePath: original.fullImagePath)
+                }
                 if isReplacingPhoto {
-                    OutfitLoadingOverlay(progress: 0.5, message: "Processing photo…")
+                    RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                    VStack(spacing: DS.Spacing.xs) {
+                        ProgressView()
+                        Text("Cutting out the item…")
+                            .font(DS.Font.footnote)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                    }
                 }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(isReplacingPhoto ? "Processing new photo" : "Item photo")
+
+            Button {
+                showReplacePhotoSource = true
+            } label: {
+                Label(replacement == nil ? "Replace photo" : "Choose a different photo", systemImage: "camera")
+                    .font(DS.Font.subheadline.weight(.semibold))
+            }
+            .disabled(isReplacingPhoto)
         }
+        .padding(.vertical, DS.Spacing.xs)
     }
 
-    private func processReplacementPhoto(_ newImage: UIImage) {
+    // MARK: - Colors
+
+    private var colorPicker: some View {
+        ColorSwatchPicker(colors: $colors)
+    }
+
+    // MARK: - Save / replace
+
+    private func save() {
+        Haptics.medium()
+        var imagePath = original.imagePath
+        var croppedImagePath = original.croppedImagePath
+        var thumbnailPath = original.thumbnailPath
+        if let replacement {
+            imagePath = replacement.imagePath
+            croppedImagePath = replacement.imagePath
+            thumbnailPath = replacement.thumbnailPath
+            ClosetImageLoader.shared.evict([original.imagePath, original.croppedImagePath, original.thumbnailPath])
+            WardrobeImageFileHelper.deleteImage(at: original.imagePath)
+            if original.croppedImagePath != original.imagePath {
+                WardrobeImageFileHelper.deleteImage(at: original.croppedImagePath)
+            }
+            WardrobeImageFileHelper.deleteImage(at: original.thumbnailPath)
+            if let fp = replacement.featurePrint {
+                ItemEmbeddingStore.shared.set(fp, quality: replacement.quality, for: original.id)
+            } else {
+                ItemEmbeddingStore.shared.remove(original.id)
+            }
+        }
+        let updated = WardrobeItem(
+            id: original.id,
+            category: category,
+            product: product,
+            colors: colors,
+            brand: brand.trimmingCharacters(in: .whitespaces),
+            pattern: pattern,
+            imagePath: imagePath,
+            croppedImagePath: croppedImagePath,
+            thumbnailPath: thumbnailPath,
+            material: material.trimmingCharacters(in: .whitespaces).isEmpty ? nil : material,
+            fit: category.supportsFit ? fit : nil,
+            neckline: category.supportsNeckline ? neckline : nil,
+            sleeveLength: category.supportsSleeves ? sleeveLength : nil,
+            garmentLength: category.supportsLength ? garmentLength : nil,
+            details: details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : details
+        )
+        saved = true
+        onSave(updated)
+        dismiss()
+    }
+
+    private func processReplacementPhoto(_ photo: UIImage) {
         isReplacingPhoto = true
+        let category = self.category, product = self.product
         Task {
-            let bgRemoved = await BackgroundRemovalService.shared.removeBackground(from: newImage) ?? newImage
-
-            guard let newImagePath = WardrobeImageFileHelper.saveImage(bgRemoved) else {
-                await MainActor.run { isReplacingPhoto = false }
-                return
-            }
-            let zoneCrop = BodyZone.cropToZone(image: bgRemoved, category: category)
-            let newCroppedPath = zoneCrop != nil ? WardrobeImageFileHelper.saveImage(zoneCrop!) : nil
-
-            let oldImagePath = self.imagePath
-            let oldCroppedPath = self.croppedImagePath
-            let oldThumbPath = self.thumbnailPath
-            let newThumbPath = WardrobeImageFileHelper.saveThumbnail(zoneCrop ?? bgRemoved)
-
+            let result = await ReplacementCutout.make(from: photo, category: category, product: product)
+            let preview = await ClosetImageLoader.shared.load(result?.imagePath)
             await MainActor.run {
-                WardrobeImageFileHelper.deleteImage(at: oldImagePath)
-                WardrobeImageFileHelper.deleteImage(at: oldCroppedPath)
-                WardrobeImageFileHelper.deleteImage(at: oldThumbPath)
-                self.imagePath = newImagePath
-                self.croppedImagePath = newCroppedPath
-                self.thumbnailPath = newThumbPath
+                if let result {
+                    replacement?.discard()      // a previous unsaved pick
+                    replacement = result
+                    replacementImage = preview
+                    Haptics.success()
+                } else {
+                    replaceFailed = true
+                }
                 isReplacingPhoto = false
-                Haptics.success()
             }
         }
-    }
-
-    @ViewBuilder
-    private func colorSwatch(for colorName: String) -> some View {
-        let name = colorName.lowercased().trimmingCharacters(in: .whitespaces)
-        let color: Color = {
-            switch name {
-            case "black": return .black
-            case "white": return .white
-            case "red": return .red
-            case "blue": return .blue
-            case "green": return .green
-            case "yellow": return .yellow
-            case "orange": return .orange
-            case "pink": return .pink
-            case "purple": return .purple
-            case "brown": return .brown
-            case "gray", "grey": return .gray
-            case "navy": return Color(red: 0, green: 0, blue: 0.5)
-            case "beige": return Color(red: 0.96, green: 0.96, blue: 0.86)
-            case "cream": return Color(red: 1, green: 0.99, blue: 0.82)
-            case "teal": return .teal
-            default: return DS.Colors.backgroundSecondary
-            }
-        }()
-
-        Circle()
-            .fill(color)
-            .frame(width: 18, height: 18)
-            .overlay(Circle().stroke(Color.black.opacity(0.1), lineWidth: 1))
     }
 }
