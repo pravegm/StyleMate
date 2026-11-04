@@ -2,33 +2,22 @@ import Foundation
 
 /// Guarantees every outfit we *show* is actually wearable.
 ///
-/// Gemini is asked to obey a composition rulebook, but nothing enforced it — a
-/// returned look could be missing a bottom or shoes, contain two pairs of pants,
-/// or duplicate another look. This layer runs on the mapped `[Outfit]` before it
-/// reaches the UI and:
+/// The on-device OutfitEngine already composes by these rules; this is the last
+/// line of defence before the UI (and the guard for any look built elsewhere).
+/// It runs on the mapped `[Outfit]` and:
 ///   1. drops physically-impossible duplicates within a look (≤1 bottom / footwear
-///      / one-piece),
-///   2. auto-repairs a missing core piece (upper, lower, footwear) by inserting the
-///      most neutral/solid wardrobe item of that category — but only for categories
-///      the wardrobe actually has, so a shoeless closet doesn't nuke every outfit,
-///   3. de-dups the batch so the 5 looks are distinct.
+///      / one-piece / mid-layer / outerwear),
+///   2. lets a one-piece cover what it covers (no separate bottom; no separate top
+///      unless it's worn over one, like dungarees or a saree),
+///   3. auto-repairs a missing core piece (upper, lower, footwear) by inserting the
+///      most neutral/solid wardrobe item for that slot — but only for slots the
+///      wardrobe actually has, so a shoeless closet doesn't nuke every outfit,
+///   4. de-dups the batch so the 5 looks are distinct.
 /// Anything that still can't be made complete is dropped.
+///
+/// Everything is keyed by `OutfitSlot`, not raw category, so an activewear
+/// legging counts as a bottom and a saree counts as a full look.
 enum OutfitValidator {
-
-    /// Categories that can serve as the upper "base" of an outfit.
-    private static let upperBaseCategories: Set<Category> = [.tops, .onePieces, .ethnicWear, .activewear]
-
-    /// At most one of each of these may appear in a single outfit. Bottoms /
-    /// footwear / one-piece are physical singletons; mid-layers and outerwear are
-    /// the "≤1 per layer tier" rule (two sweaters or two coats at once is wrong).
-    /// NOTE: .tops is deliberately NOT here — a base tee under a button-down is a
-    /// valid two-item upper layering.
-    private static let singletonCategories: Set<Category> = [.bottoms, .footwear, .onePieces, .midLayers, .outerwear]
-
-    /// Accessories are "points", not structural pieces — two looks that differ only
-    /// by an accessory aren't meaningfully different, so they're excluded from the
-    /// de-dup signature.
-    private static let coreRoleExclusions: Set<Category> = [.accessories]
 
     private static let neutralColors: Set<String> = [
         "black", "white", "gray", "grey", "navy", "beige", "cream",
@@ -36,11 +25,12 @@ enum OutfitValidator {
     ]
 
     /// Validate + repair a batch, returning only complete, distinct outfits
-    /// (original order preserved — Gemini's best suggestion stays first).
+    /// (original order preserved — the engine's best look stays first).
     static func validateAndRepair(_ outfits: [Outfit], wardrobe: [WardrobeItem]) -> [Outfit] {
-        let hasAnyFootwear = wardrobe.contains { $0.category == .footwear }
-        let hasAnyBottom   = wardrobe.contains { $0.category == .bottoms }
-        let hasAnyUpper    = wardrobe.contains { upperBaseCategories.contains($0.category) }
+        let slots = Set(wardrobe.compactMap { OutfitSlot.of($0) })
+        let hasAnyFootwear = slots.contains(.footwear)
+        let hasAnyBottom   = slots.contains(.bottom)
+        let hasAnyUpper    = slots.contains(.top)
 
         var result: [Outfit] = []
         var seen = Set<String>()
@@ -54,9 +44,9 @@ enum OutfitValidator {
                 droppedCount += 1
                 continue
             }
-            if fixed.items.count != outfit.items.count { repairedCount += 1 }
+            if fixed.items.map({ $0.id }) != outfit.items.map({ $0.id }) { repairedCount += 1 }
 
-            let key = dedupKey(fixed)
+            let key = signature(of: fixed)
             if seen.contains(key) { dupCount += 1; continue }
             seen.insert(key)
             result.append(fixed)
@@ -66,62 +56,85 @@ enum OutfitValidator {
         return result
     }
 
+    /// Identity of a look for de-duplication. Accessories are "points", not
+    /// structural pieces — two looks that differ only by an accessory aren't
+    /// meaningfully different, so they're excluded.
+    static func signature(of outfit: Outfit) -> String {
+        outfit.items
+            .filter { OutfitSlot.of($0) != .accessory }
+            .map { $0.id.uuidString }
+            .sorted()
+            .joined(separator: "|")
+    }
+
     // MARK: - Per-outfit repair
 
     private static func repair(_ outfit: Outfit, wardrobe: [WardrobeItem],
                                requireUpper: Bool, requireBottom: Bool, requireFootwear: Bool) -> Outfit? {
-        // 1) Strip impossible doubles (keep the first of each singleton category).
+        // 1) Strip impossible doubles (keep the first of each singleton slot).
         var items = dropImpossibleDoubles(outfit.items)
 
-        // 1b) A one-piece (dress/jumpsuit) already covers the lower body — a separate
-        // bottom alongside it is invalid, so drop any bottoms when a one-piece exists.
-        if items.contains(where: { $0.category == .onePieces }) {
-            items.removeAll { $0.category == .bottoms }
+        // 2) A one-piece (dress/jumpsuit/saree) already covers the lower body; a
+        // dress also covers the torso, while dungarees and a saree go over a top.
+        let onePiece = items.first { OutfitSlot.of($0) == .onePiece }
+        if let onePiece {
+            items.removeAll { OutfitSlot.of($0) == .bottom }
+            if !OutfitSlot.needsTopUnder(onePiece) {
+                items.removeAll { OutfitSlot.of($0) == .top }
+            }
         }
 
         var usedIDs = Set(items.map { $0.id })
 
-        // 2) Upper base (skip if a one-piece is present — it covers the torso).
-        let hasOnePiece = items.contains { $0.category == .onePieces }
-        if requireUpper, !hasOnePiece, !items.contains(where: { upperBaseCategories.contains($0.category) }) {
-            guard let top = pickNeutral(.tops, from: wardrobe, excluding: usedIDs) else { return nil }
+        // 3) Upper (a one-piece covers it).
+        if requireUpper, onePiece == nil, !items.contains(where: { OutfitSlot.of($0) == .top }) {
+            guard let top = pickNeutral(.top, from: wardrobe, excluding: usedIDs) else { return nil }
             items.append(top); usedIDs.insert(top.id)
         }
 
-        // 3) Lower (skip if a one-piece covers it).
-        let hasOnePieceNow = items.contains { $0.category == .onePieces }
-        if requireBottom, !hasOnePieceNow, !items.contains(where: { $0.category == .bottoms }) {
-            guard let bottom = pickNeutral(.bottoms, from: wardrobe, excluding: usedIDs) else { return nil }
+        // 4) Lower (a one-piece covers it).
+        if requireBottom, onePiece == nil, !items.contains(where: { OutfitSlot.of($0) == .bottom }) {
+            guard let bottom = pickNeutral(.bottom, from: wardrobe, excluding: usedIDs) else { return nil }
             items.append(bottom); usedIDs.insert(bottom.id)
         }
 
-        // 4) Footwear.
-        if requireFootwear, !items.contains(where: { $0.category == .footwear }) {
+        // 5) Footwear.
+        if requireFootwear, !items.contains(where: { OutfitSlot.of($0) == .footwear }) {
             guard let shoe = pickNeutral(.footwear, from: wardrobe, excluding: usedIDs) else { return nil }
             items.append(shoe); usedIDs.insert(shoe.id)
         }
 
+        // Nothing wearable at all (e.g. only accessories) isn't an outfit.
+        let hasBody = items.contains { slot in
+            let s = OutfitSlot.of(slot)
+            return s == .top || s == .onePiece
+        }
+        guard hasBody || !requireUpper else { return nil }
+
         return Outfit(items: items, explanation: outfit.explanation)
     }
 
-    /// Keep at most one bottom / footwear / one-piece (two pants is not an outfit).
+    /// Keep at most one bottom / footwear / one-piece / mid-layer / outerwear.
+    /// Tops are deliberately not singletons: a tee under dungarees or under an
+    /// open shirt is valid.
     private static func dropImpossibleDoubles(_ items: [WardrobeItem]) -> [WardrobeItem] {
-        var seenSingleton = Set<Category>()
+        var seenSlots = Set<OutfitSlot>()
         var out: [WardrobeItem] = []
         for item in items {
-            if singletonCategories.contains(item.category) {
-                if seenSingleton.contains(item.category) { continue }
-                seenSingleton.insert(item.category)
+            if let slot = OutfitSlot.of(item), slot.isSingleton {
+                if seenSlots.contains(slot) { continue }
+                seenSlots.insert(slot)
             }
             out.append(item)
         }
         return out
     }
 
-    /// Pick the most "safe to drop in" item of a category: prefer neutral colors and
-    /// solid patterns so a repaired piece doesn't clash with the rest of the look.
-    private static func pickNeutral(_ category: Category, from wardrobe: [WardrobeItem], excluding: Set<UUID>) -> WardrobeItem? {
-        let candidates = wardrobe.filter { $0.category == category && !excluding.contains($0.id) }
+    /// Pick the most "safe to drop in" item for a slot: prefer everyday categories
+    /// (not activewear / ethnic), neutral colours and solid patterns so a repaired
+    /// piece doesn't clash with the rest of the look.
+    private static func pickNeutral(_ slot: OutfitSlot, from wardrobe: [WardrobeItem], excluding: Set<UUID>) -> WardrobeItem? {
+        let candidates = wardrobe.filter { OutfitSlot.of($0) == slot && !excluding.contains($0.id) }
         guard !candidates.isEmpty else { return nil }
         return candidates.max { score($0) < score($1) }
     }
@@ -130,14 +143,7 @@ enum OutfitValidator {
         var s = 0
         if item.colors.contains(where: { neutralColors.contains($0.lowercased()) }) { s += 2 }
         if item.pattern == .solid { s += 1 }
+        if item.category != .activewear && item.category != .ethnicWear { s += 2 }
         return s
-    }
-
-    private static func dedupKey(_ outfit: Outfit) -> String {
-        outfit.items
-            .filter { !coreRoleExclusions.contains($0.category) }   // ignore accessories
-            .map { $0.id.uuidString }
-            .sorted()
-            .joined(separator: "|")
     }
 }

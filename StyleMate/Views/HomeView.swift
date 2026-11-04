@@ -124,9 +124,9 @@ struct HomeView: View {
                 case .emptyWardrobe:
                     Text("Add more items to your wardrobe to get outfit suggestions. You need at least a top, bottom, and shoes.")
                 case .networkError:
-                    Text("Couldn't connect to the styling engine. Please check your connection and try again.")
+                    Text("Something went wrong while styling. Please try again.")
                 case .parseError:
-                    Text("Something went wrong matching the suggestions. Please try again.")
+                    Text("Couldn't put a complete look together from your wardrobe yet. Try adding a few more pieces.")
                 case .none:
                     Text("Try adding more items or adjusting colors/patterns.")
                 }
@@ -157,6 +157,8 @@ struct HomeView: View {
                 }
             }
             .onAppear {
+                // Recency: the stylist reads what you've logged lately.
+                homeVM.attachWearLog(outfitsVM)
                 if homeVM.weather == nil && !homeVM.isWeatherLoading {
                     homeVM.requestWeatherForCurrentLocation()
                 }
@@ -237,7 +239,7 @@ struct HomeView: View {
         if let hero = homeVM.heroOutfit {
             Button {
                 Haptics.medium()
-                homeVM.openHeroInDeck()
+                homeVM.openHeroInDeck(user: authService.user)
             } label: {
                 VStack(alignment: .leading, spacing: DS.Spacing.md) {
                     HStack(alignment: .firstTextBaseline) {
@@ -354,7 +356,8 @@ struct HomeView: View {
 
             OutfitTypeChipRow(
                 selectedOutfitType: $homeVM.selectedOutfitType,
-                customOutfitDescription: $homeVM.customOutfitDescription
+                customOutfitDescription: $homeVM.customOutfitDescription,
+                selectedMood: $homeVM.selectedMood
             )
 
             Button(action: {
@@ -564,6 +567,7 @@ private struct WardrobeCategoryCard: View {
 private struct OutfitTypeChipRow: View {
     @Binding var selectedOutfitType: OutfitType?
     @Binding var customOutfitDescription: String?
+    @Binding var selectedMood: OutfitMood?
     @EnvironmentObject var authService: AuthService
 
     var preferredStyles: [OutfitType] {
@@ -601,6 +605,43 @@ private struct OutfitTypeChipRow: View {
                 .padding(.horizontal, DS.Spacing.micro)
             }
 
+            // Mood — optional; tap again to clear. Shapes palette, textures and fit.
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                HStack(spacing: DS.Spacing.micro) {
+                    Text("How do you want to feel?")
+                        .font(DS.Font.footnote)
+                        .foregroundStyle(selectedMood == nil ? DS.Colors.textTertiary : DS.Colors.accent)
+                    if let mood = selectedMood {
+                        Text("· \(mood.label)")
+                            .font(DS.Font.footnote.weight(.semibold))
+                            .foregroundStyle(DS.Colors.accent)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(DS.Motion.snappy, value: selectedMood)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: DS.Spacing.xs) {
+                        ForEach(OutfitMood.allCases) { mood in
+                            ChipButton(
+                                label: mood.label,
+                                icon: mood.icon,
+                                isSelected: selectedMood == mood,
+                                action: {
+                                    Haptics.selection()
+                                    withAnimation(DS.Motion.snappy) {
+                                        selectedMood = selectedMood == mood ? nil : mood
+                                    }
+                                }
+                            )
+                            .accessibilityLabel("\(mood.label) mood")
+                            .accessibilityAddTraits(selectedMood == mood ? .isSelected : [])
+                        }
+                    }
+                    .padding(.horizontal, DS.Spacing.micro)
+                }
+            }
+
             // Always-visible free text — what the user types here takes priority.
             VStack(alignment: .leading, spacing: DS.Spacing.micro) {
                 Text("Describe your own occasion or add details")
@@ -613,7 +654,7 @@ private struct OutfitTypeChipRow: View {
                         .foregroundStyle(hasCustom ? DS.Colors.accent : DS.Colors.textTertiary)
                         .padding(.top, 2)
 
-                    TextField("e.g. outdoor wedding, summer evening, smart but comfy", text: customText, axis: .vertical)
+                    TextField("e.g. outdoor wedding, something in blue, chilly evening", text: customText, axis: .vertical)
                         .font(DS.Font.subheadline)
                         .lineLimit(1...3)
                         .foregroundStyle(DS.Colors.textPrimary)
