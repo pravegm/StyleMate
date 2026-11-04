@@ -28,7 +28,8 @@ Originals, cropped images, and thumbnails are stored under `Documents/wardrobe_i
 
 The auto-scan walks `PHAssetCollection` chronologically across the date range you pick (last month / 6 months / year / custom / all). Before any photo is sent to Gemini, it's filtered by an on-device face check:
 
-- During onboarding you capture a reference selfie (`SelfieCameraService` → `FaceMatchingService`), and can optionally confirm more of your own faces from your library ("tap which photos are you") to strengthen the reference gallery.
+- During onboarding you capture a three-frame reference selfie (straight on, then a slight turn each way; `SelfieCameraService`). Each frame is checked on-device with SCRFD + AdaFace (one face, big enough, centred, lit, no sunglasses, same person as the first frame) before it's kept.
+- Then **Find yourself** (`Services/Identity/`, `FindYourselfView`) looks through up to ~1,500 recent photos on ~640 px thumbnails, embeds every usable face, groups faces of the same person (greedy centroid clustering at cosine 0.5; two faces in one photo are never grouped), ranks the groups against the selfie, and asks "Is this you?" about the best one, then "Also you?" about faces that match what you confirmed (other angles, light, sunglasses). Confirmed faces are re-embedded at ~1600 px (the scan's resolution) and a diverse set is added to the reference gallery. Without a selfie the most frequent face in your library (boosted by the Selfies album) is offered instead. It works with Limited Photos access too. The same screen is available later from Profile.
 - Faces are detected and 5-point-landmarked by the bundled **InsightFace SCRFD-10G** detector (Core ML), aligned to a canonical 112×112, then embedded with **AdaFace IR-101 (WebFace12M)** (bundled as `MobileFaceNet.mlpackage`, filename kept for history). SCRFD's precise landmarks are essential — ArcFace-family alignment is extremely sensitive, and imprecise landmarks collapse same-person similarity. Embeddings are tagged with the model version so an upgrade auto-rebuilds the gallery.
 - Each candidate photo is embedded the same way and compared by **cosine similarity** against the reference gallery, with tiered confidence (high / borderline / none) and a runner-up margin. When a photo has several people, the scan only keeps it if *you* are matched with high confidence and a clean margin, then isolates your garments via a person-instance mask — so other people's clothes are never extracted.
 
@@ -49,7 +50,7 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and show up 
 
 ## Major features
 
-- **Onboarding** — welcome → about you (name / age / gender) → photo-scan explainer (the initial auto-scan starts with the last month of photos; you can scan further back anytime) → selfie capture → photo library permission → reference builder → optional initial library scan. The auto-scan that follows can be paused/resumed from the home banner. The first time you land on Home, a one-time, skippable coach-mark tour introduces the main features (replayable anytime from Profile).
+- **Onboarding** — welcome → about you (name / age / gender) → photo-scan explainer (the initial auto-scan starts with the last month of photos; you can scan further back anytime) → three-frame selfie → photo library permission → find yourself ("Is this you?") → the initial library scan starts. The auto-scan that follows can be paused/resumed from the home banner. The first time you land on Home, a one-time, skippable coach-mark tour introduces the main features (replayable anytime from Profile).
 - **Home** — time-aware greeting, weather card, wardrobe-summary widget, "Style Me" launcher, scan progress banner, last-scan results.
 - **My Wardrobe** — grid grouped by category (sorted by item count), tap into category → product subgroups → item detail. Add via the custom bottom sheet (Camera / Gallery / Auto-scan), edit any field, delete with CloudKit cleanup.
 - **My Outfits** — calendar of logged outfits, day detail with edit/delete, manual outfit composer.
@@ -81,7 +82,8 @@ StyleMate/
 │   ├── DuplicateDetector        # similarity scoring
 │   ├── SCRFDDetector            # InsightFace SCRFD-10G face detect + 5-pt landmarks
 │   ├── FaceMatchingService      # SCRFD align + AdaFace IR-101 embeddings
-│   ├── SelfieCameraService      # onboarding selfie capture
+│   ├── SelfieCameraService      # onboarding selfie capture (3 checked frames)
+│   ├── Identity/                # "Find yourself": face clustering + ranking, library pass, selfie frame checks
 │   ├── PhotoScanService         # date-range library scan + face filter
 │   ├── OnboardingManager        # per-user completion flags
 │   ├── OutfitLogic              # Outfit value type
@@ -94,7 +96,7 @@ StyleMate/
 │   ├── MyOutfitsView
 │   ├── ProfileView / LoginView
 │   ├── MainTabView
-│   ├── Onboarding/              # welcome, explainers, selfie, permission, scan range, scan review
+│   ├── Onboarding/              # welcome, explainers, selfie, permission, find yourself, scan range, scan review
 │   └── Components/              # category cards, item rows, flow layout, weather card, scan banner, Gemini consent
 ├── DesignSystem.swift
 ├── Secrets.swift                # git-ignored, holds Gemini key
