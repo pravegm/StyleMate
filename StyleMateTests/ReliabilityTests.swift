@@ -65,6 +65,18 @@ struct ReliabilityTests {
         #expect(out.items.first?.thumbnailPath == "thumb_local.png")
     }
 
+    @Test func firstReconcileKeepsThePhonesCopy() {
+        let id = UUID()
+        let mine = item(id, colors: ["Red"])
+        var changes = CloudKitService.CloudChanges()
+        changes.modified = [item(id, colors: ["Blue"])]
+        changes.isFullFetch = true
+        let out = CloudMerge.apply(changes, to: [mine], ledger: SyncLedger(), preferLocal: true,
+                                   fileExists: { _ in true })
+        #expect(out.items.first?.colors == ["Red"])
+        #expect(out.uploadLocal == [id])
+    }
+
     @Test func locallyDeletedItemsDontComeBack() {
         let id = UUID()
         var ledger = SyncLedger()

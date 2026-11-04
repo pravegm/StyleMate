@@ -537,13 +537,19 @@ enum CloudMerge {
         var needAssets: [WardrobeItem] = []
         /// Tombstones the server confirmed (the record is gone).
         var confirmedDeletions: Set<UUID> = []
+        /// Local items whose copy should be re-uploaded (they differ from the cloud and the
+        /// local copy was kept — see `preferLocal`).
+        var uploadLocal: [UUID] = []
         var changed = false
     }
 
     /// Applies `changes` to `local` under `ledger`. `fileExists` says whether an image
-    /// file is on this phone.
+    /// file is on this phone. `preferLocal` is for the very first reconcile of a phone
+    /// (no ledger history yet): edits made under the old sync may never have reached the
+    /// cloud, so where both copies exist and differ the phone's copy is kept and re-sent.
     static func apply(_ changes: CloudKitService.CloudChanges, to local: [WardrobeItem],
-                      ledger: SyncLedger, fileExists: (String) -> Bool) -> Outcome {
+                      ledger: SyncLedger, preferLocal: Bool = false,
+                      fileExists: (String) -> Bool) -> Outcome {
         var out = Outcome(items: local)
         var indexByID: [UUID: Int] = [:]
         for (i, item) in local.enumerated() { indexByID[item.id] = i }
@@ -553,6 +559,10 @@ enum CloudMerge {
             if let idx = indexByID[cloud.id] {
                 let mine = out.items[idx]
                 guard metadataDiffers(mine, cloud) else { continue }
+                if preferLocal {
+                    out.uploadLocal.append(mine.id)
+                    continue
+                }
                 let image = fileExists(mine.imagePath) ? mine.imagePath : cloud.imagePath
                 var cropped = cloud.croppedImagePath
                 if let c = mine.croppedImagePath, fileExists(c) { cropped = c }

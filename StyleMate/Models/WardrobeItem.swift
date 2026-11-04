@@ -237,29 +237,42 @@ final class WardrobeImageFileHelper {
 
     // MARK: - Cache
     //
-    // Decoded-image cache for the small files only (thumbnails and outfit snapshots), with a
-    // byte budget. SwiftUI re-evaluates view bodies many times, and grids read
-    // `item.thumbnailImage`, so without a cache every re-render re-read the file. Full-size
-    // cutouts are NOT cached here: at up to 1024 px x 4 B they would crowd out hundreds of
-    // thumbnails (ClosetImageLoader keeps its own display-ready copies).
+    // Decoded-image caches with byte budgets (the old one was 600 entries, no size limit —
+    // ~1440 px thumbnails at ~8 MB each). SwiftUI re-evaluates view bodies many times and
+    // some views still read `item.thumbnailImage` / `croppedImage` in `body`, so without a
+    // cache every re-render re-read the file. Thumbnails and outfit snapshots get almost the
+    // whole budget; full-size cutouts (up to 4 MB decoded each) only a small one, so they
+    // can't crowd the thumbnails out. ClosetImageLoader keeps its own display-ready copies.
 
-    static let cacheByteLimit = 80 * 1024 * 1024
+    static let thumbnailCacheByteLimit = 64 * 1024 * 1024
+    static let fullImageCacheByteLimit = 16 * 1024 * 1024
 
-    private static let imageCache: NSCache<NSString, UIImage> = {
+    private static let thumbnailCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
-        cache.totalCostLimit = cacheByteLimit
-        cache.countLimit = 800
+        cache.totalCostLimit = thumbnailCacheByteLimit
+        cache.countLimit = 1000
+        return cache
+    }()
+
+    private static let fullImageCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.totalCostLimit = fullImageCacheByteLimit
+        cache.countLimit = 16
         return cache
     }()
 
     static let thumbnailPrefix = "thumb_"
     static let snapshotPrefix = "outfit_"
 
-    static func isCacheable(_ filename: String) -> Bool {
+    static func isThumbnail(_ filename: String) -> Bool {
         filename.hasPrefix(thumbnailPrefix) || filename.hasPrefix(snapshotPrefix)
     }
 
-    /// Decoded size in bytes (what the cache budget counts).
+    private static func cache(for filename: String) -> NSCache<NSString, UIImage> {
+        isThumbnail(filename) ? thumbnailCache : fullImageCache
+    }
+
+    /// Decoded size in bytes (what the cache budgets count).
     static func decodedCost(of image: UIImage) -> Int {
         let px = ImageDownsampler.pixelSize(of: image)
         return max(1, Int(px.width * px.height) * 4)
@@ -268,11 +281,13 @@ final class WardrobeImageFileHelper {
     static func loadImage(at filename: String) -> UIImage? {
         guard !filename.isEmpty else { return nil }
         let key = filename as NSString
-        if let cached = imageCache.object(forKey: key) { return cached }
+        let store = cache(for: filename)
+        if let cached = store.object(forKey: key) { return cached }
         guard let data = try? Data(contentsOf: fileURL(for: filename)),
               let image = UIImage(data: data) else { return nil }
-        if isCacheable(filename) {
-            imageCache.setObject(image, forKey: key, cost: decodedCost(of: image))
+        let cost = decodedCost(of: image)
+        if isThumbnail(filename) || cost <= fullImageCacheByteLimit / 4 {
+            store.setObject(image, forKey: key, cost: cost)
         }
         return image
     }
@@ -281,22 +296,23 @@ final class WardrobeImageFileHelper {
     /// when you only need to know whether a file is present.
     static func imageExists(at filename: String) -> Bool {
         guard !filename.isEmpty else { return false }
-        if imageCache.object(forKey: filename as NSString) != nil { return true }
+        if cache(for: filename).object(forKey: filename as NSString) != nil { return true }
         return FileManager.default.fileExists(atPath: fileURL(for: filename).path)
     }
 
     static func deleteImage(at filename: String?) {
         guard let filename, !filename.isEmpty else { return }
-        imageCache.removeObject(forKey: filename as NSString)
+        cache(for: filename).removeObject(forKey: filename as NSString)
         try? FileManager.default.removeItem(at: fileURL(for: filename))
     }
 
     static func evictFromCache(_ filename: String) {
-        imageCache.removeObject(forKey: filename as NSString)
+        cache(for: filename).removeObject(forKey: filename as NSString)
     }
 
     static func removeAllFromCache() {
-        imageCache.removeAllObjects()
+        thumbnailCache.removeAllObjects()
+        fullImageCache.removeAllObjects()
     }
 
     // MARK: - Thumbnails

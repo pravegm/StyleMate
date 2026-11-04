@@ -255,9 +255,14 @@ class WardrobeViewModel: ObservableObject {
 
         case .changes(let changes):
             guard currentUserEmail == user else { return }
-            let outcome = CloudMerge.apply(changes, to: items, ledger: ledger,
+            // First reconcile on this phone: edits made under the old sync may never have
+            // reached iCloud, so differing copies keep the phone's version (and re-send it).
+            let reconciledKey = "cloudReconciled_\(WardrobeViewModel.storageKey(for: user))"
+            let firstReconcile = changes.isFullFetch && !UserDefaults.standard.bool(forKey: reconciledKey)
+            let outcome = CloudMerge.apply(changes, to: items, ledger: ledger, preferLocal: firstReconcile,
                                            fileExists: { WardrobeImageFileHelper.imageExists(at: $0) })
             if outcome.changed { items = outcome.items }   // one write
+            for id in outcome.uploadLocal { ledger.markPending(id) }
             if !outcome.removed.isEmpty {
                 let doomed = outcome.removed
                 ItemEmbeddingStore.shared.remove(doomed.map(\.id))
@@ -277,6 +282,7 @@ class WardrobeViewModel: ObservableObject {
             }
             ledger.token = changes.newToken
             saveLedger()
+            UserDefaults.standard.set(true, forKey: reconciledKey)
             if !ledger.pending.isEmpty { await flushPendingChanges() }
             guard currentUserEmail == user else { return }
             await hydrateMissingImages(priority: outcome.needAssets, user: user)
@@ -400,6 +406,7 @@ class WardrobeViewModel: ObservableObject {
 
         // Sync ledger, then the cloud copy.
         SyncLedger.remove(userKey: key)
+        UserDefaults.standard.removeObject(forKey: "cloudReconciled_\(key)")
         if includingCloud {
             var wipe = SyncLedger()
             wipe.pendingZoneWipe = true
