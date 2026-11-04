@@ -469,7 +469,7 @@ extension FaceMatchingTests {
 
     @Test func findYourselfGroupsTheSamePersonAcrossPhotos() throws {
         let photo = try findYouFixture("street_coat_cap.jpg")
-        let other = try findYouFixture("street_coat_boots.jpg")
+        let other = try findYouFixture("kurta_dhoti_turban.jpg")   // a clearly visible, different person
 
         // The library pass works on ~640 px thumbnails; report how that resolution fares.
         let thumbFaces = FaceSampleExtractor.scannedFaces(in: resized(photo, longSide: 640), assetId: "thumb",
@@ -527,7 +527,9 @@ extension FaceMatchingTests {
         let again = SelfieFrameChecker.check(crop, step: .left, frontEmbedding: embedding)
         #expect(again.issue != .differentPerson)
         // ...and against a stranger's it isn't.
-        let strangerCG = try #require(try findYouFixture("street_coat_boots.jpg").cgImage)
+        // The street_coat_boots face is turned away in sunglasses and is (correctly) rejected by the
+        // quality gate, so use a clearly visible, different person.
+        let strangerCG = try #require(try findYouFixture("kurta_dhoti_turban.jpg").cgImage)
         let strangerFace = try #require(FaceSampleExtractor.faces(in: strangerCG).first)
         let stranger = SelfieFrameChecker.check(crop, step: .left, frontEmbedding: strangerFace.embedding)
         print("[Report] selfie check vs stranger: issue=\(String(describing: stranger.issue))")
