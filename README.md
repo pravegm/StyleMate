@@ -8,7 +8,8 @@ StyleMate finds the photos of *you* in your library, cuts out every garment and 
 
 ### 1. Finding you in your photos (on-device face matching)
 
-- During onboarding you take a selfie (`SelfieCameraService`) and can confirm more of your own faces from your library ("tap the photos that are you") to build a reference **gallery**.
+- During onboarding you take a **three-frame selfie** (straight on, then a slight turn each way; `SelfieCameraService`). Each frame is checked on-device (one face, big enough, centred, lit, no sunglasses) before it's accepted.
+- Then **Find yourself** (`Services/Identity/`, `FindYourselfView`) looks through up to ~1,500 recent photos, embeds every usable face, groups faces of the same person (greedy centroid clustering), ranks the groups by similarity to your selfie and asks "Is this you?" with one tap to confirm. The confirmed faces become your reference **gallery**, so the scan recognises you across angles, lighting and years.
 - Faces are detected and 5-point-landmarked by the bundled **InsightFace SCRFD-10G** detector (Core ML), aligned to a canonical 112×112, and embedded with **AdaFace IR-101 (WebFace12M)** (bundled as `MobileFaceNet.mlpackage`, filename kept for history). Embeddings are tagged with the model version so an upgrade rebuilds the gallery.
 - Each library photo is matched by **cosine similarity** against the gallery with tiered confidence and a runner-up margin:
   - **confident** → analysed straight away (in a multi-person photo only *your* body is isolated via a person-instance mask, so other people's clothes are never extracted); very confident matches also **teach the gallery** a new angle of your face;
@@ -48,11 +49,11 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and appear i
 
 ## Major features
 
-- **Onboarding**: welcome → about you → photo-scan explainer → selfie → photo permission → reference builder → initial library scan (pause/resume from the home banner). A one-time coach-mark tour introduces the main features.
-- **Home**: greeting, weather, wardrobe summary, "Style me" with occasion and mood chips, scan progress, "Is this you?" review banner, last-scan results.
+- **Onboarding**: welcome → about you → photo-scan explainer → three-frame selfie → photo permission → Find yourself → initial library scan (pause/resume from the home banner). A one-time coach-mark tour introduces the main features.
+- **Home**: greeting, weather, a "Today's look" card (the stylist's pick for today's weather as a small outfit board, with Wear today / More options; once you've logged a look it shows what you're wearing), "Style me" with occasion and mood chips, wardrobe summary, scan progress, "Is this you?" review banner, last-scan results.
 - **My Wardrobe**: a closet of cutout tiles on shelves (tops & layers, bottoms, dresses, footwear, bags, accessories, jewelry); filter by shelf, colour and pattern; sort by newest, colour or how often you wear it; search; tap to zoom into an item page (attributes, wear history, edit, "Remove from Wardrobe"); multi-select to remove misidentified items. Add via the + button: Camera / Gallery / Auto-scan.
 - **My Outfits**: week strip or month calendar of logged outfits.
-- **Large displays (iPhone Duo inner display, regular width)**: sidebar tabs; the closet becomes a split view (filters | grid | item page); Today's Outfit shows the board beside the note, a Keep / Swap list and all five options; Home and Outfits use two columns. The cover display and other iPhones keep the phone layout.
+- **Large displays (iPhone Duo inner display)**: two panes via `FoldAwareSplit` (split exactly on the crease when half-open): the closet grid beside the item page; Today's Outfit's board beside the note, a Keep / Swap list and all five options; Home and Outfits in two columns. The cover display and other iPhones keep the phone layout.
 - **Profile**: name, email, gender/age, preferred styles, cloud sync status, tour replay, data deletion.
 - **Authentication**: Sign in with Apple and Sign in with Google.
 - **CloudKit sync**: private database, custom `WardrobeZone`, per-item records with image assets.
@@ -74,6 +75,7 @@ StyleMate/
 │   ├── Outfits/                 # OutfitEngine, StyleKnowledge, OutfitMood, StyleIntentParser, OnDeviceStylist
 │   ├── ImageAnalysisService     # thin entry point to the wardrobe pipeline
 │   ├── SCRFDDetector / FaceMatchingService   # face detection, alignment, AdaFace embeddings, identity resolution
+│   ├── Identity/                # "Find yourself": face clustering + ranking, library pass, selfie frame checks
 │   ├── PhotoScanService         # library scan, identity gate, "Is this you?" queue
 │   ├── DuplicateDetector        # visual + attribute duplicate matching
 │   ├── OutfitValidator / OutfitLogic

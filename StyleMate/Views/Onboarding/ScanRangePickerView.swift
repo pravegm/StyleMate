@@ -82,7 +82,7 @@ struct ScanRangePickerView: View {
                 .font(DS.Font.title3)
                 .foregroundColor(DS.Colors.textPrimary)
 
-            Text("StyleMate finds the photos of you and adds what you're wearing. Everything stays on your iPhone.")
+            Text("StyleMate finds the photos of you and adds what you're wearing. Your photos are analysed on your iPhone and never uploaded.")
                 .font(DS.Font.subheadline)
                 .foregroundColor(DS.Colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

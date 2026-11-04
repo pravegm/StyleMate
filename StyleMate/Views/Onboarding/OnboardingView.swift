@@ -7,9 +7,10 @@ struct OnboardingView: View {
 
     @State private var currentStep = 0
     @State private var selfieImage: UIImage? = nil
-    @State private var showReferenceBuilder = false
 
-    private let totalSteps = 5
+    /// welcome → about you → photo explainer → selfie → photo access → find yourself.
+    /// Completing the last step marks onboarding done, which starts the first library scan.
+    private let totalSteps = 6
 
     var body: some View {
         ZStack {
@@ -36,6 +37,10 @@ struct OnboardingView: View {
                             )
                         case 4:
                             OnboardingPhotoPermissionView(onComplete: handlePhotoPermissionDone)
+                        case 5:
+                            FindYourselfView(userId: authService.user?.id ?? "", mode: .onboarding) { _ in
+                                completeOnboarding()
+                            }
                         default:
                             EmptyView()
                         }
@@ -49,20 +54,15 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .sheet(isPresented: $showReferenceBuilder, onDismiss: { completeOnboarding() }) {
-            if let userId = authService.user?.id {
-                FaceReferenceBuilderView(userId: userId, isPresented: $showReferenceBuilder)
-            }
-        }
         .onAppear { Haptics.prepare() }   // warm the Taptic Engine so the first tap is instant
     }
 
-    /// After photo permission: if granted, let the user build their face
-    /// reference ("tap which photos are you") before finishing onboarding.
+    /// After photo permission: if granted, "Find yourself" builds a strong face reference from
+    /// the library before onboarding finishes (and the first scan starts).
     private func handlePhotoPermissionDone() {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if status == .authorized || status == .limited {
-            showReferenceBuilder = true
+            advance()
         } else {
             completeOnboarding()
         }

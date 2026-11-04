@@ -17,16 +17,15 @@
 	<array>
 		<string>com.stylemates.StyleMate.photoscan</string>
 	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>
-		<string>remote-notification</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>StyleMate uses your camera to capture clothing items and take a reference selfie for finding your outfit photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>StyleMate scans your photo library to find the photos of you and catalog the clothes you wear in them. Everything, including face matching, happens on your iPhone; no photo leaves it.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>StyleMate saves diagnostic face crops to your Photos so recognition issues can be inspected.</string>
+	<string>StyleMate scans your photo library to find the photos of you and catalog the clothes you wear in them. Everything, including face matching, happens on your iPhone; no photo leaves it. Only your wardrobe items sync, to your own iCloud.</string>
 </dict>
 </plist>

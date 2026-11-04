@@ -52,8 +52,8 @@ class WeatherService {
     // MARK: - open-meteo (fallback)
 
     private func fetchFromOpenMeteo(latitude: Double, longitude: Double) async throws -> Weather {
-        let lat = String(format: "%.4f", latitude)
-        let lon = String(format: "%.4f", longitude)
+        let lat = String(format: "%.2f", latitude)
+        let lon = String(format: "%.2f", longitude)
         let urlString = "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=temperature_2m,weather_code,is_day&temperature_unit=celsius"
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
         var request = URLRequest(url: url)
@@ -109,8 +109,8 @@ class WeatherService {
     }
 
     private func fetchFromMetNo(latitude: Double, longitude: Double) async throws -> Weather {
-        let lat = String(format: "%.4f", latitude)
-        let lon = String(format: "%.4f", longitude)
+        let lat = String(format: "%.2f", latitude)
+        let lon = String(format: "%.2f", longitude)
         let urlString = "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=\(lat)&lon=\(lon)"
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
 
