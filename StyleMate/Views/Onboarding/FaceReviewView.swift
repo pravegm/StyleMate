@@ -67,7 +67,7 @@ struct FaceReviewView: View {
             Text("Tap every photo of you")
                 .font(DS.Font.title2)
                 .foregroundColor(DS.Colors.textPrimary)
-            Text("We weren't sure about these. Your picks teach StyleMate your face — and their outfits go straight into your wardrobe. Everything stays on your phone.")
+            Text("We weren't sure about these. Your picks teach StyleMate your face — and their outfits go straight into your wardrobe. Face matching never leaves your phone.")
                 .font(DS.Font.subheadline)
                 .foregroundColor(DS.Colors.textSecondary)
             Button(selected.count == reviews.count ? "Deselect all" : "Select all") {

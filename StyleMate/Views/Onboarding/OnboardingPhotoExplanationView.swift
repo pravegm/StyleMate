@@ -190,7 +190,7 @@ struct OnboardingPhotoExplanationView: View {
                      emphasized: false, visible: trust1Visible)
             trustRow(icon: "clock.fill", text: "Starts with your last month of photos. Scan further back anytime",
                      emphasized: false, visible: trust2Visible)
-            trustRow(icon: "lock.shield.fill", text: "Everything stays on your phone. Nothing is uploaded",
+            trustRow(icon: "lock.shield.fill", text: "Analysed on your phone. Your photos are never uploaded",
                      emphasized: true, visible: trust3Visible)
         }
         .padding(.horizontal, DS.Spacing.xl)
