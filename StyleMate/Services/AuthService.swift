@@ -18,6 +18,16 @@ class AuthService: ObservableObject {
     static private let authProviderKey = "authProvider"
 
     init() {
+        #if DEBUG
+        // UI-test launch arguments (StyleMate/Debug/DebugLaunchSupport.swift): sign in a local demo
+        // user without Apple/Google. Not persisted as an Apple/Google session, so
+        // checkCredentialState() leaves it alone and a normal launch never restores it.
+        if let demoUser = DebugLaunchSupport.applyIfNeeded() {
+            self.user = demoUser
+            self.isAuthenticated = true
+            return
+        }
+        #endif
         restoreSession()
     }
 
