@@ -243,24 +243,45 @@ enum GarmentSegmenter {
         }
         guard count > 0 else { return nil }
 
-        // Enclosed holes covered by an occluder (hands, arms, hair, a bag strap, a
-        // belt, jewelry). Skin that's legitimately exposed (face/torso/legs) and
-        // other garments are never filled.
+        // Amodal completion: the parts of the garment hidden behind something —
+        // a hand, an arm, hair, a bag or strap, a belt, a scarf, or (for an open
+        // jacket/shirt) the top showing between its halves. They are filled with
+        // the garment's own fabric so the cutout (and the studio render made from
+        // it) shows the WHOLE garment, not a garment with a hand-shaped hole.
+        // Candidates: pixels enclosed by the garment, or within a morphological
+        // closing of it, that the parser labels as an occluder. Exposed skin
+        // (face / torso / legs) and background are never filled, so a V-neck or
+        // the gap between trouser legs stay open.
         var holes = [UInt8](repeating: 0, count: n)
         var holeCount = 0
         if !kind.isSmall {
             let outside = floodOutside(mask, w: w, h: h, x0: x0, y0: y0, x1: x1, y1: y1)
-            let occluders: Set<UInt8> = [P.hands.rawValue, P.arms.rawValue, P.hair.rawValue,
+            var occluders: Set<UInt8> = [P.hands.rawValue, P.arms.rawValue, P.hair.rawValue,
                                          P.bag.rawValue, P.belt.rawValue, P.jewelry.rawValue, P.scarf.rawValue]
+            // Other clothing in front of / between this garment: the inner top
+            // between an open jacket's halves, a shirt overhanging trousers.
+            switch kind {
+            case .outerLayer, .innerTop: occluders.formUnion([P.top.rawValue, P.dress.rawValue])
+            case .lower: occluders.formUnion([P.top.rawValue, P.dress.rawValue])
+            case .onePiece: occluders.formUnion([P.top.rawValue])
+            default: break
+            }
+            let radius = kind == .lower ? 5 : 10
+            var hull = mask
+            for _ in 0..<radius { hull = dilate(hull, w: w, h: h) }
+            for _ in 0..<radius { hull = erode(hull, w: w, h: h) }
             for y in y0..<y1 {
                 for x in x0..<x1 {
                     let i = y * w + x
-                    if mask[i] == 0, outside[i] == 0, occluders.contains(parser[i]) { holes[i] = 1; holeCount += 1 }
+                    guard mask[i] == 0, outside[i] == 0 || hull[i] != 0 else { continue }
+                    if occluders.contains(parser[i]) { holes[i] = 1; holeCount += 1 }
                 }
             }
-            // A "hole" bigger than a third of the garment isn't an occlusion we
-            // can credibly paint over (e.g. a crossed arm over most of a top).
-            if Double(holeCount) > Double(count) * 0.33 { holes = [UInt8](repeating: 0, count: n); holeCount = 0 }
+            // Only credible completions: an open jacket's gap can be large; for
+            // anything else a "hole" over a third of the garment is a different
+            // garment or a body part, not an occlusion.
+            let limit = kind == .outerLayer ? 0.6 : 0.33
+            if Double(holeCount) > Double(count) * limit { holes = [UInt8](repeating: 0, count: n); holeCount = 0 }
         }
 
         return GarmentInstance(
