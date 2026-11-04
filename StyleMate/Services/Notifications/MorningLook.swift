@@ -388,15 +388,17 @@ enum MorningForecast {
                             "&hourly=temperature_2m,weather_code&forecast_days=3&timezone=auto") else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let decoded = try? JSONDecoder().decode(Hourly.self, from: data) else { return nil }
+        guard let result = try? await URLSession.shared.data(for: request),
+              (result.1 as? HTTPURLResponse)?.statusCode == 200,
+              let decoded = try? JSONDecoder().decode(Hourly.self, from: result.0) else { return nil }
         // Open-Meteo local time strings: "2026-11-05T07:00".
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd'T'HH:mm"
         f.timeZone = .current
-        let target = f.string(from: Calendar.current.date(bySetting: .minute, value: 0, of: date) ?? date)
+        let hourStart = Calendar.current.date(bySettingHour: Calendar.current.component(.hour, from: date),
+                                              minute: 0, second: 0, of: date) ?? date
+        let target = f.string(from: hourStart)
         let h = decoded.hourly
         guard let i = h.time.firstIndex(of: target) ?? h.time.firstIndex(where: { $0 > target }),
               i < h.temperature_2m.count, i < h.weather_code.count else { return nil }
