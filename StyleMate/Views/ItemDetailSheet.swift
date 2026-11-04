@@ -20,10 +20,15 @@ struct ItemDetailView: View {
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(item: WardrobeItem, wear: WearStat?, onDelete: @escaping (WardrobeItem) -> Void) {
+    /// Shown as a pane next to the closet grid (wide layout) instead of pushed:
+    /// no navigation title of its own, the ⋯ menu sits in the header.
+    var embedded = false
+
+    init(item: WardrobeItem, wear: WearStat?, embedded: Bool = false, onDelete: @escaping (WardrobeItem) -> Void) {
         self.itemID = item.id
         self.fallback = item
         self.wear = wear
+        self.embedded = embedded
         self.onDelete = onDelete
     }
 
@@ -33,40 +38,16 @@ struct ItemDetailView: View {
 
     var body: some View {
         let item = self.item
-        ScrollView {
-            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
-                hero(item)
-                header(item)
-                Group {
-                    colors(item)
-                    attributes(item)
-                    notes(item)
-                    actions
-                }
-                .dsAppear(appeared)
-            }
-            .padding(.horizontal, DS.Spacing.screenH)
-            .padding(.top, DS.Spacing.xs)
-            .padding(.bottom, DS.Spacing.xxl)
-        }
-        .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
-        .accessibilityIdentifier("itemDetail.root")
-        .navigationTitle(ClosetText.displayProduct(item.product))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button { showEdit = true } label: { Label("Edit details", systemImage: "pencil") }
-                        .accessibilityIdentifier("itemDetail.edit")
-                    Divider()
-                    Button(role: .destructive) { confirmRemove = true } label: {
-                        Label("Remove from Wardrobe", systemImage: "trash")
+        Group {
+            if embedded {
+                page(item)
+            } else {
+                page(item)
+                    .navigationTitle(ClosetText.displayProduct(item.product))
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) { moreMenu }
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .accessibilityLabel("More actions")
-                .accessibilityIdentifier("itemDetail.more")
             }
         }
         .onAppear {
@@ -93,6 +74,44 @@ struct ItemDetailView: View {
         }
     }
 
+    private var moreMenu: some View {
+        Menu {
+            Button { showEdit = true } label: { Label("Edit details", systemImage: "pencil") }
+                .accessibilityIdentifier("itemDetail.edit")
+            Divider()
+            Button(role: .destructive) { confirmRemove = true } label: {
+                Label("Remove from Wardrobe", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("More actions")
+        .accessibilityIdentifier("itemDetail.more")
+    }
+
+    private func page(_ item: WardrobeItem) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                hero(item)
+                header(item)
+                Group {
+                    colors(item)
+                    attributes(item)
+                    notes(item)
+                    actions
+                }
+                .dsAppear(appeared)
+            }
+            .padding(.horizontal, DS.Spacing.screenH)
+            .padding(.top, DS.Spacing.xs)
+            .padding(.bottom, DS.Spacing.xxl)
+        }
+        .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+        .accessibilityIdentifier("itemDetail.root")
+    }
+
     // MARK: - Hero
 
     private func hero(_ item: WardrobeItem) -> some View {
@@ -114,9 +133,15 @@ struct ItemDetailView: View {
     private func header(_ item: WardrobeItem) -> some View {
         let section = ClosetSection.of(item)
         return VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            Label(section.title, systemImage: section.iconName)
-                .font(DS.Font.footnote.weight(.semibold))
-                .foregroundStyle(DS.Colors.accent)
+            HStack {
+                Label(section.title, systemImage: section.iconName)
+                    .font(DS.Font.footnote.weight(.semibold))
+                    .foregroundStyle(DS.Colors.accent)
+                if embedded {
+                    Spacer()
+                    moreMenu.foregroundStyle(DS.Colors.accent)
+                }
+            }
             Text(ClosetText.displayName(item))
                 .font(DS.Font.title2)
                 .foregroundStyle(DS.Colors.textPrimary)

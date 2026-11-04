@@ -206,6 +206,20 @@ class E2ETestCase: XCTestCase {
         start.press(forDuration: 0.1, thenDragTo: end)
     }
 
+    /// The open item page (its edit action lives in the ⋯ menu, so match the page itself).
+    @MainActor
+    func itemPage() -> XCUIElement {
+        anyElement(NSPredicate(format:
+            "identifier == 'itemDetail.root' OR identifier == 'itemDetail.more' OR label == 'More actions'"))
+    }
+
+    /// Answers "Weather unavailable" with its go-ahead button ("Style anyway"; older builds: "Yes").
+    @MainActor
+    func proceedWithoutWeather(_ alert: XCUIElement) {
+        let proceed = alert.buttons["Style anyway"]
+        (proceed.exists ? proceed : alert.buttons["Yes"]).tap()
+    }
+
     /// Every button on screen, one per line — attached when a selector needs updating.
     @MainActor
     func visibleButtonLabels() -> String {

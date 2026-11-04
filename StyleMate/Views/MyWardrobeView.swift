@@ -13,7 +13,7 @@ struct MyWardrobeView: View {
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var outfitsViewModel: MyOutfitsViewModel
     @Binding var showAddSheet: Bool
-    @Environment(\.horizontalSizeClass) private var hSizeClass
+    @Environment(\.duoLayout) private var duo
 
     @State private var filter = ClosetFilter()
     @AppStorage("closet.sort") private var sort: ClosetSort = .newest
@@ -27,13 +27,16 @@ struct MyWardrobeView: View {
     @State private var pendingRemoval: WardrobeItem? = nil
     @State private var detailItem: WardrobeItem? = nil
     @State private var editingItem: WardrobeItem? = nil
-    @State private var splitVisibility: NavigationSplitViewVisibility = .all
     @Namespace private var zoomNS
 
-    private var isWide: Bool { hSizeClass == .regular }
+    private var isWide: Bool { duo.isWideLayout }
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: isWide ? 120 : (largeTiles ? 150 : 100)), spacing: 10, alignment: .top)]
+        // Wide: an even count in the grid's pane (the crease falls between panes).
+        if isWide {
+            return Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: largeTiles ? 2 : 4)
+        }
+        return [GridItem(.adaptive(minimum: largeTiles ? 150 : 100), spacing: 10, alignment: .top)]
     }
 
     var body: some View {
@@ -98,46 +101,56 @@ struct MyWardrobeView: View {
         }
     }
 
-    // MARK: - Wide: sidebar | grid | item page
+    // MARK: - Wide: grid | item page
 
+    /// Grid (filters pinned on top) beside the item page. `FoldAwareSplit` puts
+    /// the split on the crease when the Duo is half-open, so no tile or the page
+    /// ever straddles the fold; flat it is an even two-pane split.
     private var splitCloset: some View {
-        NavigationSplitView(columnVisibility: $splitVisibility) {
-            ClosetSidebar(
-                filter: $filter, sort: $sort,
-                counts: ClosetEngine.counts(wardrobeViewModel.items),
-                total: wardrobeViewModel.items.count,
-                swatches: ClosetColor.swatches(for: wardrobeViewModel.items),
-                patterns: ClosetEngine.patterns(in: wardrobeViewModel.items),
-                hasWearLog: !wear.isEmpty
-            )
-            .navigationTitle("Wardrobe")
-            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
-        } content: {
-            closetContent(showsFilterBar: false)
-                .navigationTitle(filter.section?.title ?? "All items")
-                .navigationBarTitleDisplayMode(.inline)
-                .searchable(text: $filter.query, prompt: "Search name, color, brand")
-                .toolbar { toolbar }
-                .safeAreaInset(edge: .bottom) {
-                    if isSelecting { selectionBar }
-                }
-                .navigationSplitViewColumnWidth(min: 340, ideal: 560, max: 720)
-        } detail: {
-            if let item = detailItem {
-                ItemDetailView(item: item, wear: wear[item.id]) { removed in
-                    detailItem = nil
-                    withAnimation(DS.Motion.smooth) {
-                        ClosetActions.remove([removed], from: wardrobeViewModel)
+        NavigationStack {
+            FoldAwareSplit(gutter: DS.Spacing.md, stackedSpacing: 0) {
+                closetContent(showsFilterBar: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .safeAreaInset(edge: .bottom) {
+                        if isSelecting { selectionBar }
                     }
-                }
-                .id(item.id)
-            } else {
-                ContentUnavailableView("Pick an item",
-                                       systemImage: "hanger",
-                                       description: Text("Its details, colours and wear history show here."))
+            } trailing: {
+                detailPane
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+            .navigationTitle("Wardrobe")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $filter.query, prompt: "Search name, color, brand")
+            .toolbar { toolbar }
+            .onAppear { showFirstItemIfNeeded() }
+            .onChange(of: wardrobeViewModel.items.count) { _ in showFirstItemIfNeeded() }
         }
-        .navigationSplitViewStyle(.balanced)
+    }
+
+    @ViewBuilder
+    private var detailPane: some View {
+        if let item = detailItem {
+            ItemDetailView(item: item, wear: wear[item.id], embedded: true) { removed in
+                detailItem = nil
+                withAnimation(DS.Motion.smooth) {
+                    ClosetActions.remove([removed], from: wardrobeViewModel)
+                }
+                showFirstItemIfNeeded()
+            }
+            .id(item.id)
+            .transition(.opacity)
+        } else {
+            ContentUnavailableView("Pick an item",
+                                   systemImage: "hanger",
+                                   description: Text("Its details, colors and wear history show here."))
+        }
+    }
+
+    /// Wide layout: the page pane is never empty while there's something to show.
+    private func showFirstItemIfNeeded() {
+        guard isWide, detailItem == nil else { return }
+        detailItem = ClosetEngine.apply(wardrobeViewModel.items, filter: filter, sort: sort, wear: wear).first
     }
 
     // MARK: - Closet
@@ -425,116 +438,6 @@ struct MyWardrobeView: View {
                 ClosetActions.remove([item], from: wardrobeViewModel)
             }
         }
-    }
-}
-
-// MARK: - Sidebar (wide layout)
-
-/// Shelves, sort, colours and patterns as a sidebar list for the split closet.
-private struct ClosetSidebar: View {
-    @Binding var filter: ClosetFilter
-    @Binding var sort: ClosetSort
-    let counts: [ClosetSection: Int]
-    let total: Int
-    let swatches: [String]
-    let patterns: [Pattern]
-    let hasWearLog: Bool
-
-    var body: some View {
-        List {
-            Section("Shelves") {
-                shelfRow(nil, title: "All items", icon: "square.grid.2x2", count: total)
-                ForEach(ClosetSection.allCases) { s in
-                    if let n = counts[s], n > 0 {
-                        shelfRow(s, title: s.title, icon: s.iconName, count: n)
-                    }
-                }
-            }
-
-            Section("Sort") {
-                Picker("Sort by", selection: $sort) {
-                    ForEach(ClosetSort.allCases) { s in
-                        Label(s.title, systemImage: s.iconName).tag(s)
-                    }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-                if !hasWearLog && sort.usesWearLog {
-                    Text("Log outfits to see what you wear most")
-                        .font(DS.Font.footnote)
-                        .foregroundStyle(DS.Colors.textSecondary)
-                }
-            }
-
-            if !swatches.isEmpty {
-                Section("Colors") {
-                    FlowLayout(spacing: 2) {
-                        ForEach(swatches, id: \.self) { name in
-                            ColorSwatchButton(name: name, isSelected: filter.colors.contains(name)) {
-                                if filter.colors.contains(name) { filter.colors.remove(name) }
-                                else { filter.colors.insert(name) }
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-
-            if patterns.count > 1 {
-                Section("Patterns") {
-                    ForEach(patterns) { p in
-                        Button {
-                            Haptics.selection()
-                            if filter.patterns.contains(p) { filter.patterns.remove(p) } else { filter.patterns.insert(p) }
-                        } label: {
-                            HStack {
-                                Text(p.rawValue).foregroundStyle(DS.Colors.textPrimary)
-                                Spacer()
-                                if filter.patterns.contains(p) {
-                                    Image(systemName: "checkmark").foregroundStyle(DS.Colors.accent)
-                                }
-                            }
-                        }
-                        .accessibilityAddTraits(filter.patterns.contains(p) ? .isSelected : [])
-                    }
-                }
-            }
-
-            if filter.hasFacets {
-                Section {
-                    Button("Clear filters") {
-                        Haptics.light()
-                        filter.section = nil
-                        filter.colors = []
-                        filter.patterns = []
-                    }
-                    .foregroundStyle(DS.Colors.accent)
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .animation(DS.Motion.snappy, value: filter)
-    }
-
-    private func shelfRow(_ section: ClosetSection?, title: String, icon: String, count: Int) -> some View {
-        let selected = filter.section == section
-        return Button {
-            Haptics.selection()
-            filter.section = section
-        } label: {
-            HStack {
-                Label(title, systemImage: icon)
-                    .foregroundStyle(selected ? DS.Colors.accent : DS.Colors.textPrimary)
-                Spacer()
-                Text("\(count)")
-                    .font(DS.Font.subheadline)
-                    .monospacedDigit()
-                    .foregroundStyle(DS.Colors.textSecondary)
-            }
-        }
-        .listRowBackground(selected ? DS.Colors.accentSoft : Color.clear)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("closet.filter.\(section?.rawValue ?? "all")")
     }
 }
 

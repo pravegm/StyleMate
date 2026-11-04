@@ -16,14 +16,14 @@ struct HomeView: View {
     @State private var showScanReview = false
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.horizontalSizeClass) private var hSizeClass
+    @Environment(\.duoLayout) private var duo
     @ScaledMetric(relativeTo: .body) private var heroThumbHeight: CGFloat = 104
 
     // MARK: - Outfit sheet presentation
 
     private func outfitSheetBinding(wide: Bool) -> Binding<Bool> {
         Binding(
-            get: { homeVM.showOutfitSheet && (hSizeClass == .regular) == wide },
+            get: { homeVM.showOutfitSheet && duo.isWideLayout == wide },
             set: { homeVM.showOutfitSheet = $0 }
         )
     }
@@ -117,24 +117,27 @@ struct HomeView: View {
                 DS.Colors.backgroundPrimary.ignoresSafeArea()
 
                 ScrollView {
-                    if hSizeClass == .regular {
+                    if duo.isWideLayout {
                         // Wide (Duo inner display): greeting + Style me | today's
                         // look + wardrobe, each column at a readable width.
-                        HStack(alignment: .top, spacing: DS.Spacing.xl) {
+                        // Split exactly at the crease when half-open.
+                        FoldAwareSplit(gutter: DS.Spacing.xl, stackedSpacing: 0) {
                             VStack(alignment: .leading, spacing: 0) {
                                 greetingBlock
                                 styleMeBlock
                             }
                             .frame(maxWidth: 560, alignment: .leading)
+                            .frame(maxWidth: .infinity)
+                        } trailing: {
                             VStack(alignment: .leading, spacing: 0) {
                                 heroBlock
                                 wardrobeBlock
                             }
                             .frame(maxWidth: 560, alignment: .leading)
+                            .frame(maxWidth: .infinity)
                         }
-                        .padding(.horizontal, DS.Spacing.xl)
+                        .padding(.horizontal, DS.Spacing.lg)
                         .padding(.bottom, DS.Spacing.xxxl)
-                        .frame(maxWidth: .infinity)
                     } else {
                         VStack(alignment: .leading, spacing: 0) {
                             greetingBlock

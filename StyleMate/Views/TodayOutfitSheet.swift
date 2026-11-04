@@ -20,7 +20,7 @@ struct TodayOutfitSheet: View {
     @EnvironmentObject var outfitsVM: MyOutfitsViewModel
     @EnvironmentObject var authService: AuthService
     @EnvironmentObject var tutorialManager: TutorialManager
-    @Environment(\.horizontalSizeClass) private var hSizeClass
+    @Environment(\.duoLayout) private var duo
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var selectedPieceID: UUID? = nil
@@ -66,7 +66,7 @@ struct TodayOutfitSheet: View {
     }
 
     private func isWide(_ size: CGSize) -> Bool {
-        hSizeClass == .regular && size.width >= 640
+        duo.isWideLayout && size.width >= 560
     }
 
     // MARK: - Body
@@ -199,13 +199,15 @@ struct TodayOutfitSheet: View {
 
     // MARK: - Wide layout (Duo inner display, regular width)
 
+    /// Board | note, Keep / Swap list, actions, all options. `FoldAwareSplit`
+    /// puts the split exactly on the crease when the Duo is half-open, so the
+    /// board never straddles the fold.
     private func wideLayout(_ look: Outfit, size: CGSize) -> some View {
         let gutter = DS.Spacing.lg
-        let boardWidth = max(0, (size.width - gutter * 3) * 0.55)
-        let boardHeight = max(0, min(boardWidth * 1.08, size.height - gutter * 2))
-        return HStack(alignment: .top, spacing: gutter) {
+        return FoldAwareSplit(gutter: gutter, leadingFraction: 0.55) {
             boardCard(look, inlineControls: false)
-                .frame(width: boardWidth, height: boardHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } trailing: {
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Spacing.md) {
                     noteCard(look, lineLimit: nil)

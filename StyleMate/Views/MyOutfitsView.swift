@@ -18,7 +18,7 @@ struct OutfitRef: Identifiable {
 struct MyOutfitsView: View {
     @EnvironmentObject var viewModel: MyOutfitsViewModel
     @EnvironmentObject var wardrobeVM: WardrobeViewModel
-    @Environment(\.horizontalSizeClass) private var hSizeClass
+    @Environment(\.duoLayout) private var duo
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var showAddSheet = false
     @State private var showDateJump = false
@@ -26,7 +26,7 @@ struct MyOutfitsView: View {
     @State private var deletingOutfit: DatedOutfit? = nil
     @AppStorage("outfits.showMonth") private var showMonth = false
 
-    private var isWide: Bool { hSizeClass == .regular }
+    private var isWide: Bool { duo.isWideLayout }
 
     private var dayOutfits: [DatedOutfit] {
         viewModel.outfitsByDate[selectedDate] ?? []
@@ -181,10 +181,10 @@ struct MyOutfitsView: View {
 
     // MARK: - Wide
 
-    @ScaledMetric(relativeTo: .body) private var wideCalendarWidth: CGFloat = 360
 
+    /// Month | the day's outfits, split on the crease when half-open.
     private var wideLayout: some View {
-        HStack(alignment: .top, spacing: DS.Spacing.lg) {
+        FoldAwareSplit(gutter: DS.Spacing.lg, stackedSpacing: 0, leadingFraction: 0.45) {
             ScrollView {
                 CalendarGridView(selectedDate: $selectedDate, datesWithOutfits: datesWithOutfits,
                                  onTitleTap: { showDateJump = true })
@@ -193,17 +193,20 @@ struct MyOutfitsView: View {
                                 in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
                     .dsCardShadow()
                     .coachAnchor(CoachAnchor.outfitsCalendar)
+                    .frame(maxWidth: 480)
                     .padding(.vertical, DS.Spacing.md)
+                    .frame(maxWidth: .infinity)
             }
-            .frame(width: wideCalendarWidth)
-
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } trailing: {
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                     dayHeader
                     if dayOutfits.isEmpty {
                         emptyDay
                     } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: DS.Spacing.md, alignment: .top)],
+                        // Fits the pane: one card per row in a half pane, two when roomy.
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: DS.Spacing.md, alignment: .top)],
                                   spacing: DS.Spacing.md) {
                             ForEach(dayOutfits, id: \.objectID) { outfit in card(outfit) }
                         }
@@ -211,6 +214,7 @@ struct MyOutfitsView: View {
                 }
                 .padding(.vertical, DS.Spacing.md)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(.horizontal, DS.Spacing.lg)
     }

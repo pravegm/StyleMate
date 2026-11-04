@@ -43,7 +43,7 @@ final class DuoScreensTests: E2ETestCase {
         let tee = app.buttons.matching(NSPredicate(format: "label ENDSWITH 'T-Shirt'")).firstMatch
         if scrollUntilHittable(tee, maxSwipes: 4) {
             tee.tap()
-            let editDetails = button(id: "itemDetail.edit", label: "Edit details")
+            let editDetails = itemPage()
             XCTAssertTrue(editDetails.waitForExistence(timeout: 15), "Item page didn't open")
             shoot("03-item")
             let backByID = app.navigationBars.buttons["BackButton"]
@@ -105,7 +105,7 @@ final class DuoScreensTests: E2ETestCase {
         let tee = app.buttons.matching(NSPredicate(format: "label ENDSWITH 'T-Shirt'")).firstMatch
         if scrollUntilHittable(tee, maxSwipes: 4) {
             tee.tap()
-            _ = button(id: "itemDetail.edit", label: "Edit details").waitForExistence(timeout: 15)
+            _ = itemPage().waitForExistence(timeout: 15)
             shoot("seated-03-item")
         }
 
@@ -125,14 +125,14 @@ final class DuoScreensTests: E2ETestCase {
         let generate = button(id: "home.styleMe", label: "Generate")
         guard generate.waitForExistence(timeout: 10) else { XCTFail("No Generate button on Home"); return false }
         tapScrollingIfNeeded(generate)
-        let counter = anyElement(NSPredicate(format: "identifier == 'outfit.counter' OR label MATCHES %@", "1 of [0-9]+"))
+        let counter = anyElement(NSPredicate(format: "identifier == 'outfit.counter' OR label MATCHES %@", "(Option )?1 of [0-9]+"))
         let weatherAlert = app.alerts["Weather unavailable"]
         let errorAlert = app.alerts["Outfit Suggestion"]
         let deadline = Date().addingTimeInterval(240)
         while Date() < deadline {
             switch waitForAny([counter, weatherAlert, errorAlert], timeout: max(1, deadline.timeIntervalSinceNow)) {
             case 0?: return true
-            case 1?: weatherAlert.buttons["Yes"].tap()
+            case 1?: proceedWithoutWeather(weatherAlert)
             case 2?:
                 snap("outfit-engine-error")
                 errorAlert.buttons.firstMatch.tap()
@@ -148,7 +148,7 @@ final class DuoScreensTests: E2ETestCase {
     /// Keep option 1 (logs it to today), skip the rest, close the deck.
     @MainActor
     private func finishDeck() {
-        let save = app.buttons.matching(NSPredicate(format: "identifier == 'outfit.save' OR label BEGINSWITH 'Save'")).firstMatch
+        let save = app.buttons.matching(NSPredicate(format: "identifier == 'outfit.wear' OR identifier == 'outfit.save' OR label BEGINSWITH 'Save'")).firstMatch
         if save.waitForExistence(timeout: 5) { save.tap() }
         let caughtUp = text("All Caught Up!")
         for _ in 0..<8 where !caughtUp.exists {

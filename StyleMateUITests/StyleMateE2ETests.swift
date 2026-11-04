@@ -38,8 +38,7 @@ final class StyleMateE2ETests: E2ETestCase {
         XCTAssertTrue(scrollUntilHittable(tee, maxSwipes: 4), "Tops shelf shows no T-shirt")
         tee.tap()
         // The item page (edit lives in its ⋯ menu, so wait for the page itself).
-        let editDetails = anyElement(NSPredicate(format:
-            "identifier == 'itemDetail.root' OR identifier == 'itemDetail.more' OR label == 'More actions'"))
+        let editDetails = itemPage()
         XCTAssertTrue(editDetails.waitForExistence(timeout: 15), "Item detail didn't open")
         XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS[c] 'T-Shirt'")).exists,
                       "Item detail doesn't describe the tapped T-shirt")
@@ -85,8 +84,7 @@ final class StyleMateE2ETests: E2ETestCase {
             outcome = waitForAny([counter, weatherAlert, errorAlert], timeout: max(1, deadline.timeIntervalSinceNow))
             if outcome == 1 {
                 snap("weather-unavailable-prompt")
-                let proceed = weatherAlert.buttons["Style anyway"]
-                (proceed.exists ? proceed : weatherAlert.buttons["Yes"]).tap()
+                proceedWithoutWeather(weatherAlert)
                 outcome = nil
             }
         } while outcome == nil && Date() < deadline
