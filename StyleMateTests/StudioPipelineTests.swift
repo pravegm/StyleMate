@@ -83,8 +83,9 @@ struct StudioPipelineTests {
     @Test func picksAFaithfulRenderAndRejectsAWrongOne() throws {
         try #require(WardrobeExtractor.isAvailable, "needs the bundled FashionEncoder")
         let fake = FakeGenerator()
+        let previous = StudioPipeline.generator
         StudioPipeline.generator = fake
-        defer { StudioPipeline.generator = nil }
+        defer { StudioPipeline.generator = previous }
         let cut = try #require(StudioPipeline.isolateProduct(Self.square(r: 30, g: 60, b: 160))).image
         let cutout = UIImage(cgImage: cut)
         let emb = try #require(FashionClassifier.onWhite(cut, side: 224).flatMap { WardrobeML.shared.embed($0) })
@@ -100,6 +101,44 @@ struct StudioPipelineTests {
         let bad = StudioPipeline.studioImage(cutout: cutout, embedding: emb, plan: generate, seedBase: 1)
         #expect(bad == nil, "a blank render must be rejected, keeping the cutout")
         #expect(fake.calls == refine.candidates + generate.candidates)
+    }
+
+    /// The whole thing for real: extract garments from a CC0 street photo, then
+    /// make studio images with the bundled diffusion model (simulator CPU, so
+    /// one candidate and fewer steps). Images go to $REPORT_DIR/studio_pipeline.
+    @Test(.timeLimit(.minutes(60)))
+    func realStudioRendersFromAPhoto() throws {
+        try #require(WardrobeExtractor.isAvailable)
+        guard StudioRenderer.shared.isAvailable else {
+            Issue.record("studio models not bundled"); return
+        }
+        let env = ProcessInfo.processInfo.environment
+        let dir = env["FIXTURES_DIR"].map { URL(fileURLWithPath: $0).appendingPathComponent("photos") }
+            ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/photos")
+        let out = (env["REPORT_DIR"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.temporaryDirectory)
+            .appendingPathComponent("studio_pipeline")
+        try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+
+        let photo = try #require(UIImage(data: try Data(contentsOf: dir.appendingPathComponent("casual_denim_jacket_hat.jpg"))))
+        let items = WardrobeExtractor.extract(from: photo)
+        var rendered = 0
+        for item in items where [.outerLayer, .lower].contains(item.kind) {
+            let a = item.attributes
+            let full = StudioPlan.make(product: a.product, category: a.category, colors: a.colors, pattern: a.pattern,
+                                       material: a.material, sleeve: a.sleeveLength, neckline: a.neckline, details: nil,
+                                       kind: item.kind, truncated: item.truncated)
+            let plan = StudioPlan(mode: full.mode, prompt: full.prompt, negativePrompt: full.negativePrompt, candidates: 1,
+                                  productLabel: full.productLabel, isSolid: full.isSolid)
+            try? item.cutout.pngData()?.write(to: out.appendingPathComponent("\(a.product)_cutout.png"))
+            let start = Date()
+            if let r = StudioPipeline.studioImage(cutout: item.cutout, embedding: a.embedding, plan: plan, seedBase: 42) {
+                try? r.image.pngData()?.write(to: out.appendingPathComponent("\(a.product)_studio.png"))
+                rendered += 1
+                let line = "\(a.product): sim=\(r.similarity) score=\(r.score) in \(Int(Date().timeIntervalSince(start)))s\n"
+                try? line.data(using: .utf8)?.write(to: out.appendingPathComponent("\(a.product).txt"))
+            }
+        }
+        #expect(rendered >= 1, "no convincing studio render for the denim jacket / jeans photo")
     }
 
     @Test func storeTracksRendersAndUpgrades() {

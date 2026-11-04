@@ -11,9 +11,23 @@ protocol StudioImageGenerating: AnyObject {
     /// `startingImage` nil = text-to-image; otherwise image-to-image at `strength`.
     func render(startingImage: CGImage?, prompt: String, negativePrompt: String,
                 strength: Float, steps: Int, guidance: Float, seed: UInt32) -> CGImage?
+    /// Several seeds with one model load (much faster than one call per seed).
+    func render(startingImage: CGImage?, prompt: String, negativePrompt: String,
+                strength: Float, steps: Int, guidance: Float, seeds: [UInt32]) -> [CGImage?]
     /// Frees the ~1 GB pipeline after a batch.
     func unload()
 }
+
+extension StudioImageGenerating {
+    func render(startingImage: CGImage?, prompt: String, negativePrompt: String,
+                strength: Float, steps: Int, guidance: Float, seeds: [UInt32]) -> [CGImage?] {
+        seeds.map { render(startingImage: startingImage, prompt: prompt, negativePrompt: negativePrompt,
+                           strength: strength, steps: steps, guidance: guidance, seed: $0) }
+    }
+}
+
+/// The real on-device diffusion renderer (Services/Studio/StudioRenderer).
+extension StudioRenderer: StudioImageGenerating {}
 
 /// Turns a wardrobe item into a lifelike catalog image, fully on-device:
 ///   1. plan (generate a flat-lay from the description, or refine the cutout),
@@ -25,7 +39,8 @@ protocol StudioImageGenerating: AnyObject {
 ///   4. keep the best — or nothing, if no candidate is convincingly the same
 ///      item (the clean cutout then stays as the item's image).
 enum StudioPipeline {
-    static var generator: StudioImageGenerating?
+    /// The bundled on-device renderer; tests swap in a fake.
+    static var generator: StudioImageGenerating? = StudioRenderer.shared
 
     struct Result {
         let image: UIImage
@@ -41,18 +56,18 @@ enum StudioPipeline {
         guard let gen = generator, gen.isAvailable, let cg = cutout.cgImage,
               let start = FashionClassifier.onWhite(cg, side: 512) else { return nil }
         let reference = ColorStats(cg)
+        let seeds = (0..<max(1, plan.candidates)).map { seedBase &+ UInt32($0) &* 7919 }
+        let renders: [CGImage?]
+        switch plan.mode {
+        case .generate:
+            renders = gen.render(startingImage: nil, prompt: plan.prompt, negativePrompt: plan.negativePrompt,
+                                 strength: 1, steps: StudioPlan.steps, guidance: StudioPlan.guidance, seeds: seeds)
+        case .refine(let strength):
+            renders = gen.render(startingImage: start, prompt: plan.prompt, negativePrompt: plan.negativePrompt,
+                                 strength: strength, steps: StudioPlan.steps, guidance: StudioPlan.guidance, seeds: seeds)
+        }
         var best: Result?
-        for k in 0..<max(1, plan.candidates) {
-            let seed = seedBase &+ UInt32(k) &* 7919
-            let raw: CGImage?
-            switch plan.mode {
-            case .generate:
-                raw = gen.render(startingImage: nil, prompt: plan.prompt, negativePrompt: plan.negativePrompt,
-                                 strength: 1, steps: StudioPlan.steps, guidance: StudioPlan.guidance, seed: seed)
-            case .refine(let strength):
-                raw = gen.render(startingImage: start, prompt: plan.prompt, negativePrompt: plan.negativePrompt,
-                                 strength: strength, steps: StudioPlan.steps, guidance: StudioPlan.guidance, seed: seed)
-            }
+        for (k, raw) in renders.enumerated() {
             guard let raw, let candidate = autoreleasepool(invoking: { evaluate(raw, reference: reference, embedding: embedding, plan: plan) })
             else { continue }
             print("[Studio] candidate \(k): score=\(String(format: "%.3f", candidate.score)) sim=\(String(format: "%.3f", candidate.similarity))")
