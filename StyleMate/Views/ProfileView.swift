@@ -15,6 +15,7 @@ struct ProfileView: View {
     @State private var showDeleteProfileAlert = false
     @State private var showStyleSheet = false
     @State private var showRetakeSelfie = false
+    @State private var retookSelfie = false
     @State private var showReferenceBuilder = false
     @State private var tempSelectedStyles: [OutfitType] = []
     @State private var showStyleError = false
@@ -490,8 +491,15 @@ struct ProfileView: View {
                 )
                 .environmentObject(authService)
             }
-            .sheet(isPresented: $showRetakeSelfie) {
-                RetakeSelfieSheet()
+            .sheet(isPresented: $showRetakeSelfie, onDismiss: {
+                // A new selfie resets the face gallery: go straight to "Find yourself"
+                // so the user can rebuild it from their photos.
+                if retookSelfie {
+                    retookSelfie = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showReferenceBuilder = true }
+                }
+            }) {
+                RetakeSelfieSheet(onRetaken: { retookSelfie = true })
                     .environmentObject(authService)
             }
             .sheet(isPresented: $showReferenceBuilder) {
@@ -805,12 +813,14 @@ private struct RetakeSelfieSheet: View {
     @EnvironmentObject var authService: AuthService
     @Environment(\.dismiss) private var dismiss
     @State private var selfieImage: UIImage?
+    /// Called when a new selfie was saved (not on skip / cancel).
+    var onRetaken: () -> Void = {}
 
     var body: some View {
         NavigationView {
             OnboardingSelfieView(
                 selfieImage: $selfieImage,
-                onAdvance: { dismiss() },
+                onAdvance: { onRetaken(); dismiss() },
                 onSkip: { dismiss() },
                 isRetakeMode: true
             )

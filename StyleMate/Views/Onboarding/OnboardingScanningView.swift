@@ -160,12 +160,18 @@ struct OnboardingScanningView: View {
                     await PhotoScanService.shared.continueScanning(forUser: user.id, userGender: user.gender,
                                                                    wardrobeViewModel: wardrobe)
                 } else {
-                    await PhotoScanService.shared.startScan(forUser: user.id, dateRange: .lastYear,
+                    await PhotoScanService.shared.startScan(forUser: user.id, dateRange: Self.firstScanRange,
                                                             userGender: user.gender, wardrobeViewModel: wardrobe,
                                                             trigger: .initial, firstLook: true)
                 }
             }
         }
+    }
+
+    /// The last 12 months; with Limited access, every photo the user chose
+    /// (they picked them on purpose, whatever their date).
+    static var firstScanRange: ScanDateRange {
+        PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited ? .all : .lastYear
     }
 
     private func checkHandOff() {

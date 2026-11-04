@@ -218,7 +218,8 @@ struct RootView: View {
             } else {
                 await PhotoScanService.shared.startScan(
                     forUser: userId,
-                    dateRange: .lastYear,
+                    // Limited access: scan every photo the user chose, whatever its date.
+                    dateRange: PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited ? .all : .lastYear,
                     userGender: authService.user?.gender,
                     wardrobeViewModel: wardrobeVM,
                     trigger: .initial,
