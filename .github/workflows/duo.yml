@@ -1,0 +1,256 @@
+name: Duo
+
+# StyleMate on the iPhone Duo simulator (iOS 27.1): screenshots of the main screens on the INNER display open flat
+# (180°), HALF-OPEN (~110°, book pose; plus a seated/tabletop pass) and on the COVER display (closed).
+#
+# How: StyleMateUITests/DuoScreensTests drives the app with the DEBUG launch hooks (demo user, skipped onboarding,
+# seeded wardrobe) while the phone is closed (cover display = XCUIScreen.main, where taps are reliable). At each
+# screen it calls scripts/duo_bridge.py on the host, which moves the real simulated hinge with the `hinge` CLI and
+# captures both displays with `simctl io screenshot --display`. Output: the `duo-screens` artifact
+# (<n>-cover.png, <n>-flat.png, <n>-half.png, MANIFEST.txt, raw/ both panels, xcui/ the test's own attachments, logs/).
+#
+# The runner image ships only iOS 27.0 (no Duo), so the 27.1 runtime (~7.85 GB) is downloaded each run (~2 min on
+# this runner per the sister repos). It is deliberately NOT kept in the Actions cache: it would take ~8 GB of the
+# repo's 10 GB quota and evict ci.yml's model caches (face + wardrobe models), which every CI run depends on.
+# Model caches are restored exactly like ci.yml's test job (built by ci.yml's `models` job; main's are shared).
+on:
+  push:
+    branches: [feat/duo]
+  workflow_dispatch:
+    inputs:
+      half_angle:
+        description: "Half-open hinge angle (degrees)"
+        type: string
+        default: "110"
+      seated:
+        description: "Also run the seated (portrait inner display, tabletop) pass"
+        type: boolean
+        default: true
+
+concurrency:
+  group: duo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  duo:
+    runs-on: xcode-27
+    timeout-minutes: 120
+    env:
+      XCODE_APP: /Applications/Xcode_27.1.app
+      RUNTIME_ID: com.apple.CoreSimulator.SimRuntime.iOS-27-1
+      DUO_TYPE_FALLBACK: com.apple.CoreSimulator.SimDeviceType.iPhone-Duo
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      OUT: ${{ github.workspace }}/duo-screens
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore face models
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            MobileFaceNet.mlpackage
+            SCRFD10G.mlpackage
+          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          fail-on-cache-miss: true
+      - name: Restore wardrobe models
+        uses: actions/cache/restore@v4
+        with:
+          path: StyleMate/ML
+          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          fail-on-cache-miss: true
+
+      - name: Select Xcode 27.1
+        timeout-minutes: 8
+        run: |
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+          xcrun simctl list runtimes
+          df -h / | tail -1
+          sysctl -n hw.memsize hw.ncpu
+          command -v gtimeout >/dev/null || brew install coreutils
+          mkdir -p "$OUT/logs"
+
+      - name: Install the iOS 27.1 runtime
+        timeout-minutes: 30
+        run: |
+          installed() {
+            xcrun simctl list runtimes -j | python3 -c "import json,sys,os; sys.exit(0 if any(r['identifier']==os.environ['RUNTIME_ID'] and r.get('isAvailable') for r in json.load(sys.stdin)['runtimes']) else 1)"
+          }
+          if installed; then echo "iOS 27.1 runtime already installed"; exit 0; fi
+          # With Xcode 27.1 selected, -downloadPlatform fetches and installs 27.1. The first try can fail with
+          # DVTDownloadableErrorDomain Code=41; a retry works (Squish docs/DUO-CI.md).
+          for attempt in 1 2 3; do
+            echo "::group::download attempt $attempt"
+            gtimeout 1500 xcodebuild -downloadPlatform iOS 2>&1 | grep -v "Downloading iOS" | tail -20 || true
+            echo "::endgroup::"
+            installed && break
+            sleep 15
+          done
+          xcrun simctl list runtimes
+          installed || { echo "::error::iOS 27.1 runtime not installed"; exit 1; }
+
+      - name: Create and boot the iPhone Duo
+        id: sim
+        timeout-minutes: 10
+        run: |
+          type=$(xcrun simctl list devicetypes -j | python3 -c "import json,sys; print(next((d['identifier'] for d in json.load(sys.stdin)['devicetypes'] if d['name']=='iPhone Duo'), ''))")
+          type="${type:-$DUO_TYPE_FALLBACK}"
+          echo "device type: $type"
+          udid=$(xcrun simctl create "StyleMate Duo" "$type" "$RUNTIME_ID")
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          # Boot now so the slow first boot overlaps the hinge install and the build. simctl, not Device Hub.
+          xcrun simctl boot "$udid"
+
+      - name: Install the hinge tool
+        timeout-minutes: 25
+        run: |
+          for attempt in 1 2 3; do
+            gtimeout 420 brew install artemnovichkov/tap/hinge && break
+            echo "::warning::hinge install attempt $attempt failed"
+            brew untap artemnovichkov/tap >/dev/null 2>&1 || true
+            sleep 10
+          done
+          command -v hinge >/dev/null || { echo "::error::hinge tool unavailable: the Duo cannot be opened or closed"; exit 1; }
+
+      - name: Write Secrets.swift
+        run: |
+          cat > StyleMate/Secrets.swift <<'SWIFT'
+          enum Secrets {
+              static let geminiAPIKey = ""
+          }
+          SWIFT
+
+      - name: Build for testing (iPhone Duo, iOS 27.1 SDK)
+        timeout-minutes: 40
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        # Ad-hoc signed ("Sign to Run Locally") like ci.yml's ui-tests job: the simulated entitlements are needed
+        # or CKContainer.default() throws at launch.
+        run: |
+          set -o pipefail
+          gtimeout 2300 xcodebuild build-for-testing \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            2>&1 | tee duo-build.log | grep -E "error:|warning: .*(DuoLayout|DuoScreensTests|DebugOrientation)|\*\* TEST BUILD" || true
+          grep -q "\*\* TEST BUILD SUCCEEDED \*\*" duo-build.log
+          # Linked against the 27.1 SDK, or the app runs letterboxed in compatibility mode on the Duo.
+          otool -l "$RUNNER_TEMP"/dd/Build/Products/Debug-iphonesimulator/StyleMate.app/StyleMate | grep -A4 LC_BUILD_VERSION || true
+
+      - name: Prepare the simulator (boot, hinge helper, app, permissions, location)
+        timeout-minutes: 20
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          gtimeout 840 xcrun simctl bootstatus "$UDID" -b
+          # The first `hinge` call compiles its in-simulator helper.
+          gtimeout 180 hinge -d "$UDID" get || true
+          gtimeout 30 hinge -d "$UDID" posture || true
+          APP=$(ls -d "$RUNNER_TEMP"/dd/Build/Products/Debug-iphonesimulator/StyleMate.app)
+          gtimeout 300 xcrun simctl install "$UDID" "$APP"
+          BUNDLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
+          /usr/libexec/PlistBuddy -c 'Print :UISupportedInterfaceOrientations' "$APP/Info.plist" || true
+          /usr/libexec/PlistBuddy -c 'Print :UIRequiresFullScreen' "$APP/Info.plist" 2>/dev/null && echo "::warning::UIRequiresFullScreen is set" || echo "UIRequiresFullScreen absent"
+          /usr/libexec/PlistBuddy -c 'Print :UILaunchScreen' "$APP/Info.plist" || true
+          xcrun simctl privacy "$UDID" grant location "$BUNDLE" || true
+          xcrun simctl privacy "$UDID" grant photos "$BUNDLE" || true
+          xcrun simctl location "$UDID" set 51.5072,-0.1276 || true
+
+      - name: Duo screenshots (UI test + hinge bridge)
+        timeout-minutes: 50
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          HALF_ANGLE: ${{ inputs.half_angle || '110' }}
+          SEATED: ${{ (github.event_name != 'workflow_dispatch' || inputs.seated) && '1' || '0' }}
+        run: |
+          python3 -I scripts/duo_bridge.py > "$OUT/logs/bridge-stdout.txt" 2>&1 &
+          BRIDGE=$!
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8765/ping >/dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:8765/ping || { echo "::error::bridge did not start"; cat "$OUT/logs/bridge-stdout.txt"; exit 1; }
+          # Start closed: the test navigates on the cover display.
+          curl -s "http://127.0.0.1:8765/hinge?angle=0"; echo
+          set -o pipefail
+          TEST_RUNNER_DUO_BRIDGE_URL=http://127.0.0.1:8765 TEST_RUNNER_DUO_SEATED="$SEATED" \
+          gtimeout 2700 xcodebuild test-without-building \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            -only-testing:StyleMateUITests/DuoScreensTests \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/duo.xcresult" \
+            2>&1 | tee duo-test.log | grep -E "✔|✘|Test .*(passed|failed|skipped)|error:|\[DuoShot\]|\*\* TEST" || true
+          kill $BRIDGE 2>/dev/null || true
+          cp duo-build.log duo-test.log "$OUT/logs/" || true
+          echo "### Duo screenshots" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"; cat "$OUT/MANIFEST.txt" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null; echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" duo-test.log
+
+      - name: Test failure details
+        if: always()
+        run: |
+          [ -d "$RUNNER_TEMP/duo.xcresult" ] || exit 0
+          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/duo.xcresult" > "$OUT/logs/test-results.json" 2>/dev/null || true
+          python3 - "$OUT/logs/test-results.json" <<'PY' || true
+          import json, sys
+          def walk(n, path):
+              name = n.get("name", "")
+              if n.get("nodeType") == "Failure Message":
+                  print(f"FAIL {' > '.join(path)}: {name}")
+              for c in n.get("children", []) or []:
+                  walk(c, path + [name] if n.get("nodeType") in ("Test Case", "Test Suite") else path)
+          for n in json.load(open(sys.argv[1])).get("testNodes", []):
+              walk(n, [])
+          PY
+
+      - name: Export the test's own screenshots (cover display, via XCUIScreen.main)
+        if: always()
+        run: |
+          [ -d "$RUNNER_TEMP/duo.xcresult" ] || exit 0
+          RAW="$RUNNER_TEMP/attachments-raw"; mkdir -p "$RAW" "$OUT/xcui"
+          xcrun xcresulttool export attachments --path "$RUNNER_TEMP/duo.xcresult" --output-path "$RAW" || true
+          python3 - "$RAW" "$OUT/xcui" <<'PY'
+          import json, os, re, shutil, sys
+          raw, out = sys.argv[1], sys.argv[2]
+          m = os.path.join(raw, "manifest.json")
+          n = 0
+          for test in (json.load(open(m)) if os.path.exists(m) else []):
+              for a in test.get("attachments", []):
+                  src = os.path.join(raw, a.get("exportedFileName", ""))
+                  name = a.get("suggestedHumanReadableName") or a.get("exportedFileName", "")
+                  if not os.path.isfile(src) or name.startswith("Debug description"):
+                      continue
+                  stem, ext = os.path.splitext(name)
+                  stem = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", stem)
+                  stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-")
+                  shutil.copy(src, os.path.join(out, stem + (ext or os.path.splitext(src)[1])))
+                  n += 1
+          print(f"Exported {n} attachments")
+          PY
+
+      - name: Simulator diagnostics
+        if: failure()
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          gtimeout 120 xcrun simctl spawn "$UDID" log show --last 10m --style compact \
+            --predicate 'process == "StyleMate" OR process == "SpringBoard"' > "$OUT/logs/sim-system.txt" 2>&1 || true
+          xcrun simctl list devices > "$OUT/logs/devices.txt" 2>&1 || true
+
+      - name: Upload Duo screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: duo-screens
+          path: |
+            duo-screens/
+            duo-build.log
+          if-no-files-found: ignore
+
+      - name: Shut down the simulator
+        if: always()
+        continue-on-error: true
+        run: xcrun simctl shutdown all || true
