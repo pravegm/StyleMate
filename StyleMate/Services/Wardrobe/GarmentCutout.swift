@@ -25,40 +25,57 @@ enum GarmentCutout {
     private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
     /// `cropPixels`: `rgbaPixels(crop)`, computed once per photo by the caller.
-    static func render(crop: CGImage, cropPixels: [UInt8], instance: GarmentInstance) -> Result? {
+    /// `photoInGrid`: where the real photo lies on the grid (the crop may be
+    /// padded grey past the photo's edge; nothing outside it is ever garment).
+    /// `fill`: fill occluded holes (off for patterned fabric and big holes,
+    /// where a smooth fill shows as a blotch).
+    static func render(crop: CGImage, cropPixels: [UInt8], instance: GarmentInstance,
+                       photoInGrid: CGRect? = nil, fill: Bool = true) -> Result? {
         let gw = WardrobeML.gridW, gh = WardrobeML.gridH
         let cw = crop.width, ch = crop.height
         let sx = Double(cw) / Double(gw), sy = Double(ch) / Double(gh)
 
-        // Item box in crop pixels, with a small margin for the soft edge.
+        // Item box on the grid and in crop pixels, with a small margin for the
+        // soft edge. All the per-pixel work below is limited to this box.
         let (bx0, by0, bx1, by1) = instance.box
-        let mx = 3.0, my = 3.0
-        let x0 = max(0, Int((Double(bx0) - mx) * sx)), y0 = max(0, Int((Double(by0) - my) * sy))
-        let x1 = min(cw, Int(ceil((Double(bx1) + mx) * sx))), y1 = min(ch, Int(ceil((Double(by1) + my) * sy)))
+        let gx0 = max(0, bx0 - 3), gy0 = max(0, by0 - 3), gx1 = min(gw, bx1 + 3), gy1 = min(gh, by1 + 3)
+        let x0 = Int(Double(gx0) * sx), y0 = Int(Double(gy0) * sy)
+        let x1 = min(cw, Int(ceil(Double(gx1) * sx))), y1 = min(ch, Int(ceil(Double(gy1) * sy)))
         let w = x1 - x0, h = y1 - y0
-        guard w > 8, h > 8 else { return nil }
-
-        guard let maskFull = upsampleMask(instance.mask, guide: crop, edgeAware: true) else { return nil }
-        let holeFull: [UInt8]? = instance.holeCount > 0
-            ? upsampleMask(instance.holes, guide: crop, edgeAware: false) : nil
+        guard w > 8, h > 8, gx1 - gx0 > 1, gy1 - gy0 > 1,
+              let guide = crop.cropping(to: CGRect(x: x0, y: y0, width: w, height: h)) else { return nil }
+        let gridBox = (gx0, gy0, gx1, gy1)
+        guard let maskBox = upsampleMask(instance.mask, box: gridBox, guide: guide, edgeAware: true) else { return nil }
+        let holeBox: [UInt8]? = fill && instance.holeCount > 0
+            ? upsampleMask(instance.holes, box: gridBox, guide: guide, edgeAware: false) : nil
+        // Padding outside the photo (crop px).
+        var valid = CGRect(x: 0, y: 0, width: cw, height: ch)
+        if let f = photoInGrid {
+            valid = CGRect(x: f.minX * sx, y: f.minY * sy, width: f.width * sx, height: f.height * sy)
+        }
+        let vx0 = Int(valid.minX.rounded(.up)), vy0 = Int(valid.minY.rounded(.up))
+        let vx1 = Int(valid.maxX.rounded(.down)), vy1 = Int(valid.maxY.rounded(.down))
         let rgba = cropPixels
         // Region buffers (premultiplied float RGBA) for the item box.
         var buf = [Float](repeating: 0, count: w * h * 4)
         var holeMask = [Float](repeating: 0, count: w * h)
         for y in 0..<h {
+            let cy = y + y0
             for x in 0..<w {
-                let si = (y + y0) * cw + (x + x0)
-                let a = Float(maskFull[si]) / 255
-                let o = (y * w + x) * 4
+                let cx = x + x0
+                guard cx >= vx0, cx < vx1, cy >= vy0, cy < vy1 else { continue }
+                let si = cy * cw + cx, bi = y * w + x
+                let a = Float(maskBox[bi]) / 255
+                let o = bi * 4
                 buf[o] = Float(rgba[si * 4]) / 255 * a
                 buf[o + 1] = Float(rgba[si * 4 + 1]) / 255 * a
                 buf[o + 2] = Float(rgba[si * 4 + 2]) / 255 * a
                 buf[o + 3] = a
-                if let hf = holeFull { holeMask[y * w + x] = Float(hf[si]) / 255 }
+                if let hb = holeBox { holeMask[bi] = Float(hb[bi]) / 255 }
             }
         }
 
-        if holeFull != nil { pushPullFill(&buf, holes: holeMask, w: w, h: h) }
+        if holeBox != nil { pushPullFill(&buf, holes: holeMask, w: w, h: h) }
         decontaminateEdges(&buf, w: w, h: h)
 
         let sharp = sharpness(buf, w: w, h: h)
@@ -70,10 +87,16 @@ enum GarmentCutout {
 
     // MARK: - Mask upsampling
 
-    /// Grid mask (0/1) → 8-bit alpha at the guide's resolution.
-    private static func upsampleMask(_ grid: [UInt8], guide: CGImage, edgeAware: Bool) -> [UInt8]? {
-        let gw = WardrobeML.gridW, gh = WardrobeML.gridH
-        var bytes = grid.map { $0 != 0 ? UInt8(255) : UInt8(0) }
+    /// The `box` (grid x0, y0, x1, y1) of a grid mask (0/1) → 8-bit alpha at the
+    /// resolution of `guide`, which is the same region of the crop.
+    private static func upsampleMask(_ grid: [UInt8], box: (Int, Int, Int, Int), guide: CGImage, edgeAware: Bool) -> [UInt8]? {
+        let fullW = WardrobeML.gridW
+        let gw = box.2 - box.0, gh = box.3 - box.1
+        var bytes = [UInt8](repeating: 0, count: gw * gh)
+        for y in 0..<gh {
+            let row = (y + box.1) * fullW + box.0
+            for x in 0..<gw where grid[row + x] != 0 { bytes[y * gw + x] = 255 }
+        }
         guard let provider = CGDataProvider(data: Data(bytes: &bytes, count: bytes.count) as CFData),
               let small = CGImage(width: gw, height: gh, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: gw,
                                   space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: 0),

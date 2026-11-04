@@ -1,0 +1,22 @@
+{
+  "metrics": {
+    "category_acc": 0.935,
+    "color_family_acc": 0.761,
+    "color_name_precision": 0.79,
+    "color_primary_acc": 0.739,
+    "core_found": 46,
+    "core_items": 56,
+    "false_patterns": 3,
+    "false_positives": 0,
+    "fragment_rate": 0.109,
+    "missed_patterns": 0,
+    "pattern_acc": 0.905,
+    "precision": 1,
+    "predictions": 46,
+    "product_acc": 0.761,
+    "recall": 0.821,
+    "seconds_per_photo": 66.4,
+    "sleeve_acc": 0.727
+  },
+  "source": "CI run 41902431164, feat/ml-quality @611f6d3 (pipeline before the ML quality pass)"
+}

@@ -77,7 +77,8 @@ struct WardrobeExtractionTests {
                             "truncated": item.truncated,
                             "box": [item.box.minX, item.box.minY, item.box.maxX, item.box.maxY].map { Double($0) }])
         }
-        let json = try JSONSerialization.data(withJSONObject: ["fixture": fixture, "seconds": secs, "items": summary],
+        let json = try JSONSerialization.data(withJSONObject: ["fixture": fixture, "seconds": secs, "items": summary,
+                                                               "trace": run.trace],
                                               options: [.prettyPrinted, .sortedKeys])
         try json.write(to: Self.reportDir.appendingPathComponent("\(stem).json"))
         print("[Report] \(fixture): \(items.count) items in \(String(format: "%.1f", secs))s — " +

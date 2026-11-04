@@ -58,16 +58,31 @@ enum GarmentDescriber {
     }
     #endif
 
-    private static func withTimeout<T>(seconds: Double, _ work: @escaping () async -> T?) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await work() }
-            group.addTask {
+    /// Returns `work`'s result, or nil after `seconds` — really after `seconds`:
+    /// a task group would wait for the model call to finish even once cancelled,
+    /// so the work runs detached and races a timer for one continuation.
+    static func withTimeout<T>(seconds: Double, _ work: @escaping () async -> T?) async -> T? {
+        await withCheckedContinuation { (cont: CheckedContinuation<T?, Never>) in
+            let once = ResumeOnce(cont)
+            let worker = Task.detached(priority: .utility) { once.resume(await work()) }
+            Task.detached {
                 try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                return nil
+                worker.cancel()
+                once.resume(nil)
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+        }
+    }
+
+    private final class ResumeOnce<T>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cont: CheckedContinuation<T?, Never>?
+        init(_ c: CheckedContinuation<T?, Never>) { cont = c }
+        func resume(_ value: T?) {
+            lock.lock()
+            let c = cont
+            cont = nil
+            lock.unlock()
+            c?.resume(returning: value)
         }
     }
 }

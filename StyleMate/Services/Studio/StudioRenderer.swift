@@ -15,9 +15,12 @@ import os
 ///   git-ignored). If it's missing, `isAvailable` is false and `render` returns nil, so callers keep
 ///   the plain cutout.
 /// - Runtime: Apple's ml-stable-diffusion Swift pipeline, vendored in `Vendor/StableDiffusion/`.
-/// - Memory: a single render runs in `reduceMemory` mode (each model is loaded only while it's used; the
-///   peak is the UNet). A multi-seed render (`seeds:`) keeps the models it uses loaded across the seeds
-///   (~1 GB) and unloads them all at the end. Call `unload()` after a batch to drop the pipeline too.
+/// - Memory: always `reduceMemory` mode (each model is loaded only while it's used; the peak is the
+///   UNet alone). A multi-seed render (`seeds:`) is ONE `generateImages` call with `imageCount` =
+///   seeds.count, so every model is loaded once for the whole batch. Call `unload()` after a batch to
+///   drop the pipeline too.
+/// - Cancellation: `cancelRenders()` stops the in-flight render at its next denoising step (and any
+///   render already queued behind it); the call then returns nils.
 /// - Threading: renders are serialized on a private queue (one at a time). The synchronous overloads
 ///   block their caller for seconds to minutes, so never call them on the main thread; use the `async`
 ///   overloads from UI code.
@@ -54,6 +57,8 @@ final class StudioRenderer: @unchecked Sendable {
     // Guarded by `stateLock`.
     private var _computeUnits: MLComputeUnits = .cpuAndNeuralEngine
     private var _lastStats: RenderStats?
+    private var _requests: UInt64 = 0
+    private var _cancelledThrough: UInt64 = 0
 
     /// `.cpuAndNeuralEngine` (default; the models are converted for the ANE, and iOS forbids GPU work in
     /// the background). Changing it rebuilds the pipeline on the next render.
@@ -64,6 +69,13 @@ final class StudioRenderer: @unchecked Sendable {
 
     /// Timing of the most recent successful render call.
     var lastStats: RenderStats? { stateLock.withLock { _lastStats } }
+
+    /// Stops the in-flight render at its next step, and renders queued before this call.
+    func cancelRenders() { stateLock.withLock { _cancelledThrough = _requests } }
+    private func isCancelled(_ request: UInt64) -> Bool { stateLock.withLock { request <= _cancelledThrough } }
+    /// Numbers each request when it is made (not when it starts), so a cancel issued while it waits in
+    /// the queue still applies to it, and a later request is unaffected.
+    private func beginRequest() -> UInt64 { stateLock.withLock { () -> UInt64 in _requests += 1; return _requests } }
 
     init(resourcesURL: URL? = Bundle.main.url(forResource: StudioRenderer.bundleName, withExtension: "bundle")) {
         self.resourcesURL = resourcesURL
@@ -104,8 +116,9 @@ final class StudioRenderer: @unchecked Sendable {
             assertionFailure("StudioRenderer.render must not run on the main thread")
         }
         guard isAvailable else { return seeds.map { _ in nil } }
+        let request = beginRequest()
         return queue.sync {
-            renderOnQueue(startingImage: startingImage, prompt: prompt, negativePrompt: negativePrompt,
+            renderOnQueue(request: request, startingImage: startingImage, prompt: prompt, negativePrompt: negativePrompt,
                           strength: strength, steps: steps, guidance: guidance, seeds: seeds)
         }
     }
@@ -121,10 +134,11 @@ final class StudioRenderer: @unchecked Sendable {
     func render(startingImage: CGImage?, prompt: String, negativePrompt: String,
                 strength: Float, steps: Int, guidance: Float, seeds: [UInt32]) async -> [CGImage?] {
         guard isAvailable else { return seeds.map { _ in nil } }
+        let request = beginRequest()
         return await withCheckedContinuation { (cont: CheckedContinuation<[CGImage?], Never>) in
             queue.async {
                 cont.resume(returning: self.renderOnQueue(
-                    startingImage: startingImage, prompt: prompt, negativePrompt: negativePrompt,
+                    request: request, startingImage: startingImage, prompt: prompt, negativePrompt: negativePrompt,
                     strength: strength, steps: steps, guidance: guidance, seeds: seeds))
             }
         }
@@ -172,10 +186,11 @@ final class StudioRenderer: @unchecked Sendable {
         return built
     }
 
-    private func renderOnQueue(startingImage: CGImage?, prompt: String, negativePrompt: String,
+    private func renderOnQueue(request: UInt64, startingImage: CGImage?, prompt: String, negativePrompt: String,
                                strength: Float, steps: Int, guidance: Float, seeds: [UInt32]) -> [CGImage?] {
         dispatchPrecondition(condition: .onQueue(queue))
         guard !seeds.isEmpty else { return [] }
+        guard !isCancelled(request) else { return seeds.map { _ in nil } }
         let start = CFAbsoluteTimeGetCurrent()
         var input: CGImage?
         if let startingImage {
@@ -190,11 +205,9 @@ final class StudioRenderer: @unchecked Sendable {
             return seeds.map { _ in nil }
         }
         let setup = CFAbsoluteTimeGetCurrent() - start
-        // Several seeds: keep the models loaded between them (the copy shares the same ManagedMLModels),
-        // then unload everything at the end.
-        let batch = seeds.count > 1
-        if batch { pipe.reduceMemory = false }
-        defer { if batch { pipe.unloadResources() } }
+        // Reduced memory always: the scan's models may be resident too. All seeds run as one
+        // `imageCount` batch, so each model is still loaded only once per call.
+        pipe.reduceMemory = true
 
         var config = StableDiffusionPipeline.Configuration(prompt: prompt)
         config.negativePrompt = negativePrompt
@@ -203,26 +216,30 @@ final class StudioRenderer: @unchecked Sendable {
         config.strength = input == nil ? 1 : min(max(strength, 0.01), 0.99)
         config.stepCount = max(1, steps)
         config.guidanceScale = guidance
-        config.imageCount = 1
+        config.imageCount = seeds.count
+        // The batch's noise is drawn from the first seed (image k uses the k-th draw), so results stay
+        // deterministic per seed list.
+        config.seed = seeds[0]
         config.disableSafety = true
         config.schedulerType = .dpmSolverMultistepScheduler  // DPM-Solver++ (2nd order)
         config.schedulerTimestepSpacing = .karras
         config.rngType = .torchRNG  // same noise as torch.manual_seed(seed) on CPU in diffusers
 
         var ranSteps = 0
-        var results: [CGImage?] = []
-        for seed in seeds {
-            config.seed = seed
-            do {
-                let images = try pipe.generateImages(configuration: config) { progress in
-                    ranSteps = progress.step + 1
-                    return true
-                }
-                results.append(images.first ?? nil)
-            } catch {
-                log.error("Studio render (seed \(seed)) failed: \(String(describing: error), privacy: .public)")
-                results.append(nil)
+        var results: [CGImage?] = seeds.map { _ in nil }
+        do {
+            let images = try pipe.generateImages(configuration: config) { progress in
+                ranSteps = progress.step + 1
+                return !self.isCancelled(request)
             }
+            for (i, im) in images.prefix(seeds.count).enumerated() { results[i] = im }
+        } catch {
+            log.error("Studio render (seed \(seeds[0]) x\(seeds.count)) failed: \(String(describing: error), privacy: .public)")
+        }
+        if isCancelled(request) {
+            pipe.unloadResources()
+            log.info("Studio render cancelled")
+            return seeds.map { _ in nil }
         }
         let total = CFAbsoluteTimeGetCurrent() - start
         if results.contains(where: { $0 != nil }) {

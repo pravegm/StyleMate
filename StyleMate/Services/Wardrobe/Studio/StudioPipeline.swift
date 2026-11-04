@@ -16,9 +16,12 @@ protocol StudioImageGenerating: AnyObject {
                 strength: Float, steps: Int, guidance: Float, seeds: [UInt32]) -> [CGImage?]
     /// Frees the ~1 GB pipeline after a batch.
     func unload()
+    /// Stops in-flight renders as soon as possible (they return nil).
+    func cancelRenders()
 }
 
 extension StudioImageGenerating {
+    func cancelRenders() {}
     func render(startingImage: CGImage?, prompt: String, negativePrompt: String,
                 strength: Float, steps: Int, guidance: Float, seeds: [UInt32]) -> [CGImage?] {
         seeds.map { render(startingImage: startingImage, prompt: prompt, negativePrompt: negativePrompt,
@@ -48,46 +51,125 @@ enum StudioPipeline {
         let similarity: Float
     }
 
-    /// Below this FashionSigLIP similarity to the real item, a render is a
-    /// different garment and is rejected (experiments: good renders 0.68–0.80).
-    static var minSimilarity: Float = 0.6
+    /// Everything measured about one render, accepted or not (logged, and saved
+    /// by the tests for review).
+    struct Candidate {
+        /// The isolated, colour-matched, framed product.
+        let image: UIImage
+        let score: Float
+        let similarity: Float
+        let body: Float
+        /// Zero-shot score of the planned product label (and of "Solid" for plain items).
+        let product: Float
+        let plain: Float
+        /// Best "this is a bad render" prompt minus the product prompt (> 0 = looks like a failure).
+        let qcMargin: Float
+        let touchesFrame: Bool
+        let coverage: Float
+        /// Second-largest separate object relative to the product.
+        let secondObject: Float
+        /// Largest near-white blob inside the product, as a share of it.
+        let whitePanel: Float
+        /// Why it can't be used (nil = acceptable).
+        let rejection: String?
 
+        var summary: [String: Any] {
+            ["score": score, "similarity": similarity, "body": body, "product": product, "plain": plain,
+             "qcMargin": qcMargin, "touchesFrame": touchesFrame, "coverage": coverage,
+             "secondObject": secondObject, "whitePanel": whitePanel, "rejection": rejection ?? ""]
+        }
+    }
+
+    enum Outcome {
+        case rendered(Result)
+        /// Renders were made but none is convincingly the same item (keep the cutout).
+        case rejected(bestSimilarity: Float?)
+        /// Nothing was rendered (models missing, cancelled, inference error): try again later.
+        case failed
+    }
+
+    /// FashionSigLIP similarity to the real item a render must reach. Measured
+    /// on the lab sheets: failed tees 0.646–0.669, good renders 0.69–0.78
+    /// (text-to-image); a refine starts from the cutout itself, so it must stay
+    /// much closer to it. Similarity alone doesn't catch a person wearing the
+    /// garment (0.75 in the lab) — the body check does.
+    static var minSimilarityGenerate: Float = 0.70
+    static var minSimilarityRefine: Float = 0.80
+    /// Template-guided renders already carry the garment's own fabric and
+    /// layout; against a partial cutout (a tee seen between jacket halves) a
+    /// perfect render scores only ~0.62 (lab, Nov 2026), so their bar is lower
+    /// and the hard checks (body, second object, panel, frame) carry the gate.
+    static var minSimilarityTemplate: Float = 0.60
+
+    /// Reject a generated render whose best "failed render" prompt (a person
+    /// wearing it, a stack, a flat lay with props, a white panel) comes within
+    /// this of the product prompt. Lab calibration (Nov 2026): renders of a
+    /// person -0.050…-0.031, good catalog renders -0.110…-0.061.
+    static var qcMarginReject: Float = -0.045
+
+    static func minSimilarity(for plan: StudioPlan) -> Float {
+        if case .generate = plan.mode { return plan.template == nil ? minSimilarityGenerate : minSimilarityTemplate }
+        return minSimilarityRefine
+    }
+
+    /// Back-compat wrapper: the accepted render, or nil.
     static func studioImage(cutout: UIImage, embedding: [Float], plan: StudioPlan, seedBase: UInt32) -> Result? {
+        if case .rendered(let r) = studioOutcome(cutout: cutout, embedding: embedding, plan: plan, seedBase: seedBase) { return r }
+        return nil
+    }
+
+    /// Renders `plan.candidates` images and returns the best acceptable one.
+    /// `onCandidate` sees every raw render and its evaluation (nil = nothing separable).
+    static func studioOutcome(cutout: UIImage, embedding: [Float], plan: StudioPlan, seedBase: UInt32,
+                              onCandidate: ((Int, CGImage, Candidate?) -> Void)? = nil) -> Outcome {
         guard let gen = generator, gen.isAvailable, let cg = cutout.cgImage,
-              let start = FashionClassifier.onWhite(cg, side: 512) else { return nil }
+              let start = FashionClassifier.onWhite(cg, side: 512) else { return .failed }
         let reference = ColorStats(cg)
         let seeds = (0..<max(1, plan.candidates)).map { seedBase &+ UInt32($0) &* 7919 }
         let renders: [CGImage?]
         switch plan.mode {
         case .generate:
-            renders = gen.render(startingImage: nil, prompt: plan.prompt, negativePrompt: plan.negativePrompt,
-                                 strength: 1, steps: StudioPlan.steps, guidance: StudioPlan.guidance, seeds: seeds)
+            renders = gen.render(startingImage: plan.template, prompt: plan.prompt, negativePrompt: plan.negativePrompt,
+                                 strength: plan.template == nil ? 1 : plan.templateStrength, steps: StudioPlan.steps,
+                                 guidance: StudioPlan.guidance, seeds: seeds)
         case .refine(let strength):
             renders = gen.render(startingImage: start, prompt: plan.prompt, negativePrompt: plan.negativePrompt,
                                  strength: strength, steps: StudioPlan.steps, guidance: StudioPlan.guidance, seeds: seeds)
         }
-        var best: Result?
+        guard renders.contains(where: { $0 != nil }) else { return .failed }
+        let minSim = minSimilarity(for: plan)
+        var best: Candidate?, bestSim: Float?
         for (k, raw) in renders.enumerated() {
-            guard let raw, let candidate = autoreleasepool(invoking: { evaluate(raw, reference: reference, embedding: embedding, plan: plan) })
-            else { continue }
-            print("[Studio] candidate \(k): score=\(String(format: "%.3f", candidate.score)) sim=\(String(format: "%.3f", candidate.similarity))")
-            if best == nil || candidate.score > best!.score { best = candidate }
+            guard let raw else { continue }
+            let c = autoreleasepool(invoking: { evaluate(raw, reference: reference, embedding: embedding, plan: plan, minSimilarity: minSim) })
+            onCandidate?(k, raw, c)
+            guard let c else {
+                print("[Studio] candidate \(k): nothing separable")
+                continue
+            }
+            print("[Studio] candidate \(k): score=\(String(format: "%.3f", c.score)) sim=\(String(format: "%.3f", c.similarity))" +
+                  (c.rejection.map { " REJECT \($0)" } ?? ""))
+            bestSim = max(bestSim ?? -1, c.similarity)
+            guard c.rejection == nil else { continue }
+            if best == nil || c.score > best!.score { best = c }
         }
-        guard let b = best, b.similarity >= minSimilarity else {
-            print("[Studio] no convincing render (best sim \(best.map { String(format: "%.3f", $0.similarity) } ?? "-")); keeping the cutout")
-            return nil
+        guard let b = best else {
+            print("[Studio] no convincing render (best sim \(bestSim.map { String(format: "%.3f", $0) } ?? "-")); keeping the cutout")
+            return .rejected(bestSimilarity: bestSim)
         }
-        return b
+        return .rendered(Result(image: b.image, score: b.score, similarity: b.similarity))
     }
 
     // MARK: - Candidate evaluation
 
-    static func evaluate(_ render: CGImage, reference: ColorStats?, embedding: [Float], plan: StudioPlan? = nil) -> Result? {
-        guard let cut = isolateProduct(render), cut.coverage < 0.85 else {
-            // Nothing separable from the background (a blank or full-bleed
-            // texture render) — not a product shot.
-            return nil
-        }
+    /// Kinds whose product is two separate objects (a pair of shoes).
+    private static func isPaired(_ label: String) -> Bool { label.hasPrefix("Footwear|") }
+
+    /// Returns the measured candidate (with a `rejection` reason when it fails a
+    /// hard check), or nil when nothing is separable from the background.
+    static func evaluate(_ render: CGImage, reference: ColorStats?, embedding: [Float], plan: StudioPlan? = nil,
+                         minSimilarity: Float = 0) -> Candidate? {
+        guard let cut = isolateProduct(render, keepPairs: plan.map { isPaired($0.productLabel) } ?? true) else { return nil }
         var image = cut.image
         if let ref = reference, let matched = ColorStats.match(image, to: ref) { image = matched }
         let framed = GarmentCutout.frame(image)
@@ -95,27 +177,48 @@ enum StudioPipeline {
               let e = WardrobeML.shared.embed(onWhite) else { return nil }
         let sim = WardrobeExtractor.cosine(e, embedding)
         let body = bodyFraction(render)
-        var score = sim - 0.6 * body - (cut.touchesFrame ? 0.12 : 0)
+        var score = sim - 0.6 * body
         // Does it read as the right kind of product (and, for plain items, as
-        // plain)? Zero-shot against the bundled vocabulary — catches a "t-shirt"
-        // render that grew a white panel or turned into a stack of tees.
+        // plain)? Zero-shot against the bundled vocabulary.
+        var product: Float = 0, plain: Float = 0, qcMargin: Float = -1
         if let plan, let vocab = WardrobeML.shared.vocabulary {
             for group in ["upper_inner", "upper_outer", "lower", "onepiece", "footwear", "bag", "headwear", "eyewear", "neckwear", "jewelry"] {
-                if let s = vocab.scores(in: group, for: e)[plan.productLabel] { score += 0.25 * s; break }
+                if let s = vocab.scores(in: group, for: e)[plan.productLabel] { product = s; break }
             }
-            if plan.isSolid, let solid = vocab.scores(in: "pattern", for: e)["Solid"] { score += 0.15 * solid }
+            score += 0.25 * product
+            if plan.isSolid, let solid = vocab.scores(in: "pattern", for: e)["Solid"] { plain = solid; score += 0.15 * solid }
+            // Known failure looks (a person wearing it, a stack of tees, a flat
+            // lay with props, a white panel) must stay well below the product.
+            if let worst = vocab.scores(in: "render_qc", for: e).values.max(), product > 0 { qcMargin = worst - product }
         }
-        return Result(image: framed, score: score, similarity: sim)
+        // A light garment legitimately has white areas; only check darker ones.
+        let lightGarment = (reference?.mean.0 ?? 50) > 72
+        var isGenerate = false
+        if let plan, case .generate = plan.mode { isGenerate = true }
+        let whitePanel = lightGarment ? 0 : interiorWhiteBlob(cut.image)
+
+        var rejection: String?
+        if cut.coverage >= 0.85 { rejection = "full-bleed (coverage \(String(format: "%.2f", cut.coverage)))" }
+        else if cut.touchesFrame { rejection = "touches the frame" }
+        else if cut.secondObject >= 0.15 { rejection = "second object (\(String(format: "%.2f", cut.secondObject)))" }
+        else if whitePanel >= 0.03 { rejection = "white panel (\(String(format: "%.3f", whitePanel)))" }
+        else if body > 0.25 { rejection = "body / mannequin (\(String(format: "%.2f", body)))" }
+        else if isGenerate, qcMargin > qcMarginReject { rejection = "looks like a failed render (qc +\(String(format: "%.3f", qcMargin)))" }
+        else if sim < minSimilarity { rejection = "not the same item (sim \(String(format: "%.3f", sim)) < \(minSimilarity))" }
+        return Candidate(image: framed, score: score, similarity: sim, body: body, product: product, plain: plain,
+                         qcMargin: qcMargin, touchesFrame: cut.touchesFrame, coverage: cut.coverage,
+                         secondObject: cut.secondObject, whitePanel: whitePanel, rejection: rejection)
     }
 
     /// The product, without its white background: Vision's foreground instance
-    /// mask on device (largest instance only), or white-keying where Vision
-    /// isn't available (simulator).
-    static func isolateProduct(_ render: CGImage) -> (image: CGImage, touchesFrame: Bool, coverage: Float)? {
+    /// mask on device (every instance, so a second object is measured, then the
+    /// largest kept), or white-keying where Vision isn't available (simulator).
+    static func isolateProduct(_ render: CGImage, keepPairs: Bool = true)
+        -> (image: CGImage, touchesFrame: Bool, coverage: Float, secondObject: Float)? {
         let w = render.width, h = render.height
         guard var px = GarmentCutout.rgbaPixels(render) else { return nil }
         var alpha = visionMask(render) ?? whiteKeyMask(px, w: w, h: h)
-        keepLargestComponent(&alpha, w: w, h: h)
+        let second = keepLargestComponent(&alpha, w: w, h: h, keepPairs: keepPairs)
         var any = false, touches = false, opaque = 0
         for y in 0..<h {
             for x in 0..<w {
@@ -138,7 +241,35 @@ enum StudioPipeline {
                                   space: CGColorSpaceCreateDeviceRGB(),
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
               let img = ctx.makeImage() else { return nil }
-        return (img, touches, Float(opaque) / Float(w * h))
+        return (img, touches, Float(opaque) / Float(w * h), second)
+    }
+
+    /// Share of the product covered by its largest enclosed near-white blob — a
+    /// blank label square or a white panel the model painted on a dark garment.
+    static func interiorWhiteBlob(_ product: CGImage) -> Float {
+        let side = 128
+        guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = ctx.data else { return 0 }
+        let k = CGFloat(side) / CGFloat(max(product.width, product.height))
+        let dw = CGFloat(product.width) * k, dh = CGFloat(product.height) * k
+        ctx.draw(product, in: CGRect(x: (CGFloat(side) - dw) / 2, y: (CGFloat(side) - dh) / 2, width: dw, height: dh))
+        let p = data.assumingMemoryBound(to: UInt8.self)
+        let n = side * side
+        var inside = [UInt8](repeating: 0, count: n), white = [UInt8](repeating: 0, count: n)
+        var area = 0
+        for i in 0..<n {
+            let a = Int(p[i * 4 + 3])
+            guard a > 128 else { continue }
+            inside[i] = 1; area += 1
+            let r = Int(p[i * 4]) * 255 / a, g = Int(p[i * 4 + 1]) * 255 / a, b = Int(p[i * 4 + 2]) * 255 / a
+            if min(r, g, b) > 222 && max(r, g, b) - min(r, g, b) < 18 { white[i] = 1 }
+        }
+        // Holes in the silhouette that are white count too (white-keyed renders
+        // leave an enclosed white panel as a hole only if it touches nothing).
+        guard area > 50 else { return 0 }
+        let (_, sizes) = GarmentSegmenter.components(white, w: side, h: side)
+        return Float(sizes.max() ?? 0) / Float(area)
     }
 
     private static func visionMask(_ image: CGImage) -> [UInt8]? {
@@ -181,14 +312,23 @@ enum StudioPipeline {
         return bg.map { $0 ? 0 : 255 }
     }
 
-    private static func keepLargestComponent(_ alpha: inout [UInt8], w: Int, h: Int) {
+    /// Keeps the main object (plus the second shoe of a pair when `keepPairs`)
+    /// and drops the rest; returns the largest dropped object's size relative
+    /// to the main one (specks under 1% of the image don't count).
+    @discardableResult
+    private static func keepLargestComponent(_ alpha: inout [UInt8], w: Int, h: Int, keepPairs: Bool) -> Float {
         let bin = alpha.map { $0 > 128 ? UInt8(1) : UInt8(0) }
         let (comp, sizes) = GarmentSegmenter.components(bin, w: w, h: h)
-        guard let largest = sizes.max(), let id = sizes.firstIndex(of: largest).map({ $0 + 1 }) else { return }
-        // Keep the main object and anything at least a third its size (the second
-        // shoe of a pair); drop props.
-        let keep = Set(sizes.enumerated().filter { $0.offset + 1 == id || $0.element * 3 >= largest }.map { $0.offset + 1 })
+        guard let largest = sizes.max(), largest > 0, let id = sizes.firstIndex(of: largest).map({ $0 + 1 }) else { return 0 }
+        var keep: Set<Int> = [id]
+        if keepPairs {
+            // The second shoe: at least a third of the first.
+            for (i, s) in sizes.enumerated() where i + 1 != id && s * 3 >= largest { keep.insert(i + 1) }
+        }
+        let speck = w * h / 100
+        let second = sizes.enumerated().filter { !keep.contains($0.offset + 1) && $0.element >= speck }.map { $0.element }.max() ?? 0
         for i in 0..<(w * h) where bin[i] == 1 && !keep.contains(comp[i]) { alpha[i] = 0 }
+        return Float(second) / Float(largest)
     }
 
     /// Share of person/mannequin pixels (face, hair, arms, hands, legs, torso)

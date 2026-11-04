@@ -13,7 +13,8 @@ StyleMate/ML/ (git-ignored; the Xcode synchronized group bundles whatever is the
                             separates a jacket from the top under it, coat vs
                             dress, shoes, watch... In 512x512 RGB (the same crop,
                             stretched, as in training), out `logits` for the 27
-                            whole-garment classes, resized to [1,27,576,384] so
+                            whole-garment classes plus 4 part classes (hood,
+                            collar, lapel, sleeve), resized to [1,31,576,384] so
                             both maps share one grid.
   FashionEncoder.mlpackage  Marqo-FashionSigLIP image tower (Apache-2.0). 224x224
                             RGB -> L2-normalized 768-d embedding. Zero-shot product
@@ -114,8 +115,11 @@ def build_segformer(repo, in_w, in_h, out_name, channels, softmax, out_file, des
 
 build_segformer("fashn-ai/fashn-human-parser", 384, 576, "probs", None, True, "GarmentParser.mlpackage",
                 "FASHN human parser (SegFormer-B4): 18-class clothing/body parsing, softmax on a 576x384 grid")
-build_segformer("sayeed99/segformer-b3-fashion", 512, 512, "logits", list(range(27)), False, "GarmentLabeler.mlpackage",
-                "Fashionpedia SegFormer-B3: whole-garment class logits 0..26 on a 576x384 grid")
+# Channels 0..26 = whole garments; then the part channels hood (28), collar (29), lapel (30), sleeve (32):
+# GarmentSegmenter uses them to confirm hoodies, sleeves and tailored coats.
+build_segformer("sayeed99/segformer-b3-fashion", 512, 512, "logits", list(range(27)) + [28, 29, 30, 32], False,
+                "GarmentLabeler.mlpackage",
+                "Fashionpedia SegFormer-B3: garment class logits 0..26 + hood/collar/lapel/sleeve parts, on a 576x384 grid")
 
 # ---------------------------------------------------------------- encoder + vocabulary
 import open_clip

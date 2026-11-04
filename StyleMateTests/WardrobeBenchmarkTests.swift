@@ -10,6 +10,8 @@ enum FixtureExtraction {
     struct Run {
         let items: [WardrobeExtractor.Item]
         let seconds: Double
+        /// The extractor's diagnostics (drops, zoom finds) for the report.
+        let trace: [String]
     }
 
     private static let lock = NSLock()
@@ -45,8 +47,9 @@ enum FixtureExtraction {
         lock.lock(); defer { lock.unlock() }
         if let r = cache[fixture] { return r }
         let start = Date()
-        let items = WardrobeExtractor.extract(from: image)
-        let r = Run(items: items, seconds: Date().timeIntervalSince(start))
+        var trace: [String] = []
+        let items = WardrobeExtractor.extract(from: image) { trace.append($0) }
+        let r = Run(items: items, seconds: Date().timeIntervalSince(start), trace: trace)
         cache[fixture] = r
         return r
     }
@@ -160,6 +163,7 @@ struct WardrobeBenchmarkTests {
         var seconds = 0.0
         var perFixture: [[String: Any]] = []
         var lines: [String] = []
+        var matchedItems: [(fixture: String, id: String, item: WardrobeExtractor.Item)] = []
 
         for file in files {
             let lf = try JSONDecoder().decode(LabelFile.self, from: Data(contentsOf: labelDir.appendingPathComponent(file)))
@@ -203,6 +207,7 @@ struct WardrobeBenchmarkTests {
                 let g = lf.items[gi]
                 row["match"] = g.id
                 guard g.core else { fixtureItems.append(row); continue }   // non-core: neither TP nor FP
+                matchedItems.append((lf.fixture, g.id, p))
                 truePositives += 1
                 matched += 1
                 let cat = g.categories.contains(a.category.rawValue)
@@ -241,11 +246,11 @@ struct WardrobeBenchmarkTests {
                 if gUsed.contains(gi) { coreFound += 1 }
                 else { lines.append("  MISS \(lf.fixture): \(g.id)") }
             }
-            perFixture.append(["fixture": lf.fixture, "seconds": run.seconds, "items": fixtureItems])
+            perFixture.append(["fixture": lf.fixture, "seconds": run.seconds, "items": fixtureItems, "trace": run.trace])
         }
 
         func r(_ a: Int, _ b: Int) -> Double { b == 0 ? 0 : (Double(a) / Double(b) * 1000).rounded() / 1000 }
-        let metrics: [String: Double] = [
+        var metrics: [String: Double] = [
             "precision": r(truePositives, truePositives + falsePositives),
             "recall": r(coreFound, coreTotal),
             "category_acc": r(catOK, matched),
@@ -264,6 +269,7 @@ struct WardrobeBenchmarkTests {
             "core_found": Double(coreFound),
             "false_positives": Double(falsePositives)
         ]
+        metrics.merge(Self.duplicateReport(matchedItems), uniquingKeysWith: { $1 })
         let report: [String: Any] = ["metrics": metrics, "fixtures": perFixture]
         let json = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
         try json.write(to: FixtureExtraction.reportRoot.appendingPathComponent("benchmark.json"))
@@ -288,5 +294,91 @@ struct WardrobeBenchmarkTests {
         if let b = bm["false_patterns"], let v = metrics["false_patterns"] {
             #expect(v <= b + 1, "benchmark regression: false_patterns \(v) > baseline \(b) + 1")
         }
+    }
+    // MARK: - Duplicate thresholds
+
+    /// The same physical garment in two fixture photos (one outfit, two shots).
+    static let samePairs: [((String, String), (String, String))] = [
+        (("street_coat_cap.jpg", "grey_coat"), ("street_coat_backpack.jpg", "grey_jacket")),
+        (("street_coat_cap.jpg", "leather_joggers"), ("street_coat_backpack.jpg", "leather_joggers")),
+        (("street_coat_cap.jpg", "sneakers"), ("street_coat_backpack.jpg", "sneakers")),
+        (("street_coat_cap.jpg", "cap"), ("street_coat_backpack.jpg", "cap"))
+    ]
+
+    /// A cutout re-photographed: mirrored, cropped 85%, or ±15% exposure.
+    static func variant(_ image: UIImage, _ v: Int) -> CGImage? {
+        guard let cg = image.cgImage else { return nil }
+        let w = cg.width, h = cg.height
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        let r = CGRect(x: 0, y: 0, width: w, height: h)
+        switch v {
+        case 0: ctx.translateBy(x: CGFloat(w), y: 0); ctx.scaleBy(x: -1, y: 1); ctx.draw(cg, in: r)
+        case 1:
+            guard let c = cg.cropping(to: r.insetBy(dx: CGFloat(w) * 0.075, dy: CGFloat(h) * 0.075)) else { return nil }
+            ctx.draw(c, in: r)
+        default:
+            ctx.draw(cg, in: r)
+            guard let data = ctx.data else { return nil }
+            let p = data.assumingMemoryBound(to: UInt8.self)
+            let k: Float = v == 2 ? 1.15 : 0.85
+            for px in 0..<(w * h) {
+                let a = Float(p[px * 4 + 3])   // premultiplied: a channel never exceeds alpha
+                for c in 0..<3 { p[px * 4 + c] = UInt8(min(a, Float(p[px * 4 + c]) * k)) }
+            }
+        }
+        return ctx.makeImage()
+    }
+
+    static func duplicateReport(_ items: [(fixture: String, id: String, item: WardrobeExtractor.Item)]) -> [String: Double] {
+        func embed(_ cg: CGImage) -> [Float]? { FashionClassifier.onWhite(cg, side: 224).flatMap { WardrobeML.shared.embed($0) } }
+        let same = DuplicateDetector.visualSame, maybe = DuplicateDetector.visualMaybe
+        var sameScores: [Float] = [], diffScores: [Float] = [], rows: [[String: Any]] = []
+        // Same garment: augmented copies, and the cross-photo pairs.
+        for it in items {
+            for v in 0..<4 {
+                guard let cg = variant(it.item.cutout, v), let e = embed(cg) else { continue }
+                let s = WardrobeExtractor.cosine(e, it.item.attributes.embedding)
+                sameScores.append(s)
+                rows.append(["kind": "variant\(v)", "a": "\(it.fixture)/\(it.id)", "cos": s])
+            }
+        }
+        func find(_ k: (String, String)) -> WardrobeExtractor.Item? { items.first { $0.fixture == k.0 && $0.id == k.1 }?.item }
+        var known = Set<String>()
+        for (a, b) in samePairs {
+            known.insert("\(a.0)/\(a.1)|\(b.0)/\(b.1)")
+            guard let x = find(a), let y = find(b) else { continue }
+            let s = WardrobeExtractor.cosine(x.attributes.embedding, y.attributes.embedding)
+            sameScores.append(s)
+            rows.append(["kind": "cross-photo", "a": "\(a.0)/\(a.1)", "b": "\(b.0)/\(b.1)", "cos": s])
+        }
+        // Different garments of compatible kinds, from different photos.
+        for i in 0..<items.count {
+            for j in (i + 1)..<items.count where items[i].fixture != items[j].fixture {
+                let a = items[i], b = items[j]
+                guard slot(a.item.kind.rawValue) == slot(b.item.kind.rawValue),
+                      !known.contains("\(a.fixture)/\(a.id)|\(b.fixture)/\(b.id)"),
+                      !known.contains("\(b.fixture)/\(b.id)|\(a.fixture)/\(a.id)") else { continue }
+                let s = WardrobeExtractor.cosine(a.item.attributes.embedding, b.item.attributes.embedding)
+                diffScores.append(s)
+                if s >= maybe { rows.append(["kind": "different", "a": "\(a.fixture)/\(a.id)", "b": "\(b.fixture)/\(b.id)", "cos": s]) }
+            }
+        }
+        func share(_ xs: [Float], _ t: Float) -> Double {
+            xs.isEmpty ? 0 : (Double(xs.filter { $0 >= t }.count) / Double(xs.count) * 1000).rounded() / 1000
+        }
+        let m: [String: Double] = [
+            "dup_same_pairs": Double(sameScores.count), "dup_diff_pairs": Double(diffScores.count),
+            "dup_same_at_visualSame": share(sameScores, same), "dup_same_at_visualMaybe": share(sameScores, maybe),
+            "dup_diff_at_visualSame": share(diffScores, same), "dup_diff_at_visualMaybe": share(diffScores, maybe),
+            "dup_same_min": Double(sameScores.min() ?? 0), "dup_diff_max": Double(diffScores.max() ?? 0)
+        ]
+        let report: [String: Any] = ["thresholds": ["visualSame": same, "visualMaybe": maybe], "metrics": m, "pairs": rows]
+        if let json = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+            try? json.write(to: FixtureExtraction.reportRoot.appendingPathComponent("duplicates.json"))
+        }
+        print("[Report] DUPLICATES " + m.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))
+        return m
     }
 }
