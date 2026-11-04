@@ -24,6 +24,17 @@ struct ScanProgress: Codable {
     /// Photos that are probably the user but not certain enough to add silently.
     /// Optional so progress files written before this field still decode.
     var pendingReviews: [PendingFaceReview]?
+    /// Which extraction pipeline `scannedAssetIDs` were scanned with (nil = before
+    /// versioning). See `ScanProgress.currentPipelineVersion`.
+    var pipelineVersion: Int?
+    /// Load failures per photo (offline iCloud originals), retried up to a limit.
+    var failedAttempts: [String: Int]?
+    /// The scan in progress, so it resumes exactly where it stopped.
+    var activeJob: ScanJob?
+    /// Oldest date the user asked to cover: new-photo scans keep it up to date.
+    var coverageStart: Date?
+    /// Archived `PHPersistentChangeToken` from the last new-photo check.
+    var libraryChangeToken: Data?
 }
 
 /// One "Is this you?" question queued by the scan.
@@ -50,8 +61,34 @@ struct ScanHistoryInfo {
     let totalItemsFound: Int
 }
 
+/// Who started a scan.
+enum ScanTrigger {
+    /// The user picked a range.
+    case user
+    /// The first scan after onboarding.
+    case initial
+    /// The app itself: resuming an unfinished scan or picking up new photos.
+    /// Stays quiet (no banner) when there's nothing to do.
+    case automatic
+}
+
 // MARK: - Photo Scan Service
 
+/// Walks the photo library newest first and turns photos of the user into
+/// wardrobe items, entirely on-device:
+///
+///   metadata filter (screenshots, tiny images, panoramas)
+///   → near-duplicate grouping (bursts / shots seconds apart: best frame only)
+///   → thumbnail person check → full image (iCloud download if needed)
+///   → identity (`FaceMatchingService`) → extraction (`ImageAnalysisService`)
+///   → duplicate match → add, or upgrade the stored image if this view is better.
+///
+/// The next photos are prepared (thumbnail, download, identity) while the
+/// current one is extracted; the two ML stages are each serialized. Progress is
+/// checkpointed so a scan resumes exactly — after a pause, the app being
+/// backgrounded or killed, or in the overnight background task
+/// (`BackgroundScanCoordinator`). Work slows down or pauses with the device's
+/// thermal state and Low Power Mode.
 @MainActor
 class PhotoScanService: ObservableObject {
     static let shared = PhotoScanService()
@@ -66,9 +103,48 @@ class PhotoScanService: ObservableObject {
     @Published var scanAddedItemIDs: [UUID] = []
     /// User-controlled pause. The scan loop parks (without ending) while true.
     @Published var isPaused: Bool = false
+    /// "About 12 min left" while scanning (nil until there's an estimate).
+    @Published private(set) var timeRemainingText: String?
+    /// Why the scan is holding by itself (device too hot, Low Power Mode in the
+    /// background, background time used up). nil when running or user-paused.
+    @Published private(set) var systemPauseReason: String?
+    @Published var pendingReviewCount: Int = 0
+
+    /// "1,204 of 5,310 photos · About 12 min left" — for the progress banner.
+    var progressDetail: String {
+        var parts = ["\(photosScanned.formatted()) of \(totalPhotosToScan.formatted()) photos"]
+        if let reason = systemPauseReason { parts.append(reason) }
+        else if isPaused { parts.append("Paused") }
+        else if let eta = timeRemainingText { parts.append(eta) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// True while a scan loop is running (including paused). Unlike `scanState`
+    /// it is also true for a quiet automatic scan that hasn't shown anything yet.
+    var isWorking: Bool { isRunning }
+
+    /// Set by `BackgroundScanCoordinator` when the app leaves / returns to the screen.
+    var runContext: ScanRunContext = .foreground
 
     private var lastUIUpdate = ContinuousClock.now
     private var lastScanContext: ScanContext?
+    private var isRunning = false
+    /// Bumped on every start/cancel so a superseded loop stops at its next check.
+    private var scanGeneration = 0
+    /// Set when the OS is about to suspend us (background time used up).
+    private var suspendedReason: String?
+
+    private var progressCache: [String: ScanProgress] = [:]
+    private var dirtyProgressUsers: Set<String> = []
+    private var lastProgressFlush = ContinuousClock.now
+
+    private let identityGate = AsyncGate()
+    private let extractionGate = AsyncGate()
+    private let thumbnailManager = PHCachingImageManager()
+    private static let thumbnailSize = CGSize(width: 640, height: 640)
+    private static let checkpointInterval: Duration = .seconds(5)
+    /// Frames of a near-duplicate group tried before giving up on the group.
+    private static let maxFramesPerGroup = 3
 
     private struct ScanContext {
         let userId: String
@@ -93,16 +169,19 @@ class PhotoScanService: ObservableObject {
 
     private init() {}
 
-    private var isCancelled: Bool {
-        scanState != .scanning || Task.isCancelled
+    private func isCurrent(_ generation: Int) -> Bool {
+        // Not Task.isCancelled: the scan runs in its own task (see `run`) and only
+        // stops through cancelScan(), not because a calling view went away.
+        isRunning && generation == scanGeneration
     }
 
     // MARK: - Pause / Resume
 
     func pauseScan() {
-        guard scanState == .scanning, !isPaused else { return }
+        guard isRunning, !isPaused else { return }
         isPaused = true
         currentPhase = "Scan paused"
+        flushProgress()
         print("[StyleMate] Auto-scan paused")
     }
 
@@ -115,13 +194,46 @@ class PhotoScanService: ObservableObject {
 
     func togglePause() { isPaused ? resumeScan() : pauseScan() }
 
-    /// Parks the loop while paused (without exiting). Returns false if the scan was
-    /// cancelled while paused, so the caller can bail out.
-    private func awaitWhilePaused() async -> Bool {
-        while isPaused && !isCancelled {
-            try? await Task.sleep(nanoseconds: 200_000_000)   // 0.2s
+    /// The OS is about to suspend the app (background time used up, or the
+    /// background task expired): stop at the next photo and checkpoint now.
+    func suspend(reason: String) {
+        suspendedReason = reason
+        flushProgress()
+        print("[StyleMate] Auto-scan suspended: \(reason)")
+    }
+
+    /// Back on screen / given background time again.
+    func endSuspension() {
+        guard suspendedReason != nil else { return }
+        suspendedReason = nil
+        print("[StyleMate] Auto-scan continuing")
+    }
+
+    private func currentPolicy() -> ScanThrottle.Policy {
+        ScanThrottle.policy(thermal: ProcessInfo.processInfo.thermalState,
+                            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
+                            context: runContext)
+    }
+
+    /// Parks the loop while paused by the user or the system (without exiting).
+    /// Returns false if the scan was cancelled or superseded meanwhile.
+    private func waitUntilRunnable(_ generation: Int) async -> Bool {
+        var announced = false
+        while true {
+            guard isCurrent(generation) else { return false }
+            let reason = suspendedReason ?? currentPolicy().pauseReason
+            if !isPaused && reason == nil {
+                if systemPauseReason != nil {
+                    systemPauseReason = nil
+                    currentPhase = "Scanning your photos..."
+                }
+                return true
+            }
+            if systemPauseReason != reason { systemPauseReason = reason }
+            if let reason, !isPaused, currentPhase != reason { currentPhase = reason }
+            if !announced { flushProgress(); announced = true }
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
-        return !isCancelled
     }
 
     // MARK: - Progress Persistence (JSON file in Application Support)
@@ -138,32 +250,73 @@ class PhotoScanService: ObservableObject {
         return dir.appendingPathComponent("scanProgress_\(userId).json")
     }
 
+    /// The user's scan progress. Kept in memory once read, so the scan loop and
+    /// the review flow always see (and save) the same copy.
     func loadProgress(forUser userId: String) -> ScanProgress {
-        let fileURL = Self.progressFileURL(forUser: userId)
-
-        // Migrate from UserDefaults if file doesn't exist yet
-        if !FileManager.default.fileExists(atPath: fileURL.path) {
-            let legacyKey = "scanProgress_\(userId)"
-            if let data = UserDefaults.standard.data(forKey: legacyKey),
-               let progress = try? JSONDecoder().decode(ScanProgress.self, from: data) {
-                saveProgress(progress, forUser: userId)
-                UserDefaults.standard.removeObject(forKey: legacyKey)
-                return progress
-            }
-        }
-
-        guard let data = try? Data(contentsOf: fileURL),
-              let progress = try? JSONDecoder().decode(ScanProgress.self, from: data) else {
-            return ScanProgress(scannedAssetIDs: [], totalItemsFound: 0)
+        if let cached = progressCache[userId] { return cached }
+        var progress = Self.readProgressFromDisk(forUser: userId) ?? .fresh()
+        let migrated = progress.migratePipelineIfNeeded()
+        progressCache[userId] = progress
+        if migrated {
+            print("[StyleMate] Scan progress: new extraction pipeline, photos will be scanned again")
+            writeProgress(progress, forUser: userId)
         }
         return progress
     }
 
-    private func saveProgress(_ progress: ScanProgress, forUser userId: String) {
+    private static func readProgressFromDisk(forUser userId: String) -> ScanProgress? {
+        let fileURL = progressFileURL(forUser: userId)
+        // Migrate from UserDefaults if the file doesn't exist yet.
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            let legacyKey = "scanProgress_\(userId)"
+            if let data = UserDefaults.standard.data(forKey: legacyKey),
+               let progress = try? JSONDecoder().decode(ScanProgress.self, from: data) {
+                UserDefaults.standard.removeObject(forKey: legacyKey)
+                return progress
+            }
+            return nil
+        }
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return try? JSONDecoder().decode(ScanProgress.self, from: data)
+    }
+
+    private func writeProgress(_ progress: ScanProgress, forUser userId: String) {
         let fileURL = Self.progressFileURL(forUser: userId)
         if let data = try? JSONEncoder().encode(progress) {
             try? data.write(to: fileURL, options: .atomic)
         }
+    }
+
+    private func saveProgress(_ progress: ScanProgress, forUser userId: String) {
+        progressCache[userId] = progress
+        dirtyProgressUsers.remove(userId)
+        writeProgress(progress, forUser: userId)
+    }
+
+    /// Changes the cached progress; written by the next `flushProgress()`.
+    private func updateProgress(forUser userId: String, _ change: (inout ScanProgress) -> Void) {
+        var progress = loadProgress(forUser: userId)
+        change(&progress)
+        progressCache[userId] = progress
+        dirtyProgressUsers.insert(userId)
+    }
+
+    /// Writes every changed progress file now (checkpoint).
+    func flushProgress() {
+        for userId in dirtyProgressUsers {
+            if let progress = progressCache[userId] { writeProgress(progress, forUser: userId) }
+        }
+        dirtyProgressUsers = []
+        lastProgressFlush = ContinuousClock.now
+    }
+
+    private func checkpointIfDue() {
+        if ContinuousClock.now - lastProgressFlush >= Self.checkpointInterval { flushProgress() }
+    }
+
+    /// True when an unfinished scan is waiting to continue.
+    func hasUnfinishedScan(forUser userId: String) -> Bool {
+        loadProgress(forUser: userId).activeJob != nil
     }
 
     // MARK: - Scan History
@@ -179,161 +332,352 @@ class PhotoScanService: ObservableObject {
 
     // MARK: - Main Scan
 
+    /// Scans `dateRange`, newest photo first. Photos already scanned are skipped,
+    /// so starting the same (or an overlapping) range again just continues.
     func startScan(
         forUser userId: String,
         dateRange: ScanDateRange,
         userGender: String?,
-        wardrobeViewModel: WardrobeViewModel
+        wardrobeViewModel: WardrobeViewModel,
+        trigger: ScanTrigger = .user
     ) async {
-        guard scanState != .scanning else {
+        guard !isRunning else {
             print("[StyleMate] Scan already in progress, ignoring")
             return
         }
-
-        scanState = .scanning
-        isPaused = false
-        photosScanned = 0
-        itemsFound = 0
-        scanAddedItemIDs = []
         lastScanContext = ScanContext(userId: userId, dateRange: dateRange, userGender: userGender)
+        let bounds = dateRange.bounds()
+        let job = ScanJob(rangeStart: bounds.start, rangeEnd: bounds.end, extraAssetIDs: nil,
+                          isAutomatic: trigger == .automatic, createdAt: Date())
+        await run(job, forUser: userId, userGender: userGender, wardrobeViewModel: wardrobeViewModel,
+                  extendsCoverage: true)
+    }
 
-        var progress = loadProgress(forUser: userId)
+    /// Continues whatever is unfinished: the interrupted scan if there is one,
+    /// otherwise photos added to the library since the last check (within the
+    /// range the user has scanned). Quiet when there's nothing new.
+    /// Returns false when there was nothing to start.
+    @discardableResult
+    func continueScanning(forUser userId: String, userGender: String?,
+                          wardrobeViewModel: WardrobeViewModel) async -> Bool {
+        guard !isRunning else { return false }
+        let progress = loadProgress(forUser: userId)
+        if let job = progress.activeJob {
+            print("[StyleMate] Auto-scan: resuming unfinished scan (\(job.photosDone) photos done)")
+            await run(job, forUser: userId, userGender: userGender, wardrobeViewModel: wardrobeViewModel,
+                      extendsCoverage: false)
+            return true
+        }
+        guard let coverage = progress.coverageStart else { return false }
 
-        print("[StyleMate] Auto-scan starting for user: \(userId)")
+        // Photos inserted since the last check, whatever their date.
+        let token = progress.libraryChangeToken
+        let inserted = await Task.detached(priority: .utility) {
+            LibraryChangeTracker.insertedAssetIDs(since: token)
+        }.value
+        let newToken = LibraryChangeTracker.currentToken()
+        updateProgress(forUser: userId) { $0.libraryChangeToken = newToken }
+
+        let job = ScanJob(rangeStart: coverage == .distantPast ? nil : coverage, rangeEnd: nil,
+                          extraAssetIDs: inserted.map { Array($0) }, isAutomatic: true, createdAt: Date())
+        await run(job, forUser: userId, userGender: userGender, wardrobeViewModel: wardrobeViewModel,
+                  extendsCoverage: false)
+        return true
+    }
+
+    /// Runs the scan in a task of its own and waits for it. A caller's task being
+    /// cancelled (e.g. a SwiftUI `.task` whose view went away) doesn't stop it.
+    private func run(_ requested: ScanJob, forUser userId: String, userGender: String?,
+                     wardrobeViewModel: WardrobeViewModel, extendsCoverage: Bool) async {
+        guard !isRunning else { return }
+        let task = Task(priority: .utility) { [weak self] in
+            await self?.runLoop(requested, forUser: userId, userGender: userGender,
+                                wardrobeViewModel: wardrobeViewModel, extendsCoverage: extendsCoverage)
+        }
+        await task.value
+    }
+
+    private func runLoop(_ requested: ScanJob, forUser userId: String, userGender: String?,
+                         wardrobeViewModel: WardrobeViewModel, extendsCoverage: Bool) async {
+        guard !isRunning else { return }
+        isRunning = true
+        scanGeneration += 1
+        let generation = scanGeneration
+        let quiet = requested.isAutomatic
+        isPaused = false
+        systemPauseReason = nil
+        timeRemainingText = nil
+        if !quiet {
+            scanState = .scanning
+            photosScanned = 0
+            totalPhotosToScan = 0
+        }
+
+        print("[StyleMate] Auto-scan starting for user: \(userId)\(quiet ? " (automatic)" : "")")
 
         currentPhase = "Loading face reference..."
         let hasFaceRef = FaceMatchingService.shared.loadSelfieReference(forUser: userId)
-        if hasFaceRef {
-            print("[StyleMate] Auto-scan: Face matching active (selfie loaded)")
-        } else {
+        guard hasFaceRef else {
             print("[StyleMate] Auto-scan: No selfie reference loaded -- scan requires a selfie for accurate results")
-            scanState = .error("No selfie found. Please take a selfie in Profile to enable scanning.")
+            isRunning = false
+            if quiet {
+                currentPhase = ""
+            } else {
+                scanState = .error("No selfie found. Please take a selfie in Profile to enable scanning.")
+            }
             return
         }
+
+        var job = requested
+        updateProgress(forUser: userId) { p in
+            job = p.begin(requested)
+            if extendsCoverage { p.extendCoverage(start: requested.rangeStart, end: requested.rangeEnd) }
+            if p.libraryChangeToken == nil { p.libraryChangeToken = LibraryChangeTracker.currentToken() }
+        }
+        flushProgress()
+        scanAddedItemIDs = job.addedItemIDs.compactMap { UUID(uuidString: $0) }
+        itemsFound = scanAddedItemIDs.count
 
         currentPhase = "Preparing your photo library..."
-        let allAssets = fetchPhotoAssets(in: dateRange)
-        let unscannedAssets = allAssets.filter { !progress.scannedAssetIDs.contains($0.localIdentifier) }
-        totalPhotosToScan = unscannedAssets.count
-        print("[StyleMate] Auto-scan: \(unscannedAssets.count) unscanned of \(allAssets.count) total")
+        let start = job.rangeStart, end = job.rangeEnd, extra = job.extraAssetIDs ?? []
+        let library = await Task.detached(priority: .utility) {
+            Self.fetchAssets(start: start, end: end, extraIDs: extra)
+        }.value
+        guard isCurrent(generation) else { return }
 
-        if unscannedAssets.isEmpty {
-            scanState = .completed
-            currentPhase = "No new photos to scan"
+        // Plan: drop what's done, skip what can't be an outfit photo, group bursts.
+        let progress = loadProgress(forUser: userId)
+        let pending = library.infos.filter { !progress.isDone($0.id) }
+        var skipped: [String] = []
+        var candidates: [ScanAssetInfo] = []
+        for info in pending {
+            if ScanAssetFilter.skipReason(for: info) != nil { skipped.append(info.id) } else { candidates.append(info) }
+        }
+        let units = BurstGrouper.group(candidates)
+        let doneBefore = job.photosDone
+        updateProgress(forUser: userId) { p in
+            p.markDone(skipped)
+            p.recordPhotosDone(skipped.count)
+        }
+        print("[StyleMate] Auto-scan: \(pending.count) to scan of \(library.infos.count) in range " +
+              "(\(skipped.count) screenshots/small, \(candidates.count) photos in \(units.count) moments)")
+
+        guard !units.isEmpty else {
+            finishRun(forUser: userId, generation: generation, quiet: quiet,
+                      emptyMessage: pending.isEmpty ? "No new photos to scan" : "Scan complete!")
             return
         }
 
+        if quiet { scanState = .scanning }
+        totalPhotosToScan = doneBefore + pending.count
+        photosScanned = doneBefore + skipped.count
         currentPhase = "Scanning your photos..."
-        let batchSize = 10
-        var internalScannedCount = 0
+        var eta = ScanETA()
+        updateTimeRemaining(eta, unitsLeft: units.count)
 
-        for batchStart in stride(from: 0, to: unscannedAssets.count, by: batchSize) {
-            guard !isCancelled else { return }
+        let assetsByID = Dictionary(library.assets.map { ($0.localIdentifier, $0) }, uniquingKeysWith: { a, _ in a })
+        let cacheWindow = 48
+        var cachedUpTo = 0
+        func cacheThumbnails(from index: Int) {
+            guard index >= cachedUpTo, index < units.count else { return }
+            let upper = min(units.count, index + cacheWindow)
+            let assets = units[index..<upper].flatMap { $0 }.compactMap { assetsByID[$0.id] }
+            thumbnailManager.startCachingImages(for: assets, targetSize: Self.thumbnailSize,
+                                                contentMode: .aspectFit, options: Self.thumbnailOptions)
+            cachedUpTo = upper
+        }
+        cacheThumbnails(from: 0)
 
-            let batchEnd = min(batchStart + batchSize, unscannedAssets.count)
-            let batch = Array(unscannedAssets[batchStart..<batchEnd])
+        var queue: [Task<PreparedUnit, Never>] = []
+        var nextToPrepare = 0
+        var consumed = 0
+        defer { thumbnailManager.stopCachingImagesForAllAssets() }
 
-            let thumbnails = await loadThumbnails(for: batch, targetSize: CGSize(width: 640, height: 640))
+        while consumed < units.count {
+            guard await waitUntilRunnable(generation) else { queue.forEach { $0.cancel() }; return }
+            let tick = ContinuousClock.now
+            let policy = currentPolicy()
 
-            for (asset, thumbnail) in zip(batch, thumbnails) {
-                guard !isCancelled else { return }
-                if isPaused { guard await awaitWhilePaused() else { return } }
+            while queue.count < policy.prefetchDepth + 1, nextToPrepare < units.count {
+                queue.append(prepareTask(units[nextToPrepare], userId: userId, assets: assetsByID))
+                nextToPrepare += 1
+            }
+            let prepared = await queue.removeFirst().value
+            guard isCurrent(generation) else { queue.forEach { $0.cancel() }; return }
 
-                guard let thumbnail = thumbnail, let thumbCG = thumbnail.cgImage else {
-                    // Not marked as scanned, so a later scan retries it.
-                    internalScannedCount += 1
-                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
-                    continue
-                }
-
-                // Stage 1: Quick person detection on thumbnail (catches full-body, partial body, faces)
-                // .utility priority so the background scan's heavy Vision/CoreML work
-                // yields CPU to the UI — otherwise the app stutters while scanning.
-                let hasPerson = await Task.detached(priority: .utility) {
-                    FaceMatchingService.shared.photoContainsAnyPerson(thumbCG)
-                }.value
-
-                guard hasPerson else {
-                    progress.scannedAssetIDs.insert(asset.localIdentifier)
-                    internalScannedCount += 1
-                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
-                    continue
-                }
-
-                guard !isCancelled else { return }
-
-                // Stage 2: Load full-res image for face matching + Gemini analysis
-                guard let fullImage = await loadFullImage(for: asset) else {
-                    // Not marked as scanned: it's usually an iCloud download that
-                    // failed or timed out (offline), so the next scan retries it.
-                    internalScannedCount += 1
-                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
-                    continue
-                }
-
-                // Stage 3+4: STRICT identity gate — only proceed when we're
-                // confidently sure this is the user (and can isolate them in a
-                // multi-person photo). Anything uncertain is skipped: a background
-                // scan must never silently catalog a stranger's clothes.
-                guard let fullCG = fullImage.cgImage else {
-                    progress.scannedAssetIDs.insert(asset.localIdentifier)
-                    internalScannedCount += 1
-                    throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
-                    continue
-                }
-
-                let identity: ScanIdentity = await Task.detached(priority: .utility) {
-                    autoreleasepool {
-                        FaceMatchingService.shared.resolveIdentityForScan(in: fullCG, fullImage: fullImage, userId: userId)
-                    }
-                }.value
-
-                switch identity {
-                case .skip:
-                    break
-                case let .review(sim, embedding, faceBox, faceCount):
-                    var pending = progress.pendingReviews ?? []
-                    if !pending.contains(where: { $0.assetId == asset.localIdentifier }) {
-                        pending.append(PendingFaceReview(
-                            assetId: asset.localIdentifier, similarity: sim, embedding: embedding,
-                            faceBox: [faceBox.origin.x, faceBox.origin.y, faceBox.width, faceBox.height],
-                            faceCount: faceCount))
-                        progress.pendingReviews = pending
-                        pendingReviewCount = pending.count
-                    }
-                case .analyze(let imageToAnalyze):
-                    await extractAndAdd(from: imageToAnalyze, userGender: userGender,
-                                        wardrobeViewModel: wardrobeViewModel)
-                }
-
-                progress.scannedAssetIDs.insert(asset.localIdentifier)
-                internalScannedCount += 1
-                throttleUIUpdate(scanned: internalScannedCount, total: unscannedAssets.count)
+            // Start preparing the next photos while this one is extracted.
+            while queue.count < policy.prefetchDepth, nextToPrepare < units.count {
+                queue.append(prepareTask(units[nextToPrepare], userId: userId, assets: assetsByID))
+                nextToPrepare += 1
             }
 
-            saveProgress(progress, forUser: userId)
+            await consume(prepared, userId: userId, userGender: userGender, wardrobeViewModel: wardrobeViewModel)
+            consumed += 1
 
-            let thermal = ProcessInfo.processInfo.thermalState
-            if thermal == .serious {
-                print("[StyleMate] Auto-scan: Thermal serious, adding delay")
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            } else if thermal == .critical {
-                print("[StyleMate] Auto-scan: Thermal critical, pausing")
-                scanState = .error("Paused due to device temperature")
-                return
+            updateProgress(forUser: userId) { p in
+                p.markDone(prepared.doneIDs)
+                for id in prepared.failedIDs {
+                    if p.recordLoadFailure(id) { print("[StyleMate] Auto-scan: giving up on \(id) after repeated load failures") }
+                }
+                p.recordPhotosDone(prepared.doneIDs.count)
+            }
+            throttleUIUpdate(scanned: min(totalPhotosToScan, photosScanned + prepared.memberIDs.count),
+                             total: totalPhotosToScan)
+            eta.record(seconds: Self.seconds(ContinuousClock.now - tick))
+            updateTimeRemaining(eta, unitsLeft: units.count - consumed)
+            checkpointIfDue()
+            if consumed % 24 == 0 { cacheThumbnails(from: consumed) }
+
+            if policy.delayBetweenPhotos > 0, consumed < units.count {
+                try? await Task.sleep(nanoseconds: UInt64(policy.delayBetweenPhotos * 1_000_000_000))
             }
         }
 
-        photosScanned = internalScannedCount
+        guard isCurrent(generation) else { return }
+        finishRun(forUser: userId, generation: generation, quiet: quiet, emptyMessage: "Scan complete!")
+    }
 
-        progress.lastScanDate = Date()
-        progress.totalItemsFound += scanAddedItemIDs.count
-        progress.lastScanAddedItemIDs = scanAddedItemIDs.map { $0.uuidString }
-        saveProgress(progress, forUser: userId)
+    private func finishRun(forUser userId: String, generation: Int, quiet: Bool, emptyMessage: String) {
+        guard isCurrent(generation) else { return }
+        let job = loadProgress(forUser: userId).activeJob
+        updateProgress(forUser: userId) { $0.finishJob() }
+        flushProgress()
+        if job?.isAutomatic == false {
+            UserDefaults.standard.set(true, forKey: "hasCompletedInitialScan_\(userId)")
+        }
+        isRunning = false
+        isPaused = false
+        systemPauseReason = nil
+        timeRemainingText = nil
+        photosScanned = totalPhotosToScan
+        if quiet && scanAddedItemIDs.isEmpty {
+            // Nothing new: don't flash a banner for an automatic check.
+            if scanState == .scanning { scanState = .idle }
+            currentPhase = ""
+        } else {
+            scanState = .completed
+            currentPhase = scanAddedItemIDs.isEmpty ? emptyMessage : "Scan complete!"
+        }
+        print("[StyleMate] Auto-scan complete: added \(scanAddedItemIDs.count) items")
+    }
 
-        scanState = .completed
-        currentPhase = "Scan complete!"
-        print("[StyleMate] Auto-scan complete: added \(scanAddedItemIDs.count) items from \(photosScanned) photos")
+    private func updateTimeRemaining(_ eta: ScanETA, unitsLeft: Int) {
+        let seconds = eta.secondsRemaining(units: unitsLeft) ?? ScanETA.estimate(photoCount: unitsLeft)
+        timeRemainingText = unitsLeft > 0 ? ScanETA.describe(secondsLeft: seconds) : nil
+    }
+
+    private nonisolated static func seconds(_ d: Duration) -> Double {
+        Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
+    }
+
+    // MARK: - Pipeline stages
+
+    /// One near-duplicate group after its thumbnails, download and identity check.
+    private struct PreparedUnit: @unchecked Sendable {
+        enum Outcome {
+            case analyze(UIImage)
+            case review(PendingFaceReview)
+            case skip
+        }
+        let memberIDs: [String]
+        var outcome: Outcome = .skip
+        /// Photos that couldn't be loaded and should be retried on a later scan.
+        var failedIDs: [String] = []
+        var doneIDs: [String] { memberIDs.filter { !failedIDs.contains($0) } }
+    }
+
+    private func prepareTask(_ unit: [ScanAssetInfo], userId: String,
+                             assets: [String: PHAsset]) -> Task<PreparedUnit, Never> {
+        Task(priority: .utility) { [weak self] in
+            guard let self else { return PreparedUnit(memberIDs: unit.map(\.id)) }
+            return await self.prepare(unit, userId: userId, assets: assets)
+        }
+    }
+
+    private func prepare(_ unit: [ScanAssetInfo], userId: String,
+                         assets: [String: PHAsset]) async -> PreparedUnit {
+        var result = PreparedUnit(memberIDs: unit.map(\.id))
+        let members = unit.compactMap { assets[$0.id] }
+        guard !members.isEmpty, !Task.isCancelled else { return result }
+
+        // 1. Thumbnails → person check (+ frame quality when there's a choice).
+        let thumbnails = await loadThumbnails(for: members)
+        var thumbFailed: [String] = []
+        var thumbCGs: [(String, CGImage)] = []
+        for (asset, thumb) in zip(members, thumbnails) {
+            if let cg = thumb?.cgImage { thumbCGs.append((asset.localIdentifier, cg)) }
+            else { thumbFailed.append(asset.localIdentifier) }   // retried on a later scan
+        }
+        let rankFrames = thumbCGs.count > 1
+        let signals: [(id: String, signals: ThumbnailSignals)] = await Task.detached(priority: .utility) {
+            thumbCGs.map { pair in
+                (id: pair.0, signals: rankFrames ? ThumbnailAnalyzer.signals(for: pair.1)
+                                                 : ThumbnailSignals(hasPerson: ThumbnailAnalyzer.hasPerson(pair.1)))
+            }
+        }.value
+        let ranked = BurstPicker.ranked(signals)
+        guard !ranked.isEmpty else {
+            result.failedIDs = thumbFailed
+            return result
+        }
+
+        // 2. Best frames: full image → identity, until one is the user.
+        var loadFailed: [String] = []
+        for id in ranked.prefix(Self.maxFramesPerGroup) {
+            guard !Task.isCancelled else { result.failedIDs = result.memberIDs; return result }
+            guard let asset = assets[id], let full = await loadFullImage(for: asset), let cg = full.cgImage else {
+                // Usually an iCloud download that failed or timed out (offline).
+                loadFailed.append(id)
+                continue
+            }
+            await identityGate.acquire()
+            let identity: ScanIdentity = await Task.detached(priority: .utility) {
+                autoreleasepool {
+                    FaceMatchingService.shared.resolveIdentityForScan(in: cg, fullImage: full, userId: userId)
+                }
+            }.value
+            await identityGate.release()
+
+            switch identity {
+            case .skip:
+                continue
+            case .analyze(let image):
+                result.outcome = .analyze(image)
+                return result          // the whole group is covered by this frame
+            case let .review(sim, embedding, faceBox, faceCount):
+                result.outcome = .review(PendingFaceReview(
+                    assetId: id, similarity: sim, embedding: embedding,
+                    faceBox: [faceBox.origin.x, faceBox.origin.y, faceBox.width, faceBox.height],
+                    faceCount: faceCount))
+                return result
+            }
+        }
+        // Nobody in the group is the user. Frames that failed to load may still
+        // be: retry those later.
+        result.failedIDs = thumbFailed + loadFailed
+        return result
+    }
+
+    private func consume(_ prepared: PreparedUnit, userId: String, userGender: String?,
+                         wardrobeViewModel: WardrobeViewModel) async {
+        switch prepared.outcome {
+        case .skip:
+            break
+        case .review(let review):
+            updateProgress(forUser: userId) { p in
+                var pending = p.pendingReviews ?? []
+                if !pending.contains(where: { $0.assetId == review.assetId }) {
+                    pending.append(review)
+                    p.pendingReviews = pending
+                }
+            }
+            pendingReviewCount = loadProgress(forUser: userId).pendingReviews?.count ?? 0
+        case .analyze(let image):
+            let added = await extractItems(from: image, userGender: userGender, wardrobeViewModel: wardrobeViewModel)
+            if !added.isEmpty {
+                updateProgress(forUser: userId) { p in added.forEach { p.recordAdded($0) } }
+            }
+        }
     }
 
     // MARK: - Extraction
@@ -343,8 +687,16 @@ class PhotoScanService: ObservableObject {
     @discardableResult
     func extractAndAdd(from image: UIImage, userGender: String?,
                        wardrobeViewModel: WardrobeViewModel) async -> Int {
+        await extractItems(from: image, userGender: userGender, wardrobeViewModel: wardrobeViewModel).count
+    }
+
+    /// `extractAndAdd`, returning the ids of the items added.
+    private func extractItems(from image: UIImage, userGender: String?,
+                              wardrobeViewModel: WardrobeViewModel) async -> [UUID] {
+        await extractionGate.acquire()
         let results = await ImageAnalysisService.shared.analyzeAndSegment(image: image, userGender: userGender)
-        var added = 0
+        await extractionGate.release()
+        var added: [UUID] = []
         for seg in results {
             guard let cat = seg.category, let prod = seg.product,
                   let pat = seg.pattern, !seg.colors.isEmpty else { continue }
@@ -393,11 +745,12 @@ class PhotoScanService: ObservableObject {
             if let fp = seg.featurePrint {
                 ItemEmbeddingStore.shared.set(fp, quality: seg.quality, for: wardrobeItem.id)
             }
+            // Appears in the wardrobe straight away, while the scan goes on.
             wardrobeViewModel.items.append(wardrobeItem)
             wardrobeViewModel.syncItemToCloud(wardrobeItem)
             scanAddedItemIDs.append(wardrobeItem.id)
             itemsFound = scanAddedItemIDs.count
-            added += 1
+            added.append(wardrobeItem.id)
             print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe")
         }
         return added
@@ -430,8 +783,6 @@ class PhotoScanService: ObservableObject {
 
     // MARK: - "Is this you?" review queue
 
-    @Published var pendingReviewCount: Int = 0
-
     func pendingReviews(forUser userId: String) -> [PendingFaceReview] {
         let list = loadProgress(forUser: userId).pendingReviews ?? []
         pendingReviewCount = list.count
@@ -443,14 +794,15 @@ class PhotoScanService: ObservableObject {
     func resolveReviews(confirmed: [PendingFaceReview], rejected: [PendingFaceReview],
                         forUser userId: String, userGender: String?,
                         wardrobeViewModel: WardrobeViewModel) async -> Int {
-        var progress = loadProgress(forUser: userId)
         let answered = Set((confirmed + rejected).map(\.assetId))
-        progress.pendingReviews = (progress.pendingReviews ?? []).filter { !answered.contains($0.assetId) }
-        saveProgress(progress, forUser: userId)
-        pendingReviewCount = progress.pendingReviews?.count ?? 0
+        updateProgress(forUser: userId) { p in
+            p.pendingReviews = (p.pendingReviews ?? []).filter { !answered.contains($0.assetId) }
+        }
+        flushProgress()
+        pendingReviewCount = loadProgress(forUser: userId).pendingReviews?.count ?? 0
 
-        scanAddedItemIDs = []
-        var added = 0
+        if !isRunning { scanAddedItemIDs = [] }
+        var addedIDs: [UUID] = []
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: confirmed.map(\.assetId), options: nil)
         var byId: [String: PHAsset] = [:]
         assets.enumerateObjects { a, _, _ in byId[a.localIdentifier] = a }
@@ -458,20 +810,28 @@ class PhotoScanService: ObservableObject {
         for review in confirmed {
             guard let asset = byId[review.assetId],
                   let full = await loadFullImage(for: asset), let cg = full.cgImage else { continue }
+            await identityGate.acquire()
             let image: UIImage? = await Task.detached(priority: .userInitiated) {
                 FaceMatchingService.shared.imageForConfirmedReview(
                     cgImage: cg, fullImage: full, faceBox: review.faceRect,
                     embedding: review.embedding, faceCount: review.faceCount, userId: userId)
             }.value
+            await identityGate.release()
             guard let image else { continue }
-            added += await extractAndAdd(from: image, userGender: userGender, wardrobeViewModel: wardrobeViewModel)
+            addedIDs += await extractItems(from: image, userGender: userGender, wardrobeViewModel: wardrobeViewModel)
         }
 
-        progress = loadProgress(forUser: userId)
-        progress.totalItemsFound += added
-        progress.lastScanAddedItemIDs = scanAddedItemIDs.map { $0.uuidString }
-        saveProgress(progress, forUser: userId)
-        return added
+        let addedStrings = addedIDs.map(\.uuidString)
+        updateProgress(forUser: userId) { p in
+            p.totalItemsFound += addedIDs.count
+            if p.activeJob != nil {
+                p.activeJob?.addedItemIDs += addedStrings
+            } else {
+                p.lastScanAddedItemIDs = addedStrings
+            }
+        }
+        flushProgress()
+        return addedIDs.count
     }
 
     /// Loads the face crop shown in the review grid.
@@ -493,9 +853,16 @@ class PhotoScanService: ObservableObject {
 
     // MARK: - Cancel / Dismiss
 
+    /// Stops the scan. Its progress is kept: the unfinished part continues the
+    /// next time the app opens (or overnight while charging).
     func cancelScan() {
+        flushProgress()
+        scanGeneration += 1
+        isRunning = false
         scanState = .idle
         isPaused = false
+        systemPauseReason = nil
+        timeRemainingText = nil
         currentPhase = ""
         print("[StyleMate] Auto-scan cancelled")
     }
@@ -509,13 +876,18 @@ class PhotoScanService: ObservableObject {
     }
 
     func retryScan(wardrobeViewModel: WardrobeViewModel) async {
-        guard let context = lastScanContext else { return }
-        await startScan(
-            forUser: context.userId,
-            dateRange: context.dateRange,
-            userGender: context.userGender,
-            wardrobeViewModel: wardrobeViewModel
-        )
+        if let context = lastScanContext {
+            await startScan(
+                forUser: context.userId,
+                dateRange: context.dateRange,
+                userGender: context.userGender,
+                wardrobeViewModel: wardrobeViewModel
+            )
+        } else if !wardrobeViewModel.currentUserEmail.isEmpty {
+            scanState = .idle
+            await continueScanning(forUser: wardrobeViewModel.currentUserEmail, userGender: nil,
+                                   wardrobeViewModel: wardrobeViewModel)
+        }
     }
 
     // MARK: - Persisted Scan Item IDs
@@ -526,85 +898,116 @@ class PhotoScanService: ObservableObject {
     }
 
     func removeFromLastScanIDs(_ itemId: UUID, forUser userId: String) {
-        var progress = loadProgress(forUser: userId)
-        progress.lastScanAddedItemIDs.removeAll { $0 == itemId.uuidString }
-        saveProgress(progress, forUser: userId)
+        updateProgress(forUser: userId) { p in
+            p.lastScanAddedItemIDs.removeAll { $0 == itemId.uuidString }
+            p.activeJob?.addedItemIDs.removeAll { $0 == itemId.uuidString }
+        }
+        flushProgress()
     }
 
     func clearLastScanIDs(forUser userId: String) {
-        var progress = loadProgress(forUser: userId)
-        progress.lastScanAddedItemIDs = []
-        saveProgress(progress, forUser: userId)
+        updateProgress(forUser: userId) { $0.lastScanAddedItemIDs = [] }
+        flushProgress()
     }
 
-    /// Resets all scan progress so the next scan re-processes every photo.
+    /// Resets scan progress so the next scan re-processes every photo. Pending
+    /// "Is this you?" questions and the scanned range are kept.
     func resetProgress(forUser userId: String) {
-        let fresh = ScanProgress(scannedAssetIDs: [], totalItemsFound: 0)
+        let old = loadProgress(forUser: userId)
+        var fresh = ScanProgress.fresh()
+        fresh.pendingReviews = old.pendingReviews
+        fresh.coverageStart = old.coverageStart
+        fresh.totalItemsFound = old.totalItemsFound
         saveProgress(fresh, forUser: userId)
         print("[StyleMate] Scan progress reset for user \(userId)")
+    }
+
+    /// Deletes the user's scan progress entirely (profile deletion).
+    func forgetProgress(forUser userId: String) {
+        if isRunning { cancelScan() }
+        progressCache.removeValue(forKey: userId)
+        dirtyProgressUsers.remove(userId)
+        try? FileManager.default.removeItem(at: Self.progressFileURL(forUser: userId))
+        UserDefaults.standard.removeObject(forKey: "scanProgress_\(userId)")
+        pendingReviewCount = 0
     }
 
     // MARK: - Photo Count Estimation
 
     nonisolated func estimatePhotoCount(for dateRange: ScanDateRange) -> Int {
-        fetchPhotoAssets(in: dateRange).count
+        let b = dateRange.bounds()
+        return PHAsset.fetchAssets(with: .image, options: Self.fetchOptions(start: b.start, end: b.end)).count
     }
 
     // MARK: - Photo Library Helpers
 
-    private nonisolated func fetchPhotoAssets(in dateRange: ScanDateRange) -> [PHAsset] {
-        let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-
-        let now = Date()
-        switch dateRange {
-        case .lastMonth:
-            let start = Calendar.current.date(byAdding: .month, value: -1, to: now)!
-            options.predicate = NSPredicate(format: "creationDate >= %@", start as NSDate)
-        case .lastSixMonths:
-            let start = Calendar.current.date(byAdding: .month, value: -6, to: now)!
-            options.predicate = NSPredicate(format: "creationDate >= %@", start as NSDate)
-        case .lastYear:
-            let start = Calendar.current.date(byAdding: .year, value: -1, to: now)!
-            options.predicate = NSPredicate(format: "creationDate >= %@", start as NSDate)
-        case .custom(let from, let to):
-            options.predicate = NSPredicate(format: "creationDate >= %@ AND creationDate <= %@", from as NSDate, to as NSDate)
-        case .all:
-            break
-        }
-
-        let result = PHAsset.fetchAssets(with: .image, options: options)
-        var assets: [PHAsset] = []
-        result.enumerateObjects { asset, _, _ in
-            assets.append(asset)
-        }
-        return assets
+    private struct FetchedLibrary: @unchecked Sendable {
+        let assets: [PHAsset]
+        let infos: [ScanAssetInfo]
     }
 
-    private func loadThumbnails(for assets: [PHAsset], targetSize: CGSize) async -> [UIImage?] {
-        await withTaskGroup(of: (Int, UIImage?).self) { group in
-            let manager = PHImageManager.default()
-            let options = PHImageRequestOptions()
-            options.deliveryMode = .fastFormat
-            options.resizeMode = .fast
-            // iCloud-only photos still have a small local preview, but allow the
-            // network so a missing one is fetched instead of the photo being lost.
-            options.isNetworkAccessAllowed = true
-            options.isSynchronous = false
+    private nonisolated static func fetchOptions(start: Date?, end: Date?) -> PHFetchOptions {
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        var predicates: [NSPredicate] = []
+        if let start, start > .distantPast { predicates.append(NSPredicate(format: "creationDate >= %@", start as NSDate)) }
+        if let end { predicates.append(NSPredicate(format: "creationDate <= %@", end as NSDate)) }
+        if !predicates.isEmpty { options.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates) }
+        return options
+    }
 
+    /// Photos in the range plus `extraIDs`, newest first.
+    private nonisolated static func fetchAssets(start: Date?, end: Date?, extraIDs: [String]) -> FetchedLibrary {
+        var assets: [PHAsset] = []
+        var seen = Set<String>()
+        PHAsset.fetchAssets(with: .image, options: fetchOptions(start: start, end: end)).enumerateObjects { asset, _, _ in
+            assets.append(asset)
+            seen.insert(asset.localIdentifier)
+        }
+        if !extraIDs.isEmpty {
+            var extras: [PHAsset] = []
+            PHAsset.fetchAssets(withLocalIdentifiers: extraIDs, options: nil).enumerateObjects { asset, _, _ in
+                if asset.mediaType == .image, !seen.contains(asset.localIdentifier) { extras.append(asset) }
+            }
+            if !extras.isEmpty {
+                assets += extras
+                assets.sort { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+            }
+        }
+        let infos = assets.map { a in
+            ScanAssetInfo(id: a.localIdentifier, creationDate: a.creationDate,
+                          pixelWidth: a.pixelWidth, pixelHeight: a.pixelHeight,
+                          isScreenshot: a.mediaSubtypes.contains(.photoScreenshot),
+                          burstIdentifier: a.burstIdentifier)
+        }
+        return FetchedLibrary(assets: assets, infos: infos)
+    }
+
+    private static let thumbnailOptions: PHImageRequestOptions = {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .fastFormat
+        options.resizeMode = .fast
+        // iCloud-only photos still have a small local preview, but allow the
+        // network so a missing one is fetched instead of the photo being lost.
+        options.isNetworkAccessAllowed = true
+        options.isSynchronous = false
+        return options
+    }()
+
+    private func loadThumbnails(for assets: [PHAsset]) async -> [UIImage?] {
+        let manager = thumbnailManager
+        let options = Self.thumbnailOptions
+        let targetSize = Self.thumbnailSize
+        return await withTaskGroup(of: (Int, UIImage?).self) { group in
             for (index, asset) in assets.enumerated() {
                 group.addTask { @Sendable in
                     await withCheckedContinuation { continuation in
-                        let lock = NSLock()
-                        var resumed = false
+                        let gate = ResumeGate()
                         manager.requestImage(
                             for: asset, targetSize: targetSize,
                             contentMode: .aspectFit, options: options
                         ) { image, _ in
-                            lock.lock()
-                            guard !resumed else { lock.unlock(); return }
-                            resumed = true
-                            lock.unlock()
+                            guard gate.claim() else { return }
                             let normalized = image.flatMap { Self.bakeOrientation($0) }
                             continuation.resume(returning: (index, normalized))
                         }
