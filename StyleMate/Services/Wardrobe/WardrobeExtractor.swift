@@ -39,27 +39,27 @@ enum WardrobeExtractor {
         }
 
         // 2. Parse + label + fuse.
-        guard let parserIn = resized(crop.image, w: WardrobeML.gridW, h: WardrobeML.gridH),
-              let labelerIn = resized(crop.image, w: 512, h: 512),
-              let parsed = WardrobeML.shared.parse(parserIn),
-              let logits = WardrobeML.shared.label(labelerIn) else { return [] }
-        let instances = GarmentSegmenter.segment(parser: parsed.labels, labelerLogits: logits)
-        guard let cropPixels = GarmentCutout.rgbaPixels(crop.image) else { return [] }
+        guard let seg = segment(crop.image) else { return [] }
 
         // 3 + 4.
         var items: [Item] = []
-        for inst in instances {
-            guard let cut = autoreleasepool(invoking: { GarmentCutout.render(crop: crop.image, cropPixels: cropPixels, instance: inst) }),
-                  let attrs = FashionClassifier.classify(cut.image, kind: inst.kind),
+        for inst in seg.instances {
+            var use = (inst: inst, crop: crop, pixels: seg.pixels)
+            // Small accessories cover only a few grid cells in a full-body crop;
+            // re-parse a tight crop around them for a crisp, accurate mask.
+            if needsZoom(inst), let z = zoomed(inst, in: crop, photo: source) { use = z }
+            guard let cut = autoreleasepool(invoking: { GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: use.inst) }),
+                  let attrs = FashionClassifier.classify(cut.image, kind: use.inst.kind),
                   !blockedProducts.contains(attrs.product) else { continue }
-            // Too few source pixels to make a decent wardrobe image (sunglasses
-            // 40 px wide in a group shot): skip — a closer photo will catch it.
+            // Too few source-photo pixels to make a decent wardrobe image
+            // (sunglasses 40 px wide in a group shot): skip — a closer photo will catch it.
+            let photoSide = cut.sourceSide / Float(use.crop.scale)
             let minSide: Float = inst.kind.isSmall || inst.kind == .headwear ? 56 : 110
-            guard cut.sourceSide >= minSide else {
-                print("[Wardrobe] drop tiny \(attrs.product) (\(Int(cut.sourceSide)) px)")
+            guard photoSide >= minSide else {
+                print("[Wardrobe] drop tiny \(attrs.product) (\(Int(photoSide)) px)")
                 continue
             }
-            let q = quality(inst, cut: cut, crop: crop)
+            let q = quality(use.inst, cut: cut, crop: use.crop, photoSide: photoSide)
             guard q >= 0.22 else {
                 print("[Wardrobe] drop low-quality \(attrs.product) q=\(String(format: "%.2f", q))")
                 continue
@@ -76,9 +76,48 @@ enum WardrobeExtractor {
 
     private struct Crop {
         let image: CGImage
-        /// Crop sides that sit on the photo's own edge — an item touching these
-        /// is cut off by the frame, not by our crop.
-        let onPhotoEdge: (top: Bool, bottom: Bool, left: Bool, right: Bool)
+        /// The crop's rectangle in source-photo pixels (may extend past the
+        /// photo, padded grey) and crop pixels per photo pixel.
+        let rect: CGRect
+        let scale: CGFloat
+        /// Where the actual photo lies on the 384x576 analysis grid: an item
+        /// reaching one of these edges is cut off by the photo's frame.
+        let photoInGrid: CGRect
+    }
+
+    private struct Segmentation {
+        let instances: [GarmentInstance]
+        let pixels: [UInt8]
+    }
+
+    private static func segment(_ image: CGImage) -> Segmentation? {
+        guard let parserIn = resized(image, w: WardrobeML.gridW, h: WardrobeML.gridH),
+              let labelerIn = resized(image, w: 512, h: 512),
+              let parsed = WardrobeML.shared.parse(parserIn),
+              let logits = WardrobeML.shared.label(labelerIn),
+              let pixels = GarmentCutout.rgbaPixels(image) else { return nil }
+        return Segmentation(instances: GarmentSegmenter.segment(parser: parsed.labels, labelerLogits: logits), pixels: pixels)
+    }
+
+    /// Renders `r0` (photo pixels, grown to the grid's 2:3 aspect) as a crop.
+    /// `minHeight` upsamples tiny regions so the parser sees them at full grid size.
+    private static func makeCrop(_ photo: CGImage, rect r0: CGRect, maxHeight: CGFloat = 1536, minHeight: CGFloat = 0) -> Crop? {
+        let W = CGFloat(photo.width), H = CGFloat(photo.height)
+        let gw = CGFloat(WardrobeML.gridW), gh = CGFloat(WardrobeML.gridH)
+        var r = r0
+        let aspect = gw / gh
+        if r.width / r.height < aspect {
+            let nw = r.height * aspect; r = r.insetBy(dx: -(nw - r.width) / 2, dy: 0)
+        } else {
+            let nh = r.width / aspect; r = r.insetBy(dx: 0, dy: -(nh - r.height) / 2)
+        }
+        let scale = max(min(1, maxHeight / r.height), minHeight / r.height)
+        let size = CGSize(width: (r.width * scale).rounded(), height: (r.height * scale).rounded())
+        let dest = CGRect(x: -r.minX * scale, y: -r.minY * scale, width: W * scale, height: H * scale)
+        guard let img = letterbox(photo, into: size, rect: dest) else { return nil }
+        let gx = gw / size.width, gy = gh / size.height
+        let photoInGrid = CGRect(x: dest.minX * gx, y: dest.minY * gy, width: dest.width * gx, height: dest.height * gy)
+        return Crop(image: img, rect: r, scale: scale, photoInGrid: photoInGrid)
     }
 
     private static func personCrop(_ photo: CGImage) -> Crop? {
@@ -100,35 +139,59 @@ enum WardrobeExtractor {
             let x = i % w, y = i / w
             x0 = min(x0, x); x1 = max(x1, x + 1); y0 = min(y0, y); y1 = max(y1, y + 1)
         }
-        // Back to photo pixels.
+        // Back to photo pixels, with a margin.
         var r = CGRect(x: (CGFloat(x0) - ox) / k, y: (CGFloat(y0) - oy) / k,
                        width: CGFloat(x1 - x0) / k, height: CGFloat(y1 - y0) / k)
         r = r.insetBy(dx: -r.width * 0.06, dy: -r.height * 0.04)
-        // Grow to the grid's 2:3 aspect around the centre.
-        let aspect = gw / gh
-        if r.width / r.height < aspect {
-            let nw = r.height * aspect; r = r.insetBy(dx: -(nw - r.width) / 2, dy: 0)
-        } else {
-            let nh = r.width / aspect; r = r.insetBy(dx: 0, dy: -(nh - r.height) / 2)
+        return makeCrop(photo, rect: r)
+    }
+
+    // MARK: - Zoom pass for small accessories
+
+    private static func needsZoom(_ inst: GarmentInstance) -> Bool {
+        guard [GarmentKind.eyewear, .jewelry, .headwear, .belt].contains(inst.kind) else { return false }
+        let (_, y0, _, y1) = inst.box
+        return Double(y1 - y0) < Double(WardrobeML.gridH) * 0.16
+    }
+
+    /// Re-segments a tight crop around a small item; returns the matching
+    /// instance in that crop (or nil to keep the original).
+    private static func zoomed(_ inst: GarmentInstance, in crop: Crop, photo: CGImage)
+        -> (inst: GarmentInstance, crop: Crop, pixels: [UInt8])? {
+        let gw = CGFloat(WardrobeML.gridW), gh = CGFloat(WardrobeML.gridH)
+        let (bx0, by0, bx1, by1) = inst.box
+        func toPhoto(_ gx: Int, _ gy: Int) -> CGPoint {
+            CGPoint(x: crop.rect.minX + CGFloat(gx) / gw * crop.rect.width,
+                    y: crop.rect.minY + CGFloat(gy) / gh * crop.rect.height)
         }
-        let onEdge = (top: r.minY <= 1, bottom: r.maxY >= H - 1, left: r.minX <= 1, right: r.maxX >= W - 1)
-        // Render the crop (out-of-photo area padded neutral grey), capped at 1536 px tall.
-        let scale = min(1, 1536 / r.height)
-        let size = CGSize(width: (r.width * scale).rounded(), height: (r.height * scale).rounded())
-        let dest = CGRect(x: -r.minX * scale, y: -r.minY * scale, width: W * scale, height: H * scale)
-        guard let img = letterbox(photo, into: size, rect: dest) else { return nil }
-        return Crop(image: img, onPhotoEdge: onEdge)
+        let p0 = toPhoto(bx0, by0), p1 = toPhoto(bx1, by1)
+        let box = CGRect(x: p0.x, y: p0.y, width: p1.x - p0.x, height: p1.y - p0.y)
+        // Enough context around it for the parser to recognise a head / wrist.
+        let r = box.insetBy(dx: -box.width * 1.2, dy: -box.height * 1.6)
+        guard r.width > 4, r.height > 4,
+              let z = makeCrop(photo, rect: r, minHeight: gh),
+              let seg = segment(z.image) else { return nil }
+        func distance(_ i: GarmentInstance) -> CGFloat {
+            let cx = CGFloat(i.box.0 + i.box.2) / 2, cy = CGFloat(i.box.1 + i.box.3) / 2
+            return hypot(cx - gw / 2, cy - gh / 2)
+        }
+        guard let m = seg.instances.filter({ $0.kind == inst.kind }).min(by: { distance($0) < distance($1) })
+        else { return nil }
+        return (m, z, seg.pixels)
     }
 
     // MARK: - Quality
 
-    private static func quality(_ inst: GarmentInstance, cut: GarmentCutout.Result, crop: Crop) -> Float {
-        let size = min(1, cut.sourceSide / (inst.kind.isSmall ? 120 : 380))
+    private static func quality(_ inst: GarmentInstance, cut: GarmentCutout.Result, crop: Crop, photoSide: Float) -> Float {
+        let size = min(1, photoSide / (inst.kind.isSmall ? 120 : 380))
         let occlusion = Float(inst.holeCount) / Float(max(1, inst.pixelCount + inst.holeCount))
-        // Cut off by the photo frame? (Touching our crop's edge only matters where
-        // that edge is the photo's edge.) Shoes at the bottom edge = missing feet.
-        let e = inst.touchesEdge, p = crop.onPhotoEdge
-        let truncated = (e.top && p.top) || (e.bottom && p.bottom) || (e.left && p.left) || (e.right && p.right)
+        // Cut off by the photo's frame? Compared against where the photo sits on
+        // the grid — the crop may extend past it, padded grey. Shoes at the
+        // bottom edge = missing feet.
+        let (x0, y0, x1, y1) = inst.box
+        let f = crop.photoInGrid, tol: CGFloat = 2
+        let truncated = CGFloat(y0) <= f.minY + tol || CGFloat(y1) >= f.maxY - tol
+            || CGFloat(x0) <= f.minX + tol || CGFloat(x1) >= f.maxX - tol
         let complete: Float = truncated ? (inst.kind == .footwear || inst.kind == .lower || inst.kind == .onePiece ? 0.1 : 0.45) : 1
         return 0.35 * size + 0.15 * (1 - occlusion * 2) + 0.30 * complete + 0.20 * cut.sharpness
     }
