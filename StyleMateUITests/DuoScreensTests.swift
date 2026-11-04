@@ -10,8 +10,7 @@ import XCTest
 /// screen also proves the app keeps its state across cover -> inner -> half-open -> cover.
 ///
 /// Skipped unless `DUO_BRIDGE_URL` is set (`TEST_RUNNER_DUO_BRIDGE_URL` for xcodebuild), so ci.yml's
-/// iPhone run of StyleMateUITests ignores it. `DUO_SEATED=1` adds a pass with `-uiTestOrientation portrait`
-/// (Apple's seated / tabletop pose on the inner display).
+/// iPhone run of StyleMateUITests ignores it.
 final class DuoScreensTests: E2ETestCase {
 
     override func setUpWithError() throws {
@@ -77,32 +76,10 @@ final class DuoScreensTests: E2ETestCase {
         shoot("07-profile")
     }
 
-    // MARK: - Seated (tabletop) pose
-
-    @MainActor
-    func test02_DuoSeatedScreens() throws {
-        guard bridgeURL != nil else { throw XCTSkip("DUO_BRIDGE_URL not set: not on the Duo CI") }
-        guard ProcessInfo.processInfo.environment["DUO_SEATED"] == "1" else { throw XCTSkip("DUO_SEATED != 1") }
-        app = makeApp()
-        app.launchArguments += ["-uiTestOrientation", "portrait"]
-        app.launch()
-        dismissSpringboardAlertIfPresent()
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 60) || tabButton("Home").exists,
-                      "The main tab UI never appeared")
-        _ = waitForAny([text("Your Wardrobe"), text("Style for an occasion")], timeout: 20)
-        shoot("seated-01-home")
-
-        openTab("Wardrobe")
-        if openFirstTee() {
-            shoot("seated-03-item")
-            goBack()
-        }
-
-        openTab("Home")
-        if openOutfitDeck() {
-            shoot("seated-05-outfit-deck")
-        }
-    }
+    // No seated (tabletop) pass: the Duo simulator shows the inner display sideways and simctl can't rotate it,
+    // and without UIRequiresFullScreen (which StyleMate must not set) iOS refuses programmatic rotation:
+    // "The current windowing mode does not allow for programmatic changes to interface orientation" (Duo run
+    // 41913178351). Seated pose needs the real device.
 
     // MARK: - Steps
 

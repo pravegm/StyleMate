@@ -50,7 +50,7 @@ enum DuoPosture: String, Equatable {
     case book
     /// Partly open, fold running side to side (inner display upright: Apple's "seated" pose).
     case tabletop
-    /// Closed: the app is on the cover display.
+    /// The app is on the cover display: the phone is shut (or only just opening, or in tent pose).
     case closed
 }
 
@@ -74,8 +74,11 @@ struct DuoLayoutState: Equatable {
         case .closed: return .closed
         case .fullyOpen: return .flat
         case .partiallyOpen:
-            if let c = creaseInGlobal, c.width != c.height { return c.height > c.width ? .book : .tabletop }
-            return windowSize.width > windowSize.height ? .book : .tabletop
+            // Measured on the Duo simulator (duo.yml): the inner display always reports its fold (book: a
+            // 40 pt band at x 456-496 of 951 x 669, active or not); the cover display reports none. So no fold =
+            // the app is still on the cover (opening from shut, the cover stays lit to ~20°, or tent pose).
+            guard let c = creaseInGlobal, c.width != c.height, isWideLayout else { return .closed }
+            return c.height > c.width ? .book : .tabletop
         }
     }
 

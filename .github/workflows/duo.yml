@@ -1,7 +1,9 @@
 name: Duo
 
 # StyleMate on the iPhone Duo simulator (iOS 27.1): screenshots of the main screens on the INNER display open flat
-# (180°), HALF-OPEN (~110°, book pose; plus a seated/tabletop pass) and on the COVER display (closed).
+# (180°), HALF-OPEN (~110°, book pose) and on the COVER display (closed). The app's own reading of the hinge and fold
+# (DuoLayout's posture / crease, DEBUG) is copied to logs/app-duo.txt. There is no seated (portrait) pass: the
+# simulator shows the inner display sideways and iOS refuses programmatic rotation without UIRequiresFullScreen.
 #
 # How: StyleMateUITests/DuoScreensTests drives the app with the DEBUG launch hooks (demo user, skipped onboarding,
 # seeded wardrobe) while the phone is closed (cover display = XCUIScreen.main, where taps are reliable). At each
@@ -22,10 +24,6 @@ on:
         description: "Half-open hinge angle (degrees)"
         type: string
         default: "110"
-      seated:
-        description: "Also run the seated (portrait inner display, tabletop) pass"
-        type: boolean
-        default: true
 
 concurrency:
   group: duo-${{ github.ref }}
@@ -134,7 +132,7 @@ jobs:
             -destination "id=$UDID" \
             -derivedDataPath "$RUNNER_TEMP/dd" \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
-            2>&1 | tee duo-build.log | grep -E "error:|warning: .*(DuoLayout|DuoScreensTests|DebugOrientation)|\*\* TEST BUILD" || true
+            2>&1 | tee duo-build.log | grep -E "error:|warning: .*(DuoLayout|DuoScreensTests)|\*\* TEST BUILD" || true
           grep -q "\*\* TEST BUILD SUCCEEDED \*\*" duo-build.log
           # Linked against the 27.1 SDK, or the app runs letterboxed in compatibility mode on the Duo.
           otool -l "$RUNNER_TEMP"/dd/Build/Products/Debug-iphonesimulator/StyleMate.app/StyleMate | grep -A4 LC_BUILD_VERSION || true
@@ -163,7 +161,6 @@ jobs:
         env:
           UDID: ${{ steps.sim.outputs.udid }}
           HALF_ANGLE: ${{ inputs.half_angle || '110' }}
-          SEATED: ${{ (github.event_name != 'workflow_dispatch' || inputs.seated) && '1' || '0' }}
         run: |
           python3 -I scripts/duo_bridge.py > "$OUT/logs/bridge-stdout.txt" 2>&1 &
           BRIDGE=$!
@@ -172,7 +169,7 @@ jobs:
           # Start closed: the test navigates on the cover display.
           curl -s "http://127.0.0.1:8765/hinge?angle=0"; echo
           set -o pipefail
-          TEST_RUNNER_DUO_BRIDGE_URL=http://127.0.0.1:8765 TEST_RUNNER_DUO_SEATED="$SEATED" \
+          TEST_RUNNER_DUO_BRIDGE_URL=http://127.0.0.1:8765 \
           gtimeout 2700 xcodebuild test-without-building \
             -project StyleMate.xcodeproj -scheme StyleMate \
             -destination "id=$UDID" \
@@ -230,7 +227,7 @@ jobs:
           print(f"Exported {n} attachments")
           PY
 
-      - name: The app's own Duo log (DuoLayout posture / crease, DebugOrientation)
+      - name: The app's own Duo log (DuoLayout posture / crease)
         if: always()
         timeout-minutes: 5
         continue-on-error: true
