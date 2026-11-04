@@ -165,7 +165,8 @@ enum LocalStore {
         return nil
     }
 
-    /// Deletes the user's selfie frame(s) wherever they are (new and legacy locations).
+    /// Deletes the user's selfie frames — front and head-turn — wherever they are (new and
+    /// legacy locations), and both UserDefaults keys that point at them.
     static func deleteSelfie(userId: String) {
         let fm = FileManager.default
         if let stored = UserDefaults.standard.string(forKey: selfieKey(userId)) {
@@ -178,5 +179,6 @@ enum LocalStore {
             }
         }
         UserDefaults.standard.removeObject(forKey: selfieKey(userId))
+        UserDefaults.standard.removeObject(forKey: "selfieTurnFrames_\(userId)")   // SelfieReferenceStore.turnFramesKey
     }
 }

@@ -351,8 +351,22 @@ class FaceMatchingService {
         if let e = generateEmbeddingFromPhoto(cgImage, label: "selfie") { anchors.append(e) }
         if let flipped = horizontallyFlipped(cgImage),
            let m = generateEmbeddingFromPhoto(flipped, label: "selfie-mirror") { anchors.append(m) }
-        dlog("[FaceMatch] Selfie anchors built: \(anchors.count) (upright + mirror)")
-        return anchors.isEmpty ? nil : anchors
+        guard !anchors.isEmpty else { return nil }
+        // The onboarding head-turn frames (`selfieTurnFrames_<userId>`) are selfie anchors
+        // too: protected from eviction, part of the learning gate's reference, and rebuilt
+        // with the front frame whenever the gallery is (model-version bump, migration).
+        let frontCount = anchors.count
+        for (i, frame) in SelfieReferenceStore.turnFrames(userId: userId).enumerated() {
+            guard let cg = renderUpOrientation(frame).cgImage else { continue }
+            for e in [generateEmbeddingFromPhoto(cg, label: "selfie-turn\(i + 1)"),
+                      horizontallyFlipped(cg).flatMap { generateEmbeddingFromPhoto($0, label: "selfie-turn\(i + 1)-mirror") }]
+                .compactMap({ $0 })
+            where !anchors.contains(where: { dotProduct($0, e) > 0.95 }) {
+                anchors.append(e)
+            }
+        }
+        dlog("[FaceMatch] Selfie anchors built: \(frontCount) front + \(anchors.count - frontCount) head-turn (upright + mirror)")
+        return anchors
     }
 
     /// Mirrors a CGImage left-to-right.

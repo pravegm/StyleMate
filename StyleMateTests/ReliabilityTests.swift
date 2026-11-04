@@ -250,6 +250,18 @@ struct ReliabilityTests {
         #expect(UserDefaults.standard.string(forKey: LocalStore.selfieKey(user)) == resolved)
     }
 
+    @Test func deletingTheSelfieRemovesTheHeadTurnFramesToo() throws {
+        let user = "reltest-\(UUID().uuidString)"
+        let frame = ImageDownsampler.render(size: CGSize(width: 40, height: 40)) { _ in }
+        SelfieReferenceStore.saveTurnFrames([frame, frame], userId: user)
+        let names = try #require(UserDefaults.standard.stringArray(forKey: SelfieReferenceStore.turnFramesKey(user)))
+        #expect(names.count == 2)
+        #expect(FileManager.default.fileExists(atPath: LocalStore.selfieDirectory.appendingPathComponent(names[0]).path))
+        LocalStore.deleteSelfie(userId: user)
+        #expect(UserDefaults.standard.stringArray(forKey: SelfieReferenceStore.turnFramesKey(user)) == nil)
+        #expect(!FileManager.default.fileExists(atPath: LocalStore.selfieDirectory.appendingPathComponent(names[0]).path))
+    }
+
     // MARK: - Outfit history (#18)
 
     @Test func outfitSnapshotsOutliveTheItemsFiles() throws {
