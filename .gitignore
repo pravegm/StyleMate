@@ -41,3 +41,7 @@ Config.plist
 # Conversion virtualenvs
 scripts/*venv*/
 debug_photos/
+
+# Studio diffusion model (scripts/build_studio_models.sh) + its conversion scratch dir
+StyleMate/ML/Studio/
+scripts/.studio_work/
