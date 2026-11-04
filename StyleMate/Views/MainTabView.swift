@@ -20,7 +20,7 @@ struct MainTabView: View {
                 MyOutfitsView()
             }
             Tab("Profile", systemImage: "person.circle", value: 3) {
-                ProfileView()
+                ProfileTab()
             }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -67,6 +67,109 @@ struct MainTabView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Profile tab
+
+/// Profile on a phone; on the Duo's inner display the settings list takes one
+/// half (never spanning the crease) and a wardrobe summary the other.
+private struct ProfileTab: View {
+    @Environment(\.duoLayout) private var duo
+
+    var body: some View {
+        if duo.isWideLayout {
+            FoldAwareSplit(gutter: DS.Spacing.lg, stackedSpacing: 0) {
+                ProfileView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } trailing: {
+                ProfileSummaryPanel()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+        } else {
+            ProfileView()
+        }
+    }
+}
+
+/// The wide Profile's second half: what's in the wardrobe and the log, and the
+/// on-device promise.
+private struct ProfileSummaryPanel: View {
+    @EnvironmentObject private var wardrobeViewModel: WardrobeViewModel
+    @EnvironmentObject private var outfitsViewModel: MyOutfitsViewModel
+
+    private var loggedCount: Int {
+        outfitsViewModel.outfitsByDate.values.reduce(0) { $0 + $1.count }
+    }
+
+    private var lastLogged: Date? { outfitsViewModel.outfitsByDate.keys.max() }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                Text("Your wardrobe")
+                    .font(DS.Font.title2)
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.top, DS.Spacing.xxl)
+
+                Grid(horizontalSpacing: DS.Spacing.sm, verticalSpacing: DS.Spacing.sm) {
+                    GridRow {
+                        stat("\(wardrobeViewModel.items.count)", "pieces", "hanger")
+                        stat("\(ClosetEngine.counts(wardrobeViewModel.items).count)", "shelves", "square.grid.2x2")
+                    }
+                    GridRow {
+                        stat("\(loggedCount)", loggedCount == 1 ? "outfit logged" : "outfits logged", "calendar")
+                        stat(lastLogged.map { $0.formatted(.dateTime.day().month(.abbreviated)) } ?? "—",
+                             "last logged", "clock")
+                    }
+                }
+
+                HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                    Image(systemName: "lock.shield.fill")
+                        .font(DS.Font.title3)
+                        .foregroundStyle(DS.Colors.accent)
+                    VStack(alignment: .leading, spacing: DS.Spacing.micro) {
+                        Text("Everything stays on your iPhone")
+                            .font(DS.Font.headline)
+                            .foregroundStyle(DS.Colors.textPrimary)
+                        Text("Finding you in photos, cutting out your clothes and styling outfits all run on this device. Your wardrobe is backed up only to your own iCloud.")
+                            .font(DS.Font.subheadline)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(DS.Spacing.md)
+                .background(DS.Colors.backgroundCard,
+                            in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+                .accessibilityElement(children: .combine)
+            }
+            .frame(maxWidth: 480, alignment: .leading)
+            .padding(.trailing, DS.Spacing.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+    }
+
+    private func stat(_ value: String, _ label: String, _ icon: String) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Image(systemName: icon)
+                .font(DS.Font.subheadline.weight(.semibold))
+                .foregroundStyle(DS.Colors.accent)
+            Text(value)
+                .font(DS.Font.title2)
+                .foregroundStyle(DS.Colors.textPrimary)
+                .monospacedDigit()
+            Text(label)
+                .font(DS.Font.footnote)
+                .foregroundStyle(DS.Colors.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DS.Spacing.md)
+        .background(DS.Colors.backgroundCard,
+                    in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }
 

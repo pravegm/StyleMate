@@ -87,6 +87,8 @@ struct RootView: View {
                 showAutoScan: hasPhotoAccess
             )
             .presentationDetents([.medium])
+            // Regular width (Duo inner display): a sheet sized to its rows.
+            .presentationSizing(.fitted)
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
         }

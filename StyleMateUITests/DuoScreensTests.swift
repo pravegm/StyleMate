@@ -109,6 +109,9 @@ final class DuoScreensTests: E2ETestCase {
     @MainActor
     private func goBack() {
         let editDetails = itemPage()
+        // Opening the phone moves a pushed item page into the closet's page pane, so after a
+        // shot the cover may already be back on the grid.
+        guard editDetails.exists else { return }
         // On the Duo the navigation bar's buttons live in the trailing system rail (not under
         // app.navigationBars), so look for the back button anywhere, then fall back to the edge swipe.
         let back = app.buttons.matching(NSPredicate(format:

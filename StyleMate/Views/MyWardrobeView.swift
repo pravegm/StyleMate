@@ -31,6 +31,8 @@ struct MyWardrobeView: View {
     /// to the cover display never finds a stale push waiting (the pane
     /// auto-shows the first item).
     @State private var paneItem: WardrobeItem? = nil
+    /// The pane's item was picked by the person (not the automatic first one).
+    @State private var paneIsChosen = false
     @State private var editingItem: WardrobeItem? = nil
     @Namespace private var zoomNS
 
@@ -89,17 +91,24 @@ struct MyWardrobeView: View {
         // the cover returns to the grid.
         .onChange(of: isWide) { wide in
             if wide {
-                if let d = detailItem { paneItem = d }
+                if let d = detailItem { paneItem = d; paneIsChosen = true }
                 detailItem = nil
             } else {
-                detailItem = nil
+                // Folding: a page the person opened stays open (pushed); the
+                // pane's automatic first item doesn't.
+                detailItem = paneIsChosen ? paneItem : nil
             }
         }
     }
 
     /// Opens an item: pushed on a phone, in the page pane when wide.
     private func open(_ item: WardrobeItem) {
-        if isWide { paneItem = item } else { detailItem = item }
+        if isWide {
+            paneItem = item
+            paneIsChosen = true
+        } else {
+            detailItem = item
+        }
     }
 
     // MARK: - Phone: one stack
@@ -174,6 +183,7 @@ struct MyWardrobeView: View {
     private func showFirstItemIfNeeded() {
         guard isWide, paneItem == nil else { return }
         paneItem = ClosetEngine.apply(wardrobeViewModel.items, filter: filter, sort: sort, wear: wear).first
+        paneIsChosen = false
     }
 
     // MARK: - Closet

@@ -19,6 +19,7 @@ struct ItemDetailView: View {
     @State private var showFullImage = false
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.duoLayout) private var duo
 
     /// Shown as a pane next to the closet grid (wide layout) instead of pushed:
     /// no navigation title of its own, the ⋯ menu sits in the header.
@@ -91,25 +92,52 @@ struct ItemDetailView: View {
         .accessibilityIdentifier("itemDetail.more")
     }
 
+    @ViewBuilder
     private func page(_ item: WardrobeItem) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+        if duo.isWideLayout && !embedded {
+            // Wide, full-screen page: the picture on one half, the details on
+            // the other (split on the crease when the Duo is half-open).
+            FoldAwareSplit(gutter: DS.Spacing.lg, stackedSpacing: 0) {
                 hero(item)
-                header(item)
-                Group {
-                    colors(item)
-                    attributes(item)
-                    notes(item)
-                    actions
+                    .frame(maxWidth: 520)
+                    .padding(DS.Spacing.lg)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } trailing: {
+                ScrollView {
+                    details(item)
+                        .padding(.vertical, DS.Spacing.lg)
+                        .padding(.trailing, DS.Spacing.lg)
                 }
-                .dsAppear(appeared)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(.horizontal, DS.Spacing.screenH)
-            .padding(.top, DS.Spacing.xs)
-            .padding(.bottom, DS.Spacing.xxl)
+            .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+            .accessibilityIdentifier("itemDetail.root")
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                    hero(item)
+                    details(item)
+                }
+                .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.top, DS.Spacing.xs)
+                .padding(.bottom, DS.Spacing.xxl)
+            }
+            .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+            .accessibilityIdentifier("itemDetail.root")
         }
-        .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
-        .accessibilityIdentifier("itemDetail.root")
+    }
+
+    private func details(_ item: WardrobeItem) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+            header(item)
+            Group {
+                colors(item)
+                attributes(item)
+                notes(item)
+                actions
+            }
+            .dsAppear(appeared)
+        }
     }
 
     // MARK: - Hero
