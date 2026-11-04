@@ -84,7 +84,7 @@ struct RootView: View {
                 },
                 showAutoScan: hasPhotoAccess
             )
-            .presentationDetents([.height(380)])
+            .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
         }
@@ -282,12 +282,13 @@ private struct AddSourceSheet: View {
             VStack(spacing: DS.Spacing.sm) {
                 addOptionRow(
                     icon: "photo.on.rectangle.angled",
-                    iconColor: .blue,
+                    iconColor: DS.Colors.accent,
                     title: "Choose from Gallery",
                     subtitle: "Pick photos of your clothes",
                     delay: 0,
                     action: onGallery
                 )
+                .accessibilityIdentifier("addSource.gallery")
 
                 addOptionRow(
                     icon: "camera.fill",
@@ -297,16 +298,18 @@ private struct AddSourceSheet: View {
                     delay: 1,
                     action: onCamera
                 )
+                .accessibilityIdentifier("addSource.camera")
 
                 if showAutoScan {
                     addOptionRow(
                         icon: "sparkles.rectangle.stack.fill",
-                        iconColor: .purple,
+                        iconColor: DS.Colors.accent,
                         title: "Auto-Scan Photos",
                         subtitle: "Finds your outfits in your photos, on your iPhone",
                         delay: 2,
                         action: onAutoScan
                     )
+                    .accessibilityIdentifier("addSource.autoScan")
                 }
             }
             .padding(.horizontal, DS.Spacing.lg)

@@ -39,19 +39,20 @@ There are three ways to add items, all through the same pipeline: **Auto-scan** 
 
 - **Inputs**: today's weather (met.no, Open-Meteo fallback; city via `CoreLocation`), the occasion (`OutfitType`) or free text ("dinner date, nothing black"), your **mood** (`OutfitMood`: confident, cozy, relaxed, playful, polished, bold, minimal, romantic), your saved style preferences, and your **recent wear history** from the outfit calendar.
 - **Rules + scoring**: slot-based construction (top + bottom or a one-piece, optional mid-layer and outerwear, shoes, 0–2 accessories), temperature bands and rain rules, formality fit per occasion, colour harmony on a colour wheel (neutral base + accents, tonal, analogous, complementary; at most one bold pattern), mood and preference fit, classic do-not-pairs, and a recency penalty. A diversity pass keeps the five looks genuinely different.
-- **Everything is changeable**: lock pieces, shuffle any slot to the next best alternative, add a missing piece, or regenerate.
+- **Everything is changeable**: each look is shown as a composed outfit board (layers and top on the left, bottom on the right, shoes and accessories below). Tap a piece to **Keep** it or **Swap** it for the next best alternative, shuffle the rest around kept pieces, add a missing piece, or regenerate. "Wear today" logs the look (or drag the board right; left skips). With a small closet a tip says what to add for more variety.
 - Each look comes with a short stylist note built from the scoring reasons. On Apple Intelligence devices the on-device model can interpret free text and polish the note (`OnDeviceStylist`), always with a silent deterministic fallback.
 
 ### 4. Outfit calendar
 
-Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and appear in **My Outfits** as a calendar history (day detail, edit, delete, manual composer). The log feeds the stylist's recency signal, so you aren't offered what you wore yesterday.
+Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and appear in **My Outfits** as a week strip (or month grid) with each day's outfits as cutout collages (edit, delete, manual composer). The log feeds the stylist's recency signal, so you aren't offered what you wore yesterday.
 
 ## Major features
 
 - **Onboarding**: welcome → about you → photo-scan explainer → selfie → photo permission → reference builder → initial library scan (pause/resume from the home banner). A one-time coach-mark tour introduces the main features.
-- **Home**: greeting, weather, wardrobe summary, "Style Me" with mood chips, scan progress, "Is this you?" review banner, last-scan results.
-- **My Wardrobe**: a closet of cutout tiles on shelves (tops & layers, bottoms, dresses, footwear, bags, accessories, jewelry); filter by shelf, colour and pattern; sort by newest, colour or how often you wear it; search; tap to zoom into an item page (attributes, wear history, edit, "Not mine — remove"); multi-select to remove misidentified items. Add via Camera / Gallery / Auto-scan.
-- **My Outfits**: calendar of logged outfits.
+- **Home**: greeting, weather, wardrobe summary, "Style me" with occasion and mood chips, scan progress, "Is this you?" review banner, last-scan results.
+- **My Wardrobe**: a closet of cutout tiles on shelves (tops & layers, bottoms, dresses, footwear, bags, accessories, jewelry); filter by shelf, colour and pattern; sort by newest, colour or how often you wear it; search; tap to zoom into an item page (attributes, wear history, edit, "Remove from Wardrobe"); multi-select to remove misidentified items. Add via the + button: Camera / Gallery / Auto-scan.
+- **My Outfits**: week strip or month calendar of logged outfits.
+- **Large displays (iPhone Duo inner display, regular width)**: sidebar tabs; the closet becomes a split view (filters | grid | item page); Today's Outfit shows the board beside the note, a Keep / Swap list and all five options; Home and Outfits use two columns. The cover display and other iPhones keep the phone layout.
 - **Profile**: name, email, gender/age, preferred styles, cloud sync status, tour replay, data deletion.
 - **Authentication**: Sign in with Apple and Sign in with Google.
 - **CloudKit sync**: private database, custom `WardrobeZone`, per-item records with image assets.

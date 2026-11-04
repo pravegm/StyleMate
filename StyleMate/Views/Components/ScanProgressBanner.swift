@@ -89,7 +89,7 @@ struct ScanProgressBanner: View {
                     .foregroundColor(DS.Colors.textPrimary)
                 Text(scanService.progressDetail)
                     .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textTertiary)
+                    .foregroundColor(DS.Colors.textSecondary)
 
                 HStack(spacing: DS.Spacing.xs) {
                     ProgressView(
@@ -134,13 +134,13 @@ struct ScanProgressBanner: View {
         if #available(iOS 17.0, *) {
             Text(text)
                 .font(DS.Font.caption1)
-                .foregroundColor(DS.Colors.textTertiary)
+                .foregroundColor(DS.Colors.textSecondary)
                 .contentTransition(.numericText())
                 .animation(.default, value: scanService.photosScanned)
         } else {
             Text(text)
                 .font(DS.Font.caption1)
-                .foregroundColor(DS.Colors.textTertiary)
+                .foregroundColor(DS.Colors.textSecondary)
         }
     }
 

@@ -79,7 +79,7 @@ extension CoachStep {
                   message: "Pick an occasion, or type your own like 'gym' or 'beach wedding', and StyleMate builds 5 complete looks from your own clothes.",
                   tab: 0, anchor: CoachAnchor.styleMe),
         CoachStep(title: "Add your clothes",
-                  message: "Your outfits come from your wardrobe. We're already adding clothes from your photos. Tap + to add more, three ways:",
+                  message: "Your outfits come from your wardrobe. We're already adding clothes from your photos. Tap + at the top to add more, three ways:",
                   tab: 1, anchor: CoachAnchor.addFAB,
                   methods: [
                     CoachMethod(icon: "wand.and.stars", title: "Auto-scan",
@@ -100,13 +100,13 @@ extension CoachStep {
     /// First-generation tour — runs once when the outfit result sheet first opens.
     static let generationTour: [CoachStep] = [
         CoachStep(title: "Your outfit",
-                  message: "A full head-to-toe look from your closet. Tap any piece to see it bigger. The lock keeps a piece you like; the swap icon changes just that one.",
+                  message: "A full head-to-toe look from your closet, laid out like a stylist's board.",
                   anchor: CoachAnchor.genLook),
-        CoachStep(title: "Shuffle the rest",
-                  message: "Lock the pieces you love, then tap Shuffle to swap everything else for a fresh combination.",
+        CoachStep(title: "Keep or swap a piece",
+                  message: "Tap any piece. Keep holds it in place; Swap changes just that one. Once you've kept a few, shuffle the rest.",
                   anchor: CoachAnchor.genShuffle),
-        CoachStep(title: "Save, skip, or tweak",
-                  message: "Save keeps this look for today. Skip shows the next idea. Use + to add a missing piece, or the calendar to save it to a specific day. (Or swipe: right to save, left to skip.)",
+        CoachStep(title: "Wear it, or see the next",
+                  message: "Wear today logs this look to your calendar. Skip shows the next option. More (•••) logs another day or adds a piece.",
                   anchor: CoachAnchor.genActions, cta: "Got it")
     ]
 }
@@ -317,7 +317,7 @@ struct CoachMarkOverlay: View {
                 }
                 Button("Skip") { Haptics.light(); tutorial.skip() }
                     .font(DS.Font.footnote)
-                    .foregroundStyle(DS.Colors.textTertiary)
+                    .foregroundStyle(DS.Colors.textSecondary)
                 Button { Haptics.medium(); tutorial.next() } label: {
                     Text(step.cta)
                         .font(DS.Font.subheadline.weight(.semibold))

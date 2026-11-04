@@ -56,19 +56,29 @@ enum DS {
             dark:  UIColor(red: 0.125, green: 0.125, blue: 0.133, alpha: 1)
         )
 
+        // Text. Each token also has an Increase Contrast variant (like the
+        // system's .label / .secondaryLabel), so Settings > Accessibility >
+        // Increase Contrast darkens / brightens every label in the app.
         static let textPrimary = dyn(
             light: UIColor(red: 0.067, green: 0.067, blue: 0.067, alpha: 1),   // #111111
-            dark:  UIColor(red: 0.961, green: 0.961, blue: 0.973, alpha: 1)    // #F5F5F8
+            dark:  UIColor(red: 0.961, green: 0.961, blue: 0.973, alpha: 1),   // #F5F5F8
+            lightHC: .black, darkHC: .white
         )
 
+        /// Every secondary line of text (≈5:1 on the canvas). Text never uses tertiary.
         static let textSecondary = dyn(
-            light: UIColor(red: 0.431, green: 0.431, blue: 0.451, alpha: 1),   // #6E6E73 (iOS secondaryLabel)
-            dark:  UIColor(red: 0.596, green: 0.596, blue: 0.624, alpha: 1)    // #98989F
+            light: UIColor(red: 0.431, green: 0.431, blue: 0.451, alpha: 1),   // #6E6E73
+            dark:  UIColor(red: 0.596, green: 0.596, blue: 0.624, alpha: 1),   // #98989F
+            lightHC: UIColor(red: 0.29, green: 0.29, blue: 0.31, alpha: 1),
+            darkHC: UIColor(red: 0.78, green: 0.78, blue: 0.80, alpha: 1)
         )
 
+        /// Glyphs, hairlines and placeholders only (≈2:1) — never for text people read.
         static let textTertiary = dyn(
             light: UIColor(red: 0.682, green: 0.682, blue: 0.698, alpha: 1),   // #AEAEB2 (iOS tertiaryLabel)
-            dark:  UIColor(red: 0.431, green: 0.431, blue: 0.451, alpha: 1)    // #6E6E73
+            dark:  UIColor(red: 0.431, green: 0.431, blue: 0.451, alpha: 1),   // #6E6E73
+            lightHC: UIColor(red: 0.50, green: 0.50, blue: 0.52, alpha: 1),
+            darkHC: UIColor(red: 0.60, green: 0.60, blue: 0.62, alpha: 1)
         )
 
         // Brand tint — vivid in dark, deeper in light; legible (WCAG AA) on both canvases.
@@ -121,6 +131,15 @@ enum DS {
         private static func dyn(light: UIColor, dark: UIColor) -> Color {
             Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })
         }
+
+        // Internal: light/dark plus Increase Contrast variants.
+        private static func dyn(light: UIColor, dark: UIColor, lightHC: UIColor, darkHC: UIColor) -> Color {
+            Color(UIColor { traits in
+                let high = traits.accessibilityContrast == .high
+                if traits.userInterfaceStyle == .dark { return high ? darkHC : dark }
+                return high ? lightHC : light
+            })
+        }
     }
 
     // MARK: - Spacing (8-pt grid)
@@ -154,7 +173,7 @@ enum DS {
     // gets Apple's optical sizing (SF Text vs Display) for free. Same token names.
 
     enum Font {
-        static let display    = SwiftUI.Font.system(size: 40, weight: .bold, design: .rounded)
+        static let display    = SwiftUI.Font.system(.largeTitle, design: .rounded).bold()
         static let largeTitle = SwiftUI.Font.system(.largeTitle, design: .default).weight(.bold)
         static let title1     = SwiftUI.Font.system(.title, design: .default).weight(.bold)
         static let title2     = SwiftUI.Font.system(.title2, design: .default).weight(.semibold)
@@ -247,8 +266,11 @@ struct DSPrimaryButton: ButtonStyle {
         configuration.label
             .font(DS.Font.headline)
             .foregroundStyle(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .padding(.horizontal, 20)
             .frame(maxWidth: .infinity)
-            .frame(height: DS.ButtonSize.height)
+            .frame(minHeight: DS.ButtonSize.height)
             .background(
                 isDisabled ? AnyShapeStyle(DS.Colors.accent.opacity(0.35))
                            : AnyShapeStyle(DS.Colors.accent),
@@ -267,10 +289,39 @@ struct DSSecondaryButton: ButtonStyle {
         configuration.label
             .font(DS.Font.headline)
             .foregroundStyle(DS.Colors.accent)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .padding(.horizontal, 20)
             .frame(maxWidth: .infinity)
-            .frame(height: DS.ButtonSize.height)
+            .frame(minHeight: DS.ButtonSize.height)
             .background(DS.Colors.accentSoft,
                         in: RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(DS.Motion.press, value: configuration.isPressed)
+    }
+}
+
+/// Outlined (bordered) button: the quiet partner to `DSPrimaryButton`, same
+/// height and corner radius so a pair reads as one control row.
+struct DSOutlineButton: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(DS.Font.headline)
+            .foregroundStyle(DS.Colors.accent)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: DS.ButtonSize.height)
+            .background(DS.Colors.backgroundCard,
+                        in: RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous)
+                    .strokeBorder(DS.Colors.accent.opacity(0.55), lineWidth: 1.5)
+            )
+            .opacity(isEnabled ? 1 : 0.45)
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
             .animation(DS.Motion.press, value: configuration.isPressed)
     }
@@ -395,5 +446,18 @@ extension View {
 
     func dsGlassCircle() -> some View {
         self.background(.ultraThinMaterial, in: Circle())
+    }
+
+    /// Floating control capsule: Liquid Glass on iOS 26+, a material capsule before.
+    @ViewBuilder
+    func dsGlassCapsule() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: Capsule(style: .continuous))
+        } else {
+            self
+                .background(.regularMaterial, in: Capsule(style: .continuous))
+                .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 3)
+        }
     }
 }

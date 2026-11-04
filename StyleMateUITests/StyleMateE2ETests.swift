@@ -37,7 +37,9 @@ final class StyleMateE2ETests: E2ETestCase {
         let tee = app.buttons.matching(NSPredicate(format: "label ENDSWITH 'T-Shirt'")).firstMatch
         XCTAssertTrue(scrollUntilHittable(tee, maxSwipes: 4), "Tops shelf shows no T-shirt")
         tee.tap()
-        let editDetails = button(id: "itemDetail.edit", label: "Edit details")
+        // The item page (edit lives in its ⋯ menu, so wait for the page itself).
+        let editDetails = anyElement(NSPredicate(format:
+            "identifier == 'itemDetail.root' OR identifier == 'itemDetail.more' OR label == 'More actions'"))
         XCTAssertTrue(editDetails.waitForExistence(timeout: 15), "Item detail didn't open")
         XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS[c] 'T-Shirt'")).exists,
                       "Item detail doesn't describe the tapped T-shirt")
@@ -73,8 +75,8 @@ final class StyleMateE2ETests: E2ETestCase {
         let generate = button(id: "home.styleMe", label: "Generate")
         tapScrollingIfNeeded(generate)
 
-        // Wait for the deck ("1 of 5"), answering the weather prompt if it appears.
-        let counter = anyElement(NSPredicate(format: "identifier == 'outfit.counter' OR label MATCHES %@", "1 of [0-9]+"))
+        // Wait for the deck ("Option 1 of 5"), answering the weather prompt if it appears.
+        let counter = anyElement(NSPredicate(format: "identifier == 'outfit.counter' OR label MATCHES %@", "(Option )?1 of [0-9]+"))
         let weatherAlert = app.alerts["Weather unavailable"]
         let errorAlert = app.alerts["Outfit Suggestion"]
         var outcome: Int?
@@ -83,7 +85,8 @@ final class StyleMateE2ETests: E2ETestCase {
             outcome = waitForAny([counter, weatherAlert, errorAlert], timeout: max(1, deadline.timeIntervalSinceNow))
             if outcome == 1 {
                 snap("weather-unavailable-prompt")
-                weatherAlert.buttons["Yes"].tap()
+                let proceed = weatherAlert.buttons["Style anyway"]
+                (proceed.exists ? proceed : weatherAlert.buttons["Yes"]).tap()
                 outcome = nil
             }
         } while outcome == nil && Date() < deadline
@@ -102,34 +105,43 @@ final class StyleMateE2ETests: E2ETestCase {
         snap("option-1-of-\(total)")
         note("outfit-sheet-buttons", visibleButtonLabels())
 
-        // Swap one piece of option 1.
+        // Select a piece on the board: its Keep / Swap capsule appears.
+        let piece = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'outfit.piece.'")).firstMatch
+        if piece.waitForExistence(timeout: 10) {
+            piece.tap()
+            snap("option-1-piece-selected")
+        }
+
+        // Swap that piece.
         let swap = app.buttons.matching(NSPredicate(format:
-            "identifier BEGINSWITH 'outfit.swap' OR label CONTAINS[c] 'swap' OR identifier CONTAINS 'circlepath' " +
-            "OR label CONTAINS[c] 'circlepath' OR label CONTAINS[c] 'replace this'")).firstMatch
+            "identifier BEGINSWITH 'outfit.swap' OR label BEGINSWITH[c] 'swap '")).firstMatch
         XCTAssertTrue(swap.waitForExistence(timeout: 10),
-                      "No per-item swap button on the outfit card (see the outfit-sheet-buttons attachment)")
+                      "No per-item swap button on the outfit board (see the outfit-sheet-buttons attachment)")
+        XCTAssertGreaterThanOrEqual(swap.frame.width, 44, "Swap button is smaller than a 44pt target")
         let before = lookFingerprint()
         swap.tap()
         let busy = anyElement(NSPredicate(format: "label BEGINSWITH 'Styling' OR label CONTAINS 'Shuffling'"))
         if busy.waitForExistence(timeout: 3) {
             XCTAssertTrue(waitToDisappear(busy, timeout: 120), "Swap never finished")
         }
-        XCTAssertTrue(anyElement(NSPredicate(format: "label MATCHES %@", "1 of [0-9]+")).waitForExistence(timeout: 10),
+        XCTAssertTrue(anyElement(NSPredicate(format: "label MATCHES %@", "(Option )?1 of [0-9]+")).waitForExistence(timeout: 10),
                       "Swapping moved off option 1")
         let changed = waitUntil(timeout: 10) { self.lookFingerprint() != before }
         XCTAssertTrue(changed, "The swapped piece didn't change the look")
         snap("option-1-after-swap")
 
-        // Keep option 1 (logs it to today), then page through the other four.
-        let save = app.buttons.matching(NSPredicate(format: "identifier == 'outfit.save' OR label BEGINSWITH 'Save'")).firstMatch
-        XCTAssertTrue(save.waitForExistence(timeout: 5), "No Save button on the outfit card")
-        save.tap()
-        let saved = anyElement(NSPredicate(format: "label == 'Saved'"))
-        if saved.waitForExistence(timeout: 3) { snap("option-1-saved") }
+        // Wear option 1 (logs it to today), then page through the other four.
+        let wear = app.buttons.matching(NSPredicate(format:
+            "identifier == 'outfit.wear' OR label BEGINSWITH 'Wear today' OR label BEGINSWITH 'Save'")).firstMatch
+        XCTAssertTrue(wear.waitForExistence(timeout: 5), "No Wear today button on the outfit sheet")
+        wear.tap()
+        let saved = anyElement(NSPredicate(format: "label == 'Logged for today' OR label == 'Saved'"))
+        if saved.waitForExistence(timeout: 3) { snap("option-1-logged") }
 
         if total > 1 {
             for index in 2...total {
-                let page = anyElement(NSPredicate(format: "label == %@", "\(index) of \(total)"))
+                let page = anyElement(NSPredicate(format: "label == %@ OR label == %@",
+                                                  "Option \(index) of \(total)", "\(index) of \(total)"))
                 XCTAssertTrue(page.waitForExistence(timeout: 15), "Option \(index) never showed")
                 snap("option-\(index)-of-\(total)")
                 let skip = app.buttons.matching(NSPredicate(format: "identifier == 'outfit.skip' OR label CONTAINS 'Skip'")).firstMatch
@@ -177,7 +189,8 @@ final class StyleMateE2ETests: E2ETestCase {
         XCTAssertTrue(waitToDisappear(saveOutfit, timeout: 10), "Composer didn't close after saving")
 
         assertTodayHasLoggedOutfit(expectedSourceLabel: "Manual")
-        for product in ["T-Shirts", "Jeans", "Sneakers"] {
+        // The card names its pieces in the singular ("T-Shirt · Jeans · Sneaker").
+        for product in ["T-Shirt", "Jeans", "Sneaker"] {
             XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS %@", product)).exists,
                           "Logged outfit is missing the picked \(product)")
         }

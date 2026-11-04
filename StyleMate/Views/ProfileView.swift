@@ -1,6 +1,14 @@
 import SwiftUI
 
 struct ProfileView: View {
+    /// "1.0 (12)" from the bundle, so the row never goes stale.
+    static let appVersion: String = {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = info?["CFBundleVersion"] as? String
+        return build.map { "\(version) (\($0))" } ?? version
+    }()
+
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var onboardingManager: OnboardingManager
@@ -168,10 +176,6 @@ struct ProfileView: View {
                                 }
                             }
                         }
-
-                        Toggle("Enable Notifications", isOn: .constant(user.notificationsEnabled))
-                            .disabled(true)
-                            .tint(DS.Colors.accent)
                     }
 
                     Section("iCloud Backup") {
@@ -189,7 +193,7 @@ struct ProfileView: View {
                                 } else {
                                     Text("Not yet synced")
                                         .font(DS.Font.caption1)
-                                        .foregroundColor(DS.Colors.textTertiary)
+                                        .foregroundColor(DS.Colors.textSecondary)
                                 }
                             }
                             Spacer()
@@ -213,15 +217,6 @@ struct ProfileView: View {
                         if !iCloudAvailable {
                             Text("Sign in to iCloud in Settings to enable backup.")
                                 .font(DS.Font.caption1)
-                                .foregroundColor(DS.Colors.textSecondary)
-                        }
-                    }
-
-                    Section("Subscription") {
-                        HStack {
-                            Text("Plan")
-                            Spacer()
-                            Text("Free")
                                 .foregroundColor(DS.Colors.textSecondary)
                         }
                     }
@@ -316,7 +311,7 @@ struct ProfileView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0")
+                        Text(Self.appVersion)
                             .foregroundColor(DS.Colors.textSecondary)
                     }
                 }
@@ -501,7 +496,7 @@ struct ProfileView: View {
                 .foregroundColor(DS.Colors.textPrimary)
             Text(label)
                 .font(DS.Font.caption2)
-                .foregroundColor(DS.Colors.textTertiary)
+                .foregroundColor(DS.Colors.textSecondary)
         }
     }
 
@@ -543,7 +538,7 @@ struct StylePreferencesSheet: View {
     @EnvironmentObject var authService: AuthService
     private let maxStyles = 6
     private let allStyles = OutfitType.allCases
-    private let columns = [GridItem(.flexible()), GridItem(.flexible())]
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: DS.Spacing.sm)]
     private let cellHeight: CGFloat = 56
 
     var isChanged: Bool {

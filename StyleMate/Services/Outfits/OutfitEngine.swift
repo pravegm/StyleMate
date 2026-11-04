@@ -282,6 +282,29 @@ extension OutfitType {
         case .streetwear: return "with easy street edge"
         }
     }
+
+    /// Casual occasions get a lighter register in the stylist's notes.
+    var isCasualRegister: Bool {
+        switch self {
+        case .everyday, .loungewear, .vacation, .streetwear, .sports: return true
+        case .formal, .date, .party, .business, .ethnic: return false
+        }
+    }
+}
+
+extension OutfitMood {
+    /// The mood's closing note in the occasion's register: a confident
+    /// Everyday Casual look isn't "built to own the room".
+    func closer(for occasion: OutfitType) -> String {
+        guard occasion.isCasualRegister else { return closer }
+        switch self {
+        case .confident: return "easy, with a little swagger"
+        case .polished: return "neat without trying too hard"
+        case .bold: return "a little louder than usual"
+        case .romantic: return "soft and easy"
+        case .cozy, .relaxed, .playful, .minimal: return closer
+        }
+    }
 }
 
 // MARK: - Palette analysis
@@ -1385,7 +1408,7 @@ private final class StylingPass {
             return "with the \(wanted) you asked for"
         }
         var options: [String] = []
-        if let mood = moods.first { options.append(mood.closer) }
+        if let mood = moods.first { options.append(mood.closer(for: context.resolvedOccasion)) }
         if context.occasionWasStated { options.append(context.resolvedOccasion.stylistPhrase) }
         if !context.lastWorn.isEmpty,
            clothes.allSatisfy({ (daysSinceWorn($0) ?? 99) > 7 }) {

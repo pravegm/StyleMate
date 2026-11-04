@@ -10,11 +10,8 @@ struct FaceReferenceBuilderView: View {
 
     @StateObject private var vm = FaceReferenceViewModel()
 
-    private let columns = [
-        GridItem(.flexible(), spacing: DS.Spacing.xs),
-        GridItem(.flexible(), spacing: DS.Spacing.xs),
-        GridItem(.flexible(), spacing: DS.Spacing.xs)
-    ]
+    // Three across on a phone, more on a wide display.
+    private let columns = [GridItem(.adaptive(minimum: 104), spacing: DS.Spacing.xs)]
 
     var body: some View {
         NavigationStack {
@@ -91,7 +88,7 @@ struct FaceReferenceBuilderView: View {
 
             Label("Runs entirely on your device", systemImage: "lock.shield.fill")
                 .font(DS.Font.footnote)
-                .foregroundStyle(DS.Colors.textTertiary)
+                .foregroundStyle(DS.Colors.textSecondary)
             Spacer()
         }
         .padding()

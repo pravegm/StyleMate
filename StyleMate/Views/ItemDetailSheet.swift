@@ -18,6 +18,7 @@ struct ItemDetailView: View {
     @State private var confirmRemove = false
     @State private var showFullImage = false
     @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(item: WardrobeItem, wear: WearStat?, onDelete: @escaping (WardrobeItem) -> Void) {
         self.itemID = item.id
@@ -49,29 +50,37 @@ struct ItemDetailView: View {
             .padding(.bottom, DS.Spacing.xxl)
         }
         .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+        .accessibilityIdentifier("itemDetail.root")
         .navigationTitle(ClosetText.displayProduct(item.product))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button { showEdit = true } label: { Label("Edit details", systemImage: "pencil") }
+                        .accessibilityIdentifier("itemDetail.edit")
+                    Divider()
                     Button(role: .destructive) { confirmRemove = true } label: {
-                        Label("Not mine — remove", systemImage: "trash")
+                        Label("Remove from Wardrobe", systemImage: "trash")
                     }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Image(systemName: "ellipsis")
                 }
                 .accessibilityLabel("More actions")
+                .accessibilityIdentifier("itemDetail.more")
             }
         }
-        .onAppear { withAnimation(DS.Motion.gentle.delay(0.12)) { appeared = true } }
+        .onAppear {
+            withAnimation(DSMotionEnv.resolve(DS.Motion.gentle.delay(0.12), reduceMotion: reduceMotion)) {
+                appeared = true
+            }
+        }
         .sheet(isPresented: $showEdit) {
             EditWardrobeItemView(item: item) { updated in
                 ClosetActions.update(updated, in: wardrobeViewModel)
             }
         }
         .confirmationDialog("Remove this item?", isPresented: $confirmRemove, titleVisibility: .visible) {
-            Button("Remove from wardrobe", role: .destructive) {
+            Button("Remove from Wardrobe", role: .destructive) {
                 Haptics.warning()
                 onDelete(item)
             }
@@ -151,14 +160,31 @@ struct ItemDetailView: View {
 
     // MARK: - Attributes
 
+    /// Label / value pairs in a two-column grid, like Settings' "About".
     private func attributes(_ item: WardrobeItem) -> some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+        let rows = ClosetAttributes.chips(for: item)
+        return VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             sectionLabel("Details")
-            FlowLayout(spacing: DS.Spacing.xs) {
-                ForEach(ClosetAttributes.chips(for: item)) { chip in
-                    AttributeChip(attribute: chip)
+            Grid(alignment: .leading, horizontalSpacing: DS.Spacing.md, verticalSpacing: 10) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { Divider() }
+                    GridRow(alignment: .firstTextBaseline) {
+                        Text(row.label)
+                            .font(DS.Font.subheadline)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .gridColumnAlignment(.leading)
+                        Text(row.value)
+                            .font(DS.Font.subheadline.weight(.medium))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
             }
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.vertical, DS.Spacing.sm)
+            .background(DS.Colors.backgroundCard,
+                        in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         }
     }
 
@@ -177,67 +203,32 @@ struct ItemDetailView: View {
 
     // MARK: - Actions
 
+    /// One plain destructive row; editing lives in the ⋯ menu.
     private var actions: some View {
-        VStack(spacing: DS.Spacing.sm) {
-            Button {
-                Haptics.light()
-                showEdit = true
-            } label: {
-                Label("Edit details", systemImage: "pencil")
-            }
-            .buttonStyle(DSSecondaryButton())
-
-            Button {
-                confirmRemove = true
-            } label: {
-                Label("Not mine — remove", systemImage: "trash")
-                    .font(DS.Font.headline)
-                    .foregroundStyle(DS.Colors.error)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: DS.ButtonSize.height)
-                    .background(DS.Colors.error.opacity(0.10),
-                                in: RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
-            }
-            .buttonStyle(DSTapBounce())
-            .accessibilityHint("Removes this item from your wardrobe")
+        Button(role: .destructive) {
+            confirmRemove = true
+        } label: {
+            Text("Remove from Wardrobe")
+                .font(DS.Font.body)
+                .foregroundStyle(DS.Colors.error)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DS.Spacing.md)
+                .frame(minHeight: 48)
+                .background(DS.Colors.backgroundCard,
+                            in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         }
-        .padding(.top, DS.Spacing.xs)
+        .buttonStyle(DSTapBounce())
+        .accessibilityHint("For items that aren't yours or were picked up by mistake")
+        .accessibilityIdentifier("itemDetail.remove")
+        .padding(.top, DS.Spacing.sm)
     }
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())
             .font(DS.Font.footnote.weight(.semibold))
             .tracking(0.6)
-            .foregroundStyle(DS.Colors.textTertiary)
+            .foregroundStyle(DS.Colors.textSecondary)
             .accessibilityAddTraits(.isHeader)
-    }
-}
-
-/// One attribute: a small caption label over its value, on a card capsule.
-private struct AttributeChip: View {
-    let attribute: ClosetAttribute
-
-    var body: some View {
-        HStack(spacing: DS.Spacing.xs) {
-            Image(systemName: attribute.icon)
-                .font(DS.Font.footnote.weight(.semibold))
-                .foregroundStyle(DS.Colors.accent)
-                .frame(minWidth: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(attribute.label)
-                    .font(DS.Font.caption2)
-                    .foregroundStyle(DS.Colors.textTertiary)
-                Text(attribute.value)
-                    .font(DS.Font.subheadline.weight(.medium))
-                    .foregroundStyle(DS.Colors.textPrimary)
-            }
-        }
-        .padding(.horizontal, DS.Spacing.sm)
-        .padding(.vertical, DS.Spacing.xs)
-        .background(DS.Colors.backgroundCard,
-                    in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(attribute.label): \(attribute.value)")
     }
 }
 

@@ -264,11 +264,14 @@ struct AddItemReviewView: View {
             Button(action: addSelectedItems) {
                 HStack(spacing: DS.Spacing.xs) {
                     Image(systemName: "plus.circle.fill")
-                    Text("Add \(selectedCount) Item\(selectedCount == 1 ? "" : "s") to Wardrobe")
+                    Text(selectedCount == 0 && photoSections.contains(where: { $0.isLoading })
+                         ? "Finding clothes…"
+                         : "Add \(selectedCount) Item\(selectedCount == 1 ? "" : "s") to Wardrobe")
                 }
             }
             .buttonStyle(DSPrimaryButton(isDisabled: disabled))
             .disabled(disabled)
+            .accessibilityIdentifier("review.add")
             .padding(.horizontal, DS.Spacing.screenH)
             .padding(.vertical, DS.Spacing.md)
         }
@@ -585,14 +588,14 @@ private struct ReviewItemCard: View {
                     }
             }
             .buttonStyle(DSTapBounce())
-            .accessibilityLabel("\(item.colors.joined(separator: " ")) \(item.product)")
+            .accessibilityLabel("\(item.colors.joined(separator: " ")) \(ClosetText.displayProduct(item.product))")
             .accessibilityValue(item.isSelected ? "Will be added" : "Skipped")
             .accessibilityAddTraits(item.isSelected ? [.isButton, .isSelected] : .isButton)
             .accessibilityHint(item.isDuplicate ? "Similar to an item already in your wardrobe" : "Double-tap to include or skip")
 
             HStack(alignment: .top, spacing: DS.Spacing.xs) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.product)
+                    Text(ClosetText.displayProduct(item.product))
                         .font(DS.Font.subheadline.weight(.semibold))
                         .foregroundStyle(DS.Colors.textPrimary)
                         .lineLimit(1)
@@ -620,7 +623,7 @@ private struct ReviewItemCard: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Edit \(item.product)")
+                .accessibilityLabel("Edit \(ClosetText.displayProduct(item.product))")
             }
 
             if let match = item.duplicateMatch {

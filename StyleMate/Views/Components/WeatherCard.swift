@@ -64,7 +64,7 @@ struct WeatherInlineRow: View {
                         if let city = city {
                             Text(city)
                                 .font(DS.Font.subheadline)
-                                .foregroundColor(DS.Colors.textTertiary)
+                                .foregroundColor(DS.Colors.textSecondary)
                                 .lineLimit(1)
                         }
                     }

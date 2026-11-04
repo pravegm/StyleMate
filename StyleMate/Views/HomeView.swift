@@ -16,6 +16,90 @@ struct HomeView: View {
     @State private var showScanReview = false
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+    @ScaledMetric(relativeTo: .body) private var heroThumbHeight: CGFloat = 104
+
+    // MARK: - Outfit sheet presentation
+
+    private func outfitSheetBinding(wide: Bool) -> Binding<Bool> {
+        Binding(
+            get: { homeVM.showOutfitSheet && (hSizeClass == .regular) == wide },
+            set: { homeVM.showOutfitSheet = $0 }
+        )
+    }
+
+    @ViewBuilder
+    private var outfitSheet: some View {
+        if let outfit = homeVM.todayOutfit {
+            TodayOutfitSheet(outfit: outfit, isPresented: $homeVM.showOutfitSheet)
+                .environmentObject(homeVM)
+                .environmentObject(wardrobeViewModel)
+                .environmentObject(outfitsVM)
+                .environmentObject(authService)
+                .environmentObject(tutorialManager)
+        }
+    }
+
+    // MARK: - Blocks (stacked on a phone, two columns when wide)
+
+    /// Staged entrance: fade + rise, or a plain fade under Reduce Motion.
+    private func entrance<V: View>(_ view: V, delay: Double) -> some View {
+        view
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared || reduceMotion ? 0 : 20)
+            .animation(reduceMotion ? DS.Motion.reduced : .easeOut(duration: 0.5).delay(delay), value: appeared)
+    }
+
+    private var greetingBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            entrance(heroGreetingSection, delay: 0)
+                .padding(.top, DS.Spacing.lg)
+
+            if photoScanService.scanState != .idle {
+                ScanProgressBanner(
+                    scanService: photoScanService,
+                    showReview: $showScanReview
+                )
+                .environmentObject(wardrobeViewModel)
+                .padding(.top, DS.Spacing.md)
+                .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .top).combined(with: .opacity))
+                .animation(DSMotionEnv.resolve(.spring(response: 0.4, dampingFraction: 0.8), reduceMotion: reduceMotion),
+                           value: photoScanService.scanState)
+            }
+
+            if photoScanService.scanState == .idle,
+               let userId = authService.user?.id,
+               !PhotoScanService.shared.loadLastScanItemIDs(forUser: userId).isEmpty {
+                Button {
+                    Haptics.light()
+                    showScanReview = true
+                } label: {
+                    Label("Review last scan results", systemImage: "slider.horizontal.3")
+                        .font(DS.Font.footnote.weight(.medium))
+                        .foregroundStyle(DS.Colors.accent)
+                        .frame(minHeight: 44)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var heroBlock: some View {
+        if homeVM.heroOutfit != nil || homeVM.isGeneratingHero {
+            entrance(todaysOutfitHero.coachAnchor(CoachAnchor.todayOutfit), delay: 0.1)
+                .padding(.top, DS.Spacing.xl)
+        }
+    }
+
+    private var styleMeBlock: some View {
+        entrance(styleMeHeroCard.coachAnchor(CoachAnchor.styleMe), delay: 0.15)
+            .padding(.top, DS.Spacing.xl)
+    }
+
+    private var wardrobeBlock: some View {
+        entrance(wardrobeSection, delay: 0.2)
+            .padding(.top, DS.Spacing.xl)
+    }
 
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
@@ -33,71 +117,34 @@ struct HomeView: View {
                 DS.Colors.backgroundPrimary.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // MARK: - Hero Greeting + Weather
-                        heroGreetingSection
-                            .padding(.top, DS.Spacing.lg)
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 20)
-                            .animation(.easeOut(duration: 0.5), value: appeared)
-
-                        // MARK: - Scan Progress Banner
-                        if photoScanService.scanState != .idle {
-                            ScanProgressBanner(
-                                scanService: photoScanService,
-                                showReview: $showScanReview
-                            )
-                            .environmentObject(wardrobeViewModel)
-                            .padding(.top, DS.Spacing.md)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: photoScanService.scanState)
-                        }
-
-                        if photoScanService.scanState == .idle,
-                           let userId = authService.user?.id,
-                           !PhotoScanService.shared.loadLastScanItemIDs(forUser: userId).isEmpty {
-                            Button {
-                                Haptics.light()
-                                showScanReview = true
-                            } label: {
-                                HStack(spacing: DS.Spacing.xs) {
-                                    Image(systemName: "slider.horizontal.3")
-                                        .font(.system(size: 12))
-                                    Text("Review last scan results")
-                                        .font(DS.Font.caption1)
-                                }
-                                .foregroundColor(DS.Colors.accent)
-                                .padding(.top, DS.Spacing.xs)
+                    if hSizeClass == .regular {
+                        // Wide (Duo inner display): greeting + Style me | today's
+                        // look + wardrobe, each column at a readable width.
+                        HStack(alignment: .top, spacing: DS.Spacing.xl) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                greetingBlock
+                                styleMeBlock
                             }
+                            .frame(maxWidth: 560, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 0) {
+                                heroBlock
+                                wardrobeBlock
+                            }
+                            .frame(maxWidth: 560, alignment: .leading)
                         }
-
-                        // MARK: - Today's Outfit Hero
-                        if homeVM.heroOutfit != nil || homeVM.isGeneratingHero {
-                            todaysOutfitHero
-                                .coachAnchor(CoachAnchor.todayOutfit)
-                                .padding(.top, DS.Spacing.xl)
-                                .opacity(appeared ? 1 : 0)
-                                .offset(y: appeared ? 0 : 20)
-                                .animation(.easeOut(duration: 0.5).delay(0.1), value: appeared)
+                        .padding(.horizontal, DS.Spacing.xl)
+                        .padding(.bottom, DS.Spacing.xxxl)
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            greetingBlock
+                            heroBlock
+                            styleMeBlock
+                            wardrobeBlock
                         }
-
-                        // MARK: - Style Me Hero Card
-                        styleMeHeroCard
-                            .coachAnchor(CoachAnchor.styleMe)
-                            .padding(.top, DS.Spacing.xl)
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 20)
-                            .animation(.easeOut(duration: 0.5).delay(0.15), value: appeared)
-
-                        // MARK: - Your Wardrobe
-                        wardrobeSection
-                            .padding(.top, DS.Spacing.xl)
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 20)
-                            .animation(.easeOut(duration: 0.5).delay(0.2), value: appeared)
+                        .padding(.horizontal, DS.Spacing.screenH)
+                        .padding(.bottom, DS.Spacing.xxxl)
                     }
-                    .padding(.horizontal, DS.Spacing.screenH)
-                    .padding(.bottom, DS.Spacing.xxxl)
                 }
 
                 if homeVM.isLoading {
@@ -107,22 +154,20 @@ struct HomeView: View {
                     )
                 }
             }
-            .fullScreenCover(isPresented: $homeVM.showOutfitSheet) {
-                if let outfit = homeVM.todayOutfit {
-                    TodayOutfitSheet(outfit: outfit, isPresented: $homeVM.showOutfitSheet)
-                        .environmentObject(homeVM)
-                        .environmentObject(wardrobeViewModel)
-                        .environmentObject(outfitsVM)
-                        .environmentObject(authService)
-                        .environmentObject(tutorialManager)
-                }
+            // Phone / cover display: full screen. Wide: a page sheet.
+            .fullScreenCover(isPresented: outfitSheetBinding(wide: false)) {
+                outfitSheet
+            }
+            .sheet(isPresented: outfitSheetBinding(wide: true)) {
+                outfitSheet
+                    .presentationSizing(.page)
             }
             .alert("Outfit Suggestion", isPresented: $homeVM.showOutfitErrorAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
                 switch homeVM.outfitError {
                 case .emptyWardrobe:
-                    Text("Add more items to your wardrobe to get outfit suggestions. You need at least a top, bottom, and shoes.")
+                    Text("Add more clothes to get outfit ideas. You need at least a top and a bottom.")
                 case .networkError:
                     Text("Something went wrong while styling. Please try again.")
                 case .parseError:
@@ -132,10 +177,10 @@ struct HomeView: View {
                 }
             }
             .alert("Weather unavailable", isPresented: $showWeatherWarning) {
-                Button("Yes", role: .destructive) {
+                Button("Style anyway") {
                     homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
                 }
-                Button("No", role: .cancel) {}
+                Button("Cancel", role: .cancel) {}
             } message: {
                 if homeVM.isWeatherLoading {
                     Text("Weather is still loading. Outfit suggestions may not be seasonally appropriate. Continue?")
@@ -288,29 +333,18 @@ struct HomeView: View {
         let items = outfit.items.sorted { $0.category.wearingOrder < $1.category.wearingOrder }
         return HStack(spacing: DS.Spacing.sm) {
             ForEach(items.prefix(5)) { item in
-                Group {
-                    if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFit()
-                    } else {
-                        RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
-                            .fill(DS.Colors.backgroundSecondary)
-                            .overlay(
-                                Image(systemName: item.category.iconName)
-                                    .foregroundStyle(DS.Colors.textTertiary)
-                            )
-                    }
-                }
-                .frame(height: 104)
-                .frame(maxWidth: .infinity)
+                BoardCutout(item: item, path: item.gridImagePath, shadowRadius: 4)
+                    .frame(height: heroThumbHeight)
+                    .frame(maxWidth: .infinity)
             }
         }
-        .frame(height: 104)
+        .frame(height: heroThumbHeight)
         .padding(.vertical, DS.Spacing.sm)
         .padding(.horizontal, DS.Spacing.md)
-        .background(DS.Colors.styleBoard)
+        .background(StudioSurface())
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(items.prefix(5).map { ClosetText.displayName($0) }.joined(separator: ", "))
     }
 
     private var heroSkeleton: some View {
@@ -368,18 +402,12 @@ struct HomeView: View {
                     homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
                 }
             }) {
-                HStack(spacing: DS.Spacing.sm) {
-                    Image(systemName: "sparkles")
-                        .font(DS.Font.headline)
-                    Text("Generate 5 Outfits")
-                    Spacer()
-                    Image(systemName: "arrow.right")
-                        .font(DS.Font.headline)
-                }
+                Label("Style me", systemImage: "sparkles")
             }
             .buttonStyle(DSPrimaryButton(isDisabled: ctaDisabled))
             .disabled(ctaDisabled)
-            .opacity(ctaDisabled ? 0.5 : 1.0)
+            .accessibilityHint("Builds five outfits from your wardrobe")
+            .accessibilityIdentifier("home.styleMe")
         }
         .padding(DS.Spacing.lg)
         .background(
@@ -409,7 +437,7 @@ struct HomeView: View {
                     .sorted { $0.count > $1.count }
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: DS.Spacing.sm) {
+                    HStack(alignment: .top, spacing: DS.Spacing.sm) {
                         ForEach(categoryCounts.prefix(6), id: \.category) { entry in
                             Button(action: {
                                 Haptics.light()
@@ -424,8 +452,8 @@ struct HomeView: View {
                             .buttonStyle(DSTapBounce())
                             .scrollTransition(.interactive, axis: .horizontal) { content, phase in
                                 content
-                                    .opacity(phase.isIdentity ? 1 : 0.7)
-                                    .scaleEffect(phase.isIdentity ? 1 : 0.94)
+                                    .opacity(phase.isIdentity || reduceMotion ? 1 : 0.7)
+                                    .scaleEffect(phase.isIdentity || reduceMotion ? 1 : 0.94)
                             }
                         }
                     }
@@ -471,7 +499,7 @@ struct HomeView: View {
             if let trailing = trailing {
                 Text(trailing)
                     .font(DS.Font.footnote)
-                    .foregroundStyle(DS.Colors.textTertiary)
+                    .foregroundStyle(DS.Colors.textSecondary)
             }
         }
     }
@@ -484,81 +512,40 @@ private struct WardrobeCategoryCard: View {
     let items: [WardrobeItem]
     let count: Int
 
-    // Decoded thumbnails are held in state and produced ONCE off the main thread.
-    // Previously this was a computed property that ran items.shuffled() and
-    // decoded (often full-res) images on every render — re-decoding different
-    // random images each pass defeated the cache and blocked the main thread for
-    // seconds during launch.
-    @State private var thumbs: [UIImage] = []
-    @State private var loadedCount: Int = -1
+    /// Scales with Dynamic Type so the title and count never clip.
+    @ScaledMetric(relativeTo: .headline) private var cardWidth: CGFloat = 148
+    @ScaledMetric(relativeTo: .headline) private var tileHeight: CGFloat = 72
 
     var body: some View {
         VStack(spacing: DS.Spacing.xs) {
-            thumbnailArea
+            // Two newest cutouts, fitted (never cropped) on the studio backdrop,
+            // loaded off the main thread.
+            HStack(spacing: DS.Spacing.micro) {
+                ForEach(Array(items.suffix(2).reversed())) { item in
+                    AsyncItemTile(path: item.gridImagePath, height: tileHeight,
+                                  cornerRadius: DS.Radius.control, inset: 6)
+                }
+            }
+            .padding(.horizontal, DS.Spacing.xs)
+            .accessibilityHidden(true)
 
             Text(category.rawValue)
                 .font(DS.Font.headline)
                 .foregroundStyle(DS.Colors.textPrimary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
-            Text("\(count) items")
+            Text("\(count) item\(count == 1 ? "" : "s")")
                 .font(DS.Font.footnote)
                 .foregroundStyle(DS.Colors.textSecondary)
         }
-        .frame(width: 130)
-        .padding(.vertical, DS.Spacing.sm)
+        .frame(width: cardWidth)
+        .padding(.top, DS.Spacing.xs)
+        .padding(.bottom, DS.Spacing.sm)
         .background(DS.Colors.backgroundCard)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         .dsCardShadow()
-        .onAppear { loadThumbsIfNeeded() }
-        .onChange(of: items.count) { _ in loadThumbsIfNeeded() }
-    }
-
-    @ViewBuilder
-    private var thumbnailArea: some View {
-        if thumbs.count >= 2 {
-            HStack(spacing: DS.Spacing.micro) {
-                ForEach(0..<2, id: \.self) { i in
-                    Image(uiImage: thumbs[i])
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
-                }
-            }
-        } else if thumbs.count == 1 {
-            Image(uiImage: thumbs[0])
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 80, height: 80)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
-        } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
-                    .fill(DS.Colors.accentSoft)
-                    .frame(width: 80, height: 80)
-                Image(systemName: category.iconName)
-                    .font(.system(size: 30))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(DS.Colors.accent)
-            }
-        }
-    }
-
-    private func loadThumbsIfNeeded() {
-        guard loadedCount != items.count else { return }
-        loadedCount = items.count
-        let snapshot = items
-        DispatchQueue.global(qos: .userInitiated).async {
-            var result: [UIImage] = []
-            for item in snapshot {
-                if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
-                    result.append(img)
-                    if result.count >= 2 { break }
-                }
-            }
-            DispatchQueue.main.async { self.thumbs = result }
-        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -600,17 +587,22 @@ private struct OutfitTypeChipRow: View {
                                 withAnimation(DS.Motion.snappy) { selectedOutfitType = type }
                             }
                         )
+                        .accessibilityIdentifier("home.occasion.\(type.rawValue)")
                     }
                 }
-                .padding(.horizontal, DS.Spacing.micro)
+                .padding(.horizontal, DS.Spacing.lg)
+                .padding(.vertical, 2)
             }
+            // Bleed to the card's edges so chips scroll out under its rounded
+            // corner instead of being cut mid-card.
+            .padding(.horizontal, -DS.Spacing.lg)
 
             // Mood — optional; tap again to clear. Shapes palette, textures and fit.
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                 HStack(spacing: DS.Spacing.micro) {
                     Text("How do you want to feel?")
                         .font(DS.Font.footnote)
-                        .foregroundStyle(selectedMood == nil ? DS.Colors.textTertiary : DS.Colors.accent)
+                        .foregroundStyle(selectedMood == nil ? DS.Colors.textSecondary : DS.Colors.accent)
                     if let mood = selectedMood {
                         Text("· \(mood.label)")
                             .font(DS.Font.footnote.weight(.semibold))
@@ -636,17 +628,20 @@ private struct OutfitTypeChipRow: View {
                             )
                             .accessibilityLabel("\(mood.label) mood")
                             .accessibilityAddTraits(selectedMood == mood ? .isSelected : [])
+                            .accessibilityIdentifier("mood.\(mood.rawValue)")
                         }
                     }
-                    .padding(.horizontal, DS.Spacing.micro)
+                    .padding(.horizontal, DS.Spacing.lg)
+                    .padding(.vertical, 2)
                 }
+                .padding(.horizontal, -DS.Spacing.lg)
             }
 
             // Always-visible free text — what the user types here takes priority.
             VStack(alignment: .leading, spacing: DS.Spacing.micro) {
                 Text("Describe your own occasion or add details")
                     .font(DS.Font.footnote)
-                    .foregroundStyle(hasCustom ? DS.Colors.accent : DS.Colors.textTertiary)
+                    .foregroundStyle(hasCustom ? DS.Colors.accent : DS.Colors.textSecondary)
 
                 HStack(alignment: .top, spacing: DS.Spacing.xs) {
                     Image(systemName: "text.bubble")

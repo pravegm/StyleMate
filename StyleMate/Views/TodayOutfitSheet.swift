@@ -1,5 +1,17 @@
 import SwiftUI
 
+extension Notification.Name {
+    /// Asks the tab shell to open the add-clothes sheet (the outfit sheet's gap card).
+    static let showAddClothes = Notification.Name("StyleMate.showAddClothes")
+}
+
+/// "What should I wear today?" — the five looks, one at a time, each as a
+/// composed outfit board.
+///
+/// Phone / cover display: stylist note, the board (tap a piece for Keep / Swap,
+/// drag right to wear it, left to skip), then Skip + "Wear today".
+/// Wide (Duo inner display, regular width): the board on the left (~55%), and
+/// on the right the note, a Keep / Swap list, the actions and all five options.
 struct TodayOutfitSheet: View {
     let outfit: Outfit
     @Binding var isPresented: Bool
@@ -8,43 +20,31 @@ struct TodayOutfitSheet: View {
     @EnvironmentObject var outfitsVM: MyOutfitsViewModel
     @EnvironmentObject var authService: AuthService
     @EnvironmentObject var tutorialManager: TutorialManager
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var previewImage: PreviewImage? = nil
+    @State private var selectedPieceID: UUID? = nil
     @State private var lockedItemIDs: Set<UUID> = []
-    @State private var showDatePickerSheet = false
-    @State private var selectedDate = Calendar.current.startOfDay(for: Date())
-    @State private var showSavedOverlay = false
-    @State private var showAddProductSheet = false
-    @State private var addProductStep: AddProductStep? = nil
-    @State private var expandedCategory: Category? = nil
-    @State private var savedToastText = "Saved"
+    @State private var previewItem: WardrobeItem? = nil
+    @State private var showDatePicker = false
+    @State private var logDate = Calendar.current.startOfDay(for: Date())
+    @State private var showAddPiece = false
+    @State private var toastText: String? = nil
     @State private var noticeDismissWork: DispatchWorkItem? = nil
+    @State private var gapDismissed = false
 
-    // Swipe gesture state
-    @State private var dragOffset: CGSize = .zero
-    @State private var cardRotation: Double = 0
-    @State private var cardOpacity: Double = 1
-    @State private var dismissDirection: DismissDirection? = nil
-    @State private var hasTriggeredSwipeHaptic = false
+    // Drag to decide: right = wear today, left = skip. No stamps — the board's
+    // edge tints and one haptic marks the threshold.
+    @State private var dragX: CGFloat = 0
+    @State private var pastThreshold = false
+    @State private var boardScale: CGFloat = 1
+    @State private var boardOpacity: Double = 1
+    @State private var isCommitting = false
+    private let threshold: CGFloat = 110
 
-    // Card entry animation state
-    @State private var cardScale: CGFloat = 1.0
-    @State private var cardYOffset: CGFloat = 0
-
-    // First-time hint state
-    @State private var showSwipeTooltip = false
-    @State private var isPlayingHint = false
-
-    private let swipeThreshold: CGFloat = 100
-    private let cardCornerRadius: CGFloat = 20
-
-    enum AddProductStep: Identifiable {
-        case category
-        var id: Int { hashValue }
-    }
-
-    enum DismissDirection {
-        case left, right
+    private var currentOutfit: Outfit? {
+        guard homeVM.batchIndex < homeVM.outfitBatch.count else { return nil }
+        return homeVM.outfitBatch[homeVM.batchIndex]
     }
 
     private var contextLine: String {
@@ -55,198 +55,64 @@ struct TodayOutfitSheet: View {
             let temp = homeVM.displayFahrenheit ? Int((tempC * 9.0 / 5.0) + 32) : Int(tempC)
             parts.append("\(temp)°\(homeVM.displayFahrenheit ? "F" : "C")")
         }
-        if let weather = homeVM.weather {
-            parts.append(weather.displayDescription)
-        }
-        return parts.isEmpty ? "Curated for you" : parts.joined(separator: " · ")
+        if let weather = homeVM.weather { parts.append(weather.displayDescription) }
+        return parts.isEmpty ? "Styled for you" : parts.joined(separator: " · ")
     }
 
-    private var currentOutfit: Outfit? {
-        guard homeVM.batchIndex < homeVM.outfitBatch.count else { return nil }
-        return homeVM.outfitBatch[homeVM.batchIndex]
+    private var counterText: String {
+        let total = homeVM.outfitBatch.count
+        guard total > 1 else { return "Today's outfit" }
+        return "Option \(min(homeVM.batchIndex + 1, total)) of \(total)"
     }
 
-    private var saveProgress: Double {
-        dragOffset.width > 20 ? min((dragOffset.width - 20) / (swipeThreshold - 20), 1.0) : 0
+    private func isWide(_ size: CGSize) -> Bool {
+        hSizeClass == .regular && size.width >= 640
     }
 
-    private var skipProgress: Double {
-        dragOffset.width < -20 ? min((abs(dragOffset.width) - 20) / (swipeThreshold - 20), 1.0) : 0
-    }
+    // MARK: - Body
 
     var body: some View {
-        ZStack {
-            DS.Colors.backgroundPrimary.ignoresSafeArea()
+        NavigationStack {
+            GeometryReader { geo in
+                ZStack {
+                    DS.Colors.backgroundPrimary.ignoresSafeArea()
 
-            if homeVM.allOutfitsSeen {
-                endOfBatchView
-            } else if let outfit = currentOutfit {
-                VStack(spacing: 0) {
-                    headerView
-
-                    ZStack {
-                        ghostCards
-                        outfitCard(for: outfit)
-                            .scaleEffect(cardScale)
-                            .offset(y: cardYOffset)
-                    }
-                    .padding(.horizontal, DS.Spacing.screenH)
-
-                    if showSwipeTooltip {
-                        Text("Swipe right to save, left to skip")
-                            .font(DS.Font.subheadline)
-                            .foregroundColor(DS.Colors.textSecondary)
-                            .padding(.horizontal, DS.Spacing.md)
-                            .padding(.vertical, DS.Spacing.xs)
-                            .background(DS.Colors.backgroundSecondary)
-                            .clipShape(Capsule())
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                            .padding(.top, DS.Spacing.xs)
-                    }
-                }
-                .offset(x: dragOffset.width)
-                .rotationEffect(.degrees(cardRotation))
-                .opacity(cardOpacity)
-                // simultaneous (not highPriority) so the flat-lay can scroll
-                // vertically; the direction guard below keeps the card from moving
-                // unless the drag is clearly horizontal.
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 30)
-                        .onChanged { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                            guard !isPlayingHint else { return }
-                            dragOffset = value.translation
-                            cardRotation = Double(value.translation.width / 20)
-                            let progress = min(abs(value.translation.width) / swipeThreshold, 1.0)
-                            cardOpacity = 1.0 - (progress * 0.3)
-
-                            if abs(value.translation.width) > swipeThreshold && !hasTriggeredSwipeHaptic {
-                                Haptics.light()
-                                hasTriggeredSwipeHaptic = true
-                            }
-                            if abs(value.translation.width) <= swipeThreshold {
-                                hasTriggeredSwipeHaptic = false
-                            }
+                    if homeVM.allOutfitsSeen {
+                        endOfBatchView
+                    } else if let look = currentOutfit {
+                        if isWide(geo.size) {
+                            wideLayout(look, size: geo.size)
+                        } else {
+                            phoneLayout(look)
                         }
-                        .onEnded { value in
-                            hasTriggeredSwipeHaptic = false
-                            guard !isPlayingHint else { return }
-                            guard abs(value.translation.width) > abs(value.translation.height) else {
-                                resetCardPosition()
-                                return
-                            }
-                            if value.translation.width > swipeThreshold {
-                                dismissCard(direction: .right)
-                            } else if value.translation.width < -swipeThreshold {
-                                dismissCard(direction: .left)
-                            } else {
-                                resetCardPosition()
-                            }
-                        }
-                )
-            }
-
-            if homeVM.isLoading {
-                Color.black.opacity(0.18).ignoresSafeArea()
-                ProgressView("Styling…")
-                    .padding(DS.Spacing.xl)
-                    .background(DS.Colors.backgroundCard)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-            }
-
-            // Stylist notices ("That's your only pair of shoes that works here").
-            if let notice = homeVM.stylistNotice {
-                VStack {
-                    Spacer()
-                    HStack(spacing: DS.Spacing.xs) {
-                        Image(systemName: "info.circle.fill")
-                            .foregroundStyle(DS.Colors.accent)
-                        Text(notice)
-                            .font(DS.Font.subheadline)
-                            .foregroundStyle(DS.Colors.textPrimary)
-                            .multilineTextAlignment(.leading)
                     }
-                    .padding(.horizontal, DS.Spacing.md)
-                    .padding(.vertical, DS.Spacing.sm)
-                    .dsGlassBar(cornerRadius: DS.Radius.card)
-                    .padding(.horizontal, DS.Spacing.screenH)
-                    .padding(.bottom, 120)
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .allowsHitTesting(false)
-                .zIndex(9)
-                .id(notice)
-            }
 
-            if showSavedOverlay {
-                VStack {
-                    Spacer()
-                    Label(savedToastText, systemImage: "checkmark.circle.fill")
-                        .font(DS.Font.title3)
-                        .foregroundColor(.white)
-                        .padding(.vertical, DS.Spacing.md)
-                        .padding(.horizontal, DS.Spacing.xl)
-                        .background(DS.Colors.success)
-                        .clipShape(Capsule())
-                    Spacer()
+                    overlays
                 }
-                .transition(.opacity)
-                .zIndex(10)
             }
-        }
-        .onAppear { playSwipeHintIfNeeded() }
-        .sheet(item: $previewImage) { wrapper in
-            VStack {
-                Spacer()
-                ZoomableImage(image: wrapper.image).padding()
-                Spacer()
-                Button("Close") { previewImage = nil }
-                    .buttonStyle(DSSecondaryButton())
-                    .padding(.horizontal, DS.Spacing.screenH)
-                    .padding(.bottom, DS.Spacing.lg)
-            }
-        }
-        .alert("Too Many Requests", isPresented: $homeVM.showRateLimitAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("You're shuffling too fast! Please wait a moment and try again.")
-        }
-        .sheet(isPresented: $showDatePickerSheet) {
-            NavigationView {
-                VStack(spacing: DS.Spacing.lg) {
-                    DatePicker("Select Date", selection: $selectedDate, displayedComponents: [.date])
-                        .datePickerStyle(GraphicalDatePickerStyle())
-                        .padding()
-
-                    Button("Save") {
-                        saveOutfitForDate(selectedDate)
-                        showDatePickerSheet = false
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { toolbarContent }
+            // First-generation coach tour, hosted inside the stack (preferences
+            // don't cross the navigation container).
+            .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
+                GeometryReader { geo in
+                    if tutorialManager.activeTour == .generation {
+                        CoachMarkOverlay(tutorial: tutorialManager, tour: .generation, anchors: anchors, proxy: geo)
                     }
-                    .buttonStyle(DSPrimaryButton())
-                    .padding(.horizontal, DS.Spacing.screenH)
-
-                    Button("Cancel") { showDatePickerSheet = false }
-                        .buttonStyle(DSTertiaryButton())
                 }
-                .padding()
-                .navigationTitle("Choose Date")
-                .navigationBarTitleDisplayMode(.inline)
+                .ignoresSafeArea()
             }
         }
-        .sheet(item: $addProductStep) { _ in
-            addProductSheetContent
+        .sheet(item: $previewItem) { item in
+            FullItemImageViewer(path: item.fullImagePath, fallbackPath: item.gridImagePath,
+                                title: ClosetText.displayName(item))
         }
-        .onChange(of: showAddProductSheet) { newValue in
-            if newValue {
-                addProductStep = .category
-                expandedCategory = nil
-            }
-        }
-        .onChange(of: addProductStep) { newValue in
-            if newValue == nil { showAddProductSheet = false }
-        }
+        .sheet(isPresented: $showDatePicker) { datePickerSheet }
+        .sheet(isPresented: $showAddPiece) { addPieceSheet }
         .onChange(of: homeVM.batchIndex) { _ in
-            lockedItemIDs.removeAll()   // locks are per-look; clear when swiping to the next
+            // Keeps and the selection belong to one look.
+            lockedItemIDs.removeAll()
+            selectedPieceID = nil
         }
         .onChange(of: homeVM.stylistNotice) { notice in
             guard notice != nil else { return }
@@ -258,750 +124,750 @@ struct TodayOutfitSheet: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.4, execute: work)
         }
         .animation(DS.Motion.smooth, value: homeVM.stylistNotice)
-        // First-generation coach tour, hosted over this sheet (its controls only
-        // exist here). Reads the look / shuffle / actions anchors below.
-        .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
-            GeometryReader { geo in
-                if tutorialManager.activeTour == .generation {
-                    CoachMarkOverlay(tutorial: tutorialManager, tour: .generation, anchors: anchors, proxy: geo)
-                }
-            }
-            .ignoresSafeArea()   // full-screen geo so anchors + scrim align
-        }
         .onAppear {
+            Haptics.prepare()
             guard currentOutfit != nil else { return }
-            // Brief beat for the card's entry animation to settle, then start.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 if currentOutfit != nil { tutorialManager.startIfFirstTime(.generation) }
             }
         }
     }
 
-    // MARK: - Header
+    // MARK: - Toolbar
 
-    private var headerView: some View {
-        VStack(spacing: DS.Spacing.xs) {
-            HStack {
-                VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                    Text("Today's Outfit")
-                        .font(DS.Font.title1)
-                        .foregroundColor(DS.Colors.textPrimary)
-
-                    Text(contextLine)
-                        .font(DS.Font.subheadline)
-                        .foregroundColor(DS.Colors.textSecondary)
-                }
-
-                Spacer()
-
-                if !homeVM.outfitBatch.isEmpty {
-                    Text("\(homeVM.batchIndex + 1) of \(homeVM.outfitBatch.count)")
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.textTertiary)
-                        .padding(.horizontal, DS.Spacing.sm)
-                        .padding(.vertical, DS.Spacing.micro)
-                        .background(DS.Colors.backgroundSecondary)
-                        .clipShape(Capsule())
-                }
-
-                Button(action: { isPresented = false }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundColor(DS.Colors.textTertiary)
-                }
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button {
+                isPresented = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
             }
-
-            progressDots
+            .accessibilityLabel("Close")
+            .accessibilityIdentifier("outfit.close")
         }
-        .padding(.horizontal, DS.Spacing.screenH)
-        .padding(.top, DS.Spacing.md)
+        ToolbarItem(placement: .principal) {
+            if homeVM.allOutfitsSeen || homeVM.outfitBatch.isEmpty {
+                Text("Today's outfit")
+                    .font(DS.Font.headline)
+                    .foregroundStyle(DS.Colors.textPrimary)
+            } else {
+                VStack(spacing: 5) {
+                    Text(counterText)
+                        .font(DS.Font.headline)
+                        .foregroundStyle(DS.Colors.textPrimary)
+                        .monospacedDigit()
+                    if homeVM.outfitBatch.count > 1 { progressDots }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(counterText)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("outfit.counter")
+            }
+        }
+    }
+
+    private var progressDots: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<homeVM.outfitBatch.count, id: \.self) { idx in
+                Capsule()
+                    .fill(idx == homeVM.batchIndex ? DS.Colors.accent : DS.Colors.textTertiary.opacity(0.45))
+                    .frame(width: idx == homeVM.batchIndex ? 14 : 6, height: 6)
+            }
+        }
+        .animation(DSMotionEnv.resolve(DS.Motion.snappy, reduceMotion: reduceMotion), value: homeVM.batchIndex)
+    }
+
+    // MARK: - Phone layout
+
+    private func phoneLayout(_ look: Outfit) -> some View {
+        VStack(spacing: DS.Spacing.sm) {
+            noteCard(look, lineLimit: 4)
+            boardCard(look, inlineControls: true)
+                .frame(maxHeight: .infinity)
+            if let gap = activeGap {
+                gapCard(gap)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            actionBar
+        }
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.top, DS.Spacing.xs)
         .padding(.bottom, DS.Spacing.xs)
     }
 
-    // MARK: - Progress Dots
+    // MARK: - Wide layout (Duo inner display, regular width)
 
-    private var progressDots: some View {
-        HStack(spacing: DS.Spacing.micro) {
-            ForEach(0..<homeVM.outfitBatch.count, id: \.self) { idx in
-                Circle()
-                    .fill(idx == homeVM.batchIndex ? DS.Colors.accent : DS.Colors.textTertiary.opacity(0.3))
-                    .frame(width: idx == homeVM.batchIndex ? 8 : 6, height: idx == homeVM.batchIndex ? 8 : 6)
-                    .animation(.easeInOut(duration: 0.2), value: homeVM.batchIndex)
+    private func wideLayout(_ look: Outfit, size: CGSize) -> some View {
+        let gutter = DS.Spacing.lg
+        let boardWidth = max(0, (size.width - gutter * 3) * 0.55)
+        let boardHeight = max(0, min(boardWidth * 1.08, size.height - gutter * 2))
+        return HStack(alignment: .top, spacing: gutter) {
+            boardCard(look, inlineControls: false)
+                .frame(width: boardWidth, height: boardHeight)
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                    noteCard(look, lineLimit: nil)
+                    piecesList(look)
+                    if let gap = activeGap { gapCard(gap) }
+                    actionBar
+                    if homeVM.outfitBatch.count > 1 { optionsStrip }
+                }
+                .padding(.bottom, gutter)
             }
+            .scrollIndicators(.hidden)
         }
+        .padding(gutter)
     }
 
-    // MARK: - Ghost (Stacked) Cards
+    // MARK: - Stylist note
 
-    @ViewBuilder
-    private var ghostCards: some View {
-        if homeVM.batchIndex + 2 < homeVM.outfitBatch.count {
-            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                .fill(DS.Colors.backgroundCard.opacity(0.5))
-                .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
-                .padding(.horizontal, 16)
-                .offset(y: 14)
-                .scaleEffect(0.92)
+    private func noteCard(_ look: Outfit, lineLimit: Int?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(contextLine.uppercased())
+                    .font(DS.Font.caption2.weight(.semibold))
+                    .tracking(0.4)
+            } icon: {
+                Image(systemName: "sparkles")
+                    .font(DS.Font.caption2.weight(.semibold))
+            }
+            .foregroundStyle(DS.Colors.accent)
+            .lineLimit(1)
+
+            if !look.explanation.isEmpty {
+                Text(look.explanation)
+                    .font(DS.Font.subheadline)
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .lineLimit(lineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
+                    // The on-device model may rewrite the note a beat later.
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut(duration: 0.3), value: look.explanation)
+            }
         }
-        if homeVM.batchIndex + 1 < homeVM.outfitBatch.count {
-            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                .fill(DS.Colors.backgroundCard)
-                .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
-                .padding(.horizontal, 8)
-                .offset(y: 8)
-                .scaleEffect(0.96)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.vertical, DS.Spacing.sm)
+        .background(DS.Colors.backgroundCard,
+                    in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Outfit Card
+    // MARK: - Board
 
-    @ViewBuilder
-    private func outfitCard(for outfit: Outfit) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                .fill(DS.Colors.backgroundCard)
-                .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 4)
+    private func boardCard(_ look: Outfit, inlineControls: Bool) -> some View {
+        let progress = min(abs(dragX) / threshold, 1)
+        let tint = dragX >= 0 ? DS.Colors.accent : DS.Colors.textSecondary
+        return ZStack(alignment: .bottom) {
+            OutfitBoard(
+                items: look.items,
+                selectedID: inlineControls ? selectedPieceID : nil,
+                lockedIDs: lockedItemIDs,
+                showsControls: inlineControls,
+                swapDisabled: homeVM.isLoading,
+                bottomInset: 40,
+                onTap: { tap($0, inline: inlineControls) },
+                onKeep: { toggleKeep($0) },
+                onSwap: { swap($0) },
+                onPreview: { previewItem = $0 }
+            )
+            .coachAnchor(CoachAnchor.genLook)
 
-            VStack(spacing: 0) {
-                // Pinned so the AI summary stays visible while the look scrolls.
-                if !outfit.explanation.isEmpty {
-                    HStack(alignment: .top, spacing: DS.Spacing.xs) {
-                        Image(systemName: "sparkles")
-                            .font(DS.Font.footnote)
-                            .foregroundStyle(DS.Colors.accent)
-                            .padding(.top, 2)
-
-                        Text(outfit.explanation)
-                            .font(DS.Font.subheadline)
-                            .foregroundStyle(DS.Colors.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            // The on-device model may rewrite the note a beat later.
-                            .contentTransition(.opacity)
-                            .animation(.easeInOut(duration: 0.3), value: outfit.explanation)
-                    }
-                    .padding(DS.Spacing.md)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(DS.Colors.accentSoft)
-                }
-
-                lookToolbar
-                    .coachAnchor(CoachAnchor.genShuffle)
-                    .padding(.horizontal, DS.Spacing.md)
-                    .padding(.vertical, DS.Spacing.sm)
-
-                ScrollView {
-                    flatLay(for: outfit)
-                        .coachAnchor(CoachAnchor.genLook)
-                        .padding(.horizontal, DS.Spacing.lg)
-                        .padding(.top, DS.Spacing.xs)
-                        .padding(.bottom, 96)
-                }
-                .scrollIndicators(.hidden)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
-
-            // SAVE stamp (upper-left, visible when dragging right)
-            if saveProgress > 0 {
-                VStack {
-                    HStack {
-                        Text("SAVE")
-                            .font(.system(size: 48, weight: .black))
-                            .foregroundColor(DS.Colors.success)
-                            .opacity(saveProgress)
-                            .rotationEffect(.degrees(-15))
-                            .padding(.top, DS.Spacing.xl)
-                            .padding(.leading, DS.Spacing.lg)
-                        Spacer()
-                    }
-                    Spacer()
-                }
-                .allowsHitTesting(false)
-            }
-
-            // SKIP stamp (upper-right, visible when dragging left)
-            if skipProgress > 0 {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Text("SKIP")
-                            .font(.system(size: 48, weight: .black))
-                            .foregroundColor(DS.Colors.error)
-                            .opacity(skipProgress)
-                            .rotationEffect(.degrees(15))
-                            .padding(.top, DS.Spacing.xl)
-                            .padding(.trailing, DS.Spacing.lg)
-                    }
-                    Spacer()
-                }
-                .allowsHitTesting(false)
-            }
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                .stroke(
-                    saveProgress > 0
-                        ? DS.Colors.success.opacity(saveProgress * 0.8)
-                        : (skipProgress > 0
-                            ? DS.Colors.error.opacity(skipProgress * 0.8)
-                            : Color.clear),
-                    lineWidth: 3
-                )
-        )
-        .overlay(alignment: .bottom) {
-            bottomActionBar
-                .coachAnchor(CoachAnchor.genActions)
-                .padding(.horizontal, DS.Spacing.sm)
+            boardFooter(inlineControls: inlineControls)
                 .padding(.bottom, DS.Spacing.sm)
         }
+        .background(StudioSurface())
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous)
+                .strokeBorder(tint.opacity(progress * 0.9), lineWidth: 3)
+                .allowsHitTesting(false)
+        )
+        .dsCardShadow(cornerRadius: DS.Radius.hero)
+        .offset(x: reduceMotion ? 0 : dragX * (isCommitting ? 1 : 0.6))
+        .scaleEffect(boardScale)
+        .opacity(boardOpacity)
+        .gesture(decideGesture)
+        .animation(DS.Motion.smooth, value: look.items.map { $0.id })
+        .animation(DS.Motion.snappy, value: selectedPieceID)
     }
-
-    // MARK: - Flat-lay canvas
-    //
-    // Presents the outfit as a styled "look": background-removed cutouts arranged
-    // top → bottom → shoes, with accessories beneath — instead of a row list. Each
-    // piece can be tapped to zoom or shuffled via its badge.
-
-    private static let upperZone: Set<Category> =
-        [.outerwear, .midLayers, .tops, .onePieces, .activewear, .ethnicWear, .innerwear]
 
     @ViewBuilder
-    private func flatLay(for outfit: Outfit) -> some View {
-        let items = outfit.items
-        let upper = items.filter { Self.upperZone.contains($0.category) }
-            .sorted { $0.category.wearingOrder < $1.category.wearingOrder }
-        let lower = items.filter { $0.category == .bottoms }
-        let feet = items.filter { $0.category == .footwear }
-        let accessories = items.filter { $0.category == .accessories }
-
-        VStack(spacing: DS.Spacing.xl) {
-            if !upper.isEmpty { flatLayRow(upper, maxHeight: 188) }
-            if !lower.isEmpty { flatLayRow(lower, maxHeight: 156) }
-            if !feet.isEmpty { flatLayRow(feet, maxHeight: 92) }
-            if !accessories.isEmpty {
-                HStack(spacing: DS.Spacing.xl) {
-                    ForEach(accessories) { item in
-                        flatLayPiece(item, maxHeight: 56)
-                            .transition(.scale(scale: 0.85).combined(with: .opacity))
-                    }
-                }
-            }
-        }
-        // Shuffle / add swap pieces in place: cross-fade the changed piece.
-        .animation(DS.Motion.smooth, value: items.map { $0.id })
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, DS.Spacing.xl)
-        .padding(.horizontal, DS.Spacing.lg)
-        .background(DS.Colors.styleBoard)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
-    }
-
-    private func flatLayRow(_ items: [WardrobeItem], maxHeight: CGFloat) -> some View {
-        HStack(alignment: .bottom, spacing: DS.Spacing.lg) {
-            ForEach(items) { item in
-                flatLayPiece(item, maxHeight: maxHeight)
-                    .transition(.scale(scale: 0.85).combined(with: .opacity))
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func flatLayPiece(_ item: WardrobeItem, maxHeight: CGFloat) -> some View {
-        let image = item.croppedImage ?? item.image
-        let isLocked = lockedItemIDs.contains(item.id)
-        return Group {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
-                    .fill(DS.Colors.backgroundSecondary)
-                    .aspectRatio(0.8, contentMode: .fit)
-                    .overlay(
-                        Image(systemName: item.category.iconName)
-                            .font(.system(size: 24))
-                            .foregroundStyle(DS.Colors.textTertiary)
-                    )
-            }
-        }
-        .frame(maxHeight: maxHeight)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if let image { previewImage = PreviewImage(image: image) }
-        }
-        // Lock toggle (top-left): "keep this piece" when you hit Shuffle.
-        .overlay(alignment: .topLeading) {
+    private func boardFooter(inlineControls: Bool) -> some View {
+        if !lockedItemIDs.isEmpty {
             Button {
-                Haptics.selection()
-                if isLocked { lockedItemIDs.remove(item.id) } else { lockedItemIDs.insert(item.id) }
+                shuffleRest()
             } label: {
-                Image(systemName: isLocked ? "lock.fill" : "lock.open")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(isLocked ? DS.Colors.accent : DS.Colors.textTertiary)
-                    .padding(6)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .buttonStyle(DSTapBounce())
-        }
-        // Per-slot shuffle (top-right): re-roll just this piece. Hidden when locked.
-        .overlay(alignment: .topTrailing) {
-            if !isLocked {
-                Button {
-                    Haptics.light()
-                    homeVM.shuffleItemInOutfit(
-                        itemToShuffle: item,
-                        wardrobe: wardrobeViewModel.items,
-                        user: authService.user
-                    )
-                } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(DS.Colors.accent)
-                        .padding(6)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .buttonStyle(DSTapBounce())
-                .disabled(homeVM.isLoading)
-            }
-        }
-    }
-
-    // MARK: - Look toolbar (lock + shuffle)
-
-    private var lookToolbar: some View {
-        HStack(spacing: DS.Spacing.micro) {
-            Image(systemName: lockedItemIDs.isEmpty ? "lock.open" : "lock.fill")
-                .font(DS.Font.caption1)
-            Text(lockedItemIDs.isEmpty ? "Tap a piece to keep it" : "\(lockedItemIDs.count) kept")
-                .font(DS.Font.footnote)
-            Spacer()
-            Button {
-                Haptics.medium()
-                homeVM.reshuffleKeepingLocked(
-                    lockedIDs: lockedItemIDs,
-                    wardrobe: wardrobeViewModel.items,
-                    user: authService.user
-                )
-            } label: {
-                HStack(spacing: DS.Spacing.micro) {
-                    Image(systemName: "shuffle")
-                    Text("Shuffle")
-                }
-                .font(DS.Font.subheadline.weight(.semibold))
-                .foregroundStyle(DS.Colors.accent)
-                .padding(.horizontal, DS.Spacing.md)
-                .padding(.vertical, DS.Spacing.xs)
-                .background(DS.Colors.accentSoft, in: Capsule(style: .continuous))
+                Label("\(lockedItemIDs.count) kept · Shuffle the rest", systemImage: "shuffle")
+                    .font(DS.Font.footnote.weight(.semibold))
+                    .foregroundStyle(DS.Colors.accent)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 36)
+                    .dsGlassCapsule()
             }
             .buttonStyle(DSTapBounce())
             .disabled(homeVM.isLoading)
-        }
-        .foregroundStyle(lockedItemIDs.isEmpty ? DS.Colors.textTertiary : DS.Colors.accent)
-    }
-
-    // MARK: - Dismiss & Reset
-
-    private func dismissCard(direction: DismissDirection) {
-        let screenWidth = UIScreen.main.bounds.width
-        let offscreenX: CGFloat = direction == .right ? screenWidth + 100 : -(screenWidth + 100)
-        let rotation: Double = direction == .right ? 15 : -15
-
-        withAnimation(.easeIn(duration: 0.3)) {
-            dragOffset = CGSize(width: offscreenX, height: -30)
-            cardRotation = rotation
-            cardOpacity = 0
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            if direction == .right {
-                saveOutfitForToday()
-            } else {
-                Haptics.medium()
-                homeVM.skipCurrentOutfit()
-            }
-            resetCardPosition()
+            .coachAnchor(CoachAnchor.genShuffle)
+            .accessibilityIdentifier("outfit.shuffleRest")
+        } else if selectedPieceID == nil {
+            Text(inlineControls ? "Tap a piece to keep or swap it" : "Tap a piece to see it larger")
+                .font(DS.Font.footnote)
+                .foregroundStyle(DS.Colors.textSecondary)
+                .padding(.horizontal, DS.Spacing.sm)
+                .frame(minHeight: 36)
+                .coachAnchor(CoachAnchor.genShuffle)
         }
     }
 
-    private func resetCardPosition() {
-        dragOffset = .zero
-        cardRotation = 0
-        cardOpacity = 1
-        cardScale = 0.96
-        cardYOffset = 8
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-            cardScale = 1.0
-            cardYOffset = 0
-        }
-    }
-
-    // MARK: - First-Time Swipe Hint
-
-    private func playSwipeHintIfNeeded() {
-        // The first-generation coach tour explains swiping; don't also play the
-        // wiggle hint at the same time. Only play it once the tour has been seen.
-        guard tutorialManager.hasSeen(.generation) else { return }
-        guard !UserDefaults.standard.bool(forKey: "hasSeenSwipeHint") else { return }
-        guard !isPlayingHint else { return }
-
-        isPlayingHint = true
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            withAnimation(.easeInOut(duration: 0.4)) {
-                dragOffset = CGSize(width: 60, height: 0)
-                cardRotation = 3
-            }
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                dragOffset = .zero
-                cardRotation = 0
-            }
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-            withAnimation(.easeInOut(duration: 0.4)) {
-                dragOffset = CGSize(width: -60, height: 0)
-                cardRotation = -3
-            }
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                dragOffset = .zero
-                cardRotation = 0
-            }
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                showSwipeTooltip = true
-            }
-            isPlayingHint = false
-            UserDefaults.standard.set(true, forKey: "hasSeenSwipeHint")
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.2) {
-            withAnimation(.easeOut(duration: 0.4)) {
-                showSwipeTooltip = false
-            }
-        }
-    }
-
-    // MARK: - Bottom Action Bar
-
-    private var bottomActionBar: some View {
-        HStack(spacing: DS.Spacing.xs) {
-            Button(action: {
-                Haptics.light()
-                dismissCard(direction: .left)
-            }) {
-                HStack(spacing: DS.Spacing.micro) {
-                    Image(systemName: "arrow.left")
-                    Text("Skip")
+    private var decideGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                guard !isCommitting, abs(value.translation.width) > abs(value.translation.height) else { return }
+                dragX = value.translation.width
+                let past = abs(dragX) > threshold
+                if past != pastThreshold {
+                    pastThreshold = past
+                    if past { Haptics.selection() }
                 }
             }
-            .buttonStyle(DSSecondaryButton())
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.card)
-                    .stroke(DS.Colors.error.opacity(skipProgress * 0.6), lineWidth: 2)
-            )
-
-            Button(action: {
-                Haptics.light()
-                showAddProductSheet = true
-            }) {
-                HStack(spacing: DS.Spacing.micro) {
-                    Image(systemName: "plus")
-                    Text("Add")
+            .onEnded { _ in
+                guard !isCommitting else { return }
+                pastThreshold = false
+                if dragX > threshold {
+                    commit(.wear)
+                } else if dragX < -threshold {
+                    commit(.skip)
+                } else {
+                    withAnimation(DS.Motion.snappy) { dragX = 0 }
                 }
             }
-            .buttonStyle(DSSecondaryButton())
+    }
 
-            Button(action: {
-                Haptics.light()
-                selectedDate = Calendar.current.startOfDay(for: Date())
-                showDatePickerSheet = true
-            }) {
-                Image(systemName: "calendar")
+    // MARK: - Keep / Swap list (wide)
+
+    private func piecesList(_ look: Outfit) -> some View {
+        let items = look.items.sorted { $0.category.wearingOrder < $1.category.wearingOrder }
+        return VStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                if index > 0 { Divider().padding(.leading, 68) }
+                pieceRow(item)
+            }
+        }
+        .background(DS.Colors.backgroundCard,
+                    in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .animation(DS.Motion.smooth, value: items.map { $0.id })
+    }
+
+    private func pieceRow(_ item: WardrobeItem) -> some View {
+        let kept = lockedItemIDs.contains(item.id)
+        return HStack(spacing: DS.Spacing.sm) {
+            Button {
+                previewItem = item
+            } label: {
+                AsyncItemTile(path: item.gridImagePath, height: 44, cornerRadius: DS.Radius.chip, inset: 3)
+                    .frame(width: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("View \(ClosetText.displayName(item)) larger")
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(ClosetText.displayName(item))
+                    .font(DS.Font.subheadline.weight(.medium))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .lineLimit(1)
+                Text(kept ? "Kept" : ClosetSection.of(item).chipTitle)
+                    .font(DS.Font.caption1)
+                    .foregroundStyle(kept ? DS.Colors.accent : DS.Colors.textSecondary)
+            }
+            Spacer(minLength: DS.Spacing.xs)
+            PieceActionButton(kind: .keep, item: item, isOn: kept) { toggleKeep(item) }
+            PieceActionButton(kind: .swap, item: item, disabled: homeVM.isLoading || kept) { swap(item) }
+        }
+        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.vertical, 6)
+    }
+
+    // MARK: - All options strip (wide)
+
+    private var optionsStrip: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Text("All \(homeVM.outfitBatch.count) options")
+                .font(DS.Font.footnote.weight(.semibold))
+                .foregroundStyle(DS.Colors.textSecondary)
+            HStack(spacing: DS.Spacing.xs) {
+                ForEach(Array(homeVM.outfitBatch.enumerated()), id: \.offset) { index, look in
+                    let current = index == homeVM.batchIndex
+                    Button {
+                        jump(to: index)
+                    } label: {
+                        OutfitBoard(items: look.items, isThumbnail: true)
+                            .aspectRatio(0.8, contentMode: .fit)
+                            .background(StudioSurface())
+                            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                                    .strokeBorder(current ? DS.Colors.accent : DS.Colors.separator,
+                                                  lineWidth: current ? 2 : 0.5)
+                            )
+                            .overlay(alignment: .topLeading) {
+                                Text("\(index + 1)")
+                                    .font(DS.Font.caption2.weight(.bold))
+                                    .foregroundStyle(current ? DS.Colors.accent : DS.Colors.textSecondary)
+                                    .padding(5)
+                            }
+                    }
+                    .buttonStyle(DSTapBounce())
+                    .frame(maxWidth: .infinity)
+                    .accessibilityLabel("Option \(index + 1)")
+                    .accessibilityAddTraits(current ? .isSelected : [])
+                }
+            }
+        }
+    }
+
+    // MARK: - Thin wardrobe
+
+    struct WardrobeGap: Equatable {
+        let title: String
+        let icon: String
+    }
+
+    /// With a small closet every look reuses the same few pieces; say what would help most.
+    static func gap(for items: [WardrobeItem]) -> WardrobeGap? {
+        let shoes = items.filter { $0.category == .footwear }.count
+        let bottoms = items.filter { $0.category == .bottoms }.count
+        if shoes < 3 {
+            let n = 3 - shoes
+            return WardrobeGap(title: "Add \(n == 1 ? "a pair" : "\(n) pairs") of shoes → more outfits", icon: "shoe")
+        }
+        if bottoms < 3 {
+            let n = 3 - bottoms
+            return WardrobeGap(title: "Add \(n == 1 ? "a bottom" : "\(n) bottoms") → more outfits", icon: "square.stack")
+        }
+        if items.count < 20 {
+            return WardrobeGap(title: "Add \(20 - items.count) more pieces → more outfits", icon: "hanger")
+        }
+        return nil
+    }
+
+    private var activeGap: WardrobeGap? {
+        gapDismissed ? nil : Self.gap(for: wardrobeViewModel.items)
+    }
+
+    private func gapCard(_ gap: WardrobeGap) -> some View {
+        HStack(spacing: DS.Spacing.sm) {
+            Button {
+                openAddClothes()
+            } label: {
+                HStack(spacing: DS.Spacing.sm) {
+                    Image(systemName: gap.icon)
+                        .font(DS.Font.subheadline.weight(.semibold))
+                        .foregroundStyle(DS.Colors.accent)
+                        .frame(width: 34, height: 34)
+                        .background(DS.Colors.accentSoft, in: Circle())
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(gap.title)
+                            .font(DS.Font.subheadline.weight(.semibold))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                        Text("A small closet repeats looks")
+                            .font(DS.Font.footnote)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("outfit.gap")
+
+            Button {
+                withAnimation(DS.Motion.smooth) { gapDismissed = true }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(DS.Font.footnote.weight(.semibold))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Dismiss tip")
+        }
+        .padding(.leading, DS.Spacing.sm)
+        .padding(.vertical, 2)
+        .background(DS.Colors.backgroundCard,
+                    in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+    }
+
+    private func openAddClothes() {
+        Haptics.light()
+        isPresented = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            NotificationCenter.default.post(name: .showAddClothes, object: nil)
+        }
+    }
+
+    // MARK: - Actions
+
+    private var actionBar: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            Menu {
+                Button {
+                    logDate = Calendar.current.startOfDay(for: Date())
+                    showDatePicker = true
+                } label: {
+                    Label("Log another day…", systemImage: "calendar")
+                }
+                Button {
+                    showAddPiece = true
+                } label: {
+                    Label("Add a piece", systemImage: "plus")
+                }
+                Button {
+                    shuffleRest()
+                } label: {
+                    Label(lockedItemIDs.isEmpty ? "Restyle this look" : "Restyle around kept pieces",
+                          systemImage: "shuffle")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
                     .font(DS.Font.headline)
-                    .foregroundColor(DS.Colors.accent)
+                    .foregroundStyle(DS.Colors.accent)
                     .frame(width: DS.ButtonSize.height, height: DS.ButtonSize.height)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DS.Radius.card)
-                            .stroke(DS.Colors.accent, lineWidth: 1.5)
-                    )
+                    .background(DS.Colors.accentSoft,
+                                in: RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
             }
+            .accessibilityLabel("More options")
+            .accessibilityIdentifier("outfit.more")
 
-            Button(action: {
+            Button {
                 Haptics.light()
-                dismissCard(direction: .right)
-            }) {
-                HStack(spacing: DS.Spacing.micro) {
-                    Text("Save")
-                    Image(systemName: "arrow.right")
-                }
+                commit(.skip)
+            } label: {
+                Text("Skip")
+            }
+            .buttonStyle(DSOutlineButton())
+            .frame(maxWidth: 120)
+            .accessibilityIdentifier("outfit.skip")
+
+            Button {
+                commit(.wear)
+            } label: {
+                Text("Wear today")
             }
             .buttonStyle(DSPrimaryButton())
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.card)
-                    .stroke(DS.Colors.success.opacity(saveProgress * 0.6), lineWidth: 2)
-            )
+            .accessibilityHint("Logs this outfit to today")
+            .accessibilityIdentifier("outfit.wear")
         }
-        .padding(.horizontal, DS.Spacing.xs)
-        .padding(.vertical, DS.Spacing.sm)
-        .dsGlassBar(cornerRadius: DS.Spacing.md)
+        .disabled(isCommitting)
+        .coachAnchor(CoachAnchor.genActions)
     }
 
-    // MARK: - End of Batch View
+    private enum Decision { case wear, skip }
+
+    private func commit(_ decision: Decision) {
+        guard !isCommitting, currentOutfit != nil else { return }
+        isCommitting = true
+        selectedPieceID = nil
+        let out: CGFloat = decision == .wear ? 900 : -900
+        withAnimation(reduceMotion ? DS.Motion.reduced : .easeIn(duration: 0.24)) {
+            if !reduceMotion { dragX = out }
+            boardOpacity = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+            switch decision {
+            case .wear:
+                log(on: Calendar.current.startOfDay(for: Date()))
+            case .skip:
+                homeVM.skipCurrentOutfit()
+                settleNextBoard()
+            }
+        }
+    }
+
+    /// Logs the current look to `date`, confirms, then moves to the next look.
+    private func log(on date: Date) {
+        guard let look = currentOutfit else { settleNextBoard(); return }
+        outfitsVM.addOutfit(date: date, items: look.items, source: MyOutfitsViewModel.Source.stylist)
+        homeVM.saveCurrentOutfit()
+        Haptics.success()
+        let text = Calendar.current.isDateInToday(date)
+            ? "Logged for today"
+            : "Logged for \(date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))"
+        withAnimation(DS.Motion.snappy) { toastText = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+            withAnimation(DS.Motion.smooth) { toastText = nil }
+            homeVM.advanceToNextOutfit()
+            settleNextBoard()
+        }
+    }
+
+    /// "Log another day…": fade the board, log, advance.
+    private func logAnotherDay(_ date: Date) {
+        guard !isCommitting, currentOutfit != nil else { return }
+        isCommitting = true
+        selectedPieceID = nil
+        withAnimation(DS.Motion.reduced) { boardOpacity = 0 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { log(on: date) }
+    }
+
+    private func settleNextBoard() {
+        dragX = 0
+        pastThreshold = false
+        boardScale = reduceMotion ? 1 : 0.96
+        withAnimation(reduceMotion ? DS.Motion.reduced : .spring(response: 0.35, dampingFraction: 0.8)) {
+            boardScale = 1
+            boardOpacity = 1
+        }
+        isCommitting = false
+    }
+
+    private func tap(_ item: WardrobeItem, inline: Bool) {
+        guard inline else { previewItem = item; return }
+        Haptics.selection()
+        withAnimation(DSMotionEnv.resolve(DS.Motion.snappy, reduceMotion: reduceMotion)) {
+            selectedPieceID = selectedPieceID == item.id ? nil : item.id
+        }
+    }
+
+    private func toggleKeep(_ item: WardrobeItem) {
+        Haptics.selection()
+        withAnimation(DS.Motion.snappy) {
+            if lockedItemIDs.contains(item.id) { lockedItemIDs.remove(item.id) } else { lockedItemIDs.insert(item.id) }
+        }
+    }
+
+    /// Swaps one piece; the selection follows the new piece so repeated taps
+    /// walk through the alternatives.
+    private func swap(_ item: WardrobeItem) {
+        guard let before = currentOutfit else { return }
+        Haptics.light()
+        let followSelection = selectedPieceID == item.id
+        homeVM.shuffleItemInOutfit(itemToShuffle: item, wardrobe: wardrobeViewModel.items, user: authService.user)
+        guard followSelection, let after = currentOutfit else { return }
+        let old = Set(before.items.map { $0.id })
+        if let fresh = after.items.first(where: { !old.contains($0.id) }) {
+            selectedPieceID = fresh.id
+        }
+    }
+
+    private func shuffleRest() {
+        Haptics.medium()
+        selectedPieceID = nil
+        homeVM.reshuffleKeepingLocked(lockedIDs: lockedItemIDs, wardrobe: wardrobeViewModel.items,
+                                      user: authService.user)
+    }
+
+    private func jump(to index: Int) {
+        guard !isCommitting, index != homeVM.batchIndex, index < homeVM.outfitBatch.count else { return }
+        Haptics.selection()
+        withAnimation(DS.Motion.smooth) {
+            homeVM.batchIndex = index
+            homeVM.todayOutfit = homeVM.outfitBatch[index]
+        }
+    }
+
+    // MARK: - Overlays
+
+    @ViewBuilder
+    private var overlays: some View {
+        if homeVM.isLoading {
+            Color.black.opacity(0.18).ignoresSafeArea()
+            ProgressView("Styling…")
+                .padding(DS.Spacing.xl)
+                .background(DS.Colors.backgroundCard,
+                            in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        }
+
+        // Stylist notices ("That's your only pair of shoes that works here").
+        if let notice = homeVM.stylistNotice {
+            VStack {
+                Spacer()
+                HStack(spacing: DS.Spacing.xs) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundStyle(DS.Colors.accent)
+                    Text(notice)
+                        .font(DS.Font.subheadline)
+                        .foregroundStyle(DS.Colors.textPrimary)
+                        .multilineTextAlignment(.leading)
+                }
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.vertical, DS.Spacing.sm)
+                .dsGlassBar(cornerRadius: DS.Radius.card)
+                .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.bottom, 96)
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .allowsHitTesting(false)
+            .zIndex(9)
+            .id(notice)
+        }
+
+        if let toastText {
+            Label(toastText, systemImage: "checkmark.circle.fill")
+                .font(DS.Font.headline)
+                .foregroundStyle(.white)
+                .padding(.vertical, 14)
+                .padding(.horizontal, DS.Spacing.lg)
+                .background(DS.Colors.success, in: Capsule(style: .continuous))
+                .transition(.scale(scale: 0.9).combined(with: .opacity))
+                .zIndex(10)
+                .accessibilityIdentifier("outfit.toast")
+        }
+    }
+
+    // MARK: - End of batch
 
     private var endOfBatchView: some View {
-        VStack(spacing: DS.Spacing.lg) {
-            Spacer()
+        ScrollView {
+            VStack(spacing: DS.Spacing.lg) {
+                ZStack {
+                    Circle().fill(DS.Colors.accentSoft).frame(width: 88, height: 88)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(DS.Colors.accent)
+                }
+                .padding(.top, DS.Spacing.xl)
+                .accessibilityHidden(true)
 
-            Image(systemName: "checkmark.circle")
-                .font(.system(size: 56))
-                .foregroundColor(DS.Colors.accent)
+                Text("All Caught Up!")
+                    .font(DS.Font.title2)
+                    .foregroundStyle(DS.Colors.textPrimary)
 
-            Text("All Caught Up!")
-                .font(DS.Font.title2)
-                .foregroundColor(DS.Colors.textPrimary)
+                VStack(spacing: DS.Spacing.xs) {
+                    if homeVM.savedCount > 0 {
+                        Label("\(homeVM.savedCount) outfit\(homeVM.savedCount == 1 ? "" : "s") logged to your calendar",
+                              systemImage: "calendar.badge.checkmark")
+                            .font(DS.Font.subheadline)
+                            .foregroundStyle(DS.Colors.success)
+                    }
+                    if homeVM.skippedCount > 0 {
+                        Text("\(homeVM.skippedCount) skipped")
+                            .font(DS.Font.subheadline)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                    }
+                }
 
-            VStack(spacing: DS.Spacing.xs) {
                 if homeVM.savedCount > 0 {
-                    Label(
-                        "\(homeVM.savedCount) outfit\(homeVM.savedCount == 1 ? "" : "s") logged to your calendar",
-                        systemImage: "heart.fill"
-                    )
-                    .font(DS.Font.subheadline)
-                    .foregroundColor(DS.Colors.success)
+                    Button {
+                        Haptics.light()
+                        isPresented = false
+                        // The calendar already jumps to the logged day; this asks the
+                        // tab shell to switch to it.
+                        NotificationCenter.default.post(name: .showOutfitsCalendar, object: nil)
+                    } label: {
+                        Label("View in Calendar", systemImage: "calendar")
+                    }
+                    .buttonStyle(DSOutlineButton())
+                    .accessibilityIdentifier("outfit.viewInCalendar")
                 }
-                if homeVM.skippedCount > 0 {
-                    Label("\(homeVM.skippedCount) skipped", systemImage: "arrow.right")
+
+                VStack(spacing: DS.Spacing.sm) {
+                    Text("Want more ideas? Pick a mood")
                         .font(DS.Font.subheadline)
-                        .foregroundColor(DS.Colors.textTertiary)
-                }
-            }
-
-            if homeVM.savedCount > 0 {
-                Button(action: {
-                    Haptics.light()
-                    isPresented = false
-                    // The calendar already jumps to the logged day; this asks the
-                    // tab bar to switch to it (if it's listening).
-                    NotificationCenter.default.post(name: .showOutfitsCalendar, object: nil)
-                }) {
-                    HStack(spacing: DS.Spacing.xs) {
-                        Image(systemName: "calendar")
-                        Text("View in Calendar")
-                    }
-                }
-                .buttonStyle(DSSecondaryButton())
-                .padding(.horizontal, DS.Spacing.xl)
-            }
-
-            Text("Want more suggestions?")
-                .font(DS.Font.subheadline)
-                .foregroundColor(DS.Colors.textSecondary)
-
-            // Change the mood before restyling.
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: DS.Spacing.xs) {
-                    ForEach(OutfitMood.allCases) { mood in
-                        DSChip(title: mood.label, systemImage: mood.icon,
-                               isSelected: homeVM.selectedMood == mood) {
-                            withAnimation(DS.Motion.snappy) {
-                                homeVM.selectedMood = homeVM.selectedMood == mood ? nil : mood
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, DS.Spacing.micro)
-                .padding(.vertical, DS.Spacing.micro)
-            }
-            .scrollClipDisabled()
-
-            Button(action: {
-                Haptics.medium()
-                homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
-            }) {
-                HStack(spacing: DS.Spacing.xs) {
-                    Image(systemName: "sparkles")
-                    Text("Generate More")
-                }
-            }
-            .buttonStyle(DSPrimaryButton())
-            .padding(.horizontal, DS.Spacing.xl)
-
-            Button("Done") {
-                isPresented = false
-            }
-            .buttonStyle(DSTertiaryButton())
-
-            Spacer()
-        }
-        .padding(.horizontal, DS.Spacing.screenH)
-    }
-
-    // MARK: - Add Product Sheet
-
-    private var addProductSheetContent: some View {
-        NavigationView {
-            List {
-                ForEach(Category.allCases.filter { category in
-                    wardrobeViewModel.items.contains(where: { $0.category == category })
-                }, id: \.self) { category in
-                    Section(header:
-                        HStack {
-                            Text(category.rawValue)
-                                .font(DS.Font.headline)
-                                .foregroundColor(DS.Colors.accent)
-                            Spacer()
-                            Image(systemName: expandedCategory == category ? "chevron.down" : "chevron.right")
-                                .foregroundColor(DS.Colors.accent)
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            withAnimation { expandedCategory = expandedCategory == category ? nil : category }
-                        }
-                    ) {
-                        if expandedCategory == category {
-                            let userProducts = Set(wardrobeViewModel.items.filter { $0.category == category }.map { $0.product })
-                            let products = (productTypesByCategory[category] ?? []).filter { userProducts.contains($0) }
-                            ForEach(products, id: \.self) { product in
-                                Button(action: {
-                                    addProductStep = nil
-                                    Haptics.light()
-                                    homeVM.addProductToOutfit(
-                                        category: category,
-                                        productType: product,
-                                        wardrobe: wardrobeViewModel.items,
-                                        user: authService.user
-                                    )
-                                }) {
-                                    Text(product)
-                                        .font(DS.Font.body)
-                                        .foregroundColor(DS.Colors.textPrimary)
+                        .foregroundStyle(DS.Colors.textSecondary)
+                    FlowLayout(spacing: DS.Spacing.xs) {
+                        ForEach(OutfitMood.allCases) { mood in
+                            DSChip(title: mood.label, systemImage: mood.icon,
+                                   isSelected: homeVM.selectedMood == mood) {
+                                withAnimation(DS.Motion.snappy) {
+                                    homeVM.selectedMood = homeVM.selectedMood == mood ? nil : mood
                                 }
                             }
                         }
                     }
                 }
+                .padding(.top, DS.Spacing.xs)
+
+                Button {
+                    Haptics.medium()
+                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
+                } label: {
+                    Label("Style me again", systemImage: "sparkles")
+                }
+                .buttonStyle(DSPrimaryButton())
+
+                Button("Done") { isPresented = false }
+                    .buttonStyle(DSTertiaryButton())
+                    .frame(minHeight: 44)
             }
-            .navigationTitle("Add Product")
+            .frame(maxWidth: 480)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, DS.Spacing.screenH)
+            .padding(.bottom, DS.Spacing.xl)
+        }
+    }
+
+    // MARK: - Sheets
+
+    private var datePickerSheet: some View {
+        NavigationStack {
+            DatePicker("Day", selection: $logDate, displayedComponents: [.date])
+                .datePickerStyle(.graphical)
+                .tint(DS.Colors.accent)
+                .padding(.horizontal, DS.Spacing.md)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .navigationTitle("Log to a day")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { showDatePicker = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Log") {
+                            showDatePicker = false
+                            let day = Calendar.current.startOfDay(for: logDate)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { logAnotherDay(day) }
+                        }
+                        .fontWeight(.semibold)
+                    }
+                }
+        }
+        .presentationDetents([.large])
+    }
+
+    /// Categories in the wardrobe, each with its distinct products.
+    private var addableProducts: [(category: Category, products: [String])] {
+        let byCategory = Dictionary(grouping: wardrobeViewModel.items, by: { $0.category })
+        return Category.allCases.compactMap { category in
+            guard let items = byCategory[category], !items.isEmpty else { return nil }
+            let products = Set(items.map { $0.product }).sorted {
+                $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+            }
+            return (category: category, products: products)
+        }
+    }
+
+    private var addPieceSheet: some View {
+        NavigationStack {
+            List {
+                ForEach(addableProducts, id: \.category) { group in
+                    Section(group.category.rawValue) {
+                        ForEach(group.products, id: \.self) { product in
+                            Button {
+                                showAddPiece = false
+                                Haptics.light()
+                                homeVM.addProductToOutfit(
+                                    category: group.category,
+                                    productType: product,
+                                    wardrobe: wardrobeViewModel.items,
+                                    user: authService.user
+                                )
+                            } label: {
+                                Label(ClosetText.displayProduct(product), systemImage: group.category.iconName)
+                                    .foregroundStyle(DS.Colors.textPrimary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Add a piece")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { addProductStep = nil }
+                    Button("Cancel") { showAddPiece = false }
                 }
             }
         }
-    }
-
-    // MARK: - Save Helpers
-
-    private func saveOutfitForToday() {
-        saveOutfitForDate(Calendar.current.startOfDay(for: Date()))
-    }
-
-    private func saveOutfitForDate(_ date: Date) {
-        guard let outfit = currentOutfit else { return }
-        outfitsVM.addOutfit(date: date, items: outfit.items, source: MyOutfitsViewModel.Source.stylist)
-        homeVM.saveCurrentOutfit()
-        Haptics.success()
-        savedToastText = Calendar.current.isDateInToday(date)
-            ? "Logged for today"
-            : "Logged for \(date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))"
-        showSavedOverlay = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            showSavedOverlay = false
-            homeVM.advanceToNextOutfit()
-        }
-    }
-}
-
-// MARK: - Outfit Item Row
-
-private struct OutfitItemRow: View {
-    let item: WardrobeItem
-    let onTap: () -> Void
-    let onShuffle: () -> Void
-    let isLoading: Bool
-
-    var body: some View {
-        HStack(spacing: DS.Spacing.sm) {
-            Button(action: onTap) {
-                if let uiImage = item.thumbnailImage ?? item.croppedImage ?? item.image {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 70, height: 70)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-                } else {
-                    RoundedRectangle(cornerRadius: DS.Radius.button)
-                        .fill(DS.Colors.backgroundSecondary)
-                        .frame(width: 70, height: 70)
-                        .overlay(
-                            Image(systemName: "photo")
-                                .foregroundColor(DS.Colors.textTertiary)
-                        )
-                }
-            }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                Text(item.category.rawValue)
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.accent)
-
-                Text(item.product)
-                    .font(DS.Font.headline)
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .lineLimit(1)
-
-                Text(item.colors.joined(separator: ", "))
-                    .font(DS.Font.subheadline)
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .lineLimit(1)
-
-                HStack(spacing: DS.Spacing.micro) {
-                    if let material = item.material, !material.isEmpty {
-                        Text(material)
-                            .font(DS.Font.caption1)
-                            .foregroundColor(DS.Colors.textTertiary)
-                            .lineLimit(1)
-                    }
-
-                    if !item.brand.isEmpty {
-                        if item.material != nil && !(item.material?.isEmpty ?? true) {
-                            Text("·")
-                                .font(DS.Font.caption1)
-                                .foregroundColor(DS.Colors.textTertiary)
-                        }
-                        Text(item.brand)
-                            .font(DS.Font.caption1)
-                            .foregroundColor(DS.Colors.textTertiary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-
-            Spacer()
-
-            Button(action: onShuffle) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(DS.Font.subheadline)
-                    .foregroundColor(DS.Colors.accent)
-                    .padding(DS.Spacing.xs)
-                    .background(DS.Colors.accent.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-            }
-            .disabled(isLoading)
-            .opacity(isLoading ? 0.4 : 1.0)
-            .accessibilityLabel("Swap item")
-        }
-        .padding(.horizontal, DS.Spacing.md)
-        .padding(.vertical, DS.Spacing.sm)
+        .presentationDetents([.medium, .large])
     }
 }

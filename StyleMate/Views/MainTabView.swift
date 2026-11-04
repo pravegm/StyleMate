@@ -7,40 +7,33 @@ struct MainTabView: View {
     @EnvironmentObject private var tutorialManager: TutorialManager
 
     var body: some View {
+        // Tab API + sidebarAdaptable: a glass tab bar on iPhone and the Duo's
+        // cover display, a sidebar on the wide inner display.
         TabView(selection: $selectedTab) {
-            HomeView()
-                .tabItem {
-                    Image(systemName: selectedTab == 0 ? "house.fill" : "house")
-                    Text("Home")
-                }
-                .tag(0)
-
-            MyWardrobeView(showAddSheet: $showAddSheet)
-                .tabItem {
-                    Image(systemName: selectedTab == 1 ? "tshirt.fill" : "tshirt")
-                    Text("Wardrobe")
-                }
-                .tag(1)
-
-            MyOutfitsView()
-                .tabItem {
-                    Image(systemName: "calendar")
-                    Text("Outfits")
-                }
-                .tag(2)
-
-            ProfileView()
-                .tabItem {
-                    Image(systemName: selectedTab == 3 ? "person.circle.fill" : "person.circle")
-                    Text("Profile")
-                }
-                .tag(3)
+            Tab("Home", systemImage: "house", value: 0) {
+                HomeView()
+            }
+            Tab("Wardrobe", systemImage: "tshirt", value: 1) {
+                MyWardrobeView(showAddSheet: $showAddSheet)
+            }
+            Tab("Outfits", systemImage: "calendar", value: 2) {
+                MyOutfitsView()
+            }
+            Tab("Profile", systemImage: "person.circle", value: 3) {
+                ProfileView()
+            }
         }
+        .tabViewStyle(.sidebarAdaptable)
         .tint(DS.Colors.accent)
         .sensoryFeedback(.selection, trigger: selectedTab)
         // The outfit sheet's "View in Calendar" jumps to the Outfits tab.
         .onReceive(NotificationCenter.default.publisher(for: .showOutfitsCalendar)) { _ in
             selectedTab = 2
+        }
+        // The outfit sheet's "add shoes" tip opens the add-clothes sheet.
+        .onReceive(NotificationCenter.default.publisher(for: .showAddClothes)) { _ in
+            selectedTab = 1
+            showAddSheet = true
         }
         // Host the coach-mark tour over the whole tab UI. It reads the Home
         // elements' frames (anchors) from the selected tab's content.

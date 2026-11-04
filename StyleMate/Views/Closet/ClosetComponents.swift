@@ -76,6 +76,7 @@ struct ClosetFilterBar: View {
                                        isSelected: filter.section == section) {
                                 filter.section = filter.section == section ? nil : section
                             }
+                            .accessibilityIdentifier("closet.filter.\(section.rawValue)")
                         }
                     }
                 }
@@ -198,7 +199,7 @@ struct ChipLabel: View {
                 Text("\(count)")
                     .font(DS.Font.caption1)
                     .monospacedDigit()
-                    .foregroundStyle(isSelected ? DS.Colors.accent : DS.Colors.textTertiary)
+                    .foregroundStyle(isSelected ? DS.Colors.accent : DS.Colors.textSecondary)
             }
         }
         .lineLimit(1)
@@ -235,7 +236,7 @@ struct ColorSwatchButton: View {
                 .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
                 .padding(3)
                 .overlay(Circle().strokeBorder(DS.Colors.accent, lineWidth: isSelected ? 2 : 0))
-                .frame(width: 34, height: 34)
+                .frame(width: 44, height: 44)
                 .contentShape(Circle())
         }
         .buttonStyle(DSTapBounce())
@@ -309,7 +310,7 @@ struct ClosetShelfHeader: View {
             Text("\(count)")
                 .font(DS.Font.subheadline)
                 .monospacedDigit()
-                .foregroundStyle(DS.Colors.textTertiary)
+                .foregroundStyle(DS.Colors.textSecondary)
             Spacer()
         }
         .accessibilityElement(children: .combine)

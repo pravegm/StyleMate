@@ -145,8 +145,8 @@ struct AddItemFlowView: View {
     @ViewBuilder
     private var disambiguationView: some View {
         if let current = ambiguousQueue.first {
-            let columns = [GridItem(.flexible(), spacing: DS.Spacing.sm),
-                           GridItem(.flexible(), spacing: DS.Spacing.sm)]
+            // Adaptive: two people on a phone, more across a wide display.
+            let columns = [GridItem(.adaptive(minimum: 150, maximum: 260), spacing: DS.Spacing.sm)]
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Spacing.md) {
                     Text("This photo has more than one person. Tap the one that's you so we only catalog your outfit.")
@@ -160,11 +160,15 @@ struct AddItemFlowView: View {
                                 Haptics.medium()
                                 pick(person, in: current)
                             } label: {
-                                Image(uiImage: person.crop)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(height: 200)
+                                Color.clear
+                                    .aspectRatio(0.75, contentMode: .fit)
                                     .frame(maxWidth: .infinity)
+                                    .overlay {
+                                        Image(uiImage: person.crop)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                    }
+                                    .clipped()
                                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
                                     .dsCardShadow()
                             }
@@ -188,7 +192,7 @@ struct AddItemFlowView: View {
                     if ambiguousQueue.count > 1 {
                         Text("\(ambiguousQueue.count) photos need your input")
                             .font(DS.Font.caption1)
-                            .foregroundColor(DS.Colors.textTertiary)
+                            .foregroundColor(DS.Colors.textSecondary)
                             .frame(maxWidth: .infinity)
                     }
                 }
