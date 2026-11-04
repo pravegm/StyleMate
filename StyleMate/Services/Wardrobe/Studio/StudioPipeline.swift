@@ -96,10 +96,11 @@ enum StudioPipeline {
     static var minSimilarityGenerate: Float = 0.70
     static var minSimilarityRefine: Float = 0.80
     /// Template-guided renders already carry the garment's own fabric and
-    /// layout; against a partial cutout (a tee seen between jacket halves) a
-    /// perfect render scores only ~0.62 (lab, Nov 2026), so their bar is lower
-    /// and the hard checks (body, second object, panel, frame) carry the gate.
-    static var minSimilarityTemplate: Float = 0.60
+    /// layout. Against the worn, partly hidden cutout, good template renders
+    /// scored 0.59–0.74 (13 lab renders, Nov 2026: coats 0.59, a tee seen
+    /// between jacket halves 0.63), so their bar only rules out a different
+    /// garment; the hard checks (body, second object, panel, frame) gate.
+    static var minSimilarityTemplate: Float = 0.55
 
     /// Reject a generated render whose best "failed render" prompt (a person
     /// wearing it, a stack, a flat lay with props, a white panel) comes within

@@ -80,7 +80,7 @@ struct StudioPlan {
             // Template-guided: start from a flat-lay silhouette in the garment's own fabric.
             var template: CGImage?
             if useTemplates, let cutout, let shape = StudioTemplate.shape(product: product, kind: kind, sleeve: sleeve) {
-                template = StudioTemplate.render(cutout: cutout, shape: shape)
+                template = StudioTemplate.render(cutout: cutout, shape: shape, solid: solid)
             }
             return StudioPlan(
                 mode: .generate,

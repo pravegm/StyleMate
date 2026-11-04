@@ -8,7 +8,7 @@ import Foundation
 /// no stack, no props) and the colour/texture, while the model redraws the
 /// seams, collar and folds at ~0.65 strength.
 enum StudioTemplate {
-    enum Shape: String { case tee, shirt, jacket, coat, dress, tank }
+    enum Shape: String { case tee, shirt, jacket, coat, tunic, dress, tank }
 
     /// The silhouette for an item, or nil when there's none that fits (bottoms,
     /// shoes, accessories are refined from their cutout instead).
@@ -24,7 +24,7 @@ enum StudioTemplate {
             return .jacket
         case .innerTop:
             if sleeve == .sleeveless || ["tank", "camisole", "tube", "halter", "corset", "sports bra"].contains(where: { p.contains($0) }) { return .tank }
-            if p.contains("kurta") || p.contains("kurti") || p.contains("tunic") { return .coat }
+            if p.contains("kurta") || p.contains("kurti") || p.contains("tunic") { return .tunic }
             if sleeve == .shortSleeve || sleeve == .capSleeve { return .tee }
             if ["t-shirt", "tee", "polo", "crop"].contains(where: { p.contains($0) }) && sleeve == nil { return .tee }
             return .shirt
@@ -42,7 +42,7 @@ enum StudioTemplate {
                              (0.73, 0.48), (0.72, 0.90), (0.28, 0.90), (0.27, 0.48), (0.15, 0.83), (0.06, 0.80), (0.16, 0.40), (0.28, 0.17)]
         case .jacket: return [(0.40, 0.13), (0.50, 0.17), (0.60, 0.13), (0.74, 0.17), (0.86, 0.40), (0.95, 0.78), (0.85, 0.81),
                               (0.74, 0.50), (0.74, 0.86), (0.26, 0.86), (0.26, 0.50), (0.15, 0.81), (0.05, 0.78), (0.14, 0.40), (0.26, 0.17)]
-        case .coat: return [(0.42, 0.06), (0.50, 0.10), (0.58, 0.06), (0.70, 0.10), (0.83, 0.35), (0.92, 0.72), (0.84, 0.75),
+        case .coat, .tunic: return [(0.42, 0.06), (0.50, 0.10), (0.58, 0.06), (0.70, 0.10), (0.83, 0.35), (0.92, 0.72), (0.84, 0.75),
                             (0.72, 0.42), (0.75, 0.95), (0.25, 0.95), (0.28, 0.42), (0.16, 0.75), (0.08, 0.72), (0.17, 0.35), (0.30, 0.10)]
         case .dress: return [(0.42, 0.08), (0.50, 0.13), (0.58, 0.08), (0.64, 0.10), (0.66, 0.30), (0.62, 0.42), (0.78, 0.94),
                              (0.22, 0.94), (0.38, 0.42), (0.34, 0.30), (0.36, 0.10)]
@@ -63,8 +63,11 @@ enum StudioTemplate {
 
     /// The template image (opaque, white background), or nil when the cutout
     /// has no solid fabric area to sample.
-    static func render(cutout: CGImage, shape: Shape, side: Int = 512) -> CGImage? {
-        guard let patch = fabricPatch(cutout) else { return nil }
+    /// `solid`: a plain garment — sample only fabric of its main colour (an open
+    /// coat's cutout also holds a scarf end or the dark strip between its
+    /// halves, which the model would otherwise paint on as a print).
+    static func render(cutout: CGImage, shape: Shape, solid: Bool = false, side: Int = 512) -> CGImage? {
+        guard let patch = (solid ? fabricPatch(cutout, mainColourOnly: true) : nil) ?? fabricPatch(cutout) else { return nil }
         let s = CGFloat(side)
         guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
                                   space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
@@ -120,7 +123,7 @@ enum StudioTemplate {
 
     /// The largest square of solid fabric deep inside the cutout (away from
     /// edges, holes and fills), found by eroding a downscaled mask.
-    static func fabricPatch(_ cutout: CGImage) -> CGImage? {
+    static func fabricPatch(_ cutout: CGImage, mainColourOnly: Bool = false) -> CGImage? {
         let g = 96
         let k = CGFloat(g) / CGFloat(max(cutout.width, cutout.height))
         guard let ctx = CGContext(data: nil, width: g, height: g, bitsPerComponent: 8, bytesPerRow: g * 4,
@@ -130,6 +133,24 @@ enum StudioTemplate {
         let p = data.assumingMemoryBound(to: UInt8.self)
         var m = [UInt8](repeating: 0, count: g * g)
         for i in 0..<(g * g) { m[i] = p[i * 4 + 3] > 230 ? 1 : 0 }
+        if mainColourOnly {
+            // Keep pixels within ΔE 18 of the median fabric colour.
+            var labs: [(Float, Float, Float)?] = Array(repeating: nil, count: g * g)
+            var Ls: [Float] = [], As: [Float] = [], Bs: [Float] = []
+            for i in 0..<(g * g) where m[i] != 0 {
+                let a = Float(p[i * 4 + 3]) / 255
+                let c = ColorNamer.lab(Float(p[i * 4]) / 255 / a, Float(p[i * 4 + 1]) / 255 / a, Float(p[i * 4 + 2]) / 255 / a)
+                labs[i] = c; Ls.append(c.0); As.append(c.1); Bs.append(c.2)
+            }
+            guard Ls.count > 50 else { return nil }
+            func median(_ v: [Float]) -> Float { v.sorted()[v.count / 2] }
+            let ref = (median(Ls), median(As), median(Bs))
+            for i in 0..<(g * g) {
+                guard let c = labs[i] else { continue }
+                let d = sqrt(pow(c.0 - ref.0, 2) + pow(c.1 - ref.1, 2) + pow(c.2 - ref.2, 2))
+                if d > 18 { m[i] = 0 }
+            }
+        }
         // Erode until nothing is left; the last survivors are the most interior points.
         var depth = 0, last: [Int] = []
         while true {
@@ -146,7 +167,7 @@ enum StudioTemplate {
             m = next
             depth += 1
         }
-        guard depth >= 3, let centre = last.first else { return nil }
+        guard depth >= (mainColourOnly ? 4 : 3), let centre = last.first else { return nil }
         // Back to cutout pixels (bitmap rows are top-down here; CG drew with a y-up origin).
         let cx = CGFloat(centre % g) / k, cyFromBottom = CGFloat(centre / g)
         let cy = CGFloat(cutout.height) - (CGFloat(g) - 1 - cyFromBottom) / k
