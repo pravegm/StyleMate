@@ -160,6 +160,11 @@ struct ShimmerModifier: ViewModifier {
                         .frame(width: w * 0.6)
                         .offset(x: phase * w * 1.6)
                         .blendMode(.plusLighter)
+                        // Scoped to the sheen only. A repeatForever `withAnimation`
+                        // in onAppear leaks into every other change in the same
+                        // update (texts appearing alongside a skeleton kept
+                        // animating to stale positions on Home).
+                        .animation(.linear(duration: 1.25).repeatForever(autoreverses: false), value: phase)
                     }
                     .mask(content)
                     .allowsHitTesting(false)
@@ -167,9 +172,7 @@ struct ShimmerModifier: ViewModifier {
             }
             .onAppear {
                 guard !reduceMotion else { return }
-                withAnimation(.linear(duration: 1.25).repeatForever(autoreverses: false)) {
-                    phase = 1
-                }
+                DispatchQueue.main.async { phase = 1 }
             }
     }
 }

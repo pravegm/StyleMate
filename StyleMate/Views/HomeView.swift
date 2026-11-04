@@ -437,7 +437,14 @@ struct HomeView: View {
 
                 let categoryCounts = Dictionary(grouping: wardrobeViewModel.items, by: { $0.category })
                     .map { (category: $0.key, items: $0.value, count: $0.value.count) }
-                    .sorted { $0.count > $1.count }
+                    // Stable order (ties by shelf order): a Dictionary's order changes
+                    // between renders, which reshuffled the cards on every update.
+                    .sorted {
+                        if $0.count != $1.count { return $0.count > $1.count }
+                        return $0.category.wearingOrder != $1.category.wearingOrder
+                            ? $0.category.wearingOrder < $1.category.wearingOrder
+                            : $0.category.rawValue < $1.category.rawValue
+                    }
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: DS.Spacing.sm) {
@@ -593,12 +600,12 @@ private struct OutfitTypeChipRow: View {
                         .accessibilityIdentifier("home.occasion.\(type.rawValue)")
                     }
                 }
-                .padding(.horizontal, DS.Spacing.lg)
+                .padding(.horizontal, DS.Spacing.micro)
                 .padding(.vertical, 2)
             }
-            // Bleed to the card's edges so chips scroll out under its rounded
-            // corner instead of being cut mid-card.
-            .padding(.horizontal, -DS.Spacing.lg)
+            // Chips scroll out under the card's padding to its rounded edge
+            // instead of being cut mid-card.
+            .scrollClipDisabled()
 
             // Mood — optional; tap again to clear. Shapes palette, textures and fit.
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
@@ -634,10 +641,10 @@ private struct OutfitTypeChipRow: View {
                             .accessibilityIdentifier("mood.\(mood.rawValue)")
                         }
                     }
-                    .padding(.horizontal, DS.Spacing.lg)
+                    .padding(.horizontal, DS.Spacing.micro)
                     .padding(.vertical, 2)
                 }
-                .padding(.horizontal, -DS.Spacing.lg)
+                .scrollClipDisabled()
             }
 
             // Always-visible free text — what the user types here takes priority.
