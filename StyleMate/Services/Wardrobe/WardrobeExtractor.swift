@@ -76,7 +76,19 @@ enum WardrobeExtractor {
             // Too few source-photo pixels to make a decent wardrobe image
             // (sunglasses 40 px wide in a group shot): skip — a closer photo will catch it.
             let photoSide = cut.sourceSide / Float(use.crop.scale)
-            let minSide: Float = inst.kind.isSmall || inst.kind == .headwear ? 56 : inst.kind == .footwear ? 64 : 110
+            // sqrt(area): thin sunglasses are ~1/3 of their width. The close-up passes
+            // segment these crisply, and the studio render refines them, so the bars
+            // only drop what no render could rescue (benchmark: sunglasses 38–45,
+            // a turban 47, handbags 87–90 were being dropped).
+            let minSide: Float
+            switch inst.kind {
+            case .eyewear: minSide = 32
+            case .headwear: minSide = 40
+            case .jewelry, .belt: minSide = 56
+            case .footwear: minSide = 64
+            case .bag: minSide = 72
+            default: minSide = 110
+            }
             guard photoSide >= minSide else {
                 log("drop tiny \(attrs.product) (\(Int(photoSide)) px)")
                 continue
