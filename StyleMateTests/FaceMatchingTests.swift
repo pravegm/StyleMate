@@ -30,7 +30,7 @@ struct FaceMatchingTests {
         return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
             UIImage(cgImage: crop).draw(in: CGRect(origin: .zero, size: size))
             UIColor.black.withAlphaComponent(0.12).setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
+            ctx.fill(CGRect(origin: .zero, size: size), blendMode: .normal)   // plain fill() replaces the image
         }.cgImage
     }
 
@@ -42,12 +42,75 @@ struct FaceMatchingTests {
         #expect(FaceMatchingService.shared.loadReference(forUser: Self.userId), "could not build a reference from the selfie")
     }
 
-    @Test func sameFaceMatchesAcrossReframing() throws {
-        let photo = try fixture("street_coat_cap.jpg")
+    /// Writes face diagnostics to $REPORT_DIR/faces.txt (print() from the test
+    /// host doesn't reach the xcodebuild log).
+    private func report(_ line: String) {
+        let base = ProcessInfo.processInfo.environment["REPORT_DIR"].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.temporaryDirectory
+        let url = base.appendingPathComponent("faces.txt")
+        let data = Data((line + "\n").utf8)
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() }
+        else { try? data.write(to: url) }
+    }
+
+    /// The whole pipeline (detect → align → embed) must be deterministic: the
+    /// identical photo scores ~1.0 against itself. If this fails, a model or
+    /// preprocessing step is broken, not a threshold.
+    @Test(arguments: ["kurta_dhoti_turban.jpg", "casual_denim_jacket_hat.jpg", "street_coat_cap.jpg"])
+    func identicalPhotoMatchesItself(_ name: String) throws {
+        let photo = try fixture(name)
+        try useAsSelfie(photo)
+        let match = FaceMatchingService.shared.findUserInPhoto(try #require(photo.cgImage))
+        report("identical \(name): sim=\(match.similarity ?? -1) faces=\(match.faceCount) gallery=\(FaceMatchingService.shared.referenceCount)")
+        #expect(match.faceCount >= 1, "SCRFD found no face in \(name)")
+        #expect((match.similarity ?? 0) > 0.9, "\(name) vs itself scored \(match.similarity ?? -1)")
+    }
+
+    /// Where does a face get lost? Detect on each transformation step separately
+    /// (and save the images) — the scan feeds UIGraphicsImageRenderer output to
+    /// the detector too, so this must hold for renderer-made images.
+    @Test func detectorSurvivesEachTransformStep() throws {
+        let photo = try fixture("kurta_dhoti_turban.jpg")
+        let cg = try #require(photo.cgImage)
+        let w = CGFloat(cg.width), h = CGFloat(cg.height)
+        let crop = try #require(cg.cropping(to: CGRect(x: w * 0.08, y: 0, width: w * 0.84, height: h * 0.7)))
+        func render(_ src: CGImage, scale s: CGFloat, darken: Bool, opaque: Bool) -> CGImage? {
+            let size = CGSize(width: CGFloat(src.width) * s, height: CGFloat(src.height) * s)
+            let fmt = UIGraphicsImageRendererFormat.default()
+            fmt.scale = 1
+            fmt.opaque = opaque
+            return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
+                UIImage(cgImage: src).draw(in: CGRect(origin: .zero, size: size))
+                if darken {
+                    UIColor.black.withAlphaComponent(0.12).setFill()
+                    ctx.fill(CGRect(origin: .zero, size: size), blendMode: .normal)   // plain fill() replaces the image
+                }
+            }.cgImage
+        }
+        let steps: [(String, CGImage?)] = [
+            ("original", cg), ("crop", crop),
+            ("render1x", render(crop, scale: 1, darken: false, opaque: false)),
+            ("render075", render(crop, scale: 0.75, darken: false, opaque: false)),
+            ("render075opaque", render(crop, scale: 0.75, darken: false, opaque: true)),
+            ("render075dark", render(crop, scale: 0.75, darken: true, opaque: false))
+        ]
+        let base = ProcessInfo.processInfo.environment["REPORT_DIR"].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.temporaryDirectory
+        for (label, img) in steps {
+            guard let img else { report("step \(label): nil image"); continue }
+            let faces = SCRFDDetector.shared.detect(in: img)
+            report("step \(label): \(img.width)x\(img.height) bpc=\(img.bitsPerComponent) bpp=\(img.bitsPerPixel) alpha=\(img.alphaInfo.rawValue) info=\(img.bitmapInfo.rawValue) faces=\(faces.count) boxes=\(faces.map { "\(Int($0.boxPixels.width))x\(Int($0.boxPixels.height))@\(String(format: "%.2f", $0.score))" })")
+            try? UIImage(cgImage: img).pngData()?.write(to: base.appendingPathComponent("face_step_\(label).png"))
+        }
+    }
+
+    @Test(arguments: ["kurta_dhoti_turban.jpg", "casual_denim_jacket_hat.jpg", "street_coat_cap.jpg"])
+    func sameFaceMatchesAcrossReframing(_ name: String) throws {
+        let photo = try fixture(name)
         try useAsSelfie(photo)
         let cg = try #require(variant(photo))
         let match = FaceMatchingService.shared.findUserInPhoto(cg)
-        print("[Report] face self-match after reframe: sim=\(match.similarity ?? -1) faces=\(match.faceCount)")
+        report("reframed \(name): sim=\(match.similarity ?? -1) faces=\(match.faceCount)")
         #expect(match.faceCount >= 1, "SCRFD found no face")
         #expect((match.similarity ?? 0) >= FaceMatchingService.highConfidenceThreshold,
                 "same face scored \(match.similarity ?? -1)")
