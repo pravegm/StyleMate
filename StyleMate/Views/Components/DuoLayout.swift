@@ -50,7 +50,7 @@ enum DuoPosture: String, Equatable {
     case book
     /// Partly open, fold running side to side (inner display upright: Apple's "seated" pose).
     case tabletop
-    /// Closed: the app is on the cover display.
+    /// The app is on the cover display: the phone is shut (or only just opening, or in tent pose).
     case closed
 }
 
@@ -74,8 +74,11 @@ struct DuoLayoutState: Equatable {
         case .closed: return .closed
         case .fullyOpen: return .flat
         case .partiallyOpen:
-            if let c = creaseInGlobal, c.width != c.height { return c.height > c.width ? .book : .tabletop }
-            return windowSize.width > windowSize.height ? .book : .tabletop
+            // Measured on the Duo simulator (duo.yml): the inner display always reports its fold (book: a
+            // 40 pt band at x 456-496 of 951 x 669, active or not); the cover display reports none. So no fold =
+            // the app is still on the cover (opening from shut, the cover stays lit to ~20°, or tent pose).
+            guard let c = creaseInGlobal, c.width != c.height, isWideLayout else { return .closed }
+            return c.height > c.width ? .book : .tabletop
         }
     }
 
@@ -168,10 +171,10 @@ private struct DuoLayoutReader: ViewModifier {
     private func log() {
         #if DEBUG
         let c = state.creaseInGlobal.map { String(format: "%.0f,%.0f %.0fx%.0f", $0.minX, $0.minY, $0.width, $0.height) } ?? "none"
-        print(String(format: "[Duo] posture=%@ hinge=%@ angle=%@ crease=%@ active=%d window=%.0fx%.0f wide=%d",
-                     state.posture.rawValue, state.hinge.rawValue,
-                     state.hingeAngle.map { String(format: "%.0f", $0) } ?? "-", c, state.isCreaseActive ? 1 : 0,
-                     state.windowSize.width, state.windowSize.height, state.isWideLayout ? 1 : 0))
+        duoDebugLog(String(format: "posture=%@ hinge=%@ angle=%@ crease=%@ active=%d window=%.0fx%.0f wide=%d",
+                           state.posture.rawValue, state.hinge.rawValue,
+                           state.hingeAngle.map { String(format: "%.0f", $0) } ?? "-", c, state.isCreaseActive ? 1 : 0,
+                           state.windowSize.width, state.windowSize.height, state.isWideLayout ? 1 : 0))
         #endif
     }
 
@@ -193,6 +196,25 @@ private struct DuoLayoutReader: ViewModifier {
         return false
     }
 }
+
+#if DEBUG
+/// DEBUG-only: prints a `[Duo] …` line and appends it to Documents/duo-log.txt, which the Duo CI copies out of the
+/// simulator (XCUITest owns the app's stdout there, and the unified log hides dynamic strings).
+func duoDebugLog(_ message: String) {
+    let line = "[Duo] \(ISO8601DateFormatter().string(from: Date())) \(message)\n"
+    print(line, terminator: "")
+    guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+          let data = line.data(using: .utf8) else { return }
+    let url = docs.appendingPathComponent("duo-log.txt")
+    if let handle = try? FileHandle(forWritingTo: url) {
+        handle.seekToEndOfFile()
+        handle.write(data)
+        try? handle.close()
+    } else {
+        try? data.write(to: url)
+    }
+}
+#endif
 
 /// `onHingeChange` (iOS 27.1+) as a status and an angle in degrees; reports `.unavailable` on older systems.
 private struct HingeStateReader: ViewModifier {

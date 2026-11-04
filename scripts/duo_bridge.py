@@ -46,7 +46,7 @@ MANIFEST = open(os.path.join(OUT, "MANIFEST.txt"), "a", buffering=1)
 LOCK = threading.Lock()
 STATE = {"angle": None, "inner": None, "cover": None, "failures": 0}
 
-# Expected capture sizes (px): inner book 2853x2007, inner seated 2007x2853, cover 1398x2034.
+# Expected capture sizes (px): inner book 2853x2007, inner seated (portrait) 2007x2853, cover 1398x2034.
 SIZES = {"inner": {(2853, 2007): "book", (2007, 2853): "seated"}, "cover": {(1398, 2034): "portrait", (2034, 1398): "landscape"}}
 
 

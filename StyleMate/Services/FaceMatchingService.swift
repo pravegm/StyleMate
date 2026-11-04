@@ -88,9 +88,32 @@ class FaceMatchingService {
         SIMD2<Float>(70.7299, 92.2041)    // right mouth corner
     ]
 
-    private var referenceGallery: [[Float]] = []
+    // MARK: - State (thread-safe)
+    //
+    // The service is called concurrently from the scan (background tasks), manual add,
+    // the reference builder and onboarding. All gallery state lives behind `stateLock`
+    // (recursive: public methods call each other) and every reader works on a snapshot,
+    // so a racing append can never be observed mid-mutation. Core ML access (lazy load +
+    // prediction) is serialized by `modelLock`, so `clearReference` can't drop the model
+    // under a running prediction. Long work (detection, embedding, Vision) never runs
+    // while `stateLock` is held.
+
+    private let stateLock = NSRecursiveLock()
+    private let modelLock = NSLock()
+    private var gallery: [GalleryEntry] = []
     private var loadedUserId: String?
+    /// Bumped by `clearReference`; a gallery built from before a clear is discarded.
+    private var stateGeneration = 0
     private var mlModel: MLModel?
+
+    private func withState<T>(_ body: () throws -> T) rethrows -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return try body()
+    }
+
+    /// Snapshot of the gallery embeddings (for matching).
+    private var referenceEmbeddings: [[Float]] { withState { gallery.map(\.embedding) } }
 
     // MARK: - Match Result
 
@@ -127,32 +150,55 @@ class FaceMatchingService {
 
     // MARK: - Model Loading
 
-    private func ensureModelLoaded() -> Bool {
-        if mlModel != nil { return true }
+    /// Call with `modelLock` held.
+    private func ensureModelLoadedLocked() -> MLModel? {
+        if let mlModel { return mlModel }
 
         guard let url = Bundle.main.url(forResource: "MobileFaceNet", withExtension: "mlmodelc")
                 ?? Bundle.main.url(forResource: "MobileFaceNet", withExtension: "mlpackage") else {
-            print("[FaceMatch] ERROR: MobileFaceNet model not found in bundle")
-            return false
+            dlog("[FaceMatch] ERROR: MobileFaceNet model not found in bundle")
+            return nil
         }
 
         do {
             let config = MLModelConfiguration()
             config.computeUnits = .cpuAndNeuralEngine   // no GPU: iOS forbids GPU work in the background (overnight scan)
-            mlModel = try MLModel(contentsOf: url, configuration: config)
-            print("[FaceMatch] Model loaded successfully")
-            return true
+            let model = try MLModel(contentsOf: url, configuration: config)
+            mlModel = model
+            dlog("[FaceMatch] Model loaded successfully")
+            return model
         } catch {
-            print("[FaceMatch] ERROR: Failed to load model: \(error)")
-            return false
+            dlog("[FaceMatch] ERROR: Failed to load model: \(error)")
+            return nil
         }
     }
 
     // MARK: - Reference Gallery (persisted)
 
+    /// Where a gallery embedding came from. Selfie anchors and faces the user confirmed
+    /// are never evicted; learned faces (added by the scan on its own) are capped and are
+    /// the first to go.
+    enum GallerySource: String, Codable {
+        case selfie      // the onboarding selfie (upright + mirror)
+        case confirmed   // the user said "this is me" (reference builder, review, picker)
+        case learned     // the scan was very sure on its own
+    }
+
+    struct GalleryEntry: Codable, Equatable {
+        var embedding: [Float]
+        var source: GallerySource
+        var addedAt: Date
+    }
+
+    /// v2 (Nov 2026): per-entry provenance. v1 was `{ embeddings: [[Float]], modelVersion }`
+    /// with the two selfie anchors first; it is migrated on load (`migrateLegacyGallery`).
+    private static let galleryFormatVersion = 2
+
     private struct StoredGallery: Codable {
-        var embeddings: [[Float]]
-        var modelVersion: String = ""
+        var formatVersion: Int?
+        var modelVersion: String?
+        var entries: [GalleryEntry]?
+        var embeddings: [[Float]]?      // v1
     }
 
     /// Identifies which face model produced the persisted embeddings. Embeddings
@@ -162,58 +208,125 @@ class FaceMatchingService {
     private static let modelVersion = "adaface_ir101_upright"
 
     private static func galleryURL(forUser userId: String) -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        var dir = appSupport.appendingPathComponent("FaceReference", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        var resourceValues = URLResourceValues()
-        resourceValues.isExcludedFromBackup = true
-        try? dir.setResourceValues(resourceValues)
-        return dir.appendingPathComponent("faceReference_\(userId).json")
+        LocalStore.directory("FaceReference").appendingPathComponent("faceReference_\(userId).json")
     }
 
-    private func persistGallery(forUser userId: String) {
-        let stored = StoredGallery(embeddings: referenceGallery, modelVersion: Self.modelVersion)
+    /// Call with `stateLock` held (writes are serialized with the mutations they persist).
+    private func persistGalleryLocked(forUser userId: String) {
+        let stored = StoredGallery(formatVersion: Self.galleryFormatVersion, modelVersion: Self.modelVersion,
+                                   entries: gallery, embeddings: nil)
         if let data = try? JSONEncoder().encode(stored) {
-            try? data.write(to: Self.galleryURL(forUser: userId), options: .atomic)
-            print("[FaceMatch] Persisted gallery (\(referenceGallery.count) embeddings) for \(userId)")
+            LocalStore.write(data, to: Self.galleryURL(forUser: userId))
+            dlog("[FaceMatch] Persisted gallery (\(gallery.count) embeddings: \(Self.describe(gallery)))")
         }
+    }
+
+    private static func describe(_ entries: [GalleryEntry]) -> String {
+        let s = entries.filter { $0.source == .selfie }.count
+        let c = entries.filter { $0.source == .confirmed }.count
+        let l = entries.filter { $0.source == .learned }.count
+        return "\(s) selfie, \(c) confirmed, \(l) learned"
     }
 
     /// Loads the reference gallery for a user. If none is persisted yet, bootstraps
     /// it from the onboarding selfie. Returns true if at least one embedding is available.
     @discardableResult
     func loadReference(forUser userId: String) -> Bool {
-        if loadedUserId == userId, !referenceGallery.isEmpty { return true }
+        // A `clearReference` racing the build discards it (it may have read the old
+        // selfie); one retry then builds from the current one.
+        if loadReferenceAttempt(forUser: userId) { return true }
+        return loadReferenceAttempt(forUser: userId)
+    }
 
-        // 1. Persisted gallery (selfie anchor + any confirmed library faces)
-        if let data = try? Data(contentsOf: Self.galleryURL(forUser: userId)),
-           let stored = try? JSONDecoder().decode(StoredGallery.self, from: data),
-           !stored.embeddings.isEmpty {
+    private func loadReferenceAttempt(forUser userId: String) -> Bool {
+        let generation: Int? = withState { () -> Int? in
+            (loadedUserId == userId && !gallery.isEmpty) ? nil : stateGeneration
+        }
+        guard let generation else { return true }
+
+        // 1. Persisted gallery.
+        let url = Self.galleryURL(forUser: userId)
+        if let data = try? Data(contentsOf: url),
+           let stored = try? JSONDecoder().decode(StoredGallery.self, from: data) {
             if stored.modelVersion == Self.modelVersion {
-                referenceGallery = stored.embeddings
-                loadedUserId = userId
-                print("[FaceMatch] Loaded gallery: \(referenceGallery.count) embeddings for \(userId)")
-                return true
+                if let entries = stored.entries, !entries.isEmpty {
+                    if commit(entries, forUser: userId, generation: generation, persist: false) {
+                        dlog("[FaceMatch] Loaded gallery: \(entries.count) embeddings (\(Self.describe(entries)))")
+                        return true
+                    }
+                    return withState { loadedUserId == userId && !gallery.isEmpty }
+                }
+                if let legacy = stored.embeddings, !legacy.isEmpty {
+                    let migrated = migrateLegacyGallery(legacy, forUser: userId)
+                    if !migrated.isEmpty, commit(migrated, forUser: userId, generation: generation, persist: true) {
+                        dlog("[FaceMatch] Migrated v1 gallery (\(legacy.count)) -> v2 (\(Self.describe(migrated)))")
+                        return true
+                    }
+                }
+            } else {
+                // Persisted with a different face model — those embeddings can't be
+                // compared against the current model. Discard and rebuild from the selfie.
+                dlog("[FaceMatch] Gallery model mismatch ('\(stored.modelVersion ?? "-")' != '\(Self.modelVersion)'); rebuilding from selfie")
+                try? FileManager.default.removeItem(at: url)
             }
-            // Persisted with a different face model — those embeddings can't be
-            // compared against the current model. Discard and rebuild from the selfie.
-            print("[FaceMatch] Gallery model mismatch ('\(stored.modelVersion)' != '\(Self.modelVersion)'); discarding \(stored.embeddings.count) stale embeddings, rebuilding from selfie")
-            try? FileManager.default.removeItem(at: Self.galleryURL(forUser: userId))
         }
 
-        // 2. Bootstrap from the selfie image. The selfie is captured MIRRORED
-        // (front-camera convention) but library photos are not, and ArcFace/AdaFace
-        // are not mirror-invariant — so anchor BOTH orientations to be robust no
-        // matter which way the user's other photos are flipped.
+        // 2. Bootstrap from the selfie image (both orientations; see selfieAnchors).
         guard let anchors = selfieAnchors(forUser: userId), !anchors.isEmpty else {
-            print("[FaceMatch] ERROR: Could not build reference from selfie for \(userId)")
-            return false
+            dlog("[FaceMatch] ERROR: Could not build reference from selfie")
+            return withState { loadedUserId == userId && !gallery.isEmpty }
         }
-        referenceGallery = anchors
-        loadedUserId = userId
-        persistGallery(forUser: userId)
-        print("[FaceMatch] Bootstrapped gallery with \(anchors.count) selfie anchors")
-        return true
+        let now = Date()
+        let entries = anchors.map { GalleryEntry(embedding: $0, source: .selfie, addedAt: now) }
+        if commit(entries, forUser: userId, generation: generation, persist: true) {
+            dlog("[FaceMatch] Bootstrapped gallery with \(anchors.count) selfie anchors")
+            return true
+        }
+        return withState { loadedUserId == userId && !gallery.isEmpty }
+    }
+
+    /// Installs a freshly built gallery unless another thread already loaded this user's
+    /// gallery (which may already hold newer entries) or the reference was cleared since
+    /// the build started. Returns true when `entries` became the gallery.
+    private func commit(_ entries: [GalleryEntry], forUser userId: String, generation: Int, persist: Bool) -> Bool {
+        withState {
+            if loadedUserId == userId, !gallery.isEmpty { return false }
+            guard stateGeneration == generation else { return false }
+            gallery = entries
+            loadedUserId = userId
+            if persist { persistGalleryLocked(forUser: userId) }
+            return true
+        }
+    }
+
+    /// v1 galleries had no provenance: `[selfie, selfie-mirror, confirmed/learned...]`.
+    /// The selfie anchors are rebuilt from the selfie (or, if it is gone, taken from the
+    /// front of the list); every other entry is kept only if it plausibly is the user —
+    /// similarity to the SELFIE anchors at least the review bar — and kept as `confirmed`.
+    /// Entries a drifted v1 gallery learned from someone else score at impostor level
+    /// against the selfie and are dropped.
+    private func migrateLegacyGallery(_ embeddings: [[Float]], forUser userId: String) -> [GalleryEntry] {
+        let now = Date()
+        var anchors = selfieAnchors(forUser: userId) ?? []
+        var rest: [[Float]] = embeddings
+        if anchors.isEmpty {
+            let k = min(Self.anchorCount, embeddings.count)
+            anchors = Array(embeddings.prefix(k))
+            rest = Array(embeddings.dropFirst(k))
+        }
+        var entries = anchors.map { GalleryEntry(embedding: $0, source: .selfie, addedAt: now) }
+        var dropped = 0
+        for (i, e) in rest.enumerated() {
+            if anchors.contains(where: { dotProduct($0, e) > 0.95 }) { continue }   // an old anchor
+            let selfieSim = anchors.map { dotProduct($0, e) }.max() ?? -1
+            guard selfieSim >= Self.borderlineThreshold else { dropped += 1; continue }
+            // Keep their order: older entries get earlier timestamps.
+            entries.append(GalleryEntry(embedding: e, source: .confirmed,
+                                        addedAt: now.addingTimeInterval(Double(i - rest.count))))
+        }
+        Self.enforceCaps(&entries)
+        if dropped > 0 { dlog("[FaceMatch] Migration dropped \(dropped) gallery faces that don't match the selfie") }
+        return entries
     }
 
     /// Backward-compatible alias for existing callers.
@@ -223,22 +336,37 @@ class FaceMatchingService {
     /// Builds selfie anchor embeddings in BOTH orientations (upright + mirrored),
     /// since the captured selfie is mirrored but library/scan faces usually aren't.
     private func selfieAnchors(forUser userId: String) -> [[Float]]? {
-        let key = "selfieReferencePath_\(userId)"
-        guard let path = UserDefaults.standard.string(forKey: key) else {
-            print("[FaceMatch] ERROR: No selfie path stored for user \(userId)")
+        guard let stored = UserDefaults.standard.string(forKey: LocalStore.selfieKey(userId)) else {
+            dlog("[FaceMatch] ERROR: No selfie path stored")
             return nil
         }
-        guard let rawImage = UIImage(contentsOfFile: path) ?? loadFromDocuments(filename: path),
+        // Moves a legacy Documents/ selfie into Application Support on the way.
+        guard let path = LocalStore.resolveSelfiePath(stored, userId: userId),
+              let rawImage = UIImage(contentsOfFile: path),
               let cgImage = renderUpOrientation(rawImage).cgImage else {
-            print("[FaceMatch] ERROR: Could not load selfie image at \(path)")
+            dlog("[FaceMatch] ERROR: Could not load selfie image")
             return nil
         }
         var anchors: [[Float]] = []
         if let e = generateEmbeddingFromPhoto(cgImage, label: "selfie") { anchors.append(e) }
         if let flipped = horizontallyFlipped(cgImage),
            let m = generateEmbeddingFromPhoto(flipped, label: "selfie-mirror") { anchors.append(m) }
-        print("[FaceMatch] Selfie anchors built: \(anchors.count) (upright + mirror)")
-        return anchors.isEmpty ? nil : anchors
+        guard !anchors.isEmpty else { return nil }
+        // The onboarding head-turn frames (`selfieTurnFrames_<userId>`) are selfie anchors
+        // too: protected from eviction, part of the learning gate's reference, and rebuilt
+        // with the front frame whenever the gallery is (model-version bump, migration).
+        let frontCount = anchors.count
+        for (i, frame) in SelfieReferenceStore.turnFrames(userId: userId).enumerated() {
+            guard let cg = renderUpOrientation(frame).cgImage else { continue }
+            for e in [generateEmbeddingFromPhoto(cg, label: "selfie-turn\(i + 1)"),
+                      horizontallyFlipped(cg).flatMap { generateEmbeddingFromPhoto($0, label: "selfie-turn\(i + 1)-mirror") }]
+                .compactMap({ $0 })
+            where !anchors.contains(where: { dotProduct($0, e) > 0.95 }) {
+                anchors.append(e)
+            }
+        }
+        dlog("[FaceMatch] Selfie anchors built: \(frontCount) front + \(anchors.count - frontCount) head-turn (upright + mirror)")
+        return anchors
     }
 
     /// Mirrors a CGImage left-to-right.
@@ -260,20 +388,8 @@ class FaceMatchingService {
     /// were added.
     @discardableResult
     func addReferenceFaces(from cgImages: [CGImage], forUser userId: String) -> Int {
-        loadReference(forUser: userId)
-        var added = 0
-        for cg in cgImages {
-            if let emb = generateEmbeddingFromPhoto(cg, label: "confirm") {
-                referenceGallery.append(emb)
-                added += 1
-            }
-        }
-        if added > 0 {
-            loadedUserId = userId
-            persistGallery(forUser: userId)
-        }
-        print("[FaceMatch] Added \(added) confirmed faces; gallery now \(referenceGallery.count)")
-        return added
+        let embeddings = cgImages.compactMap { generateEmbeddingFromPhoto($0, label: "confirm") }
+        return addReferenceEmbeddings(embeddings, forUser: userId)
     }
 
     // MARK: - Reference Builder ("tap which photos are you")
@@ -283,9 +399,11 @@ class FaceMatchingService {
     /// aligned face embedding (to add to the gallery on confirm), and its
     /// similarity to the current gallery (for ranking; 0 if the gallery is empty).
     func evaluateFaceForReference(in cgImage: CGImage) -> (displayCrop: CGImage, embedding: [Float], similarity: Float)? {
-        let faces = SCRFDDetector.shared.detect(in: cgImage)
+        // Candidate crops can be frame-filling faces, so the padded retry stays on here.
+        let faces = SCRFDDetector.shared.detect(in: cgImage, padRetry: true)
         guard !faces.isEmpty else { return nil }
         let imgW = cgImage.width, imgH = cgImage.height
+        let refs = referenceEmbeddings
 
         func embedAndCrop(_ face: DetectedFace) -> (crop: CGImage, embedding: [Float])? {
             guard let aligned = warpAligned(image: cgImage, srcPoints: face.keypoints),
@@ -296,7 +414,7 @@ class FaceMatchingService {
         }
 
         // No anchor yet (no selfie): fall back to the largest face.
-        if referenceGallery.isEmpty {
+        if refs.isEmpty {
             guard let face = faces.max(by: {
                 ($0.boxPixels.width * $0.boxPixels.height) < ($1.boxPixels.width * $1.boxPixels.height)
             }), let r = embedAndCrop(face) else { return nil }
@@ -309,69 +427,119 @@ class FaceMatchingService {
         var best: (crop: CGImage, embedding: [Float], sim: Float)?
         for face in faces {
             guard let r = embedAndCrop(face) else { continue }
-            let sim = bestGallerySimilarity(of: r.embedding)
+            let sim = Self.bestMatch(of: r.embedding, in: refs).sim
             if best == nil || sim > best!.sim { best = (r.crop, r.embedding, sim) }
         }
         guard let b = best else { return nil }
         return (b.crop, b.embedding, b.sim)
     }
 
-    /// Appends already-computed embeddings (from evaluateFaceForReference) to the
-    /// gallery, skipping near-duplicates to keep it diverse, and caps the size.
+    /// Appends faces the user CONFIRMED (reference builder, "Is this you?" review, "which
+    /// one is you?" pick, selfie head-turn frames) to the gallery, skipping near-duplicates.
+    /// Confirmed entries are never evicted; at the gallery cap, learned entries make room
+    /// and once the gallery is all selfie/confirmed further faces are not added.
     @discardableResult
     func addReferenceEmbeddings(_ embeddings: [[Float]], forUser userId: String) -> Int {
+        guard !embeddings.isEmpty else { return 0 }
         loadReference(forUser: userId)
-        var added = 0
-        for emb in embeddings {
-            let tooSimilar = referenceGallery.contains { dotProduct($0, emb) > 0.95 }
-            if tooSimilar { continue }
-            referenceGallery.append(emb)
-            added += 1
+        return withState {
+            if loadedUserId != userId { gallery = []; loadedUserId = userId }
+            var added = 0
+            let now = Date()
+            for emb in embeddings {
+                let protectedCount = gallery.filter { $0.source != .learned }.count
+                guard protectedCount < Self.galleryCap else { break }
+                if gallery.contains(where: { dotProduct($0.embedding, emb) > 0.95 }) { continue }
+                gallery.append(GalleryEntry(embedding: emb, source: .confirmed, addedAt: now))
+                added += 1
+            }
+            Self.enforceCaps(&gallery)
+            if added > 0 { persistGalleryLocked(forUser: userId) }
+            dlog("[FaceMatch] Added \(added) confirmed embeddings; gallery now \(gallery.count) (\(Self.describe(gallery)))")
+            return added
         }
-        trimGallery()
-        if added > 0 {
-            loadedUserId = userId
-            persistGallery(forUser: userId)
-        }
-        print("[FaceMatch] Added \(added) reference embeddings; gallery now \(referenceGallery.count)")
-        return added
     }
 
-    /// The selfie anchors (upright + mirror) are always the first two entries.
+    /// The selfie anchors (upright + mirror).
     private static let anchorCount = 2
     static let galleryCap = 60
+    /// Learned entries may be at most this share of the gallery (the rest is selfie +
+    /// confirmed), so the scan's own picks can never outvote what the user confirmed.
+    static let maxLearnedShare: Double = 0.5
 
-    /// Caps the gallery without ever dropping the selfie anchors: the oldest
-    /// learned/confirmed faces go first. (The old cap removed from the front,
-    /// which threw away the selfie itself once the gallery filled up.)
-    private func trimGallery() {
-        let overflow = referenceGallery.count - Self.galleryCap
-        guard overflow > 0 else { return }
-        let keep = min(Self.anchorCount, referenceGallery.count)
-        referenceGallery.removeSubrange(keep..<(keep + overflow))
+    /// Caps the gallery without ever dropping selfie or confirmed entries: learned faces
+    /// over their share, or over the total cap, go oldest first.
+    static func enforceCaps(_ entries: inout [GalleryEntry]) {
+        func learnedIndices() -> [Int] {
+            entries.indices.filter { entries[$0].source == .learned }
+                .sorted { entries[$0].addedAt < entries[$1].addedAt }
+        }
+        let protectedCount = entries.filter { $0.source != .learned }.count
+        let share = maxLearnedShare
+        let maxLearned = max(0, Int((Double(protectedCount) * share / (1 - share)).rounded(.down)))
+        var learned = learnedIndices()
+        var drop = Set<Int>()
+        if learned.count > maxLearned {
+            drop.formUnion(learned.prefix(learned.count - maxLearned))
+        }
+        let overflow = entries.count - drop.count - galleryCap
+        if overflow > 0 {
+            learned = learned.filter { !drop.contains($0) }
+            drop.formUnion(learned.prefix(overflow))
+        }
+        guard !drop.isEmpty else { return }
+        entries = entries.enumerated().filter { !drop.contains($0.offset) }.map(\.element)
     }
 
     // MARK: - Self-learning during the scan
     //
-    // A single selfie only covers one angle and one lighting. Real photos of the
-    // user (profile, sunglasses, low light, years older) score 0.30–0.55 against it
-    // and were skipped. Faces the scan is *very* sure about are added to the
-    // gallery, so each confident match teaches the next angle — the same idea as
-    // Photos' face groups growing over time. The bar sits well above the
-    // impostor cloud (max ~0.18, a polluted partner ~0.515) so it can't drift.
+    // A single selfie only covers one angle and one lighting. Faces the scan is *very*
+    // sure about are added to the gallery so each confident match teaches the next angle.
+    // Gate (all must hold), so one impostor can't get in and then pull in their own photos:
+    // - the match against the whole gallery is very high (`autoLearnThreshold`), AND
+    // - the face matches the SELFIE anchors themselves (`autoLearnSelfieThreshold`) —
+    //   a learned or wrongly confirmed face can't vouch for the next one, AND
+    // - in a group photo it beats every other face by a clear margin (`autoLearnMargin`).
+    // Learned entries are capped (`maxLearnedShare`) and evicted oldest-first.
     static var autoLearnThreshold: Float = 0.62
+    /// Impostors score <= ~0.18 against the selfie; the user's clear photos >= ~0.5.
+    static var autoLearnSelfieThreshold: Float = 0.50
+    static var autoLearnMargin: Float = 0.15
 
     /// Adds a confidently-matched face from the scan. Skips near-duplicates.
+    /// `margin` is the match's lead over the next-best face in the photo (solo: infinite).
     @discardableResult
-    func learnFromScan(_ embedding: [Float], similarity: Float, userId: String) -> Bool {
-        guard similarity >= Self.autoLearnThreshold else { return false }
+    func learnFromScan(_ embedding: [Float], similarity: Float,
+                       margin: Float = .greatestFiniteMagnitude, userId: String) -> Bool {
+        guard similarity >= Self.autoLearnThreshold, margin >= Self.autoLearnMargin else { return false }
         loadReference(forUser: userId)
-        if referenceGallery.contains(where: { dotProduct($0, embedding) > 0.90 }) { return false }
-        referenceGallery.append(embedding)
-        trimGallery()
-        persistGallery(forUser: userId)
-        print("[FaceMatch] Learned a new view of the user (sim=\(String(format: "%.3f", similarity))); gallery now \(referenceGallery.count)")
-        return true
+        return withState {
+            guard loadedUserId == userId else { return false }
+            let anchors = gallery.filter { $0.source == .selfie }.map(\.embedding)
+            guard !anchors.isEmpty else { return false }
+            let selfieSim = anchors.map { dotProduct($0, embedding) }.max() ?? -1
+            guard selfieSim >= Self.autoLearnSelfieThreshold else {
+                dlog("[FaceMatch] Not learning: selfie sim \(String(format: "%.3f", selfieSim)) < \(Self.autoLearnSelfieThreshold)")
+                return false
+            }
+            if gallery.contains(where: { dotProduct($0.embedding, embedding) > 0.90 }) { return false }
+            let entry = GalleryEntry(embedding: embedding, source: .learned, addedAt: Date())
+            gallery.append(entry)
+            Self.enforceCaps(&gallery)
+            guard gallery.contains(entry) else { return false }   // no room for learned faces
+            persistGalleryLocked(forUser: userId)
+            dlog("[FaceMatch] Learned a new view of the user (sim=\(String(format: "%.3f", similarity)), selfie=\(String(format: "%.3f", selfieSim))); gallery now \(gallery.count)")
+            return true
+        }
+    }
+
+    /// Gallery composition (diagnostics / tests).
+    func gallerySummary() -> (selfie: Int, confirmed: Int, learned: Int) {
+        withState {
+            (gallery.filter { $0.source == .selfie }.count,
+             gallery.filter { $0.source == .confirmed }.count,
+             gallery.filter { $0.source == .learned }.count)
+        }
     }
 
     /// A square, padded crop around a face for display in the reference grid.
@@ -392,13 +560,17 @@ class FaceMatchingService {
 
     // MARK: - Find User in Photo
 
-    func findUserInPhoto(_ cgImage: CGImage) -> MatchResult {
-        guard !referenceGallery.isEmpty else {
-            print("[FaceMatch] WARNING: No reference gallery loaded, rejecting photo")
+    /// Matches every face in a photo against the gallery. `padRetry` (re-detecting on a
+    /// padded copy when nothing is found) is only for frame-filling faces such as selfie
+    /// crops — library photos without a face would otherwise pay a second, larger pass.
+    func findUserInPhoto(_ cgImage: CGImage, padRetry: Bool = false) -> MatchResult {
+        let refs = referenceEmbeddings
+        guard !refs.isEmpty else {
+            dlog("[FaceMatch] WARNING: No reference gallery loaded, rejecting photo")
             return .noFaces
         }
 
-        let faces = SCRFDDetector.shared.detect(in: cgImage)
+        let faces = SCRFDDetector.shared.detect(in: cgImage, padRetry: padRetry)
         if faces.isEmpty { return .noFaces }
 
         var bestBox: CGRect?
@@ -418,7 +590,7 @@ class FaceMatchingService {
                 continue
             }
 
-            let (similarity, refIdx) = bestGalleryMatch(of: embedding)
+            let (similarity, refIdx) = Self.bestMatch(of: embedding, in: refs)
             allScores.append(similarity)
 
             if similarity > bestSimilarity {
@@ -432,7 +604,6 @@ class FaceMatchingService {
             }
         }
 
-        let scoresStr = allScores.map { String(format: "%.3f", $0) }.joined(separator: ", ")
         let confidence: Confidence
         if bestSimilarity >= Self.highConfidenceThreshold {
             confidence = .high
@@ -442,7 +613,7 @@ class FaceMatchingService {
             confidence = .none
         }
 
-        print("[FaceMatch] \(confidence) best=\(String(format: "%.3f", bestSimilarity)) galleryIdx=\(bestRefIndex) all=[\(scoresStr)] faces=\(faces.count) gallery=\(referenceGallery.count)")
+        dlog("[FaceMatch] \(confidence) best=\(String(format: "%.3f", bestSimilarity)) galleryIdx=\(bestRefIndex) all=[\(allScores.map { String(format: "%.3f", $0) }.joined(separator: ", "))] faces=\(faces.count) gallery=\(refs.count)")
 
         return MatchResult(
             confidence: confidence,
@@ -454,23 +625,26 @@ class FaceMatchingService {
         )
     }
 
-    /// Best cosine similarity of `embedding` against every reference in the gallery.
-    private func bestGallerySimilarity(of embedding: [Float]) -> Float {
-        bestGalleryMatch(of: embedding).sim
-    }
-
     /// Best cosine similarity AND which gallery slot produced it. The index lets
     /// us spot a polluted reference: if the same slot keeps winning matches for
     /// different people, that slot is probably not the user.
-    private func bestGalleryMatch(of embedding: [Float]) -> (sim: Float, index: Int) {
+    private static func bestMatch(of embedding: [Float], in refs: [[Float]]) -> (sim: Float, index: Int) {
         var best: Float = -.infinity
         var idx = -1
-        for (i, ref) in referenceGallery.enumerated() {
-            let s = dotProduct(ref, embedding)
+        for (i, ref) in refs.enumerated() {
+            let s = dot(ref, embedding)
             if s > best { best = s; idx = i }
         }
         return (best, idx)
     }
+
+    private static func dot(_ a: [Float], _ b: [Float]) -> Float {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+        var result: Float = 0
+        vDSP_dotpr(a, 1, b, 1, &result, vDSP_Length(a.count))
+        return result
+    }
+
 
     // MARK: - Identity Resolution (upload flow: "extract only my clothes")
 
@@ -494,19 +668,19 @@ class FaceMatchingService {
         // image (same class of bug we fixed for the scan/builder). The scan path
         // bakes via loadFullImage; do the same here.
         guard let cg = renderUpOrientation(image).cgImage else {
-            print("[Identity] No CGImage — using whole photo")
+            dlog("[Identity] No CGImage — using whole photo")
             return .useWhole
         }
         _ = loadReference(forUser: userId)
 
-        let faces = SCRFDDetector.shared.detect(in: cg)
+        let faces = SCRFDDetector.shared.detect(in: cg, padRetry: false)   // library-style photo
         let bodies = countPeople(in: cg)
         let peopleCount = max(faces.count, bodies)
-        print("[Identity] faces=\(faces.count) bodies=\(bodies) gallery=\(referenceCount)")
+        dlog("[Identity] faces=\(faces.count) bodies=\(bodies) gallery=\(referenceCount)")
 
         // One person (or none) — just extract.
         if peopleCount <= 1 {
-            print("[Identity] -> useWhole (solo/product)")
+            dlog("[Identity] -> useWhole (solo/product)")
             return .useWhole
         }
 
@@ -520,20 +694,20 @@ class FaceMatchingService {
 
         if confidentPick, match.matchedFaceBox != nil,
            let isolated = isolateMatchedPerson(from: cg, matchResult: match) {
-            print("[Identity] -> isolated user (high match, sim=\(simStr), margin=\(marginStr))")
+            dlog("[Identity] -> isolated user (high match, sim=\(simStr), margin=\(marginStr))")
             return .isolated(isolated)
         }
 
         // Unsure (low score, close runner-up, or isolation failed) -> ask the user.
         let people = detectedPeople(in: cg, faces: faces)
         if people.isEmpty {
-            print("[Identity] multi-person (\(peopleCount)) but no usable faces -> useWhole")
+            dlog("[Identity] multi-person (\(peopleCount)) but no usable faces -> useWhole")
             return .useWhole
         }
         let reason = !confidentPick && match.confidence == .high
             ? "two people score too close (margin=\(marginStr))"
             : "best conf=\(match.confidence), sim=\(simStr)"
-        print("[Identity] -> ambiguous: asking which of \(people.count) is you (\(reason))")
+        dlog("[Identity] -> ambiguous: asking which of \(people.count) is you (\(reason))")
         return .ambiguous(people)
     }
 
@@ -553,12 +727,12 @@ class FaceMatchingService {
         // photos when the gallery is just the selfie.
         func review(_ why: String) -> ScanIdentity {
             guard let box = match.matchedFaceBox, let emb = match.matchedEmbedding else { return .skip }
-            print("[Scan] review: \(why) (sim=\(simStr) margin=\(marginStr) faces=\(match.faceCount))")
+            dlog("[Scan] review: \(why) (sim=\(simStr) margin=\(marginStr) faces=\(match.faceCount))")
             return .review(sim: sim, embedding: emb, faceBox: box, faceCount: match.faceCount)
         }
 
         guard match.confidence != .none, match.matchedFaceBox != nil else {
-            print("[Scan] skip: not the user (sim=\(simStr) faces=\(match.faceCount))")
+            dlog("[Scan] skip: not the user (sim=\(simStr) faces=\(match.faceCount))")
             return .skip
         }
         guard match.confidence == .high else { return review("borderline match") }
@@ -570,16 +744,16 @@ class FaceMatchingService {
             // clothes (e.g. a partner standing next to the user).
             guard sim >= Self.multiPersonThreshold else { return review("multi-person match below the multi-person bar") }
             guard let isolated = isolateMatchedPerson(from: cgImage, matchResult: match) else {
-                print("[Scan] skip: confident match but couldn't isolate user (\(match.faceCount) people)")
+                dlog("[Scan] skip: confident match but couldn't isolate user (\(match.faceCount) people)")
                 return .skip
             }
-            if let emb = match.matchedEmbedding { learnFromScan(emb, similarity: sim, userId: userId) }
-            print("[Scan] add: isolated user from \(match.faceCount) people (sim=\(simStr) margin=\(marginStr))")
+            if let emb = match.matchedEmbedding { learnFromScan(emb, similarity: sim, margin: match.margin, userId: userId) }
+            dlog("[Scan] add: isolated user from \(match.faceCount) people (sim=\(simStr) margin=\(marginStr))")
             return .analyze(isolated)
         }
 
-        if let emb = match.matchedEmbedding { learnFromScan(emb, similarity: sim, userId: userId) }
-        print("[Scan] add: confident solo match (sim=\(simStr))")
+        if let emb = match.matchedEmbedding { learnFromScan(emb, similarity: sim, margin: match.margin, userId: userId) }
+        dlog("[Scan] add: confident solo match (sim=\(simStr))")
         return .analyze(fullImage)
     }
 
@@ -619,12 +793,12 @@ class FaceMatchingService {
         guard let cg = renderUpOrientation(image).cgImage else { return nil }
         if let emb = person.embedding {
             addReferenceEmbeddings([emb], forUser: userId)   // active learning
-            print("[Identity] User picked a person — learned their face (active learning)")
+            dlog("[Identity] User picked a person — learned their face (active learning)")
         }
         let mr = MatchResult(confidence: .high, matchedFaceBox: person.faceBox,
                              faceCount: max(totalFaces, 2), similarity: nil)
         let result = isolateMatchedPerson(from: cg, matchResult: mr)
-        print("[Identity] Isolating picked person: \(result != nil ? "ok" : "FAILED -> using whole photo")")
+        dlog("[Identity] Isolating picked person: \(result != nil ? "ok" : "FAILED -> using whole photo")")
         return result
     }
 
@@ -660,18 +834,18 @@ class FaceMatchingService {
         do {
             try handler.perform([maskRequest])
         } catch {
-            print("[FaceMatch] Person instance mask failed: \(error)")
+            dlog("[FaceMatch] Person instance mask failed: \(error)")
             return nil
         }
 
         guard let maskObs = maskRequest.results?.first else {
-            print("[FaceMatch] No person instance mask results")
+            dlog("[FaceMatch] No person instance mask results")
             return nil
         }
 
         let allInstances = maskObs.allInstances
         guard !allInstances.isEmpty else {
-            print("[FaceMatch] Instance mask found no people")
+            dlog("[FaceMatch] Instance mask found no people")
             return nil
         }
 
@@ -682,10 +856,10 @@ class FaceMatchingService {
         // Multiple people: pick the instance whose mask actually covers the
         // matched face. generateMask returns a Float32 soft mask in [0,1].
         guard let idx = instanceCoveringFace(faceBox, in: maskObs) else {
-            print("[FaceMatch] Could not map matched face to a person instance")
+            dlog("[FaceMatch] Could not map matched face to a person instance")
             return nil
         }
-        print("[FaceMatch] Matched face -> person instance \(idx) of \(allInstances.count)")
+        dlog("[FaceMatch] Matched face -> person instance \(idx) of \(allInstances.count)")
         return extractPerson(maskObs: maskObs, instances: IndexSet(integer: idx),
                              handler: handler, ciImage: ciImage)
     }
@@ -742,10 +916,10 @@ class FaceMatchingService {
             let maskedCI = CIImage(cvPixelBuffer: maskedBuffer)
             let ctx = CIContext()
             guard let maskedCG = ctx.createCGImage(maskedCI, from: maskedCI.extent) else { return nil }
-            print("[FaceMatch] Person isolated: \(maskedCG.width)x\(maskedCG.height)")
+            dlog("[FaceMatch] Person isolated: \(maskedCG.width)x\(maskedCG.height)")
             return UIImage(cgImage: maskedCG)
         } catch {
-            print("[FaceMatch] generateMaskedImage failed: \(error)")
+            dlog("[FaceMatch] generateMaskedImage failed: \(error)")
             return nil
         }
     }
@@ -804,19 +978,19 @@ class FaceMatchingService {
     // MARK: - Embedding from a Full Photo (detect + align + embed best face)
 
     private func generateEmbeddingFromPhoto(_ cgImage: CGImage, label: String) -> [Float]? {
-        let faces = SCRFDDetector.shared.detect(in: cgImage)
-        print("[FaceMatch] [\(label)] Detected \(faces.count) face(s)")
+        let faces = SCRFDDetector.shared.detect(in: cgImage, padRetry: true)   // selfie / confirm crops can fill the frame
+        dlog("[FaceMatch] [\(label)] Detected \(faces.count) face(s)")
 
         // Largest (most prominent) face — for a selfie/confirm crop there's one.
         guard let bestFace = faces.max(by: {
             ($0.boxPixels.width * $0.boxPixels.height) < ($1.boxPixels.width * $1.boxPixels.height)
         }) else {
-            print("[FaceMatch] [\(label)] No face detected")
+            dlog("[FaceMatch] [\(label)] No face detected")
             return nil
         }
 
         guard let aligned = warpAligned(image: cgImage, srcPoints: bestFace.keypoints) else {
-            print("[FaceMatch] [\(label)] Failed to produce aligned face crop")
+            dlog("[FaceMatch] [\(label)] Failed to produce aligned face crop")
             return nil
         }
 
@@ -836,7 +1010,7 @@ class FaceMatchingService {
            let aligned = warpAligned(image: cgImage, srcPoints: src) {
             return aligned
         }
-        print("[FaceMatch] Alignment unavailable, falling back to bbox crop")
+        dlog("[FaceMatch] Alignment unavailable, falling back to bbox crop")
         return bboxCrop(from: cgImage, bbox: observation.boundingBox,
                         imageWidth: imageWidth, imageHeight: imageHeight)
     }
@@ -852,7 +1026,7 @@ class FaceMatchingService {
         guard let leftEye = landmarks.leftEye, leftEye.pointCount >= 1,
               let rightEye = landmarks.rightEye, rightEye.pointCount >= 1,
               let nose = landmarks.nose, nose.pointCount >= 1 else {
-            print("[FaceMatch] Missing required landmarks (eyes or nose)")
+            dlog("[FaceMatch] Missing required landmarks (eyes or nose)")
             return nil
         }
 
@@ -906,14 +1080,14 @@ class FaceMatchingService {
             let mouthY = noseTip.y + (noseTip.y - (imageLeftEye.y + imageRightEye.y) / 2) * 0.6
             leftMouth = SIMD2<Float>(eyeMidX - eyeSpan * 0.35, mouthY)
             rightMouth = SIMD2<Float>(eyeMidX + eyeSpan * 0.35, mouthY)
-            print("[FaceMatch] Estimated mouth corners from eye/nose positions")
+            dlog("[FaceMatch] Estimated mouth corners from eye/nose positions")
         }
 
         let result = [imageLeftEye, imageRightEye, noseTip, leftMouth, rightMouth]
 
         for (i, pt) in result.enumerated() {
             if pt.x < -50 || pt.y < -50 || pt.x > Float(imageWidth + 50) || pt.y > Float(imageHeight + 50) {
-                print("[FaceMatch] Keypoint \(i) out of bounds: (\(pt.x), \(pt.y))")
+                dlog("[FaceMatch] Keypoint \(i) out of bounds: (\(pt.x), \(pt.y))")
                 return nil
             }
         }
@@ -945,21 +1119,21 @@ class FaceMatchingService {
         }
 
         guard gaussianSolve4x4(&ata, &atb) else {
-            print("[FaceMatch] Transform solve failed (singular)")
+            dlog("[FaceMatch] Transform solve failed (singular)")
             return nil
         }
 
         let a = atb[0], b = atb[1], tx = atb[2], ty = atb[3]
         let det = a * a + b * b
         guard det > 1e-6 else {
-            print("[FaceMatch] Degenerate transform (det=\(det))")
+            dlog("[FaceMatch] Degenerate transform (det=\(det))")
             return nil
         }
         let invDet = 1.0 / det
 
         let srcW = image.width, srcH = image.height
         guard let srcBuffer = imageToPixelBuffer(image) else {
-            print("[FaceMatch] Failed to rasterize source image")
+            dlog("[FaceMatch] Failed to rasterize source image")
             return nil
         }
 
@@ -1051,8 +1225,7 @@ class FaceMatchingService {
               let cropped = cgImage.cropping(to: CGRect(x: cropX, y: cropY, width: cropW, height: cropH)) else { return nil }
 
         let size = CGSize(width: 112, height: 112)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { _ in
+        return ImageDownsampler.render(size: size) { _ in   // scale 1: really 112x112 px
             UIImage(cgImage: cropped).draw(in: CGRect(origin: .zero, size: size))
         }.cgImage
     }
@@ -1077,12 +1250,16 @@ class FaceMatchingService {
 
     /// Single forward pass of the model, returning the RAW (un-normalized) embedding.
     private func rawEmbedding(for faceCrop: CGImage) -> [Float]? {
-        guard ensureModelLoaded(), let model = mlModel else {
-            print("[FaceMatch] Model not available")
+        guard let inputArray = createInputMultiArray(from: faceCrop) else {
+            dlog("[FaceMatch] Failed to create ML input array")
             return nil
         }
-        guard let inputArray = createInputMultiArray(from: faceCrop) else {
-            print("[FaceMatch] Failed to create ML input array")
+        // Load + predict + copy out under one lock: the model can't be loaded twice by
+        // racing callers, nor released (clearReference) mid-prediction.
+        modelLock.lock()
+        defer { modelLock.unlock() }
+        guard let model = ensureModelLoadedLocked() else {
+            dlog("[FaceMatch] Model not available")
             return nil
         }
         do {
@@ -1094,13 +1271,13 @@ class FaceMatchingService {
 
             guard let outputFeature = firstMultiArrayOutput(from: output),
                   let multiArray = outputFeature.multiArrayValue else {
-                print("[FaceMatch] No MLMultiArray in model output")
+                dlog("[FaceMatch] No MLMultiArray in model output")
                 return nil
             }
 
             let count = multiArray.count
             guard count >= 128 else {
-                print("[FaceMatch] Unexpected embedding dimension: \(count)")
+                dlog("[FaceMatch] Unexpected embedding dimension: \(count)")
                 return nil
             }
 
@@ -1110,7 +1287,7 @@ class FaceMatchingService {
             for i in 0..<embeddingSize { embedding[i] = ptr[i] }
             return embedding
         } catch {
-            print("[FaceMatch] Model prediction failed: \(error)")
+            dlog("[FaceMatch] Model prediction failed: \(error)")
             return nil
         }
     }
@@ -1203,17 +1380,12 @@ class FaceMatchingService {
 
     // MARK: - Helpers
 
+    /// Bakes EXIF orientation into the pixels, at the image's own pixel size. (The default
+    /// renderer format uses the screen scale: a 12 MP photo became a 108 MP bitmap.)
     private func renderUpOrientation(_ image: UIImage) -> UIImage {
         guard image.imageOrientation != .up, image.cgImage != nil else { return image }
-        let renderer = UIGraphicsImageRenderer(size: image.size)
-        return renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: image.size)) }
-    }
-
-    private func loadFromDocuments(filename: String) -> UIImage? {
-        let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let url = docsDir.appendingPathComponent(URL(fileURLWithPath: filename).lastPathComponent)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return UIImage(data: data)
+        let px = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        return ImageDownsampler.render(size: px) { _ in image.draw(in: CGRect(origin: .zero, size: px)) }
     }
 
     // MARK: - Backward-Compatible API
@@ -1234,20 +1406,29 @@ class FaceMatchingService {
 
     // MARK: - Public State
 
-    var hasReference: Bool { !referenceGallery.isEmpty }
-    var referenceCount: Int { referenceGallery.count }
+    var hasReference: Bool { withState { !gallery.isEmpty } }
+    var referenceCount: Int { withState { gallery.count } }
 
     /// Clears the in-memory and persisted reference for a user. Call after a selfie
-    /// retake so the gallery is rebuilt from the new selfie.
+    /// retake so the gallery is rebuilt from the new selfie. Safe while other threads are
+    /// matching: they finish on their snapshot, and a gallery being built from before the
+    /// clear is discarded instead of installed.
     func clearReference(forUser userId: String? = nil) {
-        referenceGallery = []
-        mlModel = nil
-        if let userId = userId {
-            try? FileManager.default.removeItem(at: Self.galleryURL(forUser: userId))
-        } else if let loaded = loadedUserId {
-            try? FileManager.default.removeItem(at: Self.galleryURL(forUser: loaded))
+        withState {
+            let target = userId ?? loadedUserId
+            stateGeneration += 1
+            if userId == nil || userId == loadedUserId {
+                gallery = []
+                loadedUserId = nil
+            }
+            if let target {
+                try? FileManager.default.removeItem(at: Self.galleryURL(forUser: target))
+            }
         }
-        loadedUserId = nil
+        // Free the embedder (~125 MB). Waits for a running prediction to finish.
+        modelLock.lock()
+        mlModel = nil
+        modelLock.unlock()
     }
 }
 
@@ -1265,9 +1446,9 @@ extension FaceMatchingService {
     /// Every face in the image, detected once and embedded from the full image
     /// (keypoint-aligned, so no per-face crop and no second detector pass —
     /// `evaluateFaceForReference` re-detects internally). Largest first.
-    /// `retryPadded: false` for library photos (see `SCRFDDetector.detect`).
-    func embedFaces(in cgImage: CGImage, retryPadded: Bool = true, maxFaces: Int = .max) -> [EmbeddedFace] {
-        let faces = SCRFDDetector.shared.detect(in: cgImage, retryPadded: retryPadded)
+    /// `padRetry: false` for library photos (see `SCRFDDetector.detect`).
+    func embedFaces(in cgImage: CGImage, padRetry: Bool = true, maxFaces: Int = .max) -> [EmbeddedFace] {
+        let faces = SCRFDDetector.shared.detect(in: cgImage, padRetry: padRetry)
             .sorted { $0.boxPixels.width * $0.boxPixels.height > $1.boxPixels.width * $1.boxPixels.height }
         return embed(faces: Array(faces.prefix(maxFaces)), in: cgImage)
     }

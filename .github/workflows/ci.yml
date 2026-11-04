@@ -16,6 +16,8 @@ on:
     branches: ['**']
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1"   # Mondays 04:00 UTC: concurrency audit (main only)
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -79,6 +81,7 @@ jobs:
 
   test:
     needs: models
+    if: github.event_name != 'schedule'
     runs-on: xcode-27
     # 75 -> 120: the studio-render test runs SD img2img on the simulator's CPU.
     timeout-minutes: 120
@@ -208,6 +211,7 @@ jobs:
   # screenshot from the .xcresult into the `e2e-screens` artifact. Independent of `test`.
   ui-tests:
     needs: models
+    if: github.event_name != 'schedule'
     runs-on: xcode-27
     timeout-minutes: 90
     steps:
@@ -341,4 +345,151 @@ jobs:
         with:
           name: e2e-screens
           path: ${{ runner.temp }}/e2e-screens
+          if-no-files-found: ignore
+
+  # The configuration that ships: compile Release for a real device (optimizer on, no DEBUG
+  # code, no simulator) so a Release-only compile error can't first show up in the TestFlight
+  # workflow. Compile only — no signing, no tests — in parallel with the test jobs.
+  release-build:
+    needs: models
+    if: github.event_name != 'schedule'
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore face models
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            MobileFaceNet.mlpackage
+            SCRFD10G.mlpackage
+          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          fail-on-cache-miss: true
+      - name: Restore wardrobe models
+        uses: actions/cache/restore@v4
+        with:
+          path: StyleMate/ML
+          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          fail-on-cache-miss: true
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Write Secrets.swift
+        run: |
+          cat > StyleMate/Secrets.swift <<'SWIFT'
+          enum Secrets {
+              static let geminiAPIKey = ""
+          }
+          SWIFT
+      - name: Build Release (generic iOS device)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/dd-release" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee release-build.log | grep -E "error:|warning: .*StyleMate/|\*\* BUILD" || true
+          grep -q "\*\* BUILD SUCCEEDED \*\*" release-build.log
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-log
+          path: release-build.log
+          if-no-files-found: ignore
+
+  # Concurrency audit (heavy, so weekly on main or on demand — not on every push):
+  #   1. a build with SWIFT_STRICT_CONCURRENCY=complete; the warning list is the report;
+  #   2. the face-identity + reliability unit tests under Thread Sanitizer (they hammer the
+  #      shared face service from several threads).
+  concurrency-audit:
+    needs: models
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore face models
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            MobileFaceNet.mlpackage
+            SCRFD10G.mlpackage
+          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          fail-on-cache-miss: true
+      - name: Restore wardrobe models
+        uses: actions/cache/restore@v4
+        with:
+          path: StyleMate/ML
+          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          fail-on-cache-miss: true
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Write Secrets.swift
+        run: |
+          cat > StyleMate/Secrets.swift <<'SWIFT'
+          enum Secrets {
+              static let geminiAPIKey = ""
+          }
+          SWIFT
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=[(rt,x) for rt,xs in d.items() if "iOS" in rt for x in xs if x["name"].startswith("iPhone") and "Pro" in x["name"]]
+          c.sort(key=lambda t:t[0])
+          print(c[-1][1]["udid"])')
+          echo "SIM=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" || true
+      - name: Strict-concurrency build (report only)
+        run: |
+          xcodebuild build \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd-strict" \
+            CODE_SIGNING_ALLOWED=NO SWIFT_STRICT_CONCURRENCY=complete \
+            > strict-build.log 2>&1 || true
+          grep -E "warning: .*StyleMate/.*(Sendable|actor|isolat|concurren|data race)" strict-build.log | sort -u > strict-concurrency-warnings.txt || true
+          echo "Strict-concurrency warnings: $(wc -l < strict-concurrency-warnings.txt)"
+          cut -d: -f1 strict-concurrency-warnings.txt | sed 's#.*/StyleMate/##' | sort | uniq -c | sort -rn | head -40
+          grep -q "\*\* BUILD SUCCEEDED \*\*" strict-build.log
+      - name: Thread Sanitizer (face identity + reliability tests)
+        run: |
+          set -o pipefail
+          export TEST_RUNNER_FIXTURES_DIR="$GITHUB_WORKSPACE/StyleMateTests/Fixtures"
+          export TEST_RUNNER_REPORT_DIR="$RUNNER_TEMP/report"
+          mkdir -p "$RUNNER_TEMP/report"
+          xcodebuild test \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd-tsan" \
+            -enableThreadSanitizer YES \
+            -only-testing:StyleMateTests/FaceMatchingTests \
+            -only-testing:StyleMateTests/ReliabilityTests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee tsan.log | grep -E "✔|✘|ThreadSanitizer|SUMMARY|Test .*(passed|failed)|error:|\*\* TEST" || true
+          if grep -q "WARNING: ThreadSanitizer" tsan.log; then
+            echo "::error::Thread Sanitizer reported data races (see tsan.log)"
+            exit 1
+          fi
+          grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" tsan.log
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: concurrency-audit
+          path: |
+            strict-build.log
+            strict-concurrency-warnings.txt
+            tsan.log
           if-no-files-found: ignore

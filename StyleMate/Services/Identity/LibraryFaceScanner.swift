@@ -49,7 +49,7 @@ enum FaceSampleExtractor {
     /// from its own keypoints in the full image, so we get all of them, not just the one that
     /// best matches the gallery, without a second detector pass per face.
     static func faces(in image: CGImage) -> [Extracted] {
-        let detected = SCRFDDetector.shared.detect(in: image, retryPadded: false)
+        let detected = SCRFDDetector.shared.detect(in: image, padRetry: false)   // library photo: no padded retry
         guard !detected.isEmpty else { return [] }
         let size = CGSize(width: image.width, height: image.height)
         let usable = detected
@@ -88,7 +88,7 @@ enum FaceSampleExtractor {
         // The crop holds the face at ~40% of its side: no padded retry needed. Of the faces in
         // it (a neighbour may be partly in), take the one that agrees with the thumbnail's.
         guard let crop = cg.cropping(to: rect),
-              let r = FaceMatchingService.shared.embedFaces(in: crop, retryPadded: false)
+              let r = FaceMatchingService.shared.embedFaces(in: crop, padRetry: false)
                 .max(by: { FaceMath.dot($0.embedding, expected) < FaceMath.dot($1.embedding, expected) })
         else { return nil }
         return FaceMath.dot(r.embedding, expected) >= 0.45 ? r.embedding : nil

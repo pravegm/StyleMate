@@ -39,10 +39,14 @@ final class ItemEmbeddingStore {
         }
     }
 
+    /// `Application Support/WardrobeEmbeddings/`: excluded from backup, protected until first
+    /// unlock (`LocalStore`), like every other personal file.
     private var directory: URL {
-        let dir = directoryOverride ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("WardrobeEmbeddings", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        guard let dir = directoryOverride else { return LocalStore.directory("WardrobeEmbeddings") }
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            LocalStore.protect(dir)
+        }
         return dir
     }
     private var fileURL: URL { directory.appendingPathComponent("items.bin") }
@@ -99,6 +103,21 @@ final class ItemEmbeddingStore {
         scheduleWrite()
     }
 
+    /// Forgets every embedding and deletes the files ("Delete everything"). A write still
+    /// pending finds nothing to do, so nothing is written back afterwards.
+    func removeAll() {
+        lock.lock()
+        entries = [:]
+        loaded = true
+        dirty = false
+        lock.unlock()
+        io.sync {
+            for url in [fileURL, legacyURL] where FileManager.default.fileExists(atPath: url.path) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
     /// Writes pending changes now (blocks until written).
     func flush() {
         io.sync { writeNow() }
@@ -124,7 +143,7 @@ final class ItemEmbeddingStore {
         lock.unlock()
         let data = Self.encode(snapshot)
         do {
-            try data.write(to: fileURL, options: .atomic)
+            try data.write(to: fileURL, options: LocalStore.writeOptions)
             if FileManager.default.fileExists(atPath: legacyURL.path) { try? FileManager.default.removeItem(at: legacyURL) }
         } catch {
             print("[Wardrobe] embedding store write failed: \(error)")

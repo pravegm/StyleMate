@@ -30,7 +30,7 @@ final class SCRFDDetector {
     private let inputSize = 640
     private let strides = [8, 16, 32]
     private let numAnchors = 2
-    private var model: MLModel?
+    private var model: MLModel?   // guarded by `lock`
     private var anchorCenters: [Int: [(Float, Float)]] = [:]
 
     private init() {
@@ -51,33 +51,38 @@ final class SCRFDDetector {
         return centers
     }
 
-    private func ensureLoaded() -> Bool {
-        if model != nil { return true }
+    /// Serializes the lazy model load and every prediction: the detector is shared by the
+    /// scan, manual add, the reference builder and onboarding, which run concurrently.
+    private let lock = NSLock()
+
+    /// Call with `lock` held.
+    private func ensureLoadedLocked() -> MLModel? {
+        if let model { return model }
         guard let url = Bundle.main.url(forResource: "SCRFD10G", withExtension: "mlmodelc")
                 ?? Bundle.main.url(forResource: "SCRFD10G", withExtension: "mlpackage") else {
-            print("[SCRFD] ERROR: SCRFD10G model not found in bundle")
-            return false
+            dlog("[SCRFD] ERROR: SCRFD10G model not found in bundle")
+            return nil
         }
         let cfg = MLModelConfiguration()
         cfg.computeUnits = .cpuAndNeuralEngine   // no GPU: iOS forbids GPU work in the background (overnight scan)
         model = try? MLModel(contentsOf: url, configuration: cfg)
-        if model == nil { print("[SCRFD] ERROR: failed to load model") }
-        else { print("[SCRFD] detector loaded") }
-        return model != nil
+        if model == nil { dlog("[SCRFD] ERROR: failed to load model") }
+        else { dlog("[SCRFD] detector loaded") }
+        return model
     }
 
     /// Detect faces. Returns each with 5 ArcFace-ordered landmarks in image pixels.
-    /// If the first pass finds nothing, retries on a margin-padded copy — a face
-    /// that fills the whole frame (e.g. a tight selfie crop) is invisible to SCRFD,
-    /// which needs the face to be a sub-region. (Verified offline: face-fills-frame
-    /// crop → 0 detections; +40% margin → detected.)
     ///
-    /// `retryPadded: false` skips that second pass: for library / scan photos,
-    /// where a face filling the whole frame is rare and most photos have no
-    /// face at all, the retry (on a ~1.8x larger copy) doubled the cost.
-    func detect(in cgImage: CGImage, scoreThreshold: Float = 0.5, retryPadded: Bool = true) -> [DetectedFace] {
+    /// `padRetry`: if the first pass finds nothing, retry on a margin-padded copy — a face
+    /// that fills the whole frame (e.g. a tight selfie crop) is invisible to SCRFD, which
+    /// needs the face to be a sub-region. (Verified offline: face-fills-frame crop → 0
+    /// detections; +40% margin → detected.) The retry costs a second pass on a 3.2x larger
+    /// image, so library / scan photos (where "no face" is the common, correct answer)
+    /// must pass `padRetry: false`; keep it on for selfie frames and face crops. The
+    /// default stays `true` for existing callers.
+    func detect(in cgImage: CGImage, scoreThreshold: Float = 0.5, padRetry: Bool = true) -> [DetectedFace] {
         let faces = detectCore(in: cgImage, scoreThreshold: scoreThreshold)
-        if !faces.isEmpty || !retryPadded { return faces }
+        if !faces.isEmpty || !padRetry { return faces }
 
         let mw = max(1, cgImage.width * 2 / 5)
         let mh = max(1, cgImage.height * 2 / 5)
@@ -93,15 +98,20 @@ final class SCRFDDetector {
     }
 
     private func detectCore(in cgImage: CGImage, scoreThreshold: Float) -> [DetectedFace] {
-        guard ensureLoaded(), let model else { return [] }
         let w = cgImage.width, h = cgImage.height
         guard w > 0, h > 0 else { return [] }
         let scale = min(Float(inputSize) / Float(w), Float(inputSize) / Float(h))
-        guard let input = makeInput(cgImage, scale: scale) else { return [] }
-        guard let provider = try? MLDictionaryFeatureProvider(
-                dictionary: [inputName(model): MLFeatureValue(multiArray: input)]),
-              let out = try? model.prediction(from: provider) else {
-            print("[SCRFD] prediction failed")
+        guard let input = makeInput(cgImage, scale: scale) else { return [] }   // CPU work, outside the lock
+        lock.lock()
+        let out: MLFeatureProvider? = {
+            guard let model = ensureLoadedLocked(),
+                  let provider = try? MLDictionaryFeatureProvider(
+                    dictionary: [inputName(model): MLFeatureValue(multiArray: input)]) else { return nil }
+            return try? model.prediction(from: provider)
+        }()
+        lock.unlock()
+        guard let out else {
+            dlog("[SCRFD] prediction failed")
             return []
         }
 
@@ -114,7 +124,7 @@ final class SCRFDDetector {
             guard let scArr = outputArray(out, count: n, inner: 1),
                   let bbArr = outputArray(out, count: n, inner: 4),
                   let kpArr = outputArray(out, count: n, inner: 10) else {
-                print("[SCRFD] stride \(s): outputs not matched (need score[\(n),1] bbox[\(n),4] kps[\(n),10])")
+                dlog("[SCRFD] stride \(s): outputs not matched (need score[\(n),1] bbox[\(n),4] kps[\(n),10])")
                 continue
             }
             let sc = floats(scArr), bb = floats(bbArr), kp = floats(kpArr)

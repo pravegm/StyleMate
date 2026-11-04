@@ -22,12 +22,10 @@ final class StudioStore {
     private var entries: [String: Entry] = [:]
     private var loaded = false
 
-    private var url: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Studio", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("studio.json")
-    }
+    /// `Application Support/Studio/studio.json` — excluded from backup and protected until
+    /// first unlock (`LocalStore`). The studio images and the original cutouts themselves
+    /// live with the other wardrobe images (`WardrobeImageFileHelper`, also `LocalStore`).
+    private var url: URL { LocalStore.directory("Studio").appendingPathComponent("studio.json") }
 
     private func load() {
         guard !loaded else { return }
@@ -45,7 +43,33 @@ final class StudioStore {
         lock.lock(); defer { lock.unlock() }
         load()
         entries[id.uuidString] = entry
-        if let d = try? JSONEncoder().encode(entries) { try? d.write(to: url, options: .atomic) }
+        save()
+    }
+
+    /// Caller holds `lock`.
+    private func save() {
+        if let d = try? JSONEncoder().encode(entries) { LocalStore.write(d, to: url) }
+    }
+
+    /// Forgets these items' renders and deletes the original cutouts kept for them (the
+    /// item's current image is deleted by its owner).
+    func remove(_ ids: [UUID]) {
+        lock.lock(); defer { lock.unlock() }
+        load()
+        for id in ids {
+            if let e = entries.removeValue(forKey: id.uuidString), !e.cutoutPath.isEmpty, e.cutoutPath != e.studioPath {
+                WardrobeImageFileHelper.deleteImage(at: e.cutoutPath)
+            }
+        }
+        save()
+    }
+
+    /// "Delete everything": forgets every render and deletes the bookkeeping file.
+    func removeAll() {
+        lock.lock(); defer { lock.unlock() }
+        entries = [:]
+        loaded = true
+        try? FileManager.default.removeItem(at: url)
     }
 
     /// The original cutout for an item that has been studio-rendered.

@@ -33,31 +33,25 @@ enum IdentityBuild {
 /// Persistence for the selfie reference frames.
 ///
 /// Contract with `FaceMatchingService.selfieAnchors`: the front frame lives at the path stored
-/// under `selfieReferencePath_<userId>` (Documents/selfie_reference_<userId>.jpg); the service
-/// bootstraps its upright + mirror anchors from it. The two head-turn frames are extra: they're
-/// stored under `selfieTurnFrames_<userId>` (file names in Documents) and added to the gallery
-/// through `addReferenceEmbeddings`, in both orientations like the front frame.
+/// under `selfieReferencePath_<userId>` (`Application Support/Selfie/selfie_reference_<userId>.jpg`,
+/// see `LocalStore`); the service bootstraps its upright + mirror anchors from it. The two
+/// head-turn frames are extra: they're stored under `selfieTurnFrames_<userId>` (file names in
+/// the same folder) and added to the gallery through `addReferenceEmbeddings`, in both
+/// orientations like the front frame. All frames are excluded from iCloud Backup and
+/// file-protected; frames written to `Documents/` by earlier builds are moved on first read.
 enum SelfieReferenceStore {
-    static func primaryKey(_ userId: String) -> String { "selfieReferencePath_\(userId)" }
+    static func primaryKey(_ userId: String) -> String { LocalStore.selfieKey(userId) }
     static func turnFramesKey(_ userId: String) -> String { "selfieTurnFrames_\(userId)" }
-
-    private static var documents: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-    }
 
     /// Writes the front frame exactly where FaceMatchingService reads it.
     @discardableResult
     static func savePrimary(_ image: UIImage, userId: String) -> Bool {
         guard let data = image.jpegData(compressionQuality: 0.95) else { return false }
-        let url = documents.appendingPathComponent("selfie_reference_\(userId).jpg")
-        do {
-            try data.write(to: url, options: .atomic)
-        } catch {
-            print("[Identity] Could not save selfie: \(error)")
+        guard LocalStore.saveSelfie(data, userId: userId) != nil else {
+            dlog("[Identity] Could not save selfie")
             return false
         }
-        UserDefaults.standard.set(url.path, forKey: primaryKey(userId))
-        print("[Identity] Selfie saved for \(userId)")
+        dlog("[Identity] Selfie saved")
         return true
     }
 
@@ -68,7 +62,7 @@ enum SelfieReferenceStore {
         for (i, image) in images.enumerated() {
             guard let data = image.jpegData(compressionQuality: 0.92) else { continue }
             let name = "selfie_reference_\(userId)_turn\(i + 1).jpg"
-            if (try? data.write(to: documents.appendingPathComponent(name), options: .atomic)) != nil {
+            if LocalStore.write(data, to: LocalStore.selfieDirectory.appendingPathComponent(name)) {
                 names.append(name)
             }
         }
@@ -77,22 +71,36 @@ enum SelfieReferenceStore {
 
     static func removeTurnFrames(userId: String) {
         for name in UserDefaults.standard.stringArray(forKey: turnFramesKey(userId)) ?? [] {
-            try? FileManager.default.removeItem(at: documents.appendingPathComponent(name))
+            try? FileManager.default.removeItem(at: LocalStore.selfieDirectory.appendingPathComponent(name))
+            try? FileManager.default.removeItem(at: LocalStore.documents.appendingPathComponent(name))
         }
         UserDefaults.standard.removeObject(forKey: turnFramesKey(userId))
     }
 
     static func primaryFrame(userId: String) -> UIImage? {
-        guard let path = UserDefaults.standard.string(forKey: primaryKey(userId)) else { return nil }
-        if let img = UIImage(contentsOfFile: path) { return img }
-        // The app container path changes across reinstalls; fall back to the file name.
-        return UIImage(contentsOfFile: documents.appendingPathComponent(URL(fileURLWithPath: path).lastPathComponent).path)
+        guard let stored = UserDefaults.standard.string(forKey: primaryKey(userId)),
+              let path = LocalStore.resolveSelfiePath(stored, userId: userId) else { return nil }
+        return UIImage(contentsOfFile: path)
     }
 
     static func turnFrames(userId: String) -> [UIImage] {
-        (UserDefaults.standard.stringArray(forKey: turnFramesKey(userId)) ?? []).compactMap {
-            UIImage(contentsOfFile: documents.appendingPathComponent($0).path)
+        (UserDefaults.standard.stringArray(forKey: turnFramesKey(userId)) ?? []).compactMap { name in
+            turnFrameURL(name).flatMap { UIImage(contentsOfFile: $0.path) }
         }
+    }
+
+    /// A turn frame's file, moving a legacy `Documents/` copy into the selfie folder.
+    private static func turnFrameURL(_ name: String) -> URL? {
+        let fm = FileManager.default
+        let dst = LocalStore.selfieDirectory.appendingPathComponent(name)
+        if fm.fileExists(atPath: dst.path) { return dst }
+        let legacy = LocalStore.documents.appendingPathComponent(name)
+        guard fm.fileExists(atPath: legacy.path) else { return nil }
+        if (try? fm.moveItem(at: legacy, to: dst)) != nil {
+            try? fm.setAttributes([.protectionKey: LocalStore.fileProtection], ofItemAtPath: dst.path)
+            return dst
+        }
+        return legacy
     }
 
     // MARK: Identity (call on IdentityWorker)
@@ -115,12 +123,12 @@ enum SelfieReferenceStore {
     static func rebuildIdentity(forUser userId: String) -> Int {
         FaceMatchingService.shared.clearReference(forUser: userId)
         guard FaceMatchingService.shared.loadReference(forUser: userId) else {
-            print("[Identity] Rebuild: no usable face in the front selfie")
+            dlog("[Identity] Rebuild: no usable face in the front selfie")
             return 0
         }
         let turns = turnFrames(userId: userId).flatMap { embeddingsBothWays($0) }
         let added = FaceMatchingService.shared.addReferenceEmbeddings(turns, forUser: userId)
-        print("[Identity] Rebuilt identity: \(added) turn embeddings added, gallery \(FaceMatchingService.shared.referenceCount)")
+        dlog("[Identity] Rebuilt identity: \(added) turn embeddings added, gallery \(FaceMatchingService.shared.referenceCount)")
         return FaceMatchingService.shared.referenceCount
     }
 
@@ -136,7 +144,7 @@ enum SelfieReferenceStore {
         if hasGallery, !turns.isEmpty, FaceMatchingService.shared.referenceCount <= 2 {
             FaceMatchingService.shared.addReferenceEmbeddings(turns, forUser: userId)
         }
-        print("[Identity] Anchors ready: \(anchors.count) (gallery \(FaceMatchingService.shared.referenceCount))")
+        dlog("[Identity] Anchors ready: \(anchors.count) (gallery \(FaceMatchingService.shared.referenceCount))")
         return anchors
     }
 
@@ -191,7 +199,7 @@ enum SelfieFrameChecker {
         if let f = frontEmbedding, let e = embedding { m.similarityToFront = FaceMath.dot(f, e) }
         var issue = SelfieFrameAssessor.issue(for: m, step: step)
         if issue == nil, embedding == nil { issue = .unclear }
-        print("[Identity] Selfie frame \(step.label): faces=\(m.faceCount) w=\(String(format: "%.2f", m.faceWidthFraction)) det=\(String(format: "%.2f", m.detectorScore)) luma=\(Int(m.faceLuma)) yaw=\(String(format: "%.2f", m.yaw)) simFront=\(m.similarityToFront.map { String(format: "%.2f", $0) } ?? "-") -> \(issue.map { "\($0)" } ?? "ok")")
+        dlog("[Identity] Selfie frame \(step.label): faces=\(m.faceCount) w=\(String(format: "%.2f", m.faceWidthFraction)) det=\(String(format: "%.2f", m.detectorScore)) luma=\(Int(m.faceLuma)) yaw=\(String(format: "%.2f", m.yaw)) simFront=\(m.similarityToFront.map { String(format: "%.2f", $0) } ?? "-") -> \(issue.map { "\($0)" } ?? "ok")")
         return SelfieFrameResult(issue: issue, embedding: embedding, yaw: m.yaw)
     }
 }
