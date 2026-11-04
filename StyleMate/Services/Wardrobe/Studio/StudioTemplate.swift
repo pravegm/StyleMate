@@ -8,7 +8,7 @@ import Foundation
 /// no stack, no props) and the colour/texture, while the model redraws the
 /// seams, collar and folds at ~0.65 strength.
 enum StudioTemplate {
-    enum Shape: String { case tee, shirt, jacket, coat, tunic, dress, tank }
+    enum Shape: String { case tee, shirt, jacket, coat, tunic, dress, tank, trousers, slimTrousers }
 
     /// The silhouette for an item, or nil when there's none that fits (bottoms,
     /// shoes, accessories are refined from their cutout instead).
@@ -28,6 +28,11 @@ enum StudioTemplate {
             if sleeve == .shortSleeve || sleeve == .capSleeve { return .tee }
             if ["t-shirt", "tee", "polo", "crop"].contains(where: { p.contains($0) }) && sleeve == nil { return .tee }
             return .shirt
+        case .lower:
+            // Only cut-off bottoms get here (whole ones are refined from their
+            // cutout, which keeps rips and fit).
+            if ["skirt", "short", "skort", "dhoti", "lehenga", "sharara", "culotte"].contains(where: { p.contains($0) }) { return nil }
+            return p.contains("legging") || p.contains("yoga") ? .slimTrousers : .trousers
         default:
             return nil
         }
@@ -46,6 +51,10 @@ enum StudioTemplate {
                             (0.72, 0.42), (0.75, 0.95), (0.25, 0.95), (0.28, 0.42), (0.16, 0.75), (0.08, 0.72), (0.17, 0.35), (0.30, 0.10)]
         case .dress: return [(0.42, 0.08), (0.50, 0.13), (0.58, 0.08), (0.64, 0.10), (0.66, 0.30), (0.62, 0.42), (0.78, 0.94),
                              (0.22, 0.94), (0.38, 0.42), (0.34, 0.30), (0.36, 0.10)]
+        case .trousers: return [(0.31, 0.06), (0.69, 0.06), (0.72, 0.30), (0.75, 0.95), (0.54, 0.95), (0.50, 0.36),
+                                (0.46, 0.95), (0.25, 0.95), (0.28, 0.30)]
+        case .slimTrousers: return [(0.36, 0.06), (0.64, 0.06), (0.66, 0.30), (0.62, 0.95), (0.52, 0.95), (0.50, 0.38),
+                                    (0.48, 0.95), (0.38, 0.95), (0.34, 0.30)]
         case .tank: return [(0.38, 0.12), (0.42, 0.12), (0.50, 0.24), (0.58, 0.12), (0.62, 0.12), (0.66, 0.30), (0.68, 0.88),
                             (0.32, 0.88), (0.34, 0.30)]
         }
