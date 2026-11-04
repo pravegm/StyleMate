@@ -19,46 +19,40 @@ final class StyleMateE2ETests: E2ETestCase {
         snap("home")
 
         openTab("Wardrobe")
-        let topsTile = button(id: "closet.category.Tops", label: "Tops")
-        XCTAssertTrue(topsTile.waitForExistence(timeout: 20), "Closet shows no Tops category: the seeded wardrobe is missing")
-        let count = anyElement(NSPredicate(format: "label CONTAINS %@", "\(seededItemCount) items"))
-        XCTAssertTrue(count.waitForExistence(timeout: 10), "Closet doesn't report the \(seededItemCount) seeded items")
+        let count = anyElement(NSPredicate(format: "label BEGINSWITH %@", "\(seededItemCount) items"))
+        XCTAssertTrue(count.waitForExistence(timeout: 20), "Closet doesn't report the \(seededItemCount) seeded items")
+        let anyTee = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'closet.item.' OR label ENDSWITH 'T-Shirt'")).firstMatch
+        XCTAssertTrue(anyTee.waitForExistence(timeout: 10), "Closet grid shows no seeded items")
         snap("closet-grid")
 
-        topsTile.tap()
-        XCTAssertTrue(app.navigationBars["Tops"].waitForExistence(timeout: 10) || text("Tops").exists,
-                      "Tops category didn't open")
-        snap("closet-category-tops")
-        // Product groups are alphabetical in a lazy grid: T-Shirts sits below the fold.
-        let tee = button(id: "closet.item.T-Shirts", label: "T-Shirts")
-        XCTAssertTrue(scrollUntilHittable(tee, maxSwipes: 6), "Tops category shows no T-Shirts")
-        snap("closet-category-tops-tshirts")
+        // Narrow to the Tops shelf with its filter chip ("Tops, 12 items").
+        let topsChip = app.buttons.matching(NSPredicate(format:
+            "identifier == 'closet.filter.tops' OR label BEGINSWITH 'Tops,'")).firstMatch
+        XCTAssertTrue(topsChip.waitForExistence(timeout: 10), "No Tops filter chip in the closet")
+        topsChip.tap()
+        XCTAssertTrue(anyElement(NSPredicate(format: "label BEGINSWITH 'Showing'")).waitForExistence(timeout: 5),
+                      "Tops filter didn't apply")
+        snap("closet-filtered-tops")
 
+        let tee = app.buttons.matching(NSPredicate(format: "label ENDSWITH 'T-Shirt'")).firstMatch
+        XCTAssertTrue(scrollUntilHittable(tee, maxSwipes: 4), "Tops shelf shows no T-shirt")
         tee.tap()
-        let detailMarker = waitForAny([
-            app.descendants(matching: .any)["itemDetail.root"],
-            button(label: "Replace Photo"),
-            text("COLORS"),
-        ], timeout: 15)
-        XCTAssertNotNil(detailMarker, "Item detail didn't open")
+        let editDetails = button(id: "itemDetail.edit", label: "Edit details")
+        XCTAssertTrue(editDetails.waitForExistence(timeout: 15), "Item detail didn't open")
         XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS[c] 'T-Shirt'")).exists,
                       "Item detail doesn't describe the tapped T-shirt")
         snap("item-detail")
+        app.swipeUp()
+        snap("item-detail-scrolled")
 
-        // Back out of the detail sheet, then back to the closet grid.
-        dragSheetDown()
-        if !waitToDisappear(button(label: "Replace Photo"), timeout: 5) {
-            dragSheetDown(fromY: 0.2)
-            XCTAssertTrue(waitToDisappear(button(label: "Replace Photo"), timeout: 5), "Item detail sheet didn't close")
-        }
-        snap("category-after-detail")
-
-        let back = app.navigationBars.buttons.element(boundBy: 0)
-        XCTAssertTrue(back.waitForExistence(timeout: 5), "No back button on the category screen")
+        // Back to the closet.
+        let backByID = app.navigationBars.buttons["BackButton"]
+        let back = backByID.exists ? backByID : app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "No back button on the item page")
         back.tap()
-        XCTAssertTrue(button(id: "closet.category.Tops", label: "Tops").waitForExistence(timeout: 10),
-                      "Didn't return to the closet grid")
-        snap("closet-grid-after-back")
+        XCTAssertTrue(waitToDisappear(editDetails, timeout: 10), "Item page didn't close")
+        XCTAssertTrue(topsChip.waitForExistence(timeout: 10), "Didn't return to the closet grid")
+        snap("closet-after-back")
     }
 
     // MARK: - 2 + 3. Today's outfit -> swap -> keep -> calendar
@@ -198,7 +192,7 @@ final class StyleMateE2ETests: E2ETestCase {
     func test04_ImportGalleryPhotoExtractsItems() throws {
         launchToHome()
         openTab("Wardrobe")
-        let fab = app.buttons.matching(NSPredicate(format: "identifier == 'closet.add' OR label == 'Add'")).firstMatch
+        let fab = app.buttons.matching(NSPredicate(format: "identifier == 'closet.add' OR label == 'Add clothes' OR label == 'Add'")).firstMatch
         XCTAssertTrue(fab.waitForExistence(timeout: 15), "No add (+) button in the closet")
         fab.tap()
 
@@ -244,14 +238,15 @@ final class StyleMateE2ETests: E2ETestCase {
         XCTAssertTrue(reviewTitle.waitForExistence(timeout: 60), "Review screen never appeared")
         snap("review-analyzing")
 
-        let detected = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ items? detected")).firstMatch
-        let noneDetected = text("No items detected")
-        let result = waitForAny([detected, noneDetected], timeout: 420)
+        // Per-photo status reads "Photo 1, 3 items found" (older UI: "3 items detected").
+        let found = anyElement(NSPredicate(format: "label MATCHES %@",
+                                           "(.*, )?[1-9][0-9]* items? (found|detected)"))
+        let noneFound = anyElement(NSPredicate(format: "label CONTAINS 'No clothes found' OR label == 'No items detected'"))
+        let result = waitForAny([found, noneFound], timeout: 420)
         snap("review-extracted-items")
         XCTAssertEqual(result, 0, "On-device extraction found no garments in the fixture photo")
         guard result == 0 else { return }
-        let found = Int(detected.label.split(separator: " ").first ?? "") ?? 0
-        XCTAssertGreaterThan(found, 0)
+        note("review-status", found.label)
         app.swipeUp()
         snap("review-extracted-items-scrolled")
 
@@ -259,7 +254,8 @@ final class StyleMateE2ETests: E2ETestCase {
         XCTAssertTrue(addToWardrobe.waitForExistence(timeout: 5), "No 'Add N Items to Wardrobe' button")
         addToWardrobe.tap()
         XCTAssertTrue(waitToDisappear(reviewTitle, timeout: 30), "Review screen didn't close after adding")
-        let newCount = anyElement(NSPredicate(format: "label MATCHES %@", "[0-9]+ items"))
+        // Closet summary: "29 items · 5 shelves".
+        let newCount = anyElement(NSPredicate(format: "label MATCHES %@", "[0-9]+ items?( · .*)?"))
         if newCount.waitForExistence(timeout: 10) {
             let n = Int(newCount.label.split(separator: " ").first ?? "") ?? 0
             XCTAssertGreaterThan(n, seededItemCount, "Closet count didn't grow after adding extracted items")
@@ -295,7 +291,11 @@ final class StyleMateE2ETests: E2ETestCase {
         tapScrollingIfNeeded(categoryRow)
         let productRow = app.staticTexts[product]
         tapScrollingIfNeeded(productRow)
-        let item = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ AND label != %@", itemSuffix, product)).firstMatch
+        // Item rows: a select button labelled with the item's name (newer UI) or the name as text.
+        let byButton = app.buttons.matching(NSPredicate(format:
+            "label ENDSWITH %@ AND NOT (label BEGINSWITH 'Preview')", itemSuffix)).firstMatch
+        let item = byButton.waitForExistence(timeout: 5) ? byButton
+            : app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ AND label != %@", itemSuffix, product)).firstMatch
         tapScrollingIfNeeded(item)
         // Collapse again so the next category sits near the top and clear of the bottom bar.
         if categoryRow.isHittable { categoryRow.tap() }

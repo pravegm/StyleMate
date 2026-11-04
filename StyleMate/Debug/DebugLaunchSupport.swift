@@ -102,7 +102,6 @@ enum DebugLaunchSupport {
         d.set(true, forKey: "tour_home_\(userId)")                   // TutorialManager
         d.set(true, forKey: "tour_generation_\(userId)")
         d.set(true, forKey: "hasSeenSwipeHint")                      // TodayOutfitSheet wiggle
-        GeminiConsent.grant(userId: userId)
         // The seeded cutouts are already final; keep the legacy image migrations off them.
         d.set(true, forKey: "bgRemovalMigrationComplete_\(userId)")
         d.set(true, forKey: "thumbnailMigrationComplete_\(userId)")
