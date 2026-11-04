@@ -144,3 +144,137 @@ jobs:
             test.log
             ${{ runner.temp }}/report
           if-no-files-found: ignore
+
+  # End-to-end UI tests (StyleMateUITests): drive the real app in the simulator with the DEBUG
+  # launch hooks (demo user, skipped onboarding, seeded wardrobe) and export every step's
+  # screenshot from the .xcresult into the `e2e-screens` artifact. Independent of `test`.
+  ui-tests:
+    needs: models
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore face models
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            MobileFaceNet.mlpackage
+            SCRFD10G.mlpackage
+          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          fail-on-cache-miss: true
+      - name: Restore wardrobe models
+        uses: actions/cache/restore@v4
+        with:
+          path: StyleMate/ML
+          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          fail-on-cache-miss: true
+
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - name: Write Secrets.swift
+        run: |
+          cat > StyleMate/Secrets.swift <<'SWIFT'
+          enum Secrets {
+              static let geminiAPIKey = ""
+          }
+          SWIFT
+
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=[(rt,x) for rt,xs in d.items() if "iOS" in rt for x in xs if x["name"].startswith("iPhone") and "Pro" in x["name"]]
+          c.sort(key=lambda t:t[0])
+          print(c[-1][1]["udid"])')
+          echo "SIM=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "$UDID"
+          xcrun simctl boot "$UDID" || true
+
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee ui-build.log | grep -E "error:|warning: .*StyleMateUITests/|warning: .*StyleMate/Debug/|\*\* TEST BUILD" || true
+          grep -q "\*\* TEST BUILD SUCCEEDED \*\*" ui-build.log
+
+      - name: Prepare the simulator (app, permissions, location, photo library)
+        run: |
+          xcrun simctl bootstatus "$SIM" -b
+          APP=$(ls -d "$RUNNER_TEMP"/dd/Build/Products/Debug-iphonesimulator/StyleMate.app)
+          xcrun simctl install "$SIM" "$APP"
+          BUNDLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
+          echo "Bundle id: $BUNDLE"
+          xcrun simctl privacy "$SIM" grant location "$BUNDLE" || true
+          xcrun simctl privacy "$SIM" grant photos "$BUNDLE" || true
+          xcrun simctl location "$SIM" set 51.5072,-0.1276 || true
+          xcrun simctl addmedia "$SIM" StyleMateUITests/Fixtures/street_coat_boots.jpg
+
+      - name: UI tests
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            -only-testing:StyleMateUITests \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/ui.xcresult" \
+            2>&1 | tee ui-test.log | grep -E "✔|✘|Test .*(passed|failed|skipped)|error:|\[UITest\]|\*\* TEST" || true
+          grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" ui-test.log
+
+      - name: Export screenshots
+        if: always()
+        run: |
+          OUT="$RUNNER_TEMP/e2e-screens"
+          RAW="$RUNNER_TEMP/attachments-raw"
+          mkdir -p "$OUT" "$RAW"
+          [ -d "$RUNNER_TEMP/ui.xcresult" ] || { echo "No result bundle"; exit 0; }
+          xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui.xcresult" --output-path "$RAW" || true
+          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/ui.xcresult" > "$OUT/test-summary.json" || true
+          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/ui.xcresult" > "$OUT/test-results.json" || true
+          # Name files after the attachment names the tests give them ("test02_...-03-option-1-of-5").
+          python3 - "$RAW" "$OUT" <<'PY'
+          import json, os, re, shutil, sys
+          raw, out = sys.argv[1], sys.argv[2]
+          manifest = os.path.join(raw, "manifest.json")
+          entries = json.load(open(manifest)) if os.path.exists(manifest) else []
+          seen = 0
+          for test in entries:
+              for a in test.get("attachments", []):
+                  src = os.path.join(raw, a.get("exportedFileName", ""))
+                  if not os.path.isfile(src):
+                      continue
+                  name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  stem, ext = os.path.splitext(name)
+                  stem = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", stem)        # drop xcresult's _0_<UUID>
+                  stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-")
+                  dst = os.path.join(out, stem + (ext or os.path.splitext(src)[1]))
+                  if os.path.exists(dst):
+                      dst = os.path.join(out, f"{stem}-{seen}{ext}")
+                  shutil.copy(src, dst)
+                  seen += 1
+          if not entries:                                                       # unknown layout: copy as-is
+              for f in os.listdir(raw):
+                  shutil.copy(os.path.join(raw, f), out)
+          print(f"Exported {seen} attachments")
+          PY
+          cp ui-build.log ui-test.log "$OUT"/ 2>/dev/null || true
+          ls -la "$OUT"
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screens
+          path: ${{ runner.temp }}/e2e-screens
+          if-no-files-found: ignore
