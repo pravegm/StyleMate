@@ -2,24 +2,20 @@ name: CI
 
 # Builds StyleMate on GitHub's Apple-silicon macOS runner and runs the test suite on an iOS simulator.
 #
-# The two on-device face models are git-ignored (large, licence-restricted weights), so the first job
-# regenerates them from the public checkpoints with scripts/build_face_models.sh and keeps them in the
-# Actions cache (never in a public artifact or release). Later runs restore them in seconds.
+# The on-device models (face detector + embedder, garment parser/labeler, fashion encoder) are
+# git-ignored (large, licence-restricted weights), so the first job regenerates them from the public
+# checkpoints (scripts/build_face_models.sh, scripts/build_wardrobe_models.sh) and keeps them in the
+# Actions cache (never in a public artifact or release). Later runs restore them in seconds; feature
+# branches restore main's cache.
 #
-# Optional repository secret:
-#   GEMINI_API_KEY: enables the live Gemini tests (garment detection / product-shot rendering).
-#   Without it those tests are skipped and the rest still run.
+# Runs on every branch push, so parallel feature branches each get their own build + test signal.
+# The `ci-report` artifact holds build/test logs and the extraction test's cutouts.
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
   workflow_dispatch:
-    inputs:
-      live_gemini:
-        description: "Also run the live Gemini pipeline tests (needs GEMINI_API_KEY)"
-        type: boolean
-        default: true
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -65,8 +61,6 @@ jobs:
     needs: models
     runs-on: xcode-27
     timeout-minutes: 75
-    env:
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: Restore face models
@@ -125,13 +119,9 @@ jobs:
           grep -q "\*\* TEST BUILD SUCCEEDED \*\*" build.log
 
       - name: Unit tests
-        env:
-          LIVE_GEMINI: ${{ github.event_name != 'workflow_dispatch' && 'false' || inputs.live_gemini }}
         run: |
           set -o pipefail
-          # Pass the key + fixtures path into the test process (TEST_RUNNER_ prefix is stripped by xcodebuild).
-          export TEST_RUNNER_GEMINI_API_KEY="$GEMINI_API_KEY"
-          export TEST_RUNNER_LIVE_GEMINI="$LIVE_GEMINI"
+          # Pass the fixtures + report paths into the test process (xcodebuild strips the TEST_RUNNER_ prefix).
           export TEST_RUNNER_FIXTURES_DIR="$GITHUB_WORKSPACE/StyleMateTests/Fixtures"
           export TEST_RUNNER_REPORT_DIR="$RUNNER_TEMP/report"
           mkdir -p "$RUNNER_TEMP/report"
