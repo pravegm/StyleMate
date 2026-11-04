@@ -1,4 +1,4 @@
-# StyleMate launch readiness (audit of `main` @ f843e59, 2026-11-04)
+# StyleMate launch readiness (audit of `main` @ f843e59 + build fix 4d043c6, 2026-11-04)
 
 This audit was checked against the code, not the README. The README still describes the
 Gemini pipeline and is stale; its owner should sweep it.
@@ -86,7 +86,10 @@ Current `StyleMate/Info.plist`, plus `INFOPLIST_KEY_*` build settings in `projec
      > StyleMate uses your approximate location to get today's weather, so outfit ideas suit it.
    - **Remove `NSLocationAlwaysAndWhenInUseUsageDescription`.** `LocationService` only calls `requestWhenInUseAuthorization`.
    - Add **`NSLocationDefaultAccuracyReduced = YES`**: city-level is enough for weather.
-   - Round the coordinates sent to met.no and Open-Meteo to 2 decimals. `WeatherService` sends full precision today, and met.no's terms ask for at most 4 decimals.
+   - Round the coordinates sent to met.no and Open-Meteo to 2 decimals (owner: `WeatherService`). This is also a **bug**:
+     - `WeatherService` interpolates the raw `Double`, which is usually 10 or more decimals.
+     - met.no's Terms of Service (https://docs.api.met.no/doc/TermsOfService) say "truncated to a maximum of four decimal places". For new products, five or more decimals get **403 Forbidden**.
+     - So the primary weather provider probably always fails, and every request falls back to Open-Meteo.
 5. **Remove `UIBackgroundModes` → `remote-notification`**, and `aps-environment` from `StyleMate.entitlements`. Nothing uses push.
 6. **Add `ITSAppUsesNonExemptEncryption = NO`.** The app uses only Apple's HTTPS, which skips the export-compliance question on every build.
 7. **Device family and orientation:**
@@ -180,6 +183,7 @@ Cheap mitigations:
 | Long scans of big libraries (detector + embedder per face, parser + labeler + encoder per kept photo) | `PhotoScanService` | Already checkpointed and thermal-aware (lines 316–320). Add an honest ETA. There is no `BGProcessingTask`, so scans stop when the app is backgrounded. Say so in the UI, or add `BGContinuedProcessingTask` (iOS 26+) later. |
 | iCloud original downloads on cellular (`isNetworkAccessAllowed = true` at `PhotoScanService:592,636`, `FaceReferenceViewModel:76`) | iCloud Photos "Optimize Storage" users | Respect Low Data Mode (`NWPathMonitor` `isConstrained` / `isExpensive`). Offer a "Download iCloud photos on cellular" toggle. Otherwise a 1-year scan can burn gigabytes. |
 | Battery and thermals | Long scans | Keep the existing thermal backoff. Pause when Low Power Mode is on. |
+| Apple Foundation Models (`GarmentDescriber`) are available only on Apple Intelligence devices running iOS 27 | `#if canImport(FoundationModels)` + `@available(iOS 27.0, *)` guard it, so it compiles and runs on 18.4 | Make sure every feature degrades gracefully when `SystemLanguageModel.default` is unavailable: older device, Apple Intelligence off, model still downloading. It is on-device, so there is no privacy-label impact. |
 | Simulator ≠ device | CI runs on a simulator only | ANE and GPU numerics differ. Run a TestFlight build on a real device before submitting. |
 
 ## 6. Founder actions (only the founder can do these)
