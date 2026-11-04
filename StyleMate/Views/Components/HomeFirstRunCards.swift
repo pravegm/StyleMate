@@ -28,6 +28,14 @@ struct HomeFirstRunCards: View {
     private var sampleCount: Int { SampleLibrary.sampleCount(in: wardrobe.items, userId: userId) }
     private var loggedDays: Set<Date> { Set(outfits.outfitsByDate.filter { !$0.value.isEmpty }.keys) }
     private var hasLoggedOutfit: Bool { !loggedDays.isEmpty }
+    /// Empty closet and nothing running (also when the scan couldn't start, e.g. no selfie).
+    private var showSampleOffer: Bool {
+        guard wardrobe.items.isEmpty, !scan.isWorking, SampleLibrary.isAvailable else { return false }
+        switch scan.scanState {
+        case .idle, .error: return true
+        case .scanning, .completed: return false
+        }
+    }
 
     var body: some View {
         VStack(spacing: DS.Spacing.sm) {
@@ -36,7 +44,7 @@ struct HomeFirstRunCards: View {
                     Haptics.medium()
                     withAnimation(DS.Motion.smooth) { SampleLibrary.removeSamples(from: wardrobe, userId: userId) }
                 }
-            } else if wardrobe.items.isEmpty, scan.scanState == .idle, !scan.isWorking, SampleLibrary.isAvailable {
+            } else if showSampleOffer {
                 EmptyClosetSampleCard {
                     Haptics.medium()
                     SampleLibrary.start(userId: userId, wardrobe: wardrobe)
@@ -93,7 +101,7 @@ struct HomeFirstRunCards: View {
     private var hasAnyCard: Bool {
         sampleCount > 0 || !held.items.isEmpty || wearLog.next(loggedDays: loggedDays) != nil
             || (hasLoggedOutfit && morning.shouldOffer)
-            || (wardrobe.items.isEmpty && scan.scanState == .idle && !scan.isWorking && SampleLibrary.isAvailable)
+            || showSampleOffer
     }
 }
 
