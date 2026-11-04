@@ -30,7 +30,7 @@ struct FaceMatchingTests {
         return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
             UIImage(cgImage: crop).draw(in: CGRect(origin: .zero, size: size))
             UIColor.black.withAlphaComponent(0.12).setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
+            ctx.fill(CGRect(origin: .zero, size: size), blendMode: .normal)   // plain fill() replaces the image
         }.cgImage
     }
 
@@ -83,7 +83,7 @@ struct FaceMatchingTests {
                 UIImage(cgImage: src).draw(in: CGRect(origin: .zero, size: size))
                 if darken {
                     UIColor.black.withAlphaComponent(0.12).setFill()
-                    ctx.fill(CGRect(origin: .zero, size: size))
+                    ctx.fill(CGRect(origin: .zero, size: size), blendMode: .normal)   // plain fill() replaces the image
                 }
             }.cgImage
         }
