@@ -181,6 +181,23 @@ class E2ETestCase: XCTestCase {
         element.tap()
     }
 
+    /// Swipes up until `element` exists and is hittable (lazy grids only materialize what's on screen).
+    @MainActor
+    @discardableResult
+    func scrollUntilHittable(_ element: XCUIElement, maxSwipes: Int) -> Bool {
+        // "Clear" = hittable and its centre above the floating tab bar.
+        func clear() -> Bool {
+            element.exists && element.isHittable && element.frame.midY < app.frame.height * 0.78
+        }
+        _ = element.waitForExistence(timeout: 3)
+        if clear() { return true }
+        for _ in 0..<maxSwipes {
+            app.swipeUp(velocity: .slow)
+            if clear() { return true }
+        }
+        return clear()
+    }
+
     /// Drags a sheet down from `fromY` (normalized screen height) to dismiss it.
     @MainActor
     func dragSheetDown(fromY: CGFloat = 0.52) {

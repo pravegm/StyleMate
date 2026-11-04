@@ -26,9 +26,13 @@ final class StyleMateE2ETests: E2ETestCase {
         snap("closet-grid")
 
         topsTile.tap()
-        let tee = button(id: "closet.item.T-Shirts", label: "T-Shirts")
-        XCTAssertTrue(tee.waitForExistence(timeout: 15), "Tops category shows no T-Shirts")
+        XCTAssertTrue(app.navigationBars["Tops"].waitForExistence(timeout: 10) || text("Tops").exists,
+                      "Tops category didn't open")
         snap("closet-category-tops")
+        // Product groups are alphabetical in a lazy grid: T-Shirts sits below the fold.
+        let tee = button(id: "closet.item.T-Shirts", label: "T-Shirts")
+        XCTAssertTrue(scrollUntilHittable(tee, maxSwipes: 6), "Tops category shows no T-Shirts")
+        snap("closet-category-tops-tshirts")
 
         tee.tap()
         let detailMarker = waitForAny([
@@ -215,12 +219,20 @@ final class StyleMateE2ETests: E2ETestCase {
              photos.allElementsBoundByIndex.map(\.label).joined(separator: "\n"))
         photo.tap()
 
-        let addButtons = app.buttons.matching(NSPredicate(format: "label == 'Add' OR label == 'Done'"))
-        let pickerAdd = addButtons.allElementsBoundByIndex
-            .filter { $0.isHittable }
-            .min { $0.frame.minY < $1.frame.minY }
-        XCTAssertNotNil(pickerAdd, "Photo picker has no Add button")
-        pickerAdd?.tap()
+        // The picker's confirm button (a checkmark: identifier 'Add', label 'Done') sits top-right;
+        // the closet's own (+) is also labelled 'Add' but lies under the sheet, lower down.
+        let confirmButtons = app.buttons.matching(NSPredicate(format:
+            "identifier == 'Add' OR label == 'Add' OR label == 'Done'"))
+        let pickerAdd = confirmButtons.allElementsBoundByIndex.min { $0.frame.minY < $1.frame.minY }
+        guard let pickerAdd else {
+            XCTFail("Photo picker has no confirm (Add/Done) button")
+            return
+        }
+        if pickerAdd.isHittable {
+            pickerAdd.tap()
+        } else {
+            pickerAdd.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
 
         // Identity resolution -> (optional "which one is you?") -> on-device analysis.
         let reviewTitle = anyElement(NSPredicate(format: "label == 'Review Items'"))
@@ -300,20 +312,28 @@ final class StyleMateE2ETests: E2ETestCase {
                       "Today's outfit card isn't marked '\(expectedSourceLabel)'", file: file, line: line)
     }
 
-    /// The newest photo in the picker, by the date in its accessibility label ("Photo, March 3, 2024, 4:17 PM").
+    /// The newest photo in the picker, by the date in its accessibility label
+    /// ("Photo, March 30, 2018, 7:14 PM"; this year's photos omit the year: "Photo, November 04, 1:52 PM").
     @MainActor
     private func newestPhoto(in photos: XCUIElementQuery) -> XCUIElement {
         let all = photos.allElementsBoundByIndex
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        let formats = ["MMMM d, yyyy, h:mm a", "MMM d, yyyy, h:mm a", "MMMM d, yyyy 'at' h:mm a", "d MMMM yyyy, HH:mm"]
+        let thisYear = Calendar.current.component(.year, from: Date())
+        let withYear = ["MMMM d, yyyy, h:mm a", "MMM d, yyyy, h:mm a", "MMMM d, yyyy 'at' h:mm a", "d MMMM yyyy, HH:mm"]
+        let withoutYear = ["MMMM d, h:mm a", "MMM d, h:mm a", "MMMM d 'at' h:mm a", "d MMMM, HH:mm"]
         func date(of element: XCUIElement) -> Date? {
             let label = element.label
                 .replacingOccurrences(of: "\u{202F}", with: " ")
                 .replacingOccurrences(of: "Photo, ", with: "")
-            for format in formats {
+            if label.hasPrefix("Today") { return Date() }
+            for format in withYear {
                 formatter.dateFormat = format
                 if let d = formatter.date(from: label) { return d }
+            }
+            for format in withoutYear {
+                formatter.dateFormat = "yyyy " + format
+                if let d = formatter.date(from: "\(thisYear) " + label) { return d }
             }
             return nil
         }
