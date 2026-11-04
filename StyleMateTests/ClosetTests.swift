@@ -5,7 +5,7 @@ import Testing
 /// Pure closet logic: shelf mapping, filters, search, sorting, wear stats, chips.
 struct ClosetTests {
 
-    private func item(_ category: Category, _ product: String, colors: [String] = ["Black"],
+    private func item(_ category: StyleMate.Category, _ product: String, colors: [String] = ["Black"],
                       pattern: Pattern = .solid, brand: String = "", material: String? = nil,
                       details: String? = nil, sleeve: SleeveLength? = nil,
                       neckline: Neckline? = nil) -> WardrobeItem {

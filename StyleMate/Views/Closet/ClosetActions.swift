@@ -3,8 +3,7 @@ import UIKit
 
 /// Wardrobe mutations the closet screens perform, in one place so every entry
 /// point (grid context menu, bulk select, detail page, category page) cleans up
-/// the same way.
-@MainActor
+/// the same way. Call on the main thread (they mutate the published items).
 enum ClosetActions {
 
     /// Removes items for good: their image files, their visual embedding (used by
