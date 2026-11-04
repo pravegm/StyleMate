@@ -22,6 +22,9 @@ struct StyleMateApp: App {
         BackgroundScanCoordinator.shared.configure(auth: auth, wardrobe: wardrobe)
         // Morning outfit notification: refresh task + the tap router (a tap can cold-launch the app).
         MorningLookScheduler.shared.configure(auth: auth, wardrobe: wardrobe)
+        #if DEBUG
+        DebugOrientation.startIfRequested()   // `-uiTestOrientation portrait` (Duo CI seated pass)
+        #endif
     }
 
     var body: some Scene {
@@ -32,6 +35,8 @@ struct StyleMateApp: App {
                 .environmentObject(onboardingManager)
                 .environmentObject(tutorialManager)
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                // iPhone Duo / large displays: \.duoLayout (posture, fold, wide layout). Views/Components/DuoLayout.swift
+                .duoLayoutReader()
         }
     }
 }
