@@ -86,7 +86,7 @@ private struct ProfileTab: View {
                 ProfileSummaryPanel()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         } else {
             ProfileView()
         }
@@ -149,7 +149,8 @@ private struct ProfileSummaryPanel: View {
             .padding(.trailing, DS.Spacing.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+        // Same canvas as the settings list beside it.
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
     }
 
     private func stat(_ value: String, _ label: String, _ icon: String) -> some View {

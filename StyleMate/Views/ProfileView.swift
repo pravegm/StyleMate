@@ -110,17 +110,22 @@ struct ProfileView: View {
                             .padding(.top, DS.Spacing.xs)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, DS.Spacing.sm)
+                        .padding(.bottom, DS.Spacing.sm)
                         .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 0, leading: DS.Spacing.md, bottom: 0, trailing: DS.Spacing.md))
                     }
+                    .listSectionSpacing(.compact)
 
                     Section("Personal Information") {
                         // Fields are seeded once (see .onAppear below) and saved on a
                         // debounce. Do NOT write authService.user per keystroke or
                         // re-seed via per-field .onAppear — that re-rendered the Form
                         // mid-edit and reverted the text, hanging the screen.
-                        TextField("Name", text: $editName)
-                            .onChange(of: editName) { _ in scheduleProfileSave() }
+                        LabeledContent("Name") {
+                            TextField("Name", text: $editName)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        .onChange(of: editName) { _ in scheduleProfileSave() }
 
                         Picker("Gender", selection: $editGender) {
                             ForEach(genderOptions, id: \.self) { option in
@@ -130,8 +135,11 @@ struct ProfileView: View {
                         .pickerStyle(MenuPickerStyle())
                         .onChange(of: editGender) { _ in scheduleProfileSave() }
 
-                        TextField("Age", text: $editAge)
-                            .keyboardType(.numberPad)
+                        LabeledContent("Age") {
+                            TextField("Age", text: $editAge)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                        }
                             .onChange(of: editAge) { newAge in
                                 editAge = String(newAge.filter(\.isNumber).prefix(3))
                                 scheduleProfileSave()

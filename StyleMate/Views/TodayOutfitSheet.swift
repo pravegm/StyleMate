@@ -72,11 +72,13 @@ struct TodayOutfitSheet: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
+        // Our own header row instead of a navigation bar: on the Duo's cover
+        // display the system moves bar items into its trailing rail, which split
+        // the close button from the title.
+        VStack(spacing: 0) {
+            header
             GeometryReader { geo in
                 ZStack {
-                    DS.Colors.backgroundPrimary.ignoresSafeArea()
-
                     if homeVM.allOutfitsSeen {
                         endOfBatchView
                     } else if let look = currentOutfit {
@@ -90,18 +92,16 @@ struct TodayOutfitSheet: View {
                     overlays
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { toolbarContent }
-            // First-generation coach tour, hosted inside the stack (preferences
-            // don't cross the navigation container).
-            .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
-                GeometryReader { geo in
-                    if tutorialManager.activeTour == .generation {
-                        CoachMarkOverlay(tutorial: tutorialManager, tour: .generation, anchors: anchors, proxy: geo)
-                    }
+        }
+        .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+        // First-generation coach tour.
+        .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
+            GeometryReader { geo in
+                if tutorialManager.activeTour == .generation {
+                    CoachMarkOverlay(tutorial: tutorialManager, tour: .generation, anchors: anchors, proxy: geo)
                 }
-                .ignoresSafeArea()
             }
+            .ignoresSafeArea()
         }
         .sheet(item: $previewItem) { item in
             FullItemImageViewer(path: item.fullImagePath, fallbackPath: item.gridImagePath,
@@ -133,39 +133,54 @@ struct TodayOutfitSheet: View {
         }
     }
 
-    // MARK: - Toolbar
+    // MARK: - Header
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
+    private var header: some View {
+        HStack(spacing: DS.Spacing.xs) {
             Button {
                 isPresented = false
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(DS.Colors.accent)
+                    .frame(width: 44, height: 44)
+                    .dsGlassCapsule()
             }
+            .buttonStyle(DSTapBounce())
             .accessibilityLabel("Close")
             .accessibilityIdentifier("outfit.close")
-        }
-        ToolbarItem(placement: .principal) {
-            if homeVM.allOutfitsSeen || homeVM.outfitBatch.isEmpty {
-                Text("Today's outfit")
-                    .font(DS.Font.headline)
-                    .foregroundStyle(DS.Colors.textPrimary)
-            } else {
-                VStack(spacing: 5) {
-                    Text(counterText)
+
+            Spacer(minLength: 0)
+
+            Group {
+                if homeVM.allOutfitsSeen || homeVM.outfitBatch.isEmpty {
+                    Text("Today's outfit")
                         .font(DS.Font.headline)
                         .foregroundStyle(DS.Colors.textPrimary)
-                        .monospacedDigit()
-                    if homeVM.outfitBatch.count > 1 { progressDots }
+                        .accessibilityAddTraits(.isHeader)
+                } else {
+                    VStack(spacing: 5) {
+                        Text(counterText)
+                            .font(DS.Font.headline)
+                            .foregroundStyle(DS.Colors.textPrimary)
+                            .monospacedDigit()
+                        if homeVM.outfitBatch.count > 1 { progressDots }
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(counterText)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("outfit.counter")
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(counterText)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("outfit.counter")
             }
+
+            Spacer(minLength: 0)
+
+            // Balances the close button so the title stays centred.
+            Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
         }
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.top, DS.Spacing.xs)
+        .padding(.bottom, DS.Spacing.micro)
     }
 
     private var progressDots: some View {
@@ -211,14 +226,15 @@ struct TodayOutfitSheet: View {
             VStack(spacing: DS.Spacing.sm) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                        noteCard(look, lineLimit: nil)
+                        noteCard(look, lineLimit: 4)
                         piecesList(look)
                         if let gap = activeGap { gapCard(gap) }
                         if homeVM.outfitBatch.count > 1 { optionsStrip }
                     }
                     .padding(.bottom, DS.Spacing.sm)
                 }
-                .scrollIndicators(.hidden)
+                .scrollIndicators(.visible)
+                .scrollBounceBehavior(.basedOnSize)
                 // Pinned, so "Wear today" is never scrolled away or clipped.
                 stackedActionBar
             }
@@ -372,8 +388,8 @@ struct TodayOutfitSheet: View {
             Button {
                 previewItem = item
             } label: {
-                AsyncItemTile(path: item.gridImagePath, height: 44, cornerRadius: DS.Radius.chip, inset: 3)
-                    .frame(width: 44)
+                AsyncItemTile(path: item.gridImagePath, height: 40, cornerRadius: DS.Radius.chip, inset: 3)
+                    .frame(width: 40)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("View \(ClosetText.displayName(item)) larger")
@@ -397,7 +413,7 @@ struct TodayOutfitSheet: View {
             PieceActionButton(kind: .swap, item: item, disabled: homeVM.isLoading || kept) { swap(item) }
         }
         .padding(.horizontal, DS.Spacing.xs)
-        .padding(.vertical, 6)
+        .padding(.vertical, 2)
     }
 
     // MARK: - All options strip (wide)

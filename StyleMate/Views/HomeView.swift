@@ -183,7 +183,7 @@ struct HomeView: View {
             }
             .alert("Weather unavailable", isPresented: $showWeatherWarning) {
                 Button("Style anyway") {
-                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
+                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user, pinned: pinnedForStyleMe)
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -296,6 +296,15 @@ struct HomeView: View {
         return items.isEmpty ? nil : items
     }
 
+    /// "Style me" with the defaults asks for the same thing as Today's look, so the
+    /// deck opens on that exact look (a mood or a description makes a new request).
+    private var pinnedForStyleMe: Outfit? {
+        guard todaysLoggedItems == nil, homeVM.selectedMood == nil, !homeVM.isCustomDescriptionValid,
+              (homeVM.selectedOutfitType ?? .everyday) == .everyday,
+              let hero = homeVM.heroOutfit else { return nil }
+        return hero
+    }
+
     private var showsTodayLook: Bool {
         todaysLoggedItems != nil || homeVM.heroOutfit != nil || homeVM.isGeneratingHero
     }
@@ -365,14 +374,16 @@ struct HomeView: View {
                 Text(note)
                     .font(DS.Font.subheadline)
                     .foregroundStyle(DS.Colors.textSecondary)
-                    .lineLimit(2)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: DS.Spacing.sm) {
                 Button {
                     Haptics.medium()
-                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
+                    // The deck starts on exactly this look, then four more.
+                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user,
+                                              pinned: isLogged ? nil : homeVM.heroOutfit)
                 } label: {
                     Text("More options")
                 }
@@ -482,7 +493,7 @@ struct HomeView: View {
                 if homeVM.isWeatherLoading || homeVM.weather == nil || homeVM.weatherError != nil {
                     showWeatherWarning = true
                 } else {
-                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
+                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user, pinned: pinnedForStyleMe)
                 }
             }) {
                 Label("Style me", systemImage: "sparkles")

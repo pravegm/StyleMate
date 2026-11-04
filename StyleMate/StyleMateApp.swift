@@ -317,9 +317,10 @@ private struct AddSourceSheet: View {
                 }
             }
             .padding(.horizontal, DS.Spacing.lg)
-
-            Spacer()
+            .padding(.bottom, DS.Spacing.lg)
         }
+        // Top-aligned without a Spacer, so a fitted sheet is exactly its rows.
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(DS.Colors.backgroundPrimary)
         .onAppear {
             withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {

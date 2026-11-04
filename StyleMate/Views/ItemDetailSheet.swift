@@ -173,6 +173,7 @@ struct ItemDetailView: View {
             Text(ClosetText.displayName(item))
                 .font(DS.Font.title2)
                 .foregroundStyle(DS.Colors.textPrimary)
+                .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             Label(ClosetAttributes.wearSummary(wear), systemImage: "calendar")
