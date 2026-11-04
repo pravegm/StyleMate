@@ -23,6 +23,9 @@ enum WardrobeExtractor {
         /// Cut off by the photo's frame (the studio render then generates the
         /// whole garment instead of refining a partial one).
         var truncated: Bool = false
+        /// Where the item is in the photo, normalised 0...1 (top-left origin).
+        /// Used by the benchmark to match items to hand labels.
+        var box: CGRect = .zero
     }
 
     /// Items we never auto-add from a photo of a person (privacy + they're not
@@ -68,7 +71,8 @@ enum WardrobeExtractor {
                 continue
             }
             items.append(Item(kind: inst.kind, attributes: attrs, cutout: cut.image, quality: q,
-                              truncated: isTruncated(use.inst, crop: use.crop)))
+                              truncated: isTruncated(use.inst, crop: use.crop),
+                              box: photoBox(use.inst, crop: use.crop, photo: source)))
         }
         items = dedupeWithinPhoto(items)
         print("[Wardrobe] extracted \(items.count) items in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s: " +
@@ -185,6 +189,17 @@ enum WardrobeExtractor {
     }
 
     // MARK: - Quality
+
+    /// The instance's grid box in normalised photo coordinates.
+    private static func photoBox(_ inst: GarmentInstance, crop: Crop, photo: CGImage) -> CGRect {
+        let gw = CGFloat(WardrobeML.gridW), gh = CGFloat(WardrobeML.gridH)
+        let W = CGFloat(photo.width), H = CGFloat(photo.height)
+        let (x0, y0, x1, y1) = inst.box
+        func px(_ gx: Int) -> CGFloat { (crop.rect.minX + CGFloat(gx) / gw * crop.rect.width) / W }
+        func py(_ gy: Int) -> CGFloat { (crop.rect.minY + CGFloat(gy) / gh * crop.rect.height) / H }
+        let r = CGRect(x: px(x0), y: py(y0), width: px(x1) - px(x0), height: py(y1) - py(y0))
+        return r.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
 
     private static func isTruncated(_ inst: GarmentInstance, crop: Crop) -> Bool {
         let (x0, y0, x1, y1) = inst.box

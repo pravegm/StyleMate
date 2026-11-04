@@ -119,8 +119,8 @@ struct StudioPipelineTests {
             .appendingPathComponent("studio_pipeline")
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 
-        let photo = try #require(UIImage(data: try Data(contentsOf: dir.appendingPathComponent("casual_denim_jacket_hat.jpg"))))
-        let items = WardrobeExtractor.extract(from: photo)
+        _ = dir
+        let items = try FixtureExtraction.run("casual_denim_jacket_hat.jpg").items
         var rendered = 0
         for item in items where [.outerLayer, .lower].contains(item.kind) {
             let a = item.attributes

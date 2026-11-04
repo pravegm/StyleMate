@@ -1,0 +1,10 @@
+{
+  "fixture": "pink_coat_boots.jpg",
+  "items": [
+    {"id": "pink_coat", "kind": "outerLayer", "categories": ["Outerwear"], "products": ["Coats", "Overcoats", "Trench Coats"], "colors_primary": ["Pink"], "colors_all": ["Beige", "Coral", "Lavender", "Pink"], "pattern": ["Solid"], "core": true, "bbox": [0.422, 0.299, 0.722, 0.683], "sleeve": ["Long Sleeve"]},
+    {"id": "paisley_scarf", "kind": "neckwear", "categories": ["Accessories"], "products": ["Scarves"], "colors_primary": ["Gray", "Charcoal", "Brown", "Black"], "colors_all": ["Beige", "Black", "Brown", "Charcoal", "Gray", "Silver", "Tan"], "pattern": ["Paisley", "Floral", "Geometric"], "core": true, "bbox": [0.479, 0.288, 0.648, 0.522]},
+    {"id": "black_tights", "kind": "lower", "categories": ["Bottoms"], "products": ["Leggings"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.506, 0.62, 0.662, 0.862]},
+    {"id": "ankle_boots", "kind": "footwear", "categories": ["Footwear"], "products": ["Ankle Boots", "Boots", "Chelsea Boots"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.487, 0.846, 0.626, 0.959]},
+    {"id": "black_inner_top", "kind": "innerTop", "categories": ["Tops"], "products": ["T-Shirts", "Turtlenecks", "Sweaters", "Tank Tops"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": false, "bbox": [0.5, 0.36, 0.56, 0.47]}
+  ]
+}

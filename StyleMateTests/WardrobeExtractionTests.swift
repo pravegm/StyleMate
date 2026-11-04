@@ -58,10 +58,9 @@ struct WardrobeExtractionTests {
     @Test(arguments: cases.map { $0.0 })
     func extractsExpectedItems(_ fixture: String) async throws {
         try #require(WardrobeExtractor.isAvailable)
-        let photo = try load(fixture)
-        let start = Date()
-        let items = WardrobeExtractor.extract(from: photo)
-        let secs = Date().timeIntervalSince(start)
+        let run = try FixtureExtraction.run(fixture)
+        let items = run.items
+        let secs = run.seconds
 
         // Report: cutouts + summary.
         let stem = (fixture as NSString).deletingPathExtension
@@ -74,7 +73,9 @@ struct WardrobeExtractionTests {
                             "product": a.product, "colors": a.colors, "pattern": a.pattern.rawValue,
                             "material": a.material ?? "", "fit": a.fit?.rawValue ?? "",
                             "neckline": a.neckline?.rawValue ?? "", "sleeve": a.sleeveLength?.rawValue ?? "",
-                            "length": a.garmentLength?.rawValue ?? "", "quality": Double(item.quality)])
+                            "length": a.garmentLength?.rawValue ?? "", "quality": Double(item.quality),
+                            "truncated": item.truncated,
+                            "box": [item.box.minX, item.box.minY, item.box.maxX, item.box.maxY].map { Double($0) }])
         }
         let json = try JSONSerialization.data(withJSONObject: ["fixture": fixture, "seconds": secs, "items": summary],
                                               options: [.prettyPrinted, .sortedKeys])
@@ -98,7 +99,7 @@ struct WardrobeExtractionTests {
 
     @Test func coatPhotoNamesTheCoatAndSneakers() throws {
         try #require(WardrobeExtractor.isAvailable)
-        let items = WardrobeExtractor.extract(from: try load("street_coat_scarf.jpg"))
+        let items = try FixtureExtraction.run("street_coat_scarf.jpg").items
         let products = items.map { $0.attributes.product }
         #expect(products.contains { ["Coats", "Overcoats", "Trench Coats"].contains($0) }, "got \(products)")
         #expect(products.contains("Sneakers"), "got \(products)")

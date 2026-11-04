@@ -1,0 +1,8 @@
+{
+  "fixture": "kurta_dhoti_turban.jpg",
+  "items": [
+    {"id": "kurta", "kind": "innerTop", "categories": ["Ethnic Wear", "Tops"], "products": ["Kurta", "Kurti", "Tunics", "Shirts"], "colors_primary": ["White", "Cream"], "colors_all": ["Beige", "Cream", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.254, 0.281, 0.711, 0.667], "sleeve": ["Long Sleeve"]},
+    {"id": "dhoti", "kind": "lower", "categories": ["Ethnic Wear", "Bottoms"], "products": ["Dhoti", "Salwar", "Patiala Pants"], "colors_primary": ["White", "Cream"], "colors_all": ["Beige", "Cream", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.33, 0.647, 0.683, 0.957]},
+    {"id": "turban", "kind": "headwear", "categories": ["Accessories"], "products": ["Turbans"], "colors_primary": ["Yellow", "Gold", "Orange"], "colors_all": ["Gold", "Khaki", "Orange", "Yellow"], "pattern": ["Solid"], "core": true, "bbox": [0.4, 0.14, 0.61, 0.26]}
+  ]
+}

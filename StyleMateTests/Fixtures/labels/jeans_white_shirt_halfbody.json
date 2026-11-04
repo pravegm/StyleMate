@@ -1,0 +1,8 @@
+{
+  "fixture": "jeans_white_shirt_halfbody.jpg",
+  "items": [
+    {"id": "white_shirt", "kind": "innerTop", "categories": ["Tops"], "products": ["Shirts", "Button-Down Shirts", "Blouses"], "colors_primary": ["White"], "colors_all": ["Cream", "Silver", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.085, 0.0, 0.878, 0.222]},
+    {"id": "jeans", "kind": "lower", "categories": ["Bottoms"], "products": ["Jeans"], "colors_primary": ["Light Blue", "Blue"], "colors_all": ["Blue", "Light Blue"], "pattern": ["Solid"], "core": true, "bbox": [0.024, 0.141, 0.899, 1.0]},
+    {"id": "bracelet", "kind": "jewelry", "categories": ["Accessories"], "products": ["Bracelets", "Rings", "Watches"], "colors_primary": ["Gold", "Silver"], "colors_all": ["Gold", "Silver"], "pattern": null, "core": false, "bbox": [0.55, 0.3, 0.68, 0.4]}
+  ]
+}
