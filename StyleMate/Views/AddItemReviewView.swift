@@ -9,6 +9,7 @@ struct AddItemReviewView: View {
     @State private var isAnalyzing = true
     @State private var photoSections: [PhotoSection] = []
     @State private var expandedImage: UIImage? = nil
+    @State private var editingRef: ReviewRef? = nil
 
     struct PhotoSection: Identifiable {
         let id = UUID()
@@ -43,6 +44,13 @@ struct AddItemReviewView: View {
         var isDuplicate: Bool { duplicateMatch != nil }
     }
 
+    /// Which detected item the editor sheet is open for.
+    struct ReviewRef: Identifiable {
+        let sectionID: UUID
+        let itemID: UUID
+        var id: UUID { itemID }
+    }
+
     private var allReviewItems: [ReviewItem] {
         photoSections.flatMap(\.items)
     }
@@ -57,146 +65,40 @@ struct AddItemReviewView: View {
         && allReviewItems.isEmpty
     }
 
+    private let gridColumns = [GridItem(.adaptive(minimum: 150), spacing: DS.Spacing.sm, alignment: .top)]
+
     var body: some View {
         NavigationStack {
             ZStack {
                 DS.Colors.backgroundPrimary.ignoresSafeArea()
 
                 if allDoneNoItems {
-                    VStack(spacing: DS.Spacing.md) {
-                        Image(systemName: "eye.slash")
-                            .font(.system(size: 40))
-                            .foregroundColor(DS.Colors.textTertiary)
-                        Text("No items detected")
-                            .font(DS.Font.headline)
-                            .foregroundColor(DS.Colors.textPrimary)
-                        Text("Try again with clearer photos of your clothing.")
-                            .font(DS.Font.subheadline)
-                            .foregroundColor(DS.Colors.textSecondary)
-                            .multilineTextAlignment(.center)
-                    }
+                    DSEmptyState(
+                        icon: "eye.slash",
+                        title: "No clothes found",
+                        message: "Try a photo where your outfit is clearly visible, or a photo of the item on its own.",
+                        actionTitle: "Close",
+                        action: { isPresented = false }
+                    )
                     .padding(.horizontal, DS.Spacing.screenH)
                 } else {
-                    VStack(spacing: 0) {
-                        ScrollView {
-                            VStack(spacing: DS.Spacing.md) {
-                                if authService.user?.gender == nil || (authService.user?.gender ?? "").isEmpty {
-                                    HStack(spacing: DS.Spacing.sm) {
-                                        Image(systemName: "sparkles")
-                                            .foregroundColor(DS.Colors.accent)
-                                        VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                                            Text("Improve detection accuracy")
-                                                .font(DS.Font.subheadline)
-                                                .foregroundColor(DS.Colors.textPrimary)
-                                            Text("Add your gender in Profile for better results")
-                                                .font(DS.Font.caption1)
-                                                .foregroundColor(DS.Colors.textSecondary)
-                                        }
-                                        Spacer()
-                                    }
-                                    .padding(DS.Spacing.sm)
-                                    .background(DS.Colors.accent.opacity(0.08))
-                                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-                                }
-
-                                if !allReviewItems.isEmpty {
-                                    Text("\(selectedCount) of \(allReviewItems.count) items selected")
-                                        .font(DS.Font.subheadline)
-                                        .foregroundColor(DS.Colors.textSecondary)
-                                        .padding(.top, DS.Spacing.sm)
-                                }
-
-                                ForEach($photoSections) { $section in
-                                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-
-                                        // Photo header
-                                        HStack(spacing: DS.Spacing.sm) {
-                                            Image(uiImage: section.sourceImage)
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 40, height: 40)
-                                                .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                                            VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                                                Text("Photo \(section.imageIndex + 1)")
-                                                    .font(DS.Font.headline)
-                                                    .foregroundColor(DS.Colors.textPrimary)
-                                                Text(section.isLoading
-                                                     ? "Analyzing..."
-                                                     : "\(section.items.count) item\(section.items.count == 1 ? "" : "s") detected")
-                                                    .font(DS.Font.caption1)
-                                                    .foregroundColor(DS.Colors.textSecondary)
-                                            }
-
-                                            Spacer()
-
-                                            if !section.isLoading {
-                                                Button(action: {
-                                                    reanalyzePhoto(sectionIndex: section.imageIndex)
-                                                }) {
-                                                    HStack(spacing: DS.Spacing.micro) {
-                                                        Image(systemName: "arrow.clockwise")
-                                                        Text("Retry")
-                                                    }
-                                                    .font(DS.Font.caption1)
-                                                    .foregroundColor(DS.Colors.accent)
-                                                    .padding(.horizontal, DS.Spacing.sm)
-                                                    .padding(.vertical, DS.Spacing.xs)
-                                                    .background(DS.Colors.accent.opacity(0.08))
-                                                    .clipShape(Capsule())
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-                                        .padding(.horizontal, DS.Spacing.sm)
-
-                                        if section.isLoading {
-                                            ForEach(0..<2, id: \.self) { _ in
-                                                SkeletonItemRow()
-                                            }
-                                        } else if section.items.isEmpty {
-                                            HStack(spacing: DS.Spacing.sm) {
-                                                Image(systemName: "eye.slash")
-                                                    .foregroundColor(DS.Colors.textTertiary)
-                                                Text("No items detected")
-                                                    .font(DS.Font.subheadline)
-                                                    .foregroundColor(DS.Colors.textSecondary)
-                                            }
-                                            .padding(DS.Spacing.md)
-                                            .frame(maxWidth: .infinity)
-                                            .background(DS.Colors.backgroundCard)
-                                            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-                                        } else {
-                                            ForEach($section.items) { $item in
-                                                ReviewItemRow(
-                                                    item: $item,
-                                                    wardrobeItems: wardrobeViewModel.items,
-                                                    onExpandImage: { img in expandedImage = img }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                            if authService.user?.gender == nil || (authService.user?.gender ?? "").isEmpty {
+                                genderTip
                             }
-                            .padding(.horizontal, DS.Spacing.screenH)
-                            .padding(.bottom, 100)
-                        }
-
-                        VStack(spacing: 0) {
-                            Divider()
-                            Button(action: addSelectedItems) {
-                                HStack(spacing: DS.Spacing.xs) {
-                                    Image(systemName: "plus.circle.fill")
-                                    Text("Add \(selectedCount) Items to Wardrobe")
-                                }
+                            if !allReviewItems.isEmpty {
+                                selectionSummary
                             }
-                            .buttonStyle(DSPrimaryButton(isDisabled: selectedCount == 0 || photoSections.allSatisfy(\.isLoading)))
-                            .disabled(selectedCount == 0 || photoSections.allSatisfy(\.isLoading))
-                            .padding(.horizontal, DS.Spacing.screenH)
-                            .padding(.vertical, DS.Spacing.md)
+                            ForEach($photoSections) { $section in
+                                photoSectionView($section)
+                            }
                         }
-                        .dsGlassBar()
+                        .padding(.horizontal, DS.Spacing.screenH)
+                        .padding(.top, DS.Spacing.sm)
+                        .padding(.bottom, DS.Spacing.lg)
                     }
+                    .safeAreaInset(edge: .bottom) { addBar }
                 }
             }
             .overlay {
@@ -207,19 +109,19 @@ struct AddItemReviewView: View {
                             .onTapGesture { expandedImage = nil }
 
                         VStack(spacing: DS.Spacing.md) {
-                            Image(uiImage: expandedImg)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: 300, maxHeight: 300)
-                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+                            ItemCutoutTile(image: expandedImg, height: 320, cornerRadius: DS.Radius.hero, inset: 24)
+                                .frame(maxWidth: 320)
                                 .shadow(radius: 10)
 
                             Text("Tap anywhere to close")
                                 .font(DS.Font.caption1)
-                                .foregroundColor(.white.opacity(0.6))
+                                .foregroundColor(.white.opacity(0.7))
                         }
+                        .onTapGesture { expandedImage = nil }
                     }
                     .transition(.opacity)
+                    .accessibilityAddTraits(.isModal)
+                    .accessibilityAction(.escape) { expandedImage = nil }
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: expandedImage != nil)
@@ -230,9 +132,174 @@ struct AddItemReviewView: View {
                     Button("Cancel") { isPresented = false }
                 }
             }
+            .sheet(item: $editingRef, onDismiss: { markAllDuplicates() }) { ref in
+                if let binding = reviewBinding(for: ref) {
+                    ReviewItemEditor(item: binding)
+                }
+            }
             .interactiveDismissDisabled()
             .onAppear { analyzeAllImages() }
         }
+    }
+
+    // MARK: - Pieces
+
+    private var genderTip: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(DS.Colors.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Improve detection accuracy")
+                    .font(DS.Font.subheadline.weight(.semibold))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                Text("Add your gender in Profile for better results")
+                    .font(DS.Font.caption1)
+                    .foregroundStyle(DS.Colors.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(DS.Spacing.sm)
+        .background(DS.Colors.accentSoft, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var selectionSummary: some View {
+        let allSelected = selectedCount == allReviewItems.count
+        return HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(selectedCount) of \(allReviewItems.count) selected")
+                    .font(DS.Font.headline)
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .monospacedDigit()
+                Text("Tap an item to include or skip it. Tap the pencil to fix details.")
+                    .font(DS.Font.caption1)
+                    .foregroundStyle(DS.Colors.textSecondary)
+            }
+            Spacer(minLength: DS.Spacing.sm)
+            Button(allSelected ? "Select none" : "Select all") {
+                Haptics.light()
+                for s in photoSections.indices {
+                    for i in photoSections[s].items.indices { photoSections[s].items[i].isSelected = !allSelected }
+                }
+            }
+            .font(DS.Font.subheadline.weight(.semibold))
+            .foregroundStyle(DS.Colors.accent)
+        }
+    }
+
+    private func photoSectionView(_ section: Binding<PhotoSection>) -> some View {
+        let value = section.wrappedValue
+        return VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack(spacing: DS.Spacing.sm) {
+                Image(uiImage: value.sourceImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Photo \(value.imageIndex + 1)")
+                        .font(DS.Font.headline)
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Text(value.isLoading
+                         ? "Finding clothes…"
+                         : "\(value.items.count) item\(value.items.count == 1 ? "" : "s") found")
+                        .font(DS.Font.caption1)
+                        .foregroundStyle(DS.Colors.textSecondary)
+                }
+                .accessibilityElement(children: .combine)
+
+                Spacer()
+
+                if !value.isLoading {
+                    Button {
+                        reanalyzePhoto(sectionIndex: value.imageIndex)
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                            .font(DS.Font.caption1.weight(.semibold))
+                            .foregroundStyle(DS.Colors.accent)
+                            .padding(.horizontal, DS.Spacing.sm)
+                            .padding(.vertical, DS.Spacing.xs)
+                            .background(DS.Colors.accentSoft, in: Capsule(style: .continuous))
+                    }
+                    .buttonStyle(DSTapBounce())
+                    .accessibilityLabel("Analyze photo \(value.imageIndex + 1) again")
+                }
+            }
+
+            if value.isLoading {
+                LazyVGrid(columns: gridColumns, spacing: DS.Spacing.sm) {
+                    ForEach(0..<2, id: \.self) { _ in SkeletonItemCard() }
+                }
+            } else if value.items.isEmpty {
+                HStack(spacing: DS.Spacing.sm) {
+                    Image(systemName: "eye.slash")
+                        .foregroundStyle(DS.Colors.textTertiary)
+                    Text("No clothes found in this photo")
+                        .font(DS.Font.subheadline)
+                        .foregroundStyle(DS.Colors.textSecondary)
+                }
+                .padding(DS.Spacing.md)
+                .frame(maxWidth: .infinity)
+                .background(DS.Colors.backgroundCard, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            } else {
+                LazyVGrid(columns: gridColumns, spacing: DS.Spacing.sm) {
+                    ForEach(section.items) { $item in
+                        ReviewItemCard(
+                            item: $item,
+                            onEdit: { editingRef = ReviewRef(sectionID: value.id, itemID: item.id) },
+                            onCompare: { existing in showExisting(existing) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var addBar: some View {
+        let disabled = selectedCount == 0 || photoSections.allSatisfy(\.isLoading)
+        return VStack(spacing: 0) {
+            Divider()
+            Button(action: addSelectedItems) {
+                HStack(spacing: DS.Spacing.xs) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Add \(selectedCount) Item\(selectedCount == 1 ? "" : "s") to Wardrobe")
+                }
+            }
+            .buttonStyle(DSPrimaryButton(isDisabled: disabled))
+            .disabled(disabled)
+            .padding(.horizontal, DS.Spacing.screenH)
+            .padding(.vertical, DS.Spacing.md)
+        }
+        .background(.bar)
+    }
+
+    private func showExisting(_ item: WardrobeItem) {
+        Task {
+            let image = await ClosetImageLoader.shared.load(item.fullImagePath)
+            await MainActor.run { expandedImage = image }
+        }
+    }
+
+    /// A binding to one detected item by id, safe if the photo is re-analyzed
+    /// while the editor is open (writes to a vanished item are dropped).
+    private func reviewBinding(for ref: ReviewRef) -> Binding<ReviewItem>? {
+        guard let s = photoSections.firstIndex(where: { $0.id == ref.sectionID }),
+              let i = photoSections[s].items.firstIndex(where: { $0.id == ref.itemID }) else { return nil }
+        let snapshot = photoSections[s].items[i]
+        return Binding(
+            get: {
+                guard let s = photoSections.firstIndex(where: { $0.id == ref.sectionID }),
+                      let i = photoSections[s].items.firstIndex(where: { $0.id == ref.itemID }) else { return snapshot }
+                return photoSections[s].items[i]
+            },
+            set: { newValue in
+                guard let s = photoSections.firstIndex(where: { $0.id == ref.sectionID }),
+                      let i = photoSections[s].items.firstIndex(where: { $0.id == ref.itemID }) else { return }
+                photoSections[s].items[i] = newValue
+            }
+        )
     }
 
     // MARK: - Analysis
@@ -474,422 +541,245 @@ struct AddItemReviewView: View {
     }
 }
 
-// MARK: - Review Item Row
+// MARK: - Review Item Card
 
-private struct ReviewItemRow: View {
+/// A detected item as a closet tile: tap to include / skip, pencil to edit.
+/// A "Similar" badge and a mini tile of the matching wardrobe item flag
+/// probable duplicates.
+private struct ReviewItemCard: View {
     @Binding var item: AddItemReviewView.ReviewItem
-    let wardrobeItems: [WardrobeItem]
-    var onExpandImage: ((UIImage) -> Void)? = nil
-
-    @State private var isExpanded = false
+    var onEdit: () -> Void
+    var onCompare: (WardrobeItem) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: DS.Spacing.sm) {
-                Button(action: {
-                    Haptics.light()
-                    item.isSelected.toggle()
-                }) {
-                    Image(systemName: item.isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(DS.Font.title3)
-                        .foregroundColor(item.isSelected ? DS.Colors.accent : DS.Colors.textTertiary)
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Button {
+                Haptics.selection()
+                withAnimation(DS.Motion.snappy) { item.isSelected.toggle() }
+            } label: {
+                ItemCutoutTile(image: item.garmentImage, height: nil, cornerRadius: DS.Radius.control, inset: 12)
+                    .saturation(item.isSelected ? 1 : 0.15)
+                    .opacity(item.isSelected ? 1 : 0.55)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                            .strokeBorder(DS.Colors.accent, lineWidth: item.isSelected ? 2.5 : 0)
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: item.isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 24, weight: .semibold))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(Color.white, item.isSelected ? DS.Colors.accent : Color.black.opacity(0.25))
+                            .shadow(color: .black.opacity(0.25), radius: 2, x: 0, y: 1)
+                            .padding(8)
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if item.isDuplicate {
+                            Label("Similar", systemImage: "square.on.square")
+                                .font(DS.Font.caption2.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(DS.Colors.warning, in: Capsule(style: .continuous))
+                                .padding(8)
+                        }
+                    }
+            }
+            .buttonStyle(DSTapBounce())
+            .accessibilityLabel("\(item.colors.joined(separator: " ")) \(item.product)")
+            .accessibilityValue(item.isSelected ? "Will be added" : "Skipped")
+            .accessibilityAddTraits(item.isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityHint(item.isDuplicate ? "Similar to an item already in your wardrobe" : "Double-tap to include or skip")
+
+            HStack(alignment: .top, spacing: DS.Spacing.xs) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.product)
+                        .font(DS.Font.subheadline.weight(.semibold))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        ForEach(Array(item.colors.prefix(3).enumerated()), id: \.offset) { _, c in
+                            Circle()
+                                .fill(ColorMapping.color(for: c))
+                                .frame(width: 9, height: 9)
+                                .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 0.5))
+                        }
+                        Text(item.colors.joined(separator: ", "))
+                            .font(DS.Font.caption1)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .lineLimit(1)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                Spacer(minLength: 0)
+                Button(action: onEdit) {
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.system(size: 26))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(DS.Colors.accent)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-
-                if let img = item.garmentImage {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 60, height: 60)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            onExpandImage?(img)
-                        }
-                }
-
-                VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                    Text(item.category.rawValue)
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.accent)
-                    Text(item.product)
-                        .font(DS.Font.headline)
-                        .foregroundColor(DS.Colors.textPrimary)
-                        .lineLimit(1)
-                    HStack(spacing: DS.Spacing.micro) {
-                        Text(item.colors.joined(separator: ", "))
-                        if !item.material.isEmpty {
-                            Text("·")
-                            Text(item.material)
-                        }
-                    }
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .lineLimit(1)
-                }
-
-                Spacer()
-
-                if let match = item.duplicateMatch {
-                    HStack(spacing: DS.Spacing.xs) {
-                        if let existingImage = match.existingItem.croppedImage ?? match.existingItem.image {
-                            Image(uiImage: existingImage)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 32, height: 32)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(DS.Colors.warning.opacity(0.4), lineWidth: 1)
-                                )
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    onExpandImage?(existingImage)
-                                }
-                        }
-
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(DS.Font.caption1)
-                            .foregroundColor(DS.Colors.warning)
-                    }
-                }
-
-                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textTertiary)
+                .accessibilityLabel("Edit \(item.product)")
             }
-
-            if isExpanded {
-                expandedFields
-                    .padding(.top, DS.Spacing.sm)
-                    .padding(.leading, 44 + DS.Spacing.sm)
-            }
-        }
-        .padding(DS.Spacing.sm)
-        .background(DS.Colors.backgroundCard)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-        .dsCardShadow()
-        .opacity(item.isSelected ? 1.0 : 0.6)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            Haptics.light()
-            withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
-        }
-    }
-
-    @ViewBuilder
-    private var expandedFields: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
 
             if let match = item.duplicateMatch {
-                VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                Button {
+                    onCompare(match.existingItem)
+                } label: {
                     HStack(spacing: DS.Spacing.xs) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(DS.Colors.warning)
-                        Text("Similar item already in your wardrobe")
-                            .font(DS.Font.subheadline)
-                            .foregroundColor(DS.Colors.warning)
+                        AsyncItemTile(path: match.existingItem.gridImagePath, height: 34,
+                                      cornerRadius: 8, inset: 3)
+                            .frame(width: 34)
+                        Text("Looks like one you have")
+                            .font(DS.Font.caption1)
+                            .foregroundStyle(DS.Colors.warning)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
                     }
+                    .padding(6)
+                    .background(DS.Colors.warning.opacity(0.10),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(DSTapBounce())
+                .accessibilityLabel("Similar to your \(ClosetText.displayName(match.existingItem)). Show it")
+            }
+        }
+        .padding(DS.Spacing.xs)
+        .background(DS.Colors.backgroundCard, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .dsCardShadow()
+    }
+}
 
-                    HStack(spacing: DS.Spacing.sm) {
-                        if let existingImage = match.existingItem.croppedImage ?? match.existingItem.image {
-                            Image(uiImage: existingImage)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 48, height: 48)
-                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    onExpandImage?(existingImage)
-                                }
-                        }
+// MARK: - Review Item Editor
 
-                        VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                            Text(match.existingItem.name)
-                                .font(DS.Font.caption1)
-                                .foregroundColor(DS.Colors.textPrimary)
-                                .lineLimit(2)
-                            if let details = match.existingItem.detailsSubtitle {
-                                Text(details)
-                                    .font(DS.Font.caption2)
-                                    .foregroundColor(DS.Colors.textTertiary)
-                                    .lineLimit(1)
+/// Fix a detected item's details before it's added.
+private struct ReviewItemEditor: View {
+    @Binding var item: AddItemReviewView.ReviewItem
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    ItemCutoutTile(image: item.garmentImage, height: 200, cornerRadius: DS.Radius.card, inset: 18)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    Toggle("Add to wardrobe", isOn: $item.isSelected)
+                }
+
+                if let match = item.duplicateMatch {
+                    Section {
+                        HStack(spacing: DS.Spacing.sm) {
+                            AsyncItemTile(path: match.existingItem.gridImagePath, height: 56,
+                                          cornerRadius: 10, inset: 4)
+                                .frame(width: 56)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Similar item already in your wardrobe")
+                                    .font(DS.Font.subheadline.weight(.semibold))
+                                    .foregroundStyle(DS.Colors.warning)
+                                Text(ClosetText.displayName(match.existingItem))
+                                    .font(DS.Font.caption1)
+                                    .foregroundStyle(DS.Colors.textSecondary)
+                                    .lineLimit(2)
                             }
                         }
-
-                        Spacer()
+                        .accessibilityElement(children: .combine)
                     }
-                    .padding(DS.Spacing.sm)
-                    .background(DS.Colors.warning.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button))
                 }
-            }
 
-            HStack(spacing: DS.Spacing.sm) {
-                VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                    Text("Category")
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.textSecondary)
+                Section("Type") {
                     Picker("Category", selection: $item.category) {
-                        ForEach(Category.allCases) { cat in
-                            Text(cat.rawValue).tag(cat)
-                        }
+                        ForEach(Category.allCases) { cat in Text(cat.rawValue).tag(cat) }
                     }
-                    .pickerStyle(.menu)
-                    .tint(DS.Colors.accent)
-                }
-
-                VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                    Text("Product")
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.textSecondary)
                     let standardProducts = productTypesByCategory[item.category] ?? []
                     Picker("Product", selection: $item.product) {
                         if !standardProducts.contains(item.product) && !item.product.isEmpty {
                             Text(item.product).tag(item.product)
                         }
-                        ForEach(standardProducts, id: \.self) { prod in
-                            Text(prod).tag(prod)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(DS.Colors.accent)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                Text("Colors")
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textSecondary)
-
-                ForEach(item.colors.indices, id: \.self) { colorIdx in
-                    HStack(spacing: DS.Spacing.xs) {
-                        colorSwatch(for: item.colors[colorIdx])
-
-                        TextField("Color", text: Binding(
-                            get: { item.colors[colorIdx] },
-                            set: { item.colors[colorIdx] = $0 }
-                        ))
-                        .font(DS.Font.body)
-                        .textContentType(.none)
-                        .autocapitalization(.none)
-                        .submitLabel(.done)
-
-                        if item.colors.count > 1 {
-                            Button(action: { item.colors.remove(at: colorIdx) }) {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundColor(DS.Colors.error)
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.borderless)
-                        }
+                        ForEach(standardProducts, id: \.self) { prod in Text(prod).tag(prod) }
                     }
                 }
 
-                Button(action: { item.colors.append("") }) {
-                    HStack(spacing: DS.Spacing.micro) {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundColor(DS.Colors.success)
-                        Text("Add Color")
-                            .font(DS.Font.subheadline)
-                            .foregroundColor(DS.Colors.accent)
-                    }
-                    .frame(height: 44)
-                    .contentShape(Rectangle())
+                Section {
+                    ColorSwatchPicker(colors: $item.colors)
+                } header: {
+                    Text("Colors")
+                } footer: {
+                    Text(item.colors.isEmpty ? "Pick at least one color." : "Main color first: \(item.colors.joined(separator: ", "))")
                 }
-                .buttonStyle(.borderless)
-            }
 
-            HStack(spacing: DS.Spacing.sm) {
-                VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                    Text("Pattern")
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.textSecondary)
+                Section("Look") {
                     Picker("Pattern", selection: $item.pattern) {
-                        ForEach(Pattern.allCases) { pat in
-                            Text(pat.rawValue).tag(pat)
+                        ForEach(Pattern.allCases) { pat in Text(pat.rawValue).tag(pat) }
+                    }
+                    TextField("Material (e.g. Cotton, Denim, Wool)", text: $item.material)
+                    TextField("Brand (e.g. Nike)", text: $item.brand)
+                }
+
+                let cat = item.category
+                if cat.supportsFit || cat.supportsNeckline || cat.supportsSleeves || cat.supportsLength {
+                    Section("Cut") {
+                        if cat.supportsFit {
+                            Picker("Fit", selection: Binding(get: { item.fit ?? .regular }, set: { item.fit = $0 })) {
+                                ForEach(Fit.allCases) { f in Text(f.rawValue).tag(f) }
+                            }
+                        }
+                        if cat.supportsNeckline {
+                            Picker("Neckline", selection: Binding(get: { item.neckline ?? .crewNeck }, set: { item.neckline = $0 })) {
+                                ForEach(Neckline.allCases) { n in Text(n.rawValue).tag(n) }
+                            }
+                        }
+                        if cat.supportsSleeves {
+                            Picker("Sleeve length", selection: Binding(get: { item.sleeveLength ?? .longSleeve }, set: { item.sleeveLength = $0 })) {
+                                ForEach(SleeveLength.allCases) { s in Text(s.rawValue).tag(s) }
+                            }
+                        }
+                        if cat.supportsLength {
+                            Picker("Length", selection: Binding(get: { item.garmentLength ?? .fullLength }, set: { item.garmentLength = $0 })) {
+                                ForEach(GarmentLength.allCases) { l in Text(l.rawValue).tag(l) }
+                            }
                         }
                     }
-                    .pickerStyle(.menu)
-                    .tint(DS.Colors.accent)
                 }
 
-                VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                    Text("Brand")
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.textSecondary)
-                    TextField("e.g. Nike", text: $item.brand)
-                        .font(DS.Font.body)
-                        .textContentType(.none)
-                        .autocapitalization(.none)
-                        .submitLabel(.done)
+                Section("Notes") {
+                    TextField("e.g. ribbed cuffs, front zip, logo on chest", text: $item.details, axis: .vertical)
+                        .lineLimit(1...4)
                 }
             }
-
-            VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                Text("Material")
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textSecondary)
-                TextField("e.g. Cotton, Denim, Wool", text: $item.material)
-                    .font(DS.Font.body)
-                    .textContentType(.none)
-                    .autocapitalization(.none)
-                    .submitLabel(.done)
-            }
-
-            HStack(spacing: DS.Spacing.sm) {
-                if ![.footwear, .accessories].contains(item.category) {
-                    VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                        Text("Fit")
-                            .font(DS.Font.caption1)
-                            .foregroundColor(DS.Colors.textSecondary)
-                        Picker("Fit", selection: Binding(
-                            get: { item.fit ?? .regular },
-                            set: { item.fit = $0 }
-                        )) {
-                            ForEach(Fit.allCases) { f in Text(f.rawValue).tag(f) }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(DS.Colors.accent)
-                    }
-                }
-
-                if [.tops, .midLayers, .onePieces, .outerwear].contains(item.category) {
-                    VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                        Text("Neckline")
-                            .font(DS.Font.caption1)
-                            .foregroundColor(DS.Colors.textSecondary)
-                        Picker("Neckline", selection: Binding(
-                            get: { item.neckline ?? .crewNeck },
-                            set: { item.neckline = $0 }
-                        )) {
-                            ForEach(Neckline.allCases) { n in Text(n.rawValue).tag(n) }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(DS.Colors.accent)
-                    }
+            .tint(DS.Colors.accent)
+            .scrollContentBackground(.hidden)
+            .background(DS.Colors.backgroundPrimary)
+            .navigationTitle(item.product)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
-
-            HStack(spacing: DS.Spacing.sm) {
-                if [.tops, .midLayers, .outerwear, .onePieces, .activewear].contains(item.category) {
-                    VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                        Text("Sleeve Length")
-                            .font(DS.Font.caption1)
-                            .foregroundColor(DS.Colors.textSecondary)
-                        Picker("Sleeve Length", selection: Binding(
-                            get: { item.sleeveLength ?? .longSleeve },
-                            set: { item.sleeveLength = $0 }
-                        )) {
-                            ForEach(SleeveLength.allCases) { s in Text(s.rawValue).tag(s) }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(DS.Colors.accent)
-                    }
-                }
-
-                if [.bottoms, .onePieces, .outerwear].contains(item.category) {
-                    VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                        Text("Length")
-                            .font(DS.Font.caption1)
-                            .foregroundColor(DS.Colors.textSecondary)
-                        Picker("Length", selection: Binding(
-                            get: { item.garmentLength ?? .fullLength },
-                            set: { item.garmentLength = $0 }
-                        )) {
-                            ForEach(GarmentLength.allCases) { l in Text(l.rawValue).tag(l) }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(DS.Colors.accent)
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                Text("Details")
-                    .font(DS.Font.caption1)
-                    .foregroundColor(DS.Colors.textSecondary)
-                TextField("e.g. ribbed cuffs, front zip, logo on chest", text: $item.details)
-                    .font(DS.Font.body)
-                    .textContentType(.none)
-                    .autocapitalization(.none)
-                    .submitLabel(.done)
-            }
-
         }
-    }
-
-    @ViewBuilder
-    private func colorSwatch(for colorName: String) -> some View {
-        let name = colorName.lowercased().trimmingCharacters(in: .whitespaces)
-        let color: Color = {
-            switch name {
-            case "black":  return .black
-            case "white":  return .white
-            case "red":    return .red
-            case "blue":   return .blue
-            case "green":  return .green
-            case "yellow": return .yellow
-            case "orange": return .orange
-            case "pink":   return .pink
-            case "purple": return .purple
-            case "brown":  return .brown
-            case "gray", "grey": return .gray
-            case "navy":   return Color(red: 0, green: 0, blue: 0.5)
-            case "beige":  return Color(red: 0.96, green: 0.96, blue: 0.86)
-            case "cream":  return Color(red: 1, green: 0.99, blue: 0.82)
-            case "maroon": return Color(red: 0.5, green: 0, blue: 0)
-            case "teal":   return .teal
-            case "olive":  return Color(red: 0.5, green: 0.5, blue: 0)
-            default:       return DS.Colors.backgroundSecondary
-            }
-        }()
-
-        Circle()
-            .fill(color)
-            .frame(width: 18, height: 18)
-            .overlay(Circle().stroke(Color.black.opacity(0.1), lineWidth: 1))
     }
 }
 
 // MARK: - Skeleton Placeholder
 
-private struct SkeletonItemRow: View {
-    @State private var shimmer = false
-
+private struct SkeletonItemCard: View {
     var body: some View {
-        HStack(spacing: DS.Spacing.sm) {
-            Circle()
-                .fill(DS.Colors.backgroundSecondary)
-                .frame(width: 24, height: 24)
-                .padding(.leading, 10)
-
-            RoundedRectangle(cornerRadius: DS.Radius.button)
-                .fill(DS.Colors.backgroundSecondary)
-                .frame(width: 60, height: 60)
-
-            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(DS.Colors.backgroundSecondary)
-                    .frame(width: 60, height: 12)
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(DS.Colors.backgroundSecondary)
-                    .frame(width: 100, height: 14)
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(DS.Colors.backgroundSecondary)
-                    .frame(width: 80, height: 12)
-            }
-
-            Spacer()
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                .fill(LinearGradient(colors: [DS.Colors.studioTop, DS.Colors.studioBottom],
+                                     startPoint: .top, endPoint: .bottom))
+                .aspectRatio(1, contentMode: .fit)
+            SkeletonBlock(width: 90, height: 12)
+            SkeletonBlock(width: 60, height: 10)
         }
-        .padding(DS.Spacing.sm)
-        .background(DS.Colors.backgroundCard)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
-        .opacity(shimmer ? 0.6 : 1.0)
-        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: shimmer)
-        .onAppear { shimmer = true }
+        .padding(DS.Spacing.xs)
+        .background(DS.Colors.backgroundCard, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .shimmering()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Finding clothes")
     }
 }

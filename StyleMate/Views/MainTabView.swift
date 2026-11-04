@@ -38,6 +38,10 @@ struct MainTabView: View {
         }
         .tint(DS.Colors.accent)
         .sensoryFeedback(.selection, trigger: selectedTab)
+        // The outfit sheet's "View in Calendar" jumps to the Outfits tab.
+        .onReceive(NotificationCenter.default.publisher(for: .showOutfitsCalendar)) { _ in
+            selectedTab = 2
+        }
         // Host the coach-mark tour over the whole tab UI. It reads the Home
         // elements' frames (anchors) from the selected tab's content.
         .overlayPreferenceValue(CoachAnchorKey.self) { anchors in

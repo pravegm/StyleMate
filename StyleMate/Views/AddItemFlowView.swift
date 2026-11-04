@@ -124,11 +124,22 @@ struct AddItemFlowView: View {
 
     private var resolvingView: some View {
         VStack(spacing: DS.Spacing.md) {
-            ProgressView().tint(DS.Colors.accent)
+            ZStack {
+                Circle().fill(DS.Colors.accentSoft).frame(width: 88, height: 88)
+                Image(systemName: "person.crop.rectangle.stack")
+                    .font(.system(size: 34))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(DS.Colors.accent)
+                    .symbolEffect(.pulse, options: .repeating)
+            }
             Text("Finding you in your photos…")
+                .font(DS.Font.headline)
+                .foregroundColor(DS.Colors.textPrimary)
+            Text("\(images.count) photo\(images.count == 1 ? "" : "s") · on your phone")
                 .font(DS.Font.subheadline)
                 .foregroundColor(DS.Colors.textSecondary)
         }
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
@@ -154,9 +165,12 @@ struct AddItemFlowView: View {
                                     .aspectRatio(contentMode: .fill)
                                     .frame(height: 200)
                                     .frame(maxWidth: .infinity)
-                                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
+                                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+                                    .dsCardShadow()
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(DSTapBounce())
+                            .accessibilityLabel("Person \((current.people.firstIndex(where: { $0.id == person.id }) ?? 0) + 1)")
+                            .accessibilityHint("Double-tap if this is you")
                         }
                     }
 

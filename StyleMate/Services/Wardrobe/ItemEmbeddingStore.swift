@@ -59,9 +59,14 @@ final class ItemEmbeddingStore {
     }
 
     func remove(_ id: UUID) {
+        remove([id])
+    }
+
+    /// Batch removal: one file write however many items (bulk delete).
+    func remove(_ ids: [UUID]) {
         lock.lock(); defer { lock.unlock() }
         loadIfNeeded()
-        entries[id.uuidString] = nil
+        for id in ids { entries[id.uuidString] = nil }
         persist()
     }
 }

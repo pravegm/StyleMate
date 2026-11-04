@@ -93,7 +93,11 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
         if exceptions.contains(product) {
             return product
         }
-        if product.hasSuffix("s") {
+        // "Watches" → "Watch", "Dresses" → "Dress", "Boxes" → "Box"; plain "-s" otherwise.
+        for suffix in ["sses", "ches", "shes", "xes"] where product.hasSuffix(suffix) {
+            return String(product.dropLast(2))
+        }
+        if product.hasSuffix("s") && !product.hasSuffix("ss") {
             return String(product.dropLast())
         }
         return product
