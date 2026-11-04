@@ -6,7 +6,14 @@ class ImageAnalysisService {
     static let shared = ImageAnalysisService()
     private init() {}
     
-    private let geminiAPIKey = Secrets.geminiAPIKey
+    /// The Gemini key. Debug test runs (CI) may inject it through the environment
+    /// so the real key never has to live in a CI-written Secrets.swift.
+    let geminiAPIKey: String = {
+        #if DEBUG
+        if let k = ProcessInfo.processInfo.environment["GEMINI_API_KEY"], !k.isEmpty { return k }
+        #endif
+        return Secrets.geminiAPIKey
+    }()
 
     // MARK: - Per-Use-Case Gemini Model Selection
     //

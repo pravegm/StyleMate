@@ -1,0 +1,137 @@
+name: CI
+
+# Builds StyleMate on GitHub's Apple-silicon macOS runner and runs the test suite on an iOS simulator.
+#
+# The two on-device face models are git-ignored (large, licence-restricted weights), so the first job
+# regenerates them from the public checkpoints with scripts/build_face_models.sh and keeps them in the
+# Actions cache (never in a public artifact or release). Later runs restore them in seconds.
+#
+# Optional repository secret:
+#   GEMINI_API_KEY: enables the live Gemini tests (garment detection / product-shot rendering).
+#   Without it those tests are skipped and the rest still run.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      live_gemini:
+        description: "Also run the live Gemini pipeline tests (needs GEMINI_API_KEY)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  models:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore face models
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            MobileFaceNet.mlpackage
+            SCRFD10G.mlpackage
+          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+      - name: Build face models
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_face_models.sh
+      - name: Check the models
+        run: |
+          du -sh MobileFaceNet.mlpackage SCRFD10G.mlpackage
+          test -f MobileFaceNet.mlpackage/Manifest.json
+          test -f SCRFD10G.mlpackage/Manifest.json
+
+  test:
+    needs: models
+    runs-on: xcode-27
+    timeout-minutes: 75
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore face models
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            MobileFaceNet.mlpackage
+            SCRFD10G.mlpackage
+          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          fail-on-cache-miss: true
+
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - name: Write Secrets.swift
+        # The key is read at run time from the environment in DEBUG test runs, so the file only needs to
+        # compile. It never holds the real key in CI.
+        run: |
+          cat > StyleMate/Secrets.swift <<'EOF'
+          enum Secrets {
+              static let geminiAPIKey = ""
+          }
+          EOF
+
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=[(rt,x) for rt,xs in d.items() if "iOS" in rt for x in xs if x["name"].startswith("iPhone") and "Pro" in x["name"]]
+          c.sort(key=lambda t:t[0])
+          print(c[-1][1]["udid"])')
+          echo "SIM=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "$UDID"
+          xcrun simctl boot "$UDID" || true
+
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build.log | grep -E "error:|warning: .*StyleMate/|\*\* TEST BUILD" || true
+          grep -q "\*\* TEST BUILD SUCCEEDED \*\*" build.log
+
+      - name: Unit tests
+        env:
+          LIVE_GEMINI: ${{ github.event_name != 'workflow_dispatch' && 'false' || inputs.live_gemini }}
+        run: |
+          set -o pipefail
+          # Pass the key + fixtures path into the test process (TEST_RUNNER_ prefix is stripped by xcodebuild).
+          export TEST_RUNNER_GEMINI_API_KEY="$GEMINI_API_KEY"
+          export TEST_RUNNER_LIVE_GEMINI="$LIVE_GEMINI"
+          export TEST_RUNNER_FIXTURES_DIR="$GITHUB_WORKSPACE/StyleMateTests/Fixtures"
+          export TEST_RUNNER_REPORT_DIR="$RUNNER_TEMP/report"
+          mkdir -p "$RUNNER_TEMP/report"
+          xcodebuild test-without-building \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            -only-testing:StyleMateTests \
+            -resultBundlePath "$RUNNER_TEMP/tests.xcresult" \
+            2>&1 | tee test.log | grep -E "✔|✘|Test .*(passed|failed)|error:|\[Report\]|\*\* TEST" || true
+          grep -q "\*\* TEST SUCCEEDED \*\*" test.log
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-report
+          path: |
+            build.log
+            test.log
+            ${{ runner.temp }}/report
+          if-no-files-found: ignore
