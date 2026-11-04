@@ -134,6 +134,25 @@ jobs:
             2>&1 | tee test.log | grep -E "✔|✘|Test .*(passed|failed)|error:|\[Report\]|\*\* TEST" || true
           grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" test.log
 
+      - name: Test failure details
+        # Swift Testing's issue messages live only in the result bundle; print them.
+        if: always()
+        run: |
+          [ -d "$RUNNER_TEMP/tests.xcresult" ] || exit 0
+          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/tests.xcresult" > "$RUNNER_TEMP/report/test-results.json" 2>/dev/null || true
+          python3 - "$RUNNER_TEMP/report/test-results.json" <<'PY' || true
+          import json, sys
+          def walk(n, path):
+              name = n.get("name", "")
+              if n.get("nodeType") == "Failure Message":
+                  print(f"FAIL {' > '.join(path)}: {name}")
+              for c in n.get("children", []) or []:
+                  walk(c, path + [name] if n.get("nodeType") in ("Test Case", "Test Suite") else path)
+          d = json.load(open(sys.argv[1]))
+          for n in d.get("testNodes", []):
+              walk(n, [])
+          PY
+
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
