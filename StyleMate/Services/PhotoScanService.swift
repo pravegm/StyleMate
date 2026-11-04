@@ -435,8 +435,11 @@ class PhotoScanService: ObservableObject {
             if p.libraryChangeToken == nil { p.libraryChangeToken = LibraryChangeTracker.currentToken() }
         }
         flushProgress()
-        scanAddedItemIDs = job.addedItemIDs.compactMap { UUID(uuidString: $0) }
-        itemsFound = scanAddedItemIDs.count
+        let jobItemIDs = job.addedItemIDs.compactMap { UUID(uuidString: $0) }
+        if !quiet {
+            scanAddedItemIDs = jobItemIDs
+            itemsFound = jobItemIDs.count
+        }
 
         currentPhase = "Preparing your photo library..."
         let start = job.rangeStart, end = job.rangeEnd, extra = job.extraAssetIDs ?? []
@@ -463,14 +466,21 @@ class PhotoScanService: ObservableObject {
               "(\(skipped.count) screenshots/small, \(candidates.count) photos in \(units.count) moments)")
 
         guard !units.isEmpty else {
-            finishRun(forUser: userId, generation: generation, quiet: quiet,
+            finishRun(forUser: userId, generation: generation, shown: !quiet,
                       emptyMessage: pending.isEmpty ? "No new photos to scan" : "Scan complete!")
             return
         }
 
-        if quiet { scanState = .scanning }
+        if quiet {
+            // Something to do after all: now show it (a quiet check that finds
+            // nothing never touches the banner).
+            scanState = .scanning
+            scanAddedItemIDs = jobItemIDs
+            itemsFound = jobItemIDs.count
+        }
         totalPhotosToScan = doneBefore + pending.count
-        photosScanned = doneBefore + skipped.count
+        var scannedCount = doneBefore + skipped.count
+        photosScanned = scannedCount
         currentPhase = "Scanning your photos..."
         var eta = ScanETA()
         updateTimeRemaining(eta, unitsLeft: units.count)
@@ -521,8 +531,8 @@ class PhotoScanService: ObservableObject {
                 }
                 p.recordPhotosDone(prepared.doneIDs.count)
             }
-            throttleUIUpdate(scanned: min(totalPhotosToScan, photosScanned + prepared.memberIDs.count),
-                             total: totalPhotosToScan)
+            scannedCount = min(totalPhotosToScan, scannedCount + prepared.memberIDs.count)
+            throttleUIUpdate(scanned: scannedCount, total: totalPhotosToScan)
             eta.record(seconds: Self.seconds(ContinuousClock.now - tick))
             updateTimeRemaining(eta, unitsLeft: units.count - consumed)
             checkpointIfDue()
@@ -534,12 +544,15 @@ class PhotoScanService: ObservableObject {
         }
 
         guard isCurrent(generation) else { return }
-        finishRun(forUser: userId, generation: generation, quiet: quiet, emptyMessage: "Scan complete!")
+        finishRun(forUser: userId, generation: generation, shown: true, emptyMessage: "Scan complete!")
     }
 
-    private func finishRun(forUser userId: String, generation: Int, quiet: Bool, emptyMessage: String) {
+    /// `shown`: this run put the scanning banner up. A quiet (automatic) run that
+    /// found nothing to scan leaves the UI exactly as it was.
+    private func finishRun(forUser userId: String, generation: Int, shown: Bool, emptyMessage: String) {
         guard isCurrent(generation) else { return }
         let job = loadProgress(forUser: userId).activeJob
+        let quiet = job?.isAutomatic ?? true
         updateProgress(forUser: userId) { $0.finishJob() }
         flushProgress()
         if job?.isAutomatic == false {
@@ -549,10 +562,14 @@ class PhotoScanService: ObservableObject {
         isPaused = false
         systemPauseReason = nil
         timeRemainingText = nil
+        guard shown else {
+            currentPhase = ""
+            return
+        }
         photosScanned = totalPhotosToScan
-        if quiet && scanAddedItemIDs.isEmpty {
-            // Nothing new: don't flash a banner for an automatic check.
-            if scanState == .scanning { scanState = .idle }
+        if quiet && (job?.addedItemIDs.isEmpty ?? true) {
+            // An automatic check that added nothing: just take the banner down.
+            scanState = .idle
             currentPhase = ""
         } else {
             scanState = .completed
@@ -609,8 +626,9 @@ class PhotoScanService: ObservableObject {
             else { thumbFailed.append(asset.localIdentifier) }   // retried on a later scan
         }
         let rankFrames = thumbCGs.count > 1
+        let frames = thumbCGs
         let signals: [(id: String, signals: ThumbnailSignals)] = await Task.detached(priority: .utility) {
-            thumbCGs.map { pair in
+            frames.map { pair in
                 (id: pair.0, signals: rankFrames ? ThumbnailAnalyzer.signals(for: pair.1)
                                                  : ThumbnailSignals(hasPerson: ThumbnailAnalyzer.hasPerson(pair.1)))
             }

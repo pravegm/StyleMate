@@ -236,10 +236,13 @@ struct ScanEngineTests {
 
     @Test func loadFailuresRetryThenGiveUp() {
         var p = ScanProgress.fresh()
-        #expect(p.recordLoadFailure("icloud") == false)
+        let first = p.recordLoadFailure("icloud")
+        #expect(first == false)
         #expect(!p.isDone("icloud"))
-        #expect(p.recordLoadFailure("icloud") == false)
-        #expect(p.recordLoadFailure("icloud") == true)     // third strike
+        let second = p.recordLoadFailure("icloud")
+        #expect(second == false)
+        let third = p.recordLoadFailure("icloud")
+        #expect(third == true)     // third strike
         #expect(p.isDone("icloud"))
         #expect(p.failedAttempts == nil)
     }
@@ -328,15 +331,18 @@ struct ScanEngineTests {
         var old = ScanProgress(scannedAssetIDs: ["a", "b"], totalItemsFound: 7)
         old.pendingReviews = []
         old.activeJob = Self.job()
-        #expect(old.migratePipelineIfNeeded())
+        let migrated = old.migratePipelineIfNeeded()
+        #expect(migrated)
         #expect(old.scannedAssetIDs.isEmpty)
         #expect(old.activeJob == nil)
         #expect(old.totalItemsFound == 7)
         #expect(old.pendingReviews != nil)
-        #expect(!old.migratePipelineIfNeeded())    // only once
+        let again = old.migratePipelineIfNeeded()
+        #expect(!again)    // only once
         var current = ScanProgress.fresh()
         current.markDone(["z"])
-        #expect(!current.migratePipelineIfNeeded())
+        let currentMigrated = current.migratePipelineIfNeeded()
+        #expect(!currentMigrated)
         #expect(current.isDone("z"))
     }
 
@@ -361,6 +367,7 @@ struct ScanEngineTests {
         let json = #"{"scannedAssetIDs":["x"],"totalItemsFound":3,"lastScanAddedItemIDs":[]}"#
         var p = try JSONDecoder().decode(ScanProgress.self, from: Data(json.utf8))
         #expect(p.pipelineVersion == nil && p.activeJob == nil)
-        #expect(p.migratePipelineIfNeeded())
+        let legacyMigrated = p.migratePipelineIfNeeded()
+        #expect(legacyMigrated)
     }
 }
