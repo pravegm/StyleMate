@@ -22,9 +22,6 @@ struct StyleMateApp: App {
         BackgroundScanCoordinator.shared.configure(auth: auth, wardrobe: wardrobe)
         // Morning outfit notification: refresh task + the tap router (a tap can cold-launch the app).
         if !AppRuntime.isUnitTestHost { MorningLookScheduler.shared.configure(auth: auth, wardrobe: wardrobe) }
-        #if DEBUG
-        DebugOrientation.startIfRequested()   // `-uiTestOrientation portrait` (Duo CI seated pass)
-        #endif
     }
 
     var body: some Scene {
@@ -97,7 +94,7 @@ struct RootView: View {
                 var images: [UIImage] = []
                 for item in items {
                     if let data = try? await item.loadTransferable(type: Data.self),
-                       let image = UIImage(data: data) {
+                       let image = ImageDownsampler.downsample(data: data) {   // ≤2048 px, not a 24 MP decode
                         images.append(image)
                     }
                 }
@@ -116,7 +113,7 @@ struct RootView: View {
                     capturedCameraImage = img
                     showCamera = false
                     if let image = img {
-                        reviewImages = [image]
+                        reviewImages = [ImageDownsampler.downsample(image: image)]
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             showReview = true
                         }
@@ -236,6 +233,7 @@ struct RootView: View {
     /// Loads everything that hangs off the local profile id.
     private func activateProfile(_ id: String) {
         lastUserKey = id
+        outfitsVM.setUser(id)   // the outfit calendar is scoped per profile (Core Data v2)
         wardrobeVM.load(forUser: id)
         onboardingManager.check(forUser: id)
         UncertainItemsStore.shared.load(forUser: id)

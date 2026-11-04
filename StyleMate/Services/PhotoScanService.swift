@@ -144,7 +144,6 @@ class PhotoScanService: ObservableObject {
     private var lastProgressFlush = ContinuousClock.now
 
     private let identityGate = AsyncGate()
-    private let extractionGate = AsyncGate()
     private let thumbnailManager = PHCachingImageManager()
     private static let thumbnailSize = CGSize(width: 640, height: 640)
     private static let checkpointInterval: Duration = .seconds(5)
@@ -244,15 +243,8 @@ class PhotoScanService: ObservableObject {
     // MARK: - Progress Persistence (JSON file in Application Support)
 
     private static func progressFileURL(forUser userId: String) -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        var dir = appSupport.appendingPathComponent("ScanProgress", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-
-        var resourceValues = URLResourceValues()
-        resourceValues.isExcludedFromBackup = true
-        try? dir.setResourceValues(resourceValues)
-
-        return dir.appendingPathComponent("scanProgress_\(userId).json")
+        // Backup-excluded and file-protected (LocalStore).
+        LocalStore.directory("ScanProgress").appendingPathComponent("scanProgress_\(userId).json")
     }
 
     /// The user's scan progress. Kept in memory once read, so the scan loop and
@@ -293,7 +285,7 @@ class PhotoScanService: ObservableObject {
         let fileURL = Self.progressFileURL(forUser: userId)
         Self.progressWriter.async {
             if let data = try? JSONEncoder().encode(progress) {
-                try? data.write(to: fileURL, options: .atomic)
+                LocalStore.write(data, to: fileURL)
             }
         }
     }
@@ -762,9 +754,9 @@ class PhotoScanService: ObservableObject {
     /// Nothing lands if the profile changed meanwhile.
     private func extractItems(from image: UIImage, userId: String, userGender: String?, holdUncertain: Bool = true,
                               wardrobeViewModel: WardrobeViewModel) async -> ExtractionOutcome {
-        await extractionGate.acquire()
+        await ExtractionGate.shared.acquire()   // shared with manual add
         let results = await ImageAnalysisService.shared.analyzeAndSegment(image: image, userGender: userGender)
-        await extractionGate.release()
+        await ExtractionGate.shared.release()
         var outcome = ExtractionOutcome()
         for seg in results {
             // The profile was reset / deleted while this photo was being analysed.
@@ -1243,7 +1235,7 @@ class PhotoScanService: ObservableObject {
                             contentMode: .aspectFit, options: options
                         ) { image, _ in
                             guard gate.claim() else { return }
-                            let normalized = image.flatMap { Self.bakeOrientation($0) }
+                            let normalized = image.flatMap { Self.bakeOrientation($0, pixelScale: true) }   // 1x: no 3x screen-scale copies
                             continuation.resume(returning: (index, normalized))
                         }
                     }

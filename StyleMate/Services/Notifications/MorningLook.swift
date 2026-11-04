@@ -209,7 +209,9 @@ final class MorningLookScheduler: ObservableObject {
         }
         let forecast = await MorningForecast.fetch(for: date)
         let weather = forecast ?? MorningForecast.cachedWeather()
-        let lastWorn = MyOutfitsViewModel().lastWornDates()
+        let log = MyOutfitsViewModel()
+        log.setUser(user.id)
+        let lastWorn = log.lastWornDates()
         let context = StylingContext(weather: weather, occasion: user.preferredStyles.first ?? .everyday, mood: nil,
                                      hints: StyleHints(), user: user, lastWorn: lastWorn, now: date,
                                      useFahrenheit: MorningForecast.prefersFahrenheit)

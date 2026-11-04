@@ -39,13 +39,7 @@ final class UncertainItemsStore: ObservableObject {
     private init() {}
 
     private static func fileURL(forUser userId: String) -> URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        var dir = support.appendingPathComponent("ScanProgress", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        try? dir.setResourceValues(values)
-        return dir.appendingPathComponent("uncertain_\(userId).json")
+        LocalStore.directory("ScanProgress").appendingPathComponent("uncertain_\(userId).json")
     }
 
     func load(forUser userId: String) {
@@ -63,7 +57,7 @@ final class UncertainItemsStore: ObservableObject {
         let url = Self.fileURL(forUser: userId)
         let snapshot = items
         Task.detached(priority: .utility) {
-            if let data = try? JSONEncoder().encode(snapshot) { try? data.write(to: url, options: .atomic) }
+            if let data = try? JSONEncoder().encode(snapshot) { LocalStore.write(data, to: url) }
         }
     }
 

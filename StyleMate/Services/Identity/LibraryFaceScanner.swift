@@ -48,7 +48,7 @@ enum FaceSampleExtractor {
     /// several, each face is embedded from its own padded crop so we get all of them, not just
     /// the one that best matches the gallery.
     static func faces(in image: CGImage) -> [Extracted] {
-        let detected = SCRFDDetector.shared.detect(in: image)
+        let detected = SCRFDDetector.shared.detect(in: image, padRetry: false)   // library photo: no padded retry
         guard !detected.isEmpty else { return [] }
         let size = CGSize(width: image.width, height: image.height)
         let usable = detected

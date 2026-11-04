@@ -533,37 +533,18 @@ struct ProfileView: View {
         PhotoScanService.shared.forgetProgress(forUser: userId)
         MorningLookScheduler.shared.setEnabled(false)
 
-        // 2. Wardrobe: items (the real storage key), embeddings, held items.
-        let itemIDs = wardrobeViewModel.items.map(\.id)
-        wardrobeViewModel.clear()
-        UserDefaults.standard.removeObject(forKey: Self.wardrobeStorageKey(for: userId))
-        ItemEmbeddingStore.shared.remove(itemIDs)
+        // 2. Wardrobe (real storage key), images, embeddings, outfit history, selfie +
+        //    face gallery, sync ledger and the iCloud zone (retried until it succeeds).
+        wardrobeViewModel.deleteAllLocalData(forUser: userId)
+        outfitsVM.fetchAllOutfits()
+
+        // 3. What the first-run / habit features keep.
         UncertainItemsStore.shared.forget(forUser: userId)
         WearLogSuggestions.shared.forget(forUser: userId)
         MorningLookStore.forgetAll()
 
-        // 3. Files: wardrobe images + selfie (Documents), face gallery, scan state, embeddings.
-        let fm = FileManager.default
-        let documentsPath = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
-        if let files = try? fm.contentsOfDirectory(atPath: documentsPath.path) {
-            for file in files {
-                try? fm.removeItem(at: documentsPath.appendingPathComponent(file))
-            }
-        }
-        FaceMatchingService.shared.clearReference(forUser: userId)
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        try? fm.removeItem(at: appSupport.appendingPathComponent("FaceReference/faceReference_\(userId).json"))
-        try? fm.removeItem(at: appSupport.appendingPathComponent("WardrobeEmbeddings"))
-
-        // 4. The outfit calendar (Core Data has no per-user scope: it's this phone's log).
-        Self.deleteOutfitHistory()
-        outfitsVM.fetchAllOutfits()
-
         let keysToRemove = [
             "hasCompletedOnboarding_\(userId)",
-            "selfieReferencePath_\(userId)",
-            "wardrobeData_\(userId)",
-            "wardrobe_\(userId)",
             "sampleItemIDs_\(userId)",
             "tour_home_\(userId)",
             "tour_generation_\(userId)",
@@ -573,48 +554,16 @@ struct ProfileView: View {
             "hasCompletedInitialScan_\(userId)",
             "hasSeenSwipeHint",
             "cachedWeather",
-            "hasMigratedBackgroundRemoval_\(userId)",
-            "hasMigratedThumbnails_\(userId)",
-            "hasMigratedZoneCrop_\(userId)",
-            "bgRemovalMigrationComplete_\(userId)",
-            "thumbnailMigrationComplete_\(userId)",
-            "zoneCropMigrationComplete_\(userId)",
         ]
         for key in keysToRemove {
             UserDefaults.standard.removeObject(forKey: key)
         }
 
-        // 5. iCloud: delete the zone, check, and retry a couple of times (a
-        //    flaky network shouldn't leave the backup behind).
-        Task {
-            for attempt in 0..<3 {
-                await CloudKitService.shared.deleteAllData()
-                let left = await CloudKitService.shared.fetchAll(userID: userId)
-                if left.isEmpty { break }
-                print("[StyleMate] Cloud delete: \(left.count) records left, retrying (\(attempt + 1))")
-                try? await Task.sleep(nanoseconds: UInt64(2 + attempt * 6) * 1_000_000_000)
-            }
-        }
-
-        // 6. A fresh local profile → onboarding again.
+        // 4. A fresh local profile → onboarding again.
         onboardingManager.reset(forUser: userId)
         authService.resetLocalProfile()
 
         print("[StyleMate] Profile deleted for user: \(userId)")
-    }
-
-    /// Same derivation as `WardrobeViewModel.storageKey(for:)` ("." and "@" → "_").
-    static func wardrobeStorageKey(for userId: String) -> String {
-        "wardrobe_\(userId.replacingOccurrences(of: "@", with: "_").replacingOccurrences(of: ".", with: "_"))"
-    }
-
-    private static func deleteOutfitHistory() {
-        let context = PersistenceController.shared.container.viewContext
-        for entity in ["OutfitItem", "DatedOutfit"] {
-            let request = NSFetchRequest<NSManagedObject>(entityName: entity)
-            if let objects = try? context.fetch(request) { objects.forEach { context.delete($0) } }
-        }
-        if context.hasChanges { try? context.save() }
     }
 
     // MARK: - Stat Badge
