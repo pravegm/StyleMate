@@ -221,15 +221,12 @@ final class StyleMateE2ETests: E2ETestCase {
              photos.allElementsBoundByIndex.map(\.label).joined(separator: "\n"))
         photo.tap()
 
-        // The picker's confirm button (a checkmark: identifier 'Add', label 'Done') sits top-right;
-        // the closet's own (+) is also labelled 'Add' but lies under the sheet, lower down.
-        let confirmButtons = app.buttons.matching(NSPredicate(format:
-            "identifier == 'Add' OR label == 'Add' OR label == 'Done'"))
-        let pickerAdd = confirmButtons.allElementsBoundByIndex.min { $0.frame.minY < $1.frame.minY }
-        guard let pickerAdd else {
-            XCTFail("Photo picker has no confirm (Add/Done) button")
-            return
-        }
+        // The picker's confirm button is a checkmark (identifier 'Add', label 'Done'). The closet's
+        // own (+) under the sheet is identifier 'plus', label 'Add' — exclude it. (Resolve with
+        // firstMatch, not allElementsBoundByIndex: the picker's tree mutates after a selection.)
+        let pickerAdd = app.buttons.matching(NSPredicate(format:
+            "(identifier == 'Add' OR label == 'Done' OR label == 'Add') AND identifier != 'plus'")).firstMatch
+        XCTAssertTrue(pickerAdd.waitForExistence(timeout: 10), "Photo picker has no confirm (Add/Done) button")
         if pickerAdd.isHittable {
             pickerAdd.tap()
         } else {
