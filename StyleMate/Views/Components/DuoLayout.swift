@@ -168,8 +168,7 @@ private struct DuoLayoutReader: ViewModifier {
     private func log() {
         #if DEBUG
         let c = state.creaseInGlobal.map { String(format: "%.0f,%.0f %.0fx%.0f", $0.minX, $0.minY, $0.width, $0.height) } ?? "none"
-        // NSLog (unified log), so the Duo CI can read it with `simctl spawn … log show` while XCUITest owns stdout.
-        NSLog("%@", String(format: "[Duo] posture=%@ hinge=%@ angle=%@ crease=%@ active=%d window=%.0fx%.0f wide=%d",
+        duoDebugLog(String(format: "posture=%@ hinge=%@ angle=%@ crease=%@ active=%d window=%.0fx%.0f wide=%d",
                            state.posture.rawValue, state.hinge.rawValue,
                            state.hingeAngle.map { String(format: "%.0f", $0) } ?? "-", c, state.isCreaseActive ? 1 : 0,
                            state.windowSize.width, state.windowSize.height, state.isWideLayout ? 1 : 0))
@@ -194,6 +193,25 @@ private struct DuoLayoutReader: ViewModifier {
         return false
     }
 }
+
+#if DEBUG
+/// DEBUG-only: prints a `[Duo] …` line and appends it to Documents/duo-log.txt, which the Duo CI copies out of the
+/// simulator (XCUITest owns the app's stdout there, and the unified log hides dynamic strings).
+func duoDebugLog(_ message: String) {
+    let line = "[Duo] \(ISO8601DateFormatter().string(from: Date())) \(message)\n"
+    print(line, terminator: "")
+    guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+          let data = line.data(using: .utf8) else { return }
+    let url = docs.appendingPathComponent("duo-log.txt")
+    if let handle = try? FileHandle(forWritingTo: url) {
+        handle.seekToEndOfFile()
+        handle.write(data)
+        try? handle.close()
+    } else {
+        try? data.write(to: url)
+    }
+}
+#endif
 
 /// `onHingeChange` (iOS 27.1+) as a status and an angle in degrees; reports `.unavailable` on older systems.
 private struct HingeStateReader: ViewModifier {

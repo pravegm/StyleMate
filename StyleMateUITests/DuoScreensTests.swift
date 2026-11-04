@@ -132,10 +132,21 @@ final class DuoScreensTests: E2ETestCase {
     @MainActor
     private func goBack() {
         let editDetails = button(id: "itemDetail.edit", label: "Edit details")
-        let backByID = app.navigationBars.buttons["BackButton"]
-        let back = backByID.exists ? backByID : app.navigationBars.buttons.element(boundBy: 0)
-        if back.waitForExistence(timeout: 5) { back.tap() }
-        _ = waitToDisappear(editDetails, timeout: 10)
+        // On the Duo the navigation bar's buttons live in the trailing system rail (not under
+        // app.navigationBars), so look for the back button anywhere, then fall back to the edge swipe.
+        let back = app.buttons.matching(NSPredicate(format:
+            "identifier == 'BackButton' OR label == 'Back' OR label == 'Wardrobe'")).firstMatch
+        if back.waitForExistence(timeout: 5), back.isHittable {
+            back.tap()
+        }
+        if !waitToDisappear(editDetails, timeout: 5) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+        }
+        if !waitToDisappear(editDetails, timeout: 5) {
+            note("back-buttons", visibleButtonLabels())
+            XCTFail("Couldn't leave the item page")
+        }
     }
 
     /// Home -> occasion -> Generate -> the deck's "1 of N" (answering the weather prompt).

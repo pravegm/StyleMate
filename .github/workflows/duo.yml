@@ -237,9 +237,10 @@ jobs:
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
-          gtimeout 180 xcrun simctl spawn "$UDID" log show --last 90m --style compact \
-            --predicate 'process == "StyleMate" AND eventMessage CONTAINS "[Duo]"' > "$OUT/logs/app-duo.txt" 2>&1 || true
-          echo "$(wc -l < "$OUT/logs/app-duo.txt") lines"; grep -E "posture=|orientation" "$OUT/logs/app-duo.txt" | tail -60 || true
+          # DEBUG builds append every posture / orientation change to Documents/duo-log.txt (DuoLayout.swift).
+          DATA=$(gtimeout 30 xcrun simctl get_app_container "$UDID" com.stylemates.StyleMate data 2>/dev/null || true)
+          cp "$DATA/Documents/duo-log.txt" "$OUT/logs/app-duo.txt" 2>/dev/null || echo "no duo-log.txt in '$DATA'"
+          [ -f "$OUT/logs/app-duo.txt" ] && { echo "$(wc -l < "$OUT/logs/app-duo.txt") lines"; tail -80 "$OUT/logs/app-duo.txt"; } || true
 
       - name: Simulator diagnostics
         if: failure()
