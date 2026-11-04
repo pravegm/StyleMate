@@ -1,0 +1,228 @@
+name: TestFlight
+
+# Builds a signed Release of StyleMate on GitHub's Apple-silicon runner (Xcode 27.1, so it runs natively
+# on the iPhone Duo) and uploads it to App Store Connect, where it appears in TestFlight. Nobody on the
+# team has a Mac that can run Xcode 27, so this is how builds reach the founder's iPhone 17 Pro and Duo.
+#
+# One-time setup (founder) — docs/TESTFLIGHT.md:
+#   - App Store Connect app record for bundle id com.stylemates.StyleMate
+#   - Repository secrets (Settings > Secrets and variables > Actions), the same values the Duo games use:
+#       ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY (the .p8 text): App Store Connect API team key, Admin role
+#       APPLE_TEAM_ID: the 10-character Team ID
+#
+# The on-device models (face, wardrobe, studio render) are git-ignored; they are restored from the
+# Actions cache that ci.yml fills on main. Run CI on main first if a cache is missing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "What to test (shown in the run summary)"
+        type: string
+        default: ""
+      check_only:
+        description: "Build and App Store-sign, check the signature, but do NOT upload"
+        type: boolean
+        default: false
+      archive_only:
+        description: "Only archive the Release build and check its contents (no secrets needed)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Check the secrets
+        if: ${{ !inputs.archive_only }}
+        run: |
+          missing=""
+          for s in ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY APPLE_TEAM_ID; do
+            [ -n "${!s}" ] || missing="$missing $s"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. See docs/TESTFLIGHT.md."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Restore face models
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            MobileFaceNet.mlpackage
+            SCRFD10G.mlpackage
+          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          fail-on-cache-miss: true
+      - name: Restore wardrobe models
+        uses: actions/cache/restore@v4
+        with:
+          path: StyleMate/ML
+          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          fail-on-cache-miss: true
+      - name: Restore studio models
+        id: studio
+        if: hashFiles('scripts/build_studio_models.sh') != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: StudioModels.bundle
+          key: studio-models-v1-${{ hashFiles('scripts/build_studio_models.sh', 'scripts/convert_studio_model.py') }}
+          fail-on-cache-miss: true
+      - name: Place studio models
+        if: steps.studio.outcome == 'success'
+        run: mkdir -p StyleMate/ML/Studio && mv StudioModels.bundle StyleMate/ML/Studio/
+
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_27.1*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - name: Write Secrets.swift
+        # No API keys any more; the git-ignored file only has to exist for older references.
+        run: |
+          [ -f StyleMate/Secrets.swift ] || printf 'enum Secrets {}\n' > StyleMate/Secrets.swift
+
+      - name: Write the API key
+        if: ${{ !inputs.archive_only }}
+        run: |
+          umask 077
+          KEY="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s\n' "$ASC_PRIVATE_KEY" > "$KEY"
+          echo "KEY_PATH=$KEY" >> "$GITHUB_ENV"
+
+      - name: Archive (Release) without creating a development certificate
+        # Same approach as the founder's other apps: archive unsigned (a fresh runner would mint a new
+        # Apple Development certificate every run and hit the account limit), stamp the entitlements on
+        # with an ad-hoc signature, then let the export sign it for the App Store with Apple's
+        # cloud-managed distribution certificate via the Admin API key.
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project StyleMate.xcodeproj -scheme StyleMate -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/StyleMate.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            2>&1 | tee archive.log | grep -E "error:|\*\* ARCHIVE" || true
+          grep -q "\*\* ARCHIVE SUCCEEDED \*\*" archive.log
+          APP="$RUNNER_TEMP/StyleMate.xcarchive/Products/Applications/StyleMate.app"
+          codesign --force --sign - --timestamp=none --entitlements StyleMate/StyleMate.entitlements "$APP"
+          du -sh "$APP"
+
+      - name: Check the build
+        run: |
+          APP="$RUNNER_TEMP/StyleMate.xcarchive/Products/Applications/StyleMate.app"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" -c "Print :CFBundleVersion" -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          BUILT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")
+          [ "$BUILT" = "${{ github.run_number }}" ] || { echo "::error::CFBundleVersion is $BUILT, not ${{ github.run_number }}"; exit 1; }
+          # Every on-device model must be inside the app.
+          for m in MobileFaceNet.mlmodelc SCRFD10G.mlmodelc GarmentParser.mlmodelc GarmentLabeler.mlmodelc FashionEncoder.mlmodelc FashionVocabulary.json; do
+            test -e "$APP/$m" || { echo "::error::$m missing from the app"; exit 1; }
+          done
+          if [ -d StyleMate/ML/Studio ]; then test -d "$APP/StudioModels.bundle" || { echo "::error::StudioModels.bundle missing"; exit 1; }; fi
+          # DEBUG-only test hooks must not ship.
+          if strings "$APP/StyleMate" | grep -q "uiTestSeedWardrobe"; then echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1; fi
+
+      - name: Export locally and check the App Store signature
+        if: ${{ !inputs.archive_only }}
+        run: |
+          set -o pipefail
+          cat > "$RUNNER_TEMP/ExportLocal.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/StyleMate.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportLocal.plist" -exportPath "$RUNNER_TEMP/local" \
+            -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee export-local.log | grep -E "error:|EXPORT" || true
+          grep -q "\*\* EXPORT SUCCEEDED \*\*" export-local.log
+          mkdir -p "$RUNNER_TEMP/ipa" && cd "$RUNNER_TEMP/ipa" && unzip -q "$RUNNER_TEMP"/local/*.ipa
+          APP=$(ls -d "$RUNNER_TEMP"/ipa/Payload/*.app)
+          codesign -dvv "$APP" 2>&1 | grep -E "Authority|TeamIdentifier" || true
+          codesign -d --entitlements :- "$APP" > ent.plist 2>/dev/null || true
+          cat ent.plist
+          grep -q "com.apple.developer.applesignin" ent.plist || { echo "::error::Sign in with Apple entitlement missing"; exit 1; }
+          grep -q "CloudKit" ent.plist || { echo "::error::CloudKit entitlement missing"; exit 1; }
+          ls -la "$RUNNER_TEMP"/local/*.ipa
+
+      - name: Upload to App Store Connect
+        if: ${{ !inputs.check_only && !inputs.archive_only }}
+        run: |
+          set -o pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/StyleMate.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee export.log | grep -E "error:|Upload|EXPORT|uploaded" || true
+          grep -qE "\*\* EXPORT SUCCEEDED \*\*|Upload succeeded|Uploaded" export.log
+
+      - name: Summary
+        if: success() && !inputs.check_only && !inputs.archive_only
+        env:
+          NOTES: ${{ inputs.notes }}
+        run: |
+          {
+            echo "### Uploaded StyleMate build ${{ github.run_number }} to App Store Connect"
+            echo "It shows up in TestFlight after Apple's processing (usually 10–30 min)."
+            if [ -n "$NOTES" ]; then
+              echo ""
+              echo "**What to test:** $NOTES"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-logs
+          path: |
+            archive.log
+            export-local.log
+            export.log
+          if-no-files-found: ignore
