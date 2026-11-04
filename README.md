@@ -1,191 +1,117 @@
 # StyleMate
 
-An iOS app that turns your camera roll into an organized digital wardrobe and gives you AI-generated outfit suggestions for the day — built with SwiftUI, on-device computer vision, and the Gemini API.
+An iOS app that turns your camera roll into an organized digital wardrobe and styles you every day — **entirely on your iPhone**. No photo, face or wardrobe data is sent to any AI service.
 
-You take (or already have) photos of your clothes. StyleMate detects the individual garments in each photo, removes the background, classifies category / product / colors / fit / material, deduplicates against what's already there, and stores everything locally with CloudKit sync. When you want to get dressed, it suggests outfits scoped to the occasion, today's weather, and your own wardrobe.
+StyleMate finds the photos of *you* in your library, cuts out every garment and accessory you're wearing, names it (category, product, colours, pattern, material, fit…), de-duplicates it against what you already own, and files it into your closet. When you want to get dressed, it builds five outfits for today from your own clothes — tuned to the weather, the occasion, your mood and what you've worn recently — and lets you log the look on a calendar.
 
 ## How it works
 
-### Wardrobe building
+### 1. Finding you in your photos (on-device face matching)
 
-There are three ways to add items, all funneled through the same analysis pipeline:
+- During onboarding you take a selfie (`SelfieCameraService`) and can confirm more of your own faces from your library ("tap the photos that are you") to build a reference **gallery**.
+- Faces are detected and 5-point-landmarked by the bundled **InsightFace SCRFD-10G** detector (Core ML), aligned to a canonical 112×112, and embedded with **AdaFace IR-101 (WebFace12M)** (bundled as `MobileFaceNet.mlpackage`, filename kept for history). Embeddings are tagged with the model version so an upgrade rebuilds the gallery.
+- Each library photo is matched by **cosine similarity** against the gallery with tiered confidence and a runner-up margin:
+  - **confident** → analysed straight away (in a multi-person photo only *your* body is isolated via a person-instance mask, so other people's clothes are never extracted); very confident matches also **teach the gallery** a new angle of your face;
+  - **probably you** → queued for an **"Is this you?"** review (home banner → `FaceReviewView`); confirming teaches the gallery and extracts those outfits;
+  - anyone else → skipped.
+- The scan downloads iCloud-only originals when needed ("Optimize iPhone Storage"), retries photos that failed to load, and checkpoints progress to `Application Support/ScanProgress/` so it can pause/resume.
 
-1. **Camera** — capture a single item.
-2. **Photo picker** — bulk-select up to 15 photos from your library.
-3. **Auto-scan** — point the app at a date range of your library and let it find outfits automatically.
+### 2. Building the wardrobe (on-device garment extraction — `Services/Wardrobe/`)
 
-Each photo is run through:
+For each photo of you, `WardrobeExtractor`:
 
-- **Photo-mode detection** (`Vision` / `VNDetectHumanRectanglesRequest`) — is this a person wearing the item, or a flat product shot?
-- **Segmentation + classification** — the image is sent to Gemini (3.x Flash family), which identifies every distinct garment and returns structured metadata (category, product, colors, pattern, material, fit, neckline, sleeve length, garment length, brand, details).
-- **Background removal** (`VNGenerateForegroundInstanceMaskRequest`) — per-item mask composited onto a clean background.
-- **Category-aware cropping** — `BodyZone` crops the segmented image to the right vertical region for the category (tops, bottoms, footwear, etc.) so thumbnails look right.
-- **Duplicate detection** — `DuplicateDetector` scores the new item against your existing wardrobe across category, product, colors, pattern, material, fit, neckline, sleeves, gated so unrelated categories never collide. Matches over a score of 55 prompt you before adding.
+1. **Finds and crops the person** at a 2:3 portrait aspect so the garments fill the analysis grid.
+2. **Parses** the crop with two Core ML segmentation models on a shared 384×576 grid:
+   - **GarmentParser** — the FASHN human parser (SegFormer-B4): which pixels are clothing vs face/hair/arms/hands/legs/torso, and the coarse region (top, dress, skirt, pants, shoes, bag, hat, scarf, glasses, belt, jewelry). Skin never leaks into a garment.
+   - **GarmentLabeler** — a Fashionpedia SegFormer-B3: the garment *type* per pixel. `GarmentSegmenter` votes inside each region, which splits an open coat or jacket from the top underneath it.
+3. **Cuts each item out** at full resolution (`GarmentCutout`): edge-aware mask upsampling guided by the photo, colour decontamination of soft edges (no halos), and a pyramid fill of small holes where a hand, arm, hair, strap or belt covered the fabric. Every cutout is trimmed and centred on a transparent square, and shown on a soft studio backdrop (`ItemCutoutTile`).
+4. **Names it** (`FashionClassifier`): **Marqo-FashionSigLIP** (Apache-2.0) embeds the cutout and is compared zero-shot against precomputed text embeddings (`FashionVocabulary.json`) for product (and therefore category), pattern, material, fit, sleeve, neckline and length; colours are *measured* by k-means over the fabric pixels in CIELAB. On Apple Intelligence devices (iOS 27+), Apple's **on-device** foundation model (`SystemLanguageModel`, never Private Cloud Compute) adds a short details line and any clearly readable brand (`GarmentDescriber`).
+5. **Scores the view** (size, sharpness, not cut off by the frame, little occlusion). Items too small or too poor to make a good wardrobe image are skipped — a better photo will catch them.
 
-Originals, cropped images, and thumbnails are stored under `Documents/wardrobe_images/`. Metadata is persisted as JSON in `UserDefaults` per signed-in user, with parallel sync to a private CloudKit zone.
+Then `DuplicateDetector` compares the item with the wardrobe using the visual embeddings (`ItemEmbeddingStore`) plus attribute gates. The same garment seen again in a **better** photo **upgrades** the wardrobe image instead of adding a duplicate.
 
-### Auto-scan and face matching
+There are three ways to add items, all through the same pipeline: **Auto-scan** of a date range, **Photo picker** (up to 15 photos, with "which one is you?" when several people are in a shot), and **Camera**.
 
-The auto-scan walks `PHAssetCollection` chronologically across the date range you pick (last month / 6 months / year / custom / all). Before any photo is sent to Gemini, it's filtered by an on-device face check:
+### 3. "What should I wear today?" (on-device stylist — `Services/Outfits/`)
 
-- During onboarding you capture a reference selfie (`SelfieCameraService` → `FaceMatchingService`), and can optionally confirm more of your own faces from your library ("tap which photos are you") to strengthen the reference gallery.
-- Faces are detected and 5-point-landmarked by the bundled **InsightFace SCRFD-10G** detector (Core ML), aligned to a canonical 112×112, then embedded with **AdaFace IR-101 (WebFace12M)** (bundled as `MobileFaceNet.mlpackage`, filename kept for history). SCRFD's precise landmarks are essential — ArcFace-family alignment is extremely sensitive, and imprecise landmarks collapse same-person similarity. Embeddings are tagged with the model version so an upgrade auto-rebuilds the gallery.
-- Each candidate photo is embedded the same way and compared by **cosine similarity** against the reference gallery, with tiered confidence (high / borderline / none) and a runner-up margin. When a photo has several people, the scan only keeps it if *you* are matched with high confidence and a clean margin, then isolates your garments via a person-instance mask — so other people's clothes are never extracted.
+`OutfitEngine` builds **five distinct outfits** from your wardrobe:
 
-Scan progress is checkpointed to `Application Support/ScanProgress/` so you can resume after backgrounding or a crash.
+- **Inputs**: today's weather (met.no, Open-Meteo fallback; city via `CoreLocation`), the occasion (`OutfitType`) or free text ("dinner date, nothing black"), your **mood** (`OutfitMood`: confident, cozy, relaxed, playful, polished, bold, minimal, romantic), your saved style preferences, and your **recent wear history** from the outfit calendar.
+- **Rules + scoring**: slot-based construction (top + bottom or a one-piece, optional mid-layer and outerwear, shoes, 0–2 accessories), temperature bands and rain rules, formality fit per occasion, colour harmony on a colour wheel (neutral base + accents, tonal, analogous, complementary; at most one bold pattern), mood and preference fit, classic do-not-pairs, and a recency penalty. A diversity pass keeps the five looks genuinely different.
+- **Everything is changeable**: lock pieces, shuffle any slot to the next best alternative, add a missing piece, or regenerate.
+- Each look comes with a short stylist note built from the scoring reasons. On Apple Intelligence devices the on-device model can interpret free text and polish the note (`OnDeviceStylist`), always with a silent deterministic fallback.
 
-### Outfit suggestions
+### 4. Outfit calendar
 
-The Home screen's "Style Me" flow combines:
-
-- your full wardrobe (sent to Gemini as indexed metadata, not raw images),
-- the occasion you pick (`OutfitType`: Everyday Casual, Formal, Date Night, Sports, Party, Business, Loungewear, Vacation, Ethnic, Streetwear) or a free-text description,
-- the current weather (met.no primary, Open-Meteo fallback — both free, no auth required, reverse-geocoded city via `CoreLocation`),
-- your gender preference, if set.
-
-Gemini returns a batch of outfit suggestions — each is a set of wardrobe item indices and a short markdown explanation. The `TodayOutfitSheet` presents them as a swipeable card stack: swipe to keep, skip the rest. You can shuffle individual slots ("show me a different top") or ask the model to add a missing piece, and both call back into Gemini with narrowed scope.
-
-Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and show up in **My Outfits** as a calendar history. You can also log outfits manually from any date.
+Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and appear in **My Outfits** as a calendar history (day detail, edit, delete, manual composer). The log feeds the stylist's recency signal, so you aren't offered what you wore yesterday.
 
 ## Major features
 
-- **Onboarding** — welcome → about you (name / age / gender) → photo-scan explainer (the initial auto-scan starts with the last month of photos; you can scan further back anytime) → selfie capture → photo library permission → reference builder → optional initial library scan. The auto-scan that follows can be paused/resumed from the home banner. The first time you land on Home, a one-time, skippable coach-mark tour introduces the main features (replayable anytime from Profile).
-- **Home** — time-aware greeting, weather card, wardrobe-summary widget, "Style Me" launcher, scan progress banner, last-scan results.
-- **My Wardrobe** — grid grouped by category (sorted by item count), tap into category → product subgroups → item detail. Add via the custom bottom sheet (Camera / Gallery / Auto-scan), edit any field, delete with CloudKit cleanup.
-- **My Outfits** — calendar of logged outfits, day detail with edit/delete, manual outfit composer.
-- **Profile** — name, email, optional gender/age, preferred styles, cloud sync status, replay the app tour, data deletion.
-- **Authentication** — Sign in with Apple and Sign in with Google.
-- **CloudKit sync** — private database, custom `WardrobeZone`, per-item records with image assets. Local files win on conflict.
-- **Gemini consent** — explicit per-user opt-in (`GeminiConsentView`) before any image leaves the device for classification. Face matching never does.
-- **Design system** — a Modern iOS-native premium language in `DesignSystem.swift` (DS) + `DSComponents.swift`: semantic light/dark color tokens (gray-canvas/white-card depth in light, layered near-blacks in dark), Dynamic-Type typography, continuous (squircle) corners, spring-based motion presets, system materials/glass, and pre-warmed haptics. Reusable parts include section headers, designed empty states, shimmer skeletons, and chips; the wardrobe item detail opens with a matched-geometry zoom transition.
+- **Onboarding**: welcome → about you → photo-scan explainer → selfie → photo permission → reference builder → initial library scan (pause/resume from the home banner). A one-time coach-mark tour introduces the main features.
+- **Home**: greeting, weather, wardrobe summary, "Style Me" with mood chips, scan progress, "Is this you?" review banner, last-scan results.
+- **My Wardrobe**: closet grid grouped by category, product subgroups, item detail, edit any field, delete (with CloudKit cleanup). Add via Camera / Gallery / Auto-scan.
+- **My Outfits**: calendar of logged outfits.
+- **Profile**: name, email, gender/age, preferred styles, cloud sync status, tour replay, data deletion.
+- **Authentication**: Sign in with Apple and Sign in with Google.
+- **CloudKit sync**: private database, custom `WardrobeZone`, per-item records with image assets.
 
 ## Architecture
 
-- **Language / UI**: Swift, SwiftUI (UIKit interop only for `ImagePicker` and camera capture).
-- **Pattern**: MVVM. `HomeViewModel`, `MyOutfitsViewModel`, plus services published via `@Published`.
-- **Local persistence**: `UserDefaults` (wardrobe items per user, scoped by sanitized email) + Core Data (`StyleMateDataModel.xcdatamodeld`, outfit history).
-- **Cloud**: CloudKit private DB (zone `WardrobeZone`), `CKRecord` per wardrobe item with `CKAsset` image attachments.
-- **On-device ML**: Core ML — InsightFace SCRFD-10G face detector (`SCRFD10G.mlpackage`) + AdaFace IR-101 embedder (`MobileFaceNet.mlpackage`) — plus `Vision` (person-instance mask, foreground mask, human detection). Face landmarks come from SCRFD, not Vision.
-- **Remote AI**: Google Gemini (3.x Flash family) for classification, segmentation, and outfit reasoning.
-- **Weather**: met.no primary with Open-Meteo fallback (both free, no key).
+- **Language / UI**: Swift, SwiftUI (UIKit interop for `ImagePicker` and camera capture). MVVM.
+- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder. Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
+- **Local persistence**: `UserDefaults` (wardrobe items per user), files under `Documents/wardrobe_images/`, item embeddings under `Application Support/WardrobeEmbeddings/`, Core Data (outfit history).
+- **Cloud**: CloudKit private DB only (your own iCloud). No third-party AI services.
+- **Weather**: met.no primary with Open-Meteo fallback (no key).
 
 ```
 StyleMate/
-├── Models/                      # WardrobeItem, Category, ProductType, OutfitType, User + Core Data model
+├── Models/                      # WardrobeItem, Category (+ WardrobeViewModel), ProductType, OutfitType, User, Core Data model
+├── ML/                          # git-ignored: GarmentParser / GarmentLabeler / FashionEncoder .mlpackage + FashionVocabulary.json
 ├── Services/
-│   ├── AuthService              # Apple + Google sign-in, session restore
-│   ├── PersistenceController    # Core Data stack
-│   ├── CloudKitService          # WardrobeZone sync
-│   ├── ImageAnalysisService     # Gemini calls (classify, segment, suggest outfits)
-│   ├── BackgroundRemovalService # Vision foreground mask + category crops
-│   ├── DuplicateDetector        # similarity scoring
-│   ├── SCRFDDetector            # InsightFace SCRFD-10G face detect + 5-pt landmarks
-│   ├── FaceMatchingService      # SCRFD align + AdaFace IR-101 embeddings
-│   ├── SelfieCameraService      # onboarding selfie capture
-│   ├── PhotoScanService         # date-range library scan + face filter
-│   ├── OnboardingManager        # per-user completion flags
-│   ├── OutfitLogic              # Outfit value type
-│   ├── WeatherService           # met.no + Open-Meteo client
-│   └── LocationService          # CLLocationManager wrapper
-├── ViewModels/                  # HomeViewModel, MyOutfitsViewModel
-├── Views/
-│   ├── HomeView / TodayOutfitSheet / WardrobeSummaryWidget
-│   ├── MyWardrobeView / AddItemReviewView / EditWardrobeItemView / ItemDetailSheet
-│   ├── MyOutfitsView
-│   ├── ProfileView / LoginView
-│   ├── MainTabView
-│   ├── Onboarding/              # welcome, explainers, selfie, permission, scan range, scan review
-│   └── Components/              # category cards, item rows, flow layout, weather card, scan banner, Gemini consent
+│   ├── Wardrobe/                # WardrobeExtractor, WardrobeML, GarmentSegmenter, GarmentCutout, FashionClassifier, ColorNamer, GarmentDescriber, ItemEmbeddingStore
+│   ├── Outfits/                 # OutfitEngine, StyleKnowledge, OutfitMood, StyleIntentParser, OnDeviceStylist
+│   ├── ImageAnalysisService     # thin entry point to the wardrobe pipeline
+│   ├── SCRFDDetector / FaceMatchingService   # face detection, alignment, AdaFace embeddings, identity resolution
+│   ├── PhotoScanService         # library scan, identity gate, "Is this you?" queue
+│   ├── DuplicateDetector        # visual + attribute duplicate matching
+│   ├── OutfitValidator / OutfitLogic
+│   ├── AuthService, CloudKitService, PersistenceController, OnboardingManager
+│   ├── SelfieCameraService, WeatherService, LocationService
+├── ViewModels/                  # HomeViewModel, MyOutfitsViewModel, FaceReferenceViewModel
+├── Views/                       # Home, TodayOutfitSheet, MyWardrobe, ItemDetail, AddItem*, MyOutfits, Profile, Login, Onboarding/, Components/
 ├── DesignSystem.swift
-├── Secrets.swift                # git-ignored, holds Gemini key
-└── StyleMateApp.swift           # root, AddSourceSheet, app-wide migrations (thumbnails, background-removal, zone crops)
+└── StyleMateApp.swift
 ```
 
 ## Permissions
 
-Declared in `Info.plist`:
-
-- **Photos** (`NSPhotoLibraryUsageDescription`) — required for wardrobe building and auto-scan.
-- **Camera** (`NSCameraUsageDescription`) — onboarding selfie and direct item capture.
-- **Location** — optional, used only to fetch weather for outfit context.
-
-Declared in `StyleMate.entitlements`:
-
-- Sign in with Apple
-- iCloud / CloudKit (`iCloud.$(CFBundleIdentifier)`)
-
-`UIBackgroundModes: remote-notification` is enabled for future push notifications.
+Declared in `Info.plist`: **Photos** (wardrobe building and scan), **Camera** (selfie and item capture), **Location** (optional, weather only). Entitlements: Sign in with Apple, iCloud / CloudKit.
 
 ## Setup
 
-### Requirements
+Nobody needs a local Mac build to work on StyleMate: **every branch push runs `.github/workflows/ci.yml`** on GitHub's Apple-silicon `xcode-27` runner. It regenerates all models into the Actions cache, builds the app, and runs the simulator tests (including end-to-end garment extraction on CC0 street photos in `StyleMateTests/Fixtures/`, whose cutouts are uploaded in the `ci-report` artifact).
 
-- Xcode 15+
-- iOS 18+ device or simulator (face matching needs a real device for camera capture during onboarding)
-- An Apple Developer team with iCloud + Sign in with Apple capabilities
-- A Google OAuth client ID for Sign in with Google
-- A Google Gemini API key
+To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
 
-### Steps
-
-1. **Clone**
-
+1. `git clone https://github.com/pravegm/StyleMate.git`
+2. Configure Google Sign-In: update `GIDClientID` and the matching `CFBundleURLSchemes` in `StyleMate/Info.plist`.
+3. Generate the git-ignored models (Python 3.11):
    ```bash
-   git clone https://github.com/pravegm/StyleMate.git
-   cd StyleMate
+   bash scripts/build_face_models.sh       # -> MobileFaceNet.mlpackage + SCRFD10G.mlpackage at the repo root
+   bash scripts/build_wardrobe_models.sh   # -> StyleMate/ML/*.mlpackage + FashionVocabulary.json
    ```
+   The face embedder takes **BGR** input (handled in `createInputMultiArray`); see `scripts/convert_adaface.py`, `convert_scrfd.py` and `convert_wardrobe_models.py` (each parity-checks Core ML against PyTorch).
+4. `open StyleMate.xcodeproj`, set your signing team, and run (a real device for the selfie camera).
 
-2. **Add your Gemini key**
+## Privacy
 
-   ```bash
-   cp Secrets.example.swift StyleMate/Secrets.swift
-   ```
+- Face matching, garment extraction, classification and outfit styling all run **on the device**. Selfies, face embeddings and photos never leave the phone.
+- Apple's Foundation Models are used only through the on-device `SystemLanguageModel`.
+- Wardrobe data syncs only to the user's own private CloudKit database.
 
-   Fill in the Gemini API key in `StyleMate/Secrets.swift`. The file is git-ignored.
+## Licensing note
 
-3. **Configure Google Sign-In**
-
-   Update `GIDClientID` and the matching `CFBundleURLSchemes` entry in `StyleMate/Info.plist` with your OAuth client ID.
-
-4. **Generate the face-embedding model**
-
-   The face model is **not** committed (large binary, git-ignored). Regenerate `MobileFaceNet.mlpackage` (~125 MB) at the repo root from the public AdaFace checkpoint:
-
-   ```bash
-   cd scripts
-   python3 -m venv adaface_venv && source adaface_venv/bin/activate
-   pip install "numpy<2" torch torchvision coremltools gdown
-   gdown 1dswnavflETcnAuplZj1IOKKP0eM8ITgT -O adaface_ir101_webface12m.ckpt
-   python convert_adaface.py   # converts + verifies Core ML matches PyTorch >0.99
-   rm -rf ../MobileFaceNet.mlpackage && cp -R AdaFaceR100.mlpackage ../MobileFaceNet.mlpackage
-   ```
-
-   This produces the AdaFace IR-101 (WebFace12M) embedder the app loads by the historical name `MobileFaceNet` (**BGR** input, handled in `createInputMultiArray`). See `scripts/convert_adaface.py`.
-
-   Also generate the face **detector** (`SCRFD10G.mlpackage`, ~8 MB), likewise git-ignored:
-
-   ```bash
-   pip install insightface onnxruntime           # downloads buffalo_l (incl. det_10g.onnx)
-   python -c "from insightface.app import FaceAnalysis; FaceAnalysis(name='buffalo_l').prepare(ctx_id=-1)"
-   python convert_scrfd.py                        # -> SCRFD10G.mlpackage
-   cp -R SCRFD10G.mlpackage ../SCRFD10G.mlpackage
-   ```
-
-   (`scripts/convert_r50.py` remains for the prior InsightFace R50 embedder.)
-
-5. **Open and run**
-
-   ```bash
-   open StyleMate.xcodeproj
-   ```
-
-   Set your signing team, ensure the bundle identifier matches your iCloud container, and run on a device for the full onboarding flow.
-
-## Privacy notes
-
-- The face-matching pipeline runs entirely on-device; selfies and embeddings never leave the phone.
-- Image classification and outfit reasoning go to Google Gemini and require explicit per-user consent (`GeminiConsentView`) before any image is sent.
-- Wardrobe data is synced only to the user's own private CloudKit database.
+The bundled model weights come with their own licences, several of which are research / non-commercial (SCRFD, AdaFace's training data, the SegFormer-based parsers). They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
 
 ## License
 
