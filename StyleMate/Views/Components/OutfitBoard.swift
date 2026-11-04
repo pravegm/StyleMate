@@ -2,13 +2,17 @@ import SwiftUI
 
 // MARK: - Outfit board
 //
-// One look as a composed flat-lay, like a stylist's board: layers over the top
-// on the left, the bottom (or a one-piece) on the right, and shoes, bag and
-// accessories in a centred row underneath. Every cell is sized from the space
-// the board is given, so up to six pieces always fit without scrolling.
+// One look as a composed flat-lay, like a stylist's board. Two columns that
+// read as one figure:
+//   left  — the top half, LAYERED: the outer layer behind, the top in front,
+//           cascading down and to the right (like a jacket worn open over a tee),
+//           with the bag / accessories beneath;
+//   right — the bottom (or a one-piece) with the shoes centred under it.
+// Every size is derived from the space the board is given, so up to six pieces
+// always fit without scrolling.
 //
 // Interactive boards show a selected piece's Keep / Swap controls in a glass
-// capsule; thumbnail boards (the option strip) are plain pictures.
+// capsule; thumbnail boards (option strip, Home's card) are plain pictures.
 
 struct OutfitBoard: View {
     let items: [WardrobeItem]
@@ -21,68 +25,77 @@ struct OutfitBoard: View {
     var swapDisabled = false
     /// Room left free at the bottom (for a hint or chip drawn over the board).
     var bottomInset: CGFloat = 0
+    /// Overrides the default inner padding (thumbnails 5 pt, boards 16 pt).
+    var padding: CGFloat? = nil
     var onTap: (WardrobeItem) -> Void = { _ in }
     var onKeep: (WardrobeItem) -> Void = { _ in }
     var onSwap: (WardrobeItem) -> Void = { _ in }
     var onPreview: (WardrobeItem) -> Void = { _ in }
 
     struct Arrangement: Equatable {
-        var left: [WardrobeItem] = []
-        var right: [WardrobeItem] = []
-        var lower: [WardrobeItem] = []
+        /// Layers and tops, back to front (outer layer first).
+        var tops: [WardrobeItem] = []
+        /// The bottom(s), or the one-piece when there's no bottom.
+        var main: [WardrobeItem] = []
+        var shoes: [WardrobeItem] = []
+        /// Bags, accessories, jewelry.
+        var extras: [WardrobeItem] = []
     }
 
     /// Which piece goes where. Pure, so the layout is predictable.
     static func arrange(_ items: [WardrobeItem]) -> Arrangement {
         var a = Arrangement()
-        var upper: [WardrobeItem] = []
         var bottoms: [WardrobeItem] = []
         var onePieces: [WardrobeItem] = []
         for item in items {
             switch ClosetSection.of(item) {
-            case .tops: upper.append(item)
+            case .tops: a.tops.append(item)
             case .bottoms: bottoms.append(item)
             case .dresses: onePieces.append(item)
-            case .footwear, .bags, .accessories, .jewelry: a.lower.append(item)
+            case .footwear: a.shoes.append(item)
+            case .bags, .accessories, .jewelry: a.extras.append(item)
             }
         }
-        // Outer layer first (top of the column), then the mid-layer, then the top.
-        upper.sort { $0.category.wearingOrder < $1.category.wearingOrder }
+        a.tops.sort { $0.category.wearingOrder < $1.category.wearingOrder }
         if bottoms.isEmpty {
-            a.left = upper
-            a.right = onePieces
+            a.main = onePieces
         } else {
-            a.left = upper + onePieces
-            a.right = bottoms
+            a.main = bottoms
+            // A one-piece worn with a bottom (rare) layers in with the tops.
+            a.tops += onePieces
         }
-        a.lower.sort { lowerRank($0) < lowerRank($1) }
+        a.extras.sort { extraRank($0) < extraRank($1) }
         return a
     }
 
-    private static func lowerRank(_ item: WardrobeItem) -> Int {
+    private static func extraRank(_ item: WardrobeItem) -> Int {
         switch ClosetSection.of(item) {
-        case .footwear: return 0
-        case .bags: return 1
-        case .accessories: return 2
-        default: return 3
+        case .bags: return 0
+        case .accessories: return 1
+        default: return 2
         }
     }
 
     var body: some View {
         GeometryReader { geo in
             let a = Self.arrange(items)
-            let pad: CGFloat = isThumbnail ? 5 : DS.Spacing.md
+            let pad: CGFloat = padding ?? (isThumbnail ? 5 : DS.Spacing.md)
             let gap: CGFloat = isThumbnail ? 3 : DS.Spacing.sm
             let w = max(0, geo.size.width - pad * 2)
             let h = max(0, geo.size.height - pad * 2 - bottomInset)
-            let split = Self.split(a, height: h, gap: gap)
 
-            VStack(spacing: gap) {
-                if split.upper > 0 {
-                    upper(a, width: w, height: split.upper, gap: gap)
-                }
-                if split.lower > 0 {
-                    row(a.lower, width: w, height: split.lower, gap: gap, maxCellWidth: max(0, (w - gap) / 2))
+            Group {
+                if !a.tops.isEmpty && !a.main.isEmpty {
+                    let colW = max(0, (w - gap) / 2)
+                    HStack(alignment: .top, spacing: gap) {
+                        column(a.tops, layered: true, under: a.extras, width: colW, height: h, gap: gap)
+                        column(a.main, layered: false, under: a.shoes, width: colW, height: h, gap: gap)
+                    }
+                } else {
+                    // One column (a dress alone, or tops without a bottom), centred.
+                    let primary = a.tops.isEmpty ? a.main : a.tops
+                    column(primary, layered: !a.tops.isEmpty, under: a.shoes + a.extras,
+                           width: min(w, max(w * 0.7, h * 0.6)), height: h, gap: gap)
                 }
             }
             .frame(width: w, height: h)
@@ -91,30 +104,51 @@ struct OutfitBoard: View {
         }
     }
 
-    /// Heights of the upper block and the lower row.
-    private static func split(_ a: Arrangement, height: CGFloat, gap: CGFloat) -> (upper: CGFloat, lower: CGFloat) {
-        let hasUpper = !a.left.isEmpty || !a.right.isEmpty
-        if a.lower.isEmpty { return (hasUpper ? height : 0, 0) }
-        if !hasUpper { return (0, height) }
-        let lower = min(height * 0.28, 180)
-        return (max(0, height - lower - gap), lower)
+    /// A column: the main pieces on top, a centred row of smaller pieces under them.
+    private func column(_ primary: [WardrobeItem], layered: Bool, under: [WardrobeItem],
+                        width: CGFloat, height: CGFloat, gap: CGFloat) -> some View {
+        let underH: CGFloat = under.isEmpty ? 0 : max(0, min(height * 0.3, width * 0.62))
+        let mainH = max(0, under.isEmpty ? height : height - underH - gap)
+        return VStack(spacing: gap) {
+            if layered {
+                layeredStack(primary, width: width, height: mainH)
+            } else {
+                stacked(primary, width: width, height: mainH, gap: gap)
+            }
+            if !under.isEmpty {
+                row(under, width: width, height: underH, gap: gap)
+            }
+        }
+        .frame(width: width, height: height, alignment: .top)
     }
 
+    /// Layers cascading back to front, overlapping like they're worn together.
     @ViewBuilder
-    private func upper(_ a: Arrangement, width: CGFloat, height: CGFloat, gap: CGFloat) -> some View {
-        if !a.left.isEmpty && !a.right.isEmpty {
-            let colW = max(0, (width - gap) / 2)
-            HStack(spacing: gap) {
-                column(a.left, width: colW, height: height, gap: gap)
-                column(a.right, width: colW, height: height, gap: gap)
-            }
+    private func layeredStack(_ list: [WardrobeItem], width: CGFloat, height: CGFloat) -> some View {
+        let n = list.count
+        if n <= 1 {
+            ForEach(list) { item in piece(item).frame(width: width, height: height) }
         } else {
-            row(a.left.isEmpty ? a.right : a.left, width: width, height: height, gap: gap,
-                maxCellWidth: width * 0.62)
+            let steps = CGFloat(n - 1)
+            let side = max(0, min(width * (n == 2 ? 0.80 : 0.70), height * (n == 2 ? 0.72 : 0.58)))
+            let dx = max(0, (width - side) / steps)
+            let dy = max(0, min((height - side) / steps, side * 0.40))
+            let y0 = max(0, (height - side - dy * steps) / 2)
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
+                    piece(item)
+                        .frame(width: side, height: side)
+                        .offset(x: dx * CGFloat(index), y: y0 + dy * CGFloat(index))
+                        // Outer layer behind; a selected piece comes forward so
+                        // its controls are never covered.
+                        .zIndex(selectedID == item.id ? 100 : Double(index))
+                }
+            }
+            .frame(width: width, height: height, alignment: .topLeading)
         }
     }
 
-    private func column(_ list: [WardrobeItem], width: CGFloat, height: CGFloat, gap: CGFloat) -> some View {
+    private func stacked(_ list: [WardrobeItem], width: CGFloat, height: CGFloat, gap: CGFloat) -> some View {
         let n = CGFloat(max(list.count, 1))
         let cellH = max(0, (height - gap * (n - 1)) / n)
         return VStack(spacing: gap) {
@@ -124,10 +158,9 @@ struct OutfitBoard: View {
         }
     }
 
-    private func row(_ list: [WardrobeItem], width: CGFloat, height: CGFloat, gap: CGFloat,
-                     maxCellWidth: CGFloat) -> some View {
+    private func row(_ list: [WardrobeItem], width: CGFloat, height: CGFloat, gap: CGFloat) -> some View {
         let n = CGFloat(max(list.count, 1))
-        let cellW = max(0, min((width - gap * (n - 1)) / n, maxCellWidth))
+        let cellW = max(0, min((width - gap * (n - 1)) / n, width * 0.8))
         return HStack(spacing: gap) {
             ForEach(list) { item in
                 piece(item).frame(width: cellW, height: height)

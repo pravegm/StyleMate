@@ -17,7 +17,9 @@ struct HomeView: View {
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.duoLayout) private var duo
-    @ScaledMetric(relativeTo: .body) private var heroThumbHeight: CGFloat = 104
+    @ScaledMetric(relativeTo: .body) private var heroBoardHeight: CGFloat = 230
+    /// The rounded temperature today's look was picked for.
+    @State private var heroTemperature: Int? = nil
 
     // MARK: - Outfit sheet presentation
 
@@ -85,9 +87,9 @@ struct HomeView: View {
 
     @ViewBuilder
     private var heroBlock: some View {
-        if homeVM.heroOutfit != nil || homeVM.isGeneratingHero {
+        if showsTodayLook {
             entrance(todaysOutfitHero.coachAnchor(CoachAnchor.todayOutfit), delay: 0.1)
-                .padding(.top, DS.Spacing.xl)
+                .padding(.top, DS.Spacing.lg)
         }
     }
 
@@ -124,13 +126,13 @@ struct HomeView: View {
                         FoldAwareSplit(gutter: DS.Spacing.xl, stackedSpacing: 0) {
                             VStack(alignment: .leading, spacing: 0) {
                                 greetingBlock
-                                styleMeBlock
+                                heroBlock
                             }
                             .frame(maxWidth: 560, alignment: .leading)
                             .frame(maxWidth: .infinity)
                         } trailing: {
                             VStack(alignment: .leading, spacing: 0) {
-                                heroBlock
+                                styleMeBlock
                                 wardrobeBlock
                             }
                             .frame(maxWidth: 560, alignment: .leading)
@@ -210,15 +212,12 @@ struct HomeView: View {
                 if homeVM.weather == nil && !homeVM.isWeatherLoading {
                     homeVM.requestWeatherForCurrentLocation()
                 }
-                homeVM.ensureHero(wardrobe: wardrobeViewModel.items, user: authService.user)
+                refreshHeroIfNeeded()
                 withAnimation { appeared = true }
             }
-            .onChange(of: homeVM.weather?.temperature2m) { _ in
-                homeVM.ensureHero(wardrobe: wardrobeViewModel.items, user: authService.user)
-            }
-            .onChange(of: homeVM.weatherError) { _ in
-                homeVM.ensureHero(wardrobe: wardrobeViewModel.items, user: authService.user)
-            }
+            .onChange(of: homeVM.weather?.temperature2m) { _ in refreshHeroIfNeeded() }
+            .onChange(of: homeVM.weatherError) { _ in refreshHeroIfNeeded() }
+            .onChange(of: wardrobeViewModel.items.count) { _ in refreshHeroIfNeeded() }
             .onChange(of: homeVM.isLoading) { isLoading in
                 if isLoading {
                     loadingProgress = 0.0
@@ -280,74 +279,155 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Today's Outfit Hero
+    // MARK: - Today's look (hero)
+    //
+    // The app opens on an answer: the stylist's pick for today's weather as a
+    // small outfit board, with "Wear today" (logs it) and "More options" (the
+    // five-option deck). Once today is logged, it shows what you're wearing.
+    // The morning notification deep-links here.
+
+    /// Today's logged look, as wardrobe items (nil when nothing is logged today).
+    private var todaysLoggedItems: [WardrobeItem]? {
+        let today = Calendar.current.startOfDay(for: Date())
+        guard let outfit = outfitsVM.outfitsByDate[today]?.last,
+              let logged = outfit.items as? Set<OutfitItem> else { return nil }
+        let byID = Dictionary(wardrobeViewModel.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let items = logged.compactMap { $0.id.flatMap { byID[$0] } }
+        return items.isEmpty ? nil : items
+    }
+
+    private var showsTodayLook: Bool {
+        todaysLoggedItems != nil || homeVM.heroOutfit != nil || homeVM.isGeneratingHero
+    }
+
+    private var todayWeatherLine: String {
+        var parts: [String] = []
+        if let c = homeVM.lastCelsius {
+            parts.append("\(DSFormat.degrees(celsius: c, fahrenheit: homeVM.displayFahrenheit))°")
+        }
+        if let w = homeVM.weather { parts.append(w.displayDescription) }
+        return parts.joined(separator: " · ")
+    }
 
     @ViewBuilder
     private var todaysOutfitHero: some View {
-        if let hero = homeVM.heroOutfit {
-            Button {
-                Haptics.medium()
-                homeVM.openHeroInDeck(user: authService.user)
-            } label: {
-                VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Today's Outfit")
-                            .font(DS.Font.title2)
-                            .foregroundStyle(DS.Colors.textPrimary)
-                        Spacer()
-                        HStack(spacing: 2) {
-                            Text("Style it")
-                                .font(DS.Font.subheadline.weight(.semibold))
-                            Image(systemName: "chevron.right")
-                                .font(DS.Font.footnote.weight(.semibold))
-                        }
-                        .foregroundStyle(DS.Colors.accent)
-                    }
-
-                    heroPreviewRow(hero)
-
-                    if !hero.explanation.isEmpty {
-                        HStack(alignment: .top, spacing: DS.Spacing.xs) {
-                            Image(systemName: "sparkles")
-                                .font(DS.Font.footnote)
-                                .foregroundStyle(DS.Colors.accent)
-                                .padding(.top, 1)
-                            Text(hero.explanation)
-                                .font(DS.Font.subheadline)
-                                .foregroundStyle(DS.Colors.textSecondary)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-                .padding(DS.Spacing.lg)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(DS.Colors.backgroundCard)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
-                .dsElevatedShadow(cornerRadius: DS.Radius.hero)
-            }
-            .buttonStyle(DSTapBounce())
+        if let logged = todaysLoggedItems {
+            todayLookCard(items: logged, note: nil, isLogged: true)
+        } else if let hero = homeVM.heroOutfit {
+            todayLookCard(items: hero.items, note: hero.explanation, isLogged: false)
         } else if homeVM.isGeneratingHero {
             heroSkeleton
         }
     }
 
-    private func heroPreviewRow(_ outfit: Outfit) -> some View {
-        let items = outfit.items.sorted { $0.category.wearingOrder < $1.category.wearingOrder }
-        return HStack(spacing: DS.Spacing.sm) {
-            ForEach(items.prefix(5)) { item in
-                BoardCutout(item: item, path: item.gridImagePath, shadowRadius: 4)
-                    .frame(height: heroThumbHeight)
+    private func todayLookCard(items: [WardrobeItem], note: String?, isLogged: Bool) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            HStack(alignment: .center, spacing: DS.Spacing.xs) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isLogged ? "Today you're wearing" : "Today's look")
+                        .font(DS.Font.title3)
+                        .foregroundStyle(DS.Colors.textPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                    if !todayWeatherLine.isEmpty {
+                        Text(todayWeatherLine)
+                            .font(DS.Font.footnote)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                    }
+                }
+                Spacer(minLength: 0)
+                if isLogged {
+                    Label("Logged", systemImage: "checkmark.circle.fill")
+                        .font(DS.Font.footnote.weight(.semibold))
+                        .foregroundStyle(DS.Colors.success)
+                }
+            }
+
+            Button {
+                Haptics.medium()
+                if isLogged {
+                    NotificationCenter.default.post(name: .showOutfitsCalendar, object: nil)
+                } else {
+                    homeVM.openHeroInDeck(user: authService.user)
+                }
+            } label: {
+                OutfitBoard(items: items, isThumbnail: true, padding: DS.Spacing.sm)
+                    .frame(height: heroBoardHeight)
                     .frame(maxWidth: .infinity)
+                    .background(StudioSurface())
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            }
+            .buttonStyle(DSTapBounce())
+            .accessibilityLabel(items.map { ClosetText.displayName($0) }.joined(separator: ", "))
+            .accessibilityHint(isLogged ? "Opens your outfit calendar" : "Opens this look to keep or swap pieces")
+            .accessibilityIdentifier("home.todayLook.board")
+
+            if let note, !note.isEmpty {
+                Text(note)
+                    .font(DS.Font.subheadline)
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: DS.Spacing.sm) {
+                Button {
+                    Haptics.medium()
+                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
+                } label: {
+                    Text("More options")
+                }
+                .buttonStyle(DSOutlineButton())
+                .disabled(homeVM.isLoading)
+                .accessibilityHint("Builds five outfits for today")
+                .accessibilityIdentifier("home.todayLook.more")
+
+                if !isLogged {
+                    Button {
+                        wearHeroToday(items)
+                    } label: {
+                        Text("Wear today")
+                    }
+                    .buttonStyle(DSPrimaryButton())
+                    .accessibilityHint("Logs this outfit to today")
+                    .accessibilityIdentifier("home.todayLook.wear")
+                }
             }
         }
-        .frame(height: heroThumbHeight)
-        .padding(.vertical, DS.Spacing.sm)
-        .padding(.horizontal, DS.Spacing.md)
-        .background(StudioSurface())
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(items.prefix(5).map { ClosetText.displayName($0) }.joined(separator: ", "))
+        .padding(DS.Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
+        .dsElevatedShadow(cornerRadius: DS.Radius.hero)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.todayLook")
+        .animation(DSMotionEnv.resolve(DS.Motion.smooth, reduceMotion: reduceMotion), value: isLogged)
+    }
+
+    private func wearHeroToday(_ items: [WardrobeItem]) {
+        Haptics.success()
+        withAnimation(DSMotionEnv.resolve(DS.Motion.smooth, reduceMotion: reduceMotion)) {
+            outfitsVM.addOutfit(date: Calendar.current.startOfDay(for: Date()), items: items,
+                                source: MyOutfitsViewModel.Source.stylist)
+        }
+    }
+
+    /// Re-picks today's look when the wardrobe loses one of its pieces or the
+    /// temperature moves (the pick itself is seeded by the date, so it's stable).
+    private func refreshHeroIfNeeded() {
+        let items = wardrobeViewModel.items
+        guard let hero = homeVM.heroOutfit else {
+            homeVM.ensureHero(wardrobe: items, user: authService.user)
+            heroTemperature = homeVM.lastCelsius.map { DSFormat.degrees(celsius: $0, fahrenheit: false) }
+            return
+        }
+        let ids = Set(items.map(\.id))
+        let temp = homeVM.lastCelsius.map { DSFormat.degrees(celsius: $0, fahrenheit: false) }
+        let lostPiece = hero.items.contains { !ids.contains($0.id) }
+        let weatherMoved = heroTemperature != nil && temp != nil && abs((temp ?? 0) - (heroTemperature ?? 0)) >= 3
+        if lostPiece || weatherMoved {
+            homeVM.generateHero(wardrobe: items, user: authService.user)
+        }
+        if heroTemperature == nil || weatherMoved { heroTemperature = temp }
     }
 
     private var heroSkeleton: some View {

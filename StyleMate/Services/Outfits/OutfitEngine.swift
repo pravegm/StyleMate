@@ -1350,15 +1350,19 @@ private final class StylingPass {
         let bottom = clothes.first { $0.slot == .bottom }
         let shoes = clothes.first { $0.slot == .footwear }
         func d(_ p: ItemProfile) -> String { StyleVocabulary.describe(p) }
+        /// Verb agreement: "the jeans keep", "the tee keeps".
+        func v(_ p: ItemProfile, _ singular: String, _ plural: String) -> String {
+            StyleVocabulary.isPlural(p) ? plural : singular
+        }
 
         // The top layer against what's under it.
         if let outer, let under = mid ?? base, [.neutral, .singleAccent, .tonal].contains(palette.kind) {
             if let o = outer.lead, o.isNeutral, o.isWarm,
                (under.lead?.isCool ?? false) || (under.lead?.isDark ?? false) || under.lead?.hue == nil {
-                return "the \(d(outer)) warms up the \(d(under))"
+                return "the \(d(outer)) \(v(outer, "warms", "warm")) up the \(d(under))"
             }
             if let o = outer.lead, o.isDark, outer.formality >= 3.4 {
-                return "the \(d(outer)) sharpens the \(d(under))"
+                return "the \(d(outer)) \(v(outer, "sharpens", "sharpen")) the \(d(under))"
             }
         }
 
@@ -1382,20 +1386,20 @@ private final class StylingPass {
             if let partner = clothes.first(where: { $0.id != accent.id && $0.isNeutral && $0.slot != .footwear })
                 ?? clothes.first(where: { $0.id != accent.id }) {
                 return rng.choose([
-                    "the \(d(accent)) pops against the \(d(partner))",
-                    "the \(d(accent)) does the talking, the \(d(partner)) keeps it grounded",
+                    "the \(d(accent)) \(v(accent, "pops", "pop")) against the \(d(partner))",
+                    "the \(d(accent)) \(v(accent, "does", "do")) the talking, the \(d(partner)) \(v(partner, "keeps", "keep")) it grounded",
                     "one hit of colour, the \(d(accent)), with the \(d(partner))"
                 ])
             }
-            return "the \(d(accent)) brings the colour"
+            return "the \(d(accent)) \(v(accent, "brings", "bring")) the colour"
         case .analogous, .complementary:
             let accents = palette.accentItems.filter { $0.isClothing }
             let a = accents.first ?? first
             let b = accents.dropFirst().first ?? clothes.first(where: { $0.id != a.id }) ?? a
             if palette.kind == .analogous {
-                return rng.choose(["the \(d(a)) flows into the \(d(b))", "neighbouring shades, \(d(a)) and \(d(b))"])
+                return rng.choose(["the \(d(a)) \(v(a, "flows", "flow")) into the \(d(b))", "neighbouring shades, \(d(a)) and \(d(b))"])
             }
-            return rng.choose(["the \(d(a)) plays off the \(d(b))", "\(d(a)) and \(d(b)) for a confident contrast"])
+            return rng.choose(["the \(d(a)) \(v(a, "plays", "play")) off the \(d(b))", "\(d(a)) and \(d(b)) for a confident contrast"])
         case .triadic, .clashing, .busy:
             let lead = palette.accentItems.first(where: { $0.isClothing }) ?? first
             return "a confident colour mix led by the \(d(lead))"
@@ -1448,6 +1452,22 @@ enum StyleVocabulary {
             return "knit"
         }
         return nouns[p.productKey] ?? p.item.displayProduct.lowercased()
+    }
+
+    /// Nouns that take a plural verb ("the jeans keep it grounded").
+    private static let pluralNouns: Set<String> = [
+        "jeans", "trousers", "chinos", "cargos", "wide-leg trousers", "linen trousers", "palazzos",
+        "sweatpants", "joggers", "leggings", "shorts", "sneakers", "boots", "ankle boots", "chelsea boots",
+        "sandals", "loafers", "oxfords", "dress shoes", "heels", "flats", "dungarees", "overalls",
+        "pants", "tights", "slippers", "trainers", "mules", "espadrilles", "slides", "sunglasses"
+    ]
+
+    static func isPlural(_ p: ItemProfile) -> Bool {
+        let word = noun(for: p).lowercased()
+        if pluralNouns.contains(word) { return true }
+        // Fall back to the last word ("black chelsea boots" → "boots").
+        if let last = word.split(separator: " ").last, pluralNouns.contains(String(last)) { return true }
+        return false
     }
 
     static func describe(_ p: ItemProfile) -> String {

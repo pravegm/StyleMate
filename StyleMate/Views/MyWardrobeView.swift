@@ -25,7 +25,12 @@ struct MyWardrobeView: View {
     @State private var selection: Set<UUID> = []
     @State private var confirmBulkRemove = false
     @State private var pendingRemoval: WardrobeItem? = nil
+    /// The pushed item page (phone / cover display).
     @State private var detailItem: WardrobeItem? = nil
+    /// The item in the page pane (wide). Separate from `detailItem`, so folding
+    /// to the cover display never finds a stale push waiting (the pane
+    /// auto-shows the first item).
+    @State private var paneItem: WardrobeItem? = nil
     @State private var editingItem: WardrobeItem? = nil
     @Namespace private var zoomNS
 
@@ -62,8 +67,10 @@ struct MyWardrobeView: View {
             Button("Remove from Wardrobe", role: .destructive) {
                 Haptics.warning()
                 if detailItem?.id == item.id { detailItem = nil }
+                if paneItem?.id == item.id { paneItem = nil }
                 ClosetActions.remove([item], from: wardrobeViewModel)
                 pendingRemoval = nil
+                showFirstItemIfNeeded()
             }
             Button("Cancel", role: .cancel) { pendingRemoval = nil }
         } message: { _ in
@@ -75,8 +82,24 @@ struct MyWardrobeView: View {
             let ids = Set(wardrobeViewModel.items.map(\.id))
             selection.formIntersection(ids)
             if let d = detailItem, !ids.contains(d.id) { detailItem = nil }
+            if let p = paneItem, !ids.contains(p.id) { paneItem = nil }
             if wardrobeViewModel.items.isEmpty { isSelecting = false }
         }
+        // Unfolding keeps an open item page (it moves into the pane); folding to
+        // the cover returns to the grid.
+        .onChange(of: isWide) { wide in
+            if wide {
+                if let d = detailItem { paneItem = d }
+                detailItem = nil
+            } else {
+                detailItem = nil
+            }
+        }
+    }
+
+    /// Opens an item: pushed on a phone, in the page pane when wide.
+    private func open(_ item: WardrobeItem) {
+        if isWide { paneItem = item } else { detailItem = item }
     }
 
     // MARK: - Phone: one stack
@@ -130,9 +153,9 @@ struct MyWardrobeView: View {
 
     @ViewBuilder
     private var detailPane: some View {
-        if let item = detailItem {
+        if let item = paneItem {
             ItemDetailView(item: item, wear: wear[item.id], embedded: true) { removed in
-                detailItem = nil
+                paneItem = nil
                 withAnimation(DS.Motion.smooth) {
                     ClosetActions.remove([removed], from: wardrobeViewModel)
                 }
@@ -149,8 +172,8 @@ struct MyWardrobeView: View {
 
     /// Wide layout: the page pane is never empty while there's something to show.
     private func showFirstItemIfNeeded() {
-        guard isWide, detailItem == nil else { return }
-        detailItem = ClosetEngine.apply(wardrobeViewModel.items, filter: filter, sort: sort, wear: wear).first
+        guard isWide, paneItem == nil else { return }
+        paneItem = ClosetEngine.apply(wardrobeViewModel.items, filter: filter, sort: sort, wear: wear).first
     }
 
     // MARK: - Closet
@@ -258,13 +281,13 @@ struct MyWardrobeView: View {
 
     private func cell(_ item: WardrobeItem) -> some View {
         let selected = selection.contains(item.id)
-        let isOpen = isWide && detailItem?.id == item.id
+        let isOpen = isWide && paneItem?.id == item.id
         return Button {
             if isSelecting {
                 Haptics.selection()
                 if selected { selection.remove(item.id) } else { selection.insert(item.id) }
             } else {
-                detailItem = item
+                open(item)
             }
         } label: {
             ClosetItemCell(item: item, isSelecting: isSelecting, isSelected: selected || isOpen,
@@ -275,7 +298,7 @@ struct MyWardrobeView: View {
         .accessibilityIdentifier("closet.item.\(item.id.uuidString)")
         .contextMenu {
             if !isSelecting {
-                Button { detailItem = item } label: { Label("View", systemImage: "eye") }
+                Button { open(item) } label: { Label("View", systemImage: "eye") }
                 Button { editingItem = item } label: { Label("Edit details", systemImage: "pencil") }
                 Button {
                     withAnimation(DS.Motion.snappy) {
@@ -347,8 +370,10 @@ struct MyWardrobeView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        if !wardrobeViewModel.items.isEmpty {
-            ToolbarItem(placement: .topBarTrailing) {
+        // One group, so Select and + always sit together (the Duo's cover
+        // display otherwise floated + into its trailing rail).
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if !wardrobeViewModel.items.isEmpty {
                 Button(isSelecting ? "Done" : "Select") {
                     Haptics.light()
                     withAnimation(DS.Motion.snappy) {
@@ -357,10 +382,9 @@ struct MyWardrobeView: View {
                     }
                 }
                 .fontWeight(isSelecting ? .semibold : .regular)
+                .accessibilityIdentifier("closet.select")
             }
-        }
-        if !isSelecting {
-            ToolbarItem(placement: .topBarTrailing) {
+            if !isSelecting {
                 Button {
                     Haptics.medium()
                     showAddSheet = true

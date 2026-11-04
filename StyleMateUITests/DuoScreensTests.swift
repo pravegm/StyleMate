@@ -46,10 +46,14 @@ final class DuoScreensTests: E2ETestCase {
             let editDetails = itemPage()
             XCTAssertTrue(editDetails.waitForExistence(timeout: 15), "Item page didn't open")
             shoot("03-item")
-            let backByID = app.navigationBars.buttons["BackButton"]
-            let back = backByID.exists ? backByID : app.navigationBars.buttons.element(boundBy: 0)
-            if back.waitForExistence(timeout: 5) { back.tap() }
-            _ = waitToDisappear(editDetails, timeout: 10)
+            // Only go back from a pushed page (never tap the closet's own Select by mistake).
+            if editDetails.exists {
+                let backByID = app.navigationBars.buttons["BackButton"]
+                let back = backByID.exists ? backByID : app.navigationBars.buttons.matching(NSPredicate(format:
+                    "identifier != 'closet.select' AND identifier != 'closet.add' AND identifier != 'itemDetail.more'")).firstMatch
+                if back.waitForExistence(timeout: 5) { back.tap() }
+                _ = waitToDisappear(editDetails, timeout: 10)
+            }
         } else {
             XCTFail("No T-shirt tile to open")
         }

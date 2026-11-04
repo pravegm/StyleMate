@@ -207,6 +207,16 @@ enum DS {
     }
 }
 
+// MARK: - Formatting
+
+enum DSFormat {
+    /// Whole degrees, ROUNDED, the same way the stylist's notes do it (8.6°C is
+    /// "9°" everywhere, never "8°" in one place and "9°C" in another).
+    static func degrees(celsius: Double, fahrenheit: Bool) -> Int {
+        Int((fahrenheit ? celsius * 9 / 5 + 32 : celsius).rounded())
+    }
+}
+
 // MARK: - Shadow / Card Modifiers
 
 struct DSCardShadow: ViewModifier {

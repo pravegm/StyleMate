@@ -66,8 +66,11 @@ final class StyleMateE2ETests: E2ETestCase {
                       "Home has no Style Me card")
 
         // Occasion + (once the redesign lands) mood.
+        // Today's look sits above the form once the stylist has a pick.
+        let todayLook = app.buttons["home.todayLook.wear"]
+        if todayLook.waitForExistence(timeout: 10) { snap("home-todays-look") }
         let occasion = button(id: "home.occasion.Everyday Casual", label: "Everyday Casual")
-        if occasion.waitForExistence(timeout: 5) { occasion.tap() }
+        if occasion.waitForExistence(timeout: 5) { tapScrollingIfNeeded(occasion) }
         pickMoodIfOffered()
         snap("home-style-me")
 
@@ -280,6 +283,7 @@ final class StyleMateE2ETests: E2ETestCase {
     @MainActor
     private func pickMoodIfOffered() {
         let byID = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH[c] 'mood.'")).firstMatch
+        if byID.exists && !byID.isHittable { _ = scrollUntilHittable(byID, maxSwipes: 2) }
         if byID.exists && byID.isHittable {
             byID.tap()
             snap("mood-picked")

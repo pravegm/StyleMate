@@ -13,9 +13,9 @@ struct StylingLoadingView: View {
         case 0.15..<0.30:
             let weatherText: String
             if let w = weather, let city = w.city, !city.isEmpty {
-                weatherText = "\(Int(w.temperature2m))°C in \(city)"
+                weatherText = "\(DSFormat.degrees(celsius: w.temperature2m, fahrenheit: false))°C in \(city)"
             } else if let w = weather {
-                weatherText = "\(Int(w.temperature2m))°C"
+                weatherText = "\(DSFormat.degrees(celsius: w.temperature2m, fahrenheit: false))°C"
             } else {
                 weatherText = ""
             }

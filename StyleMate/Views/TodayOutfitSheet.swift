@@ -52,7 +52,7 @@ struct TodayOutfitSheet: View {
         if let type = homeVM.selectedOutfitType { parts.append(type.rawValue) }
         if let mood = homeVM.selectedMood { parts.append(mood.label) }
         if let tempC = homeVM.lastCelsius {
-            let temp = homeVM.displayFahrenheit ? Int((tempC * 9.0 / 5.0) + 32) : Int(tempC)
+            let temp = DSFormat.degrees(celsius: tempC, fahrenheit: homeVM.displayFahrenheit)
             parts.append("\(temp)°\(homeVM.displayFahrenheit ? "F" : "C")")
         }
         if let weather = homeVM.weather { parts.append(weather.displayDescription) }
@@ -204,21 +204,25 @@ struct TodayOutfitSheet: View {
     /// board never straddles the fold.
     private func wideLayout(_ look: Outfit, size: CGSize) -> some View {
         let gutter = DS.Spacing.lg
-        return FoldAwareSplit(gutter: gutter, leadingFraction: 0.55) {
+        return FoldAwareSplit(gutter: gutter, leadingFraction: 0.5) {
             boardCard(look, inlineControls: false)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } trailing: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                    noteCard(look, lineLimit: nil)
-                    piecesList(look)
-                    if let gap = activeGap { gapCard(gap) }
-                    actionBar
-                    if homeVM.outfitBatch.count > 1 { optionsStrip }
+            VStack(spacing: DS.Spacing.sm) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                        noteCard(look, lineLimit: nil)
+                        piecesList(look)
+                        if let gap = activeGap { gapCard(gap) }
+                        if homeVM.outfitBatch.count > 1 { optionsStrip }
+                    }
+                    .padding(.bottom, DS.Spacing.sm)
                 }
-                .padding(.bottom, gutter)
+                .scrollIndicators(.hidden)
+                // Pinned, so "Wear today" is never scrolled away or clipped.
+                stackedActionBar
             }
-            .scrollIndicators(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(gutter)
     }
@@ -375,19 +379,24 @@ struct TodayOutfitSheet: View {
             .accessibilityLabel("View \(ClosetText.displayName(item)) larger")
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(ClosetText.displayName(item))
+                // The short garment name ("Camel coat"), two lines when narrow.
+                Text(StyleVocabulary.capitalizedFirst(StyleVocabulary.describe(item)))
                     .font(DS.Font.subheadline.weight(.medium))
                     .foregroundStyle(DS.Colors.textPrimary)
-                    .lineLimit(1)
-                Text(kept ? "Kept" : ClosetSection.of(item).chipTitle)
-                    .font(DS.Font.caption1)
-                    .foregroundStyle(kept ? DS.Colors.accent : DS.Colors.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                if kept {
+                    Text("Kept")
+                        .font(DS.Font.caption1)
+                        .foregroundStyle(DS.Colors.accent)
+                }
             }
-            Spacer(minLength: DS.Spacing.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
             PieceActionButton(kind: .keep, item: item, isOn: kept) { toggleKeep(item) }
             PieceActionButton(kind: .swap, item: item, disabled: homeVM.isLoading || kept) { swap(item) }
         }
-        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.horizontal, DS.Spacing.xs)
         .padding(.vertical, 6)
     }
 
@@ -512,6 +521,50 @@ struct TodayOutfitSheet: View {
 
     private var actionBar: some View {
         HStack(spacing: DS.Spacing.sm) {
+            moreMenu
+            skipButton.frame(maxWidth: 120)
+            wearButton
+        }
+        .disabled(isCommitting)
+        .coachAnchor(CoachAnchor.genActions)
+    }
+
+    /// Wide layout's narrower pane: "Wear today" full width, ⋯ and Skip beneath.
+    private var stackedActionBar: some View {
+        VStack(spacing: DS.Spacing.xs) {
+            wearButton
+            HStack(spacing: DS.Spacing.xs) {
+                moreMenu
+                skipButton
+            }
+        }
+        .disabled(isCommitting)
+        .coachAnchor(CoachAnchor.genActions)
+    }
+
+    private var skipButton: some View {
+        Button {
+            Haptics.light()
+            commit(.skip)
+        } label: {
+            Text("Skip")
+        }
+        .buttonStyle(DSOutlineButton())
+        .accessibilityIdentifier("outfit.skip")
+    }
+
+    private var wearButton: some View {
+        Button {
+            commit(.wear)
+        } label: {
+            Text("Wear today")
+        }
+        .buttonStyle(DSPrimaryButton())
+        .accessibilityHint("Logs this outfit to today")
+        .accessibilityIdentifier("outfit.wear")
+    }
+
+    private var moreMenu: some View {
             Menu {
                 Button {
                     logDate = Calendar.current.startOfDay(for: Date())
@@ -540,28 +593,6 @@ struct TodayOutfitSheet: View {
             }
             .accessibilityLabel("More options")
             .accessibilityIdentifier("outfit.more")
-
-            Button {
-                Haptics.light()
-                commit(.skip)
-            } label: {
-                Text("Skip")
-            }
-            .buttonStyle(DSOutlineButton())
-            .frame(maxWidth: 120)
-            .accessibilityIdentifier("outfit.skip")
-
-            Button {
-                commit(.wear)
-            } label: {
-                Text("Wear today")
-            }
-            .buttonStyle(DSPrimaryButton())
-            .accessibilityHint("Logs this outfit to today")
-            .accessibilityIdentifier("outfit.wear")
-        }
-        .disabled(isCommitting)
-        .coachAnchor(CoachAnchor.genActions)
     }
 
     private enum Decision { case wear, skip }

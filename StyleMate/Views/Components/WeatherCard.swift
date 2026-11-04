@@ -51,7 +51,7 @@ struct WeatherInlineRow: View {
                         .font(DS.Font.title3)
                         .foregroundColor(DS.Colors.accent)
 
-                    Text("\(Int(displayFahrenheit ? tempF : tempC))°")
+                    Text("\(Int((displayFahrenheit ? tempF : tempC).rounded()))°")
                         .font(DS.Font.display)
                         .foregroundColor(DS.Colors.textPrimary)
 

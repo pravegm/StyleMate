@@ -261,8 +261,9 @@ class HomeViewModel: ObservableObject {
     @Published var heroOutfit: Outfit?
     @Published var isGeneratingHero = false
 
-    /// The wardrobe must be this rich before we surface a "Today's Outfit" on Home.
-    static let minItemsForHero = 30
+    /// Home's "Today's look" shows as soon as the wardrobe can make an outfit
+    /// (a top and a bottom); the engine returns nothing below that.
+    static let minItemsForHero = 2
 
     private static let heroCacheKey = "todayHeroOutfit"
 
