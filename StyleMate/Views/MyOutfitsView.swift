@@ -99,10 +99,21 @@ struct MyOutfitsView: View {
             }
             .background(DS.Colors.backgroundPrimary)
             .navigationTitle("Outfits")
-            .onAppear { withAnimation { appeared = true } }
+            .onAppear {
+                // Land on the day just logged from Home ("View in Calendar").
+                if let logged = viewModel.lastLoggedDate { selectedDate = logged }
+                withAnimation { appeared = true }
+            }
+            .onChange(of: viewModel.lastLoggedDate) { logged in
+                if let logged { selectedDate = logged }
+            }
+            // The tab view lives for the whole session; keep "Today" honest past midnight.
+            .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
+                selectedDate = Calendar.current.startOfDay(for: Date())
+            }
             .sheet(isPresented: $showAddSheet) {
                 AddOutfitSheet(selectedDate: selectedDate) { items, notes in
-                    viewModel.addOutfit(date: selectedDate, items: items, source: "manual", notes: notes)
+                    viewModel.addOutfit(date: selectedDate, items: items, source: MyOutfitsViewModel.Source.manual, notes: notes)
                 }
                 .environmentObject(wardrobeVM)
             }
@@ -517,17 +528,18 @@ struct OutfitCardView: View {
 
             HStack {
                 if let source = outfit.source {
+                    let styled = MyOutfitsViewModel.Source.isStyled(source)
                     HStack(spacing: DS.Spacing.micro) {
-                        Image(systemName: source == "gemini" ? "wand.and.stars" : "hand.draw")
+                        Image(systemName: styled ? "wand.and.stars" : "hand.draw")
                             .font(DS.Font.caption2)
-                        Text(source == "gemini" ? "AI Styled" : "Manual")
+                        Text(styled ? "Styled for you" : "Manual")
                             .font(DS.Font.caption2)
                     }
-                    .foregroundColor(source == "gemini" ? DS.Colors.accent : DS.Colors.textTertiary)
+                    .foregroundColor(styled ? DS.Colors.accent : DS.Colors.textTertiary)
                     .padding(.horizontal, DS.Spacing.sm)
                     .padding(.vertical, DS.Spacing.micro)
                     .background(
-                        source == "gemini"
+                        styled
                             ? DS.Colors.accent.opacity(0.1)
                             : DS.Colors.backgroundSecondary
                         , in: Capsule()
