@@ -1,6 +1,8 @@
 import SwiftUI
 import AVFoundation
 
+/// Captures the identity reference: three quick frames (straight on, slight turn left, slight
+/// turn right), each checked on the phone for a clear, well-lit, single face before it's kept.
 struct OnboardingSelfieView: View {
     @Binding var selfieImage: UIImage?
     let onAdvance: () -> Void
@@ -19,6 +21,7 @@ struct OnboardingSelfieView: View {
     @State private var capturedBounce: CGFloat = 1.0
     @State private var searchDotPhase = 0
     @State private var showConfirmButtons = false
+    @State private var stepFlash = false
 
     var isRetakeMode: Bool = false
 
@@ -51,6 +54,14 @@ struct OnboardingSelfieView: View {
         }
         .onChange(of: cameraService.captureState) { state in
             handleStateChange(state)
+        }
+        .onChange(of: cameraService.frames.count) { count in
+            guard count > 0, count < SelfieStep.allCases.count else { return }
+            // A frame was kept and the next one starts: a brief green confirmation.
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { stepFlash = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                withAnimation(.easeOut(duration: 0.3)) { stepFlash = false }
+            }
         }
     }
 
@@ -99,11 +110,11 @@ struct OnboardingSelfieView: View {
                 // Title above the oval, instruction below it, controls at the bottom.
                 titleArea
                     .position(x: geo.size.width / 2,
-                              y: max(geo.safeAreaInsets.top + 44, ovalCenter.y - ovalH / 2 - 54))
+                              y: max(geo.safeAreaInsets.top + 52, ovalCenter.y - ovalH / 2 - 70))
 
                 instructionText
                     .padding(.horizontal, DS.Spacing.lg)
-                    .position(x: geo.size.width / 2, y: ovalCenter.y + ovalH / 2 + 56)
+                    .position(x: geo.size.width / 2, y: ovalCenter.y + ovalH / 2 + 62)
 
                 VStack {
                     Spacer()
@@ -126,16 +137,40 @@ struct OnboardingSelfieView: View {
     // MARK: - Title
 
     private var titleArea: some View {
-        VStack(spacing: DS.Spacing.micro) {
-            Text("Take a Quick Selfie")
-                .font(DS.Font.title2)
-                .foregroundColor(.white)
-            Text("to find your outfit photos")
-                .font(DS.Font.subheadline)
-                .foregroundColor(.white.opacity(0.6))
+        VStack(spacing: DS.Spacing.xs) {
+            VStack(spacing: DS.Spacing.micro) {
+                Text(isRetakeMode ? "Retake your selfie" : "Take a quick selfie")
+                    .font(DS.Font.title2)
+                    .foregroundColor(.white)
+                Text("so StyleMate can find you in your photos")
+                    .font(DS.Font.subheadline)
+                    .foregroundColor(.white.opacity(0.65))
+            }
+            if cameraService.captureState != .captured {
+                tipsRow
+            }
         }
         .opacity(titleVisible ? 1 : 0)
         .animation(.easeOut(duration: 0.4), value: titleVisible)
+    }
+
+    private var tipsRow: some View {
+        HStack(spacing: DS.Spacing.xs) {
+            tip("sun.max.fill", "Face the light")
+            tip("eyeglasses", "No sunglasses")
+            tip("person.fill", "Just you")
+        }
+    }
+
+    private func tip(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+            Text(text).font(DS.Font.caption2)
+        }
+        .foregroundColor(.white.opacity(0.85))
+        .padding(.horizontal, DS.Spacing.xs)
+        .padding(.vertical, 5)
+        .background(.ultraThinMaterial.opacity(0.6), in: Capsule())
     }
 
     // MARK: - Oval Border
@@ -145,7 +180,8 @@ struct OnboardingSelfieView: View {
         switch cameraService.captureState {
         case .searching:
             Ellipse()
-                .stroke(Color.white.opacity(searchPulse ? 0.5 : 0.25), lineWidth: 2)
+                .stroke(stepFlash ? DS.Colors.success : Color.white.opacity(searchPulse ? 0.5 : 0.25),
+                        lineWidth: stepFlash ? 3 : 2)
                 .frame(width: ovalW, height: ovalH)
                 .position(center)
 
@@ -189,7 +225,7 @@ struct OnboardingSelfieView: View {
     private func cornerTicks(center: CGPoint, ovalW: CGFloat, ovalH: CGFloat) -> some View {
         let tickColor: Color = {
             switch cameraService.captureState {
-            case .searching: return .white.opacity(0.6)
+            case .searching: return stepFlash ? DS.Colors.success : .white.opacity(0.6)
             case .detected: return DS.Colors.accent
             case .captured: return DS.Colors.success
             case .denied: return .clear
@@ -220,66 +256,91 @@ struct OnboardingSelfieView: View {
         }
     }
 
+    // MARK: - Step indicator
+
+    private var stepIndicator: some View {
+        HStack(spacing: DS.Spacing.xs) {
+            ForEach(SelfieStep.allCases, id: \.rawValue) { s in
+                let done = cameraService.frames.count > s.rawValue
+                let current = !done && cameraService.step == s
+                HStack(spacing: 4) {
+                    Image(systemName: done ? "checkmark.circle.fill" : (current ? "circle.inset.filled" : "circle"))
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(s.label).font(DS.Font.caption1)
+                }
+                .foregroundColor(done ? DS.Colors.success : (current ? .white : .white.opacity(0.45)))
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Photo \(min(cameraService.frames.count + 1, 3)) of 3")
+    }
+
     // MARK: - Instruction Text
 
     @ViewBuilder
     private var instructionText: some View {
         switch cameraService.captureState {
-        case .searching:
+        case .searching, .detected:
             VStack(spacing: DS.Spacing.xs) {
-                if let warning = cameraService.qualityWarning {
+                stepIndicator
+
+                if cameraService.isChecking {
+                    HStack(spacing: DS.Spacing.xs) {
+                        ProgressView().tint(.white).controlSize(.small)
+                        Text("Checking…")
+                            .font(DS.Font.headline)
+                            .foregroundColor(.white)
+                    }
+                } else if let warning = cameraService.qualityWarning ?? cameraService.frameFeedback {
                     Text(warning)
                         .font(DS.Font.headline)
                         .foregroundColor(.yellow)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                         .transition(.opacity)
-                } else {
-                    Text("Position your face in the oval")
+                } else if cameraService.captureState == .detected {
+                    Text("Hold still…")
                         .font(DS.Font.headline)
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(.center)
-                }
-
-                HStack(spacing: DS.Spacing.micro) {
-                    ForEach(0..<3, id: \.self) { i in
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: 5, height: 5)
-                            .scaleEffect(searchDotPhase == i ? 1.5 : 1.0)
-                            .opacity(searchDotPhase == i ? 1.0 : 0.3)
-                            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: searchDotPhase)
+                        .foregroundColor(DS.Colors.accent)
+                } else {
+                    HStack(spacing: DS.Spacing.xs) {
+                        if cameraService.step == .left { Image(systemName: "arrow.turn.up.left") }
+                        Text(cameraService.step.prompt)
+                        if cameraService.step == .right { Image(systemName: "arrow.turn.up.right") }
                     }
-                }
-                .onReceive(searchDotTimer) { _ in
-                    if cameraService.captureState == .searching {
-                        searchDotPhase = (searchDotPhase + 1) % 3
-                    }
-                }
-            }
-            .transition(.opacity)
-            .accessibilityLabel("Position your face in the oval to take a selfie")
-
-        case .detected:
-            VStack(spacing: DS.Spacing.xs) {
-                Text("Hold still...")
                     .font(DS.Font.headline)
-                    .foregroundColor(DS.Colors.accent)
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                }
 
-                Circle()
-                    .trim(from: 0, to: faceProgress)
-                    .stroke(DS.Colors.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .frame(width: 16, height: 16)
+                if cameraService.captureState == .searching, !cameraService.isChecking {
+                    HStack(spacing: DS.Spacing.micro) {
+                        ForEach(0..<3, id: \.self) { i in
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 5, height: 5)
+                                .scaleEffect(searchDotPhase == i ? 1.5 : 1.0)
+                                .opacity(searchDotPhase == i ? 1.0 : 0.3)
+                                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: searchDotPhase)
+                        }
+                    }
+                    .onReceive(searchDotTimer) { _ in
+                        if cameraService.captureState == .searching {
+                            searchDotPhase = (searchDotPhase + 1) % 3
+                        }
+                    }
+                }
             }
-            .transition(.opacity)
-            .accessibilityLabel("Face detected, hold still")
+            .animation(.easeInOut(duration: 0.2), value: cameraService.step)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(cameraService.frameFeedback ?? cameraService.step.prompt)
 
         case .captured:
             VStack(spacing: DS.Spacing.md) {
                 HStack(spacing: DS.Spacing.xs) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(DS.Colors.success)
-                    Text("Looks good!")
+                    Text("Looks great!")
                         .font(DS.Font.headline)
                         .foregroundColor(DS.Colors.success)
                 }
@@ -287,20 +348,33 @@ struct OnboardingSelfieView: View {
                 .animation(.spring(response: 0.35, dampingFraction: 0.5), value: showCapturedState)
 
                 if showConfirmButtons {
+                    HStack(spacing: DS.Spacing.xs) {
+                        ForEach(Array(cameraService.frames.enumerated()), id: \.offset) { _, frame in
+                            Image(uiImage: frame)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 52, height: 64)
+                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.chip, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: DS.Radius.chip, style: .continuous)
+                                    .strokeBorder(.white.opacity(0.6), lineWidth: 1))
+                        }
+                    }
+                    .accessibilityLabel("\(cameraService.frames.count) reference photos")
+
                     VStack(spacing: DS.Spacing.sm) {
                         Button {
                             Haptics.medium()
                             confirmSelfie()
                         } label: {
-                            Text("Use This Photo")
+                            Text("Use these photos")
                                 .font(DS.Font.headline)
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, DS.Spacing.sm)
                                 .background(DS.Colors.accent)
-                                .cornerRadius(DS.Radius.button)
+                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
                         }
-                        .accessibilityLabel("Use this selfie photo")
+                        .accessibilityLabel("Use these selfie photos")
 
                         Button {
                             Haptics.light()
@@ -310,14 +384,13 @@ struct OnboardingSelfieView: View {
                                 .font(DS.Font.callout)
                                 .foregroundColor(.white.opacity(0.7))
                         }
-                        .accessibilityLabel("Retake selfie photo")
+                        .accessibilityLabel("Retake selfie photos")
                     }
                     .padding(.horizontal, DS.Spacing.xl)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .transition(.opacity)
-            .accessibilityLabel("Photo captured, choose to use or retake")
 
         case .denied:
             EmptyView()
@@ -331,18 +404,20 @@ struct OnboardingSelfieView: View {
             HStack(spacing: DS.Spacing.micro) {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 11))
-                Text("Your selfie stays on this device")
+                Text("Your selfie never leaves this phone")
                     .font(DS.Font.caption1)
             }
-            .foregroundColor(.white.opacity(0.5))
+            .foregroundColor(.white.opacity(0.55))
 
-            Button {
-                Haptics.light()
-                onSkip()
-            } label: {
-                Text("Skip")
-                    .font(DS.Font.callout)
-                    .foregroundColor(.white.opacity(0.65))
+            if cameraService.captureState != .captured {
+                Button {
+                    Haptics.light()
+                    onSkip()
+                } label: {
+                    Text("Skip")
+                        .font(DS.Font.callout)
+                        .foregroundColor(.white.opacity(0.65))
+                }
             }
         }
     }
@@ -352,7 +427,8 @@ struct OnboardingSelfieView: View {
     private func handleStateChange(_ state: SelfieCameraService.CaptureState) {
         switch state {
         case .detected:
-            withAnimation(.linear(duration: 1.5)) {
+            faceProgress = 0
+            withAnimation(.linear(duration: cameraService.step == .front ? 1.2 : 0.7)) {
                 faceProgress = 1.0
             }
         case .searching:
@@ -382,19 +458,20 @@ struct OnboardingSelfieView: View {
                 showConfirmButtons = true
             }
         }
-        print("[StyleMate] Selfie captured, waiting for user confirmation")
+        print("[StyleMate] Selfie frames captured, waiting for user confirmation")
     }
 
     private func confirmSelfie() {
-        if let image = cameraService.capturedImage, let userId = authService.user?.id {
-            selfieImage = image
-            // Advance immediately; do the JPEG-encode + disk write + reference reset
-            // off the main thread so the tap and transition stay responsive (this
-            // synchronous I/O was the source of the gesture-gate lag).
-            Task.detached(priority: .userInitiated) {
-                cameraService.saveSelfie(image, userId: userId)
-                FaceMatchingService.shared.clearReference(forUser: userId)
-                print("[StyleMate] Selfie confirmed and saved, reference cleared for reload")
+        if let front = cameraService.frames.first, let userId = authService.user?.id {
+            selfieImage = front
+            let turns = Array(cameraService.frames.dropFirst())
+            // Advance immediately; the save + identity rebuild runs in the background and the
+            // "Find yourself" step waits for it before ranking faces against the new selfie.
+            IdentityBuild.start {
+                SelfieReferenceStore.savePrimary(front, userId: userId)
+                SelfieReferenceStore.saveTurnFrames(turns, userId: userId)
+                SelfieReferenceStore.rebuildIdentity(forUser: userId)
+                print("[StyleMate] Selfie frames saved, identity rebuilt")
             }
         }
         onAdvance()
@@ -428,7 +505,7 @@ struct OnboardingSelfieView: View {
                 .foregroundColor(DS.Colors.textPrimary)
                 .multilineTextAlignment(.center)
 
-            Text("We'll use your selfie to find photos of you wearing your clothes.")
+            Text("A quick selfie lets StyleMate find the photos of you wearing your clothes. It stays on this phone.")
                 .font(DS.Font.body)
                 .foregroundColor(DS.Colors.textSecondary)
                 .multilineTextAlignment(.center)

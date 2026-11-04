@@ -99,7 +99,7 @@ struct LoginView: View {
                 .offset(y: appear ? 0 : 20)
                 .animation(.easeOut(duration: 0.9).delay(0.15), value: appear)
 
-                Text("Your data stays private on this device")
+                Text("Analysed on your iPhone · synced only to your own iCloud")
                     .font(DS.Font.caption1)
                     .foregroundStyle(DS.Colors.textTertiary)
                     .padding(.top, DS.Spacing.md)

@@ -172,7 +172,7 @@ struct OnboardingPhotoExplanationView: View {
     }
 
     private var bodyText: some View {
-        Text("We'll scan your recent photos to find clothing items automatically. A quick selfie helps us find photos of you.")
+        Text("StyleMate finds the photos of you and turns what you're wearing into your wardrobe. A quick selfie shows it which face is yours.")
             .font(DS.Font.body)
             .foregroundColor(DS.Colors.textSecondary)
             .multilineTextAlignment(.center)
@@ -186,11 +186,11 @@ struct OnboardingPhotoExplanationView: View {
 
     private var trustSignals: some View {
         VStack(spacing: DS.Spacing.sm) {
-            trustRow(icon: "faceid", text: "Quick selfie to find your photos",
+            trustRow(icon: "faceid", text: "A quick selfie, then confirm a few photos of you",
                      emphasized: false, visible: trust1Visible)
-            trustRow(icon: "clock.fill", text: "Starts with your last month of photos — scan further back anytime",
+            trustRow(icon: "clock.fill", text: "Starts with your last month of photos. Scan further back anytime",
                      emphasized: false, visible: trust2Visible)
-            trustRow(icon: "lock.shield.fill", text: "Everything stays on your device",
+            trustRow(icon: "lock.shield.fill", text: "Analysed on your phone. Your photos are never uploaded",
                      emphasized: true, visible: trust3Visible)
         }
         .padding(.horizontal, DS.Spacing.xl)
