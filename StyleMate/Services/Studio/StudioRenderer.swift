@@ -3,34 +3,43 @@ import CoreML
 import Foundation
 import os
 
-/// On-device "studio render" of a wardrobe item: Stable Diffusion 1.5-class img2img
-/// (Lykon/dreamshaper-8, Core ML, 6-bit palettized, SPLIT_EINSUM_V2 attention) that turns a garment
-/// cutout composited on white into a lifelike product photo. Fully on-device; nothing leaves the phone.
+/// On-device "studio render" of a wardrobe item with a Stable Diffusion 1.5-class model
+/// (Lykon/dreamshaper-8, Core ML, 6-bit palettized, SPLIT_EINSUM_V2 attention). Two modes:
+/// - **img2img** (`startingImage` = the garment cutout on white, strength ~0.5): keeps the item's exact
+///   shape, best for bottoms / shoes / bags;
+/// - **text-to-image** (`startingImage` = nil, a flat-lay prompt built from the attributes, ~20 steps):
+///   best for tops / jackets / dresses. The VAE encoder is never loaded in this mode.
+/// Fully on-device; nothing leaves the phone.
 ///
 /// - Models: `StudioModels.bundle` in the app bundle (built by `scripts/build_studio_models.sh`,
 ///   git-ignored). If it's missing, `isAvailable` is false and `render` returns nil, so callers keep
 ///   the plain cutout.
 /// - Runtime: Apple's ml-stable-diffusion Swift pipeline, vendored in `Vendor/StableDiffusion/`.
-/// - Memory: the pipeline runs in `reduceMemory` mode, loading each model only while it is used (peak is
-///   the UNet, a few hundred MB on the Neural Engine). Call `unload()` after a batch to drop everything.
-/// - Threading: renders are serialized on a private queue (one at a time). The synchronous `render`
-///   blocks its caller for seconds to minutes, so never call it on the main thread; use the `async`
-///   overload from UI code.
+/// - Memory: a single render runs in `reduceMemory` mode (each model is loaded only while it's used; the
+///   peak is the UNet). A multi-seed render (`seeds:`) keeps the models it uses loaded across the seeds
+///   (~1 GB) and unloads them all at the end. Call `unload()` after a batch to drop the pipeline too.
+/// - Threading: renders are serialized on a private queue (one at a time). The synchronous overloads
+///   block their caller for seconds to minutes, so never call them on the main thread; use the `async`
+///   overloads from UI code.
 final class StudioRenderer: @unchecked Sendable {
     static let shared = StudioRenderer()
 
-    /// Output (and model input) edge in pixels; the models are converted for a 64x64 latent.
+    /// Output (and img2img input) edge in pixels; the models are converted for a 64x64 latent.
     static let imageSize = 512
     static let bundleName = "StudioModels"
     static let requiredResources = ["TextEncoder.mlmodelc", "Unet.mlmodelc", "VAEEncoder.mlmodelc",
                                     "VAEDecoder.mlmodelc", "vocab.json", "merges.txt"]
 
     struct RenderStats: Sendable {
-        /// Pipeline construction + model loads (first render after `unload()` includes Core ML compilation).
+        /// Pipeline construction + first model loads (the first render after launch / `unload()` also
+        /// pays Core ML's on-device compilation for the Neural Engine).
         var setupSeconds: Double
+        /// Wall time for the whole call (all seeds).
         var totalSeconds: Double
-        /// Denoising steps actually run (img2img skips the first `steps * (1 - strength)`).
+        /// Denoising steps run per image (img2img skips the first `steps * (1 - strength)`).
         var denoisingSteps: Int
+        var imageCount: Int
+        var textToImage: Bool
     }
 
     private let log = Logger(subsystem: "com.stylemates.StyleMate", category: "StudioRenderer")
@@ -53,7 +62,7 @@ final class StudioRenderer: @unchecked Sendable {
         set { stateLock.withLock { _computeUnits = newValue } }
     }
 
-    /// Timing of the most recent successful render.
+    /// Timing of the most recent successful render call.
     var lastStats: RenderStats? { stateLock.withLock { _lastStats } }
 
     init(resourcesURL: URL? = Bundle.main.url(forResource: StudioRenderer.bundleName, withExtension: "bundle")) {
@@ -70,37 +79,53 @@ final class StudioRenderer: @unchecked Sendable {
 
     // MARK: - Rendering
 
-    /// Renders a lifelike product photo from a cutout composited on white.
+    /// Renders one 512x512 product photo.
     ///
     /// - Parameters:
-    ///   - cutoutOnWhite: the garment on a white background, any size (letterboxed onto 512x512 white;
-    ///     transparent pixels become white).
-    ///   - strength: 0...1, how far img2img may move from the input (~0.45-0.6 keeps the garment's shape).
-    ///   - steps: scheduler steps for strength 1; `steps * strength` are actually run.
-    ///   - guidance: classifier-free guidance scale (~6.5).
+    ///   - startingImage: img2img source (the garment on white, any size: letterboxed onto 512x512 white,
+    ///     transparent pixels become white), or nil for text-to-image.
+    ///   - strength: img2img only, 0...1: how far the render may move from the input (~0.45-0.6 keeps the
+    ///     garment's shape). Ignored for text-to-image.
+    ///   - steps: scheduler steps (img2img actually runs `steps * strength` of them).
+    ///   - guidance: classifier-free guidance scale (~6.5-7).
     /// - Returns: a 512x512 opaque sRGB image, or nil if the models are missing or inference failed.
-    func render(cutoutOnWhite: CGImage, prompt: String, negativePrompt: String,
+    func render(startingImage: CGImage?, prompt: String, negativePrompt: String,
                 strength: Float, steps: Int, guidance: Float, seed: UInt32) -> CGImage? {
+        render(startingImage: startingImage, prompt: prompt, negativePrompt: negativePrompt,
+               strength: strength, steps: steps, guidance: guidance, seeds: [seed]).first ?? nil
+    }
+
+    /// Renders one image per seed with a single model load (the models stay loaded across the seeds and
+    /// are unloaded at the end). Results are in `seeds` order; an entry is nil if that render failed.
+    func render(startingImage: CGImage?, prompt: String, negativePrompt: String,
+                strength: Float, steps: Int, guidance: Float, seeds: [UInt32]) -> [CGImage?] {
         if Thread.isMainThread {
             log.fault("StudioRenderer.render called on the main thread; use the async overload")
             assertionFailure("StudioRenderer.render must not run on the main thread")
         }
-        guard isAvailable else { return nil }
+        guard isAvailable else { return seeds.map { _ in nil } }
         return queue.sync {
-            renderOnQueue(cutoutOnWhite: cutoutOnWhite, prompt: prompt, negativePrompt: negativePrompt,
-                          strength: strength, steps: steps, guidance: guidance, seed: seed)
+            renderOnQueue(startingImage: startingImage, prompt: prompt, negativePrompt: negativePrompt,
+                          strength: strength, steps: steps, guidance: guidance, seeds: seeds)
         }
     }
 
-    /// Async version of `render` for UI code; waits its turn behind other renders without blocking a thread.
-    func render(cutoutOnWhite: CGImage, prompt: String, negativePrompt: String,
+    /// Async `render` for UI code; waits its turn behind other renders without blocking a thread.
+    func render(startingImage: CGImage?, prompt: String, negativePrompt: String,
                 strength: Float, steps: Int, guidance: Float, seed: UInt32) async -> CGImage? {
-        guard isAvailable else { return nil }
-        return await withCheckedContinuation { (cont: CheckedContinuation<CGImage?, Never>) in
+        await render(startingImage: startingImage, prompt: prompt, negativePrompt: negativePrompt,
+                     strength: strength, steps: steps, guidance: guidance, seeds: [seed]).first ?? nil
+    }
+
+    /// Async multi-seed `render` (one model load for all seeds).
+    func render(startingImage: CGImage?, prompt: String, negativePrompt: String,
+                strength: Float, steps: Int, guidance: Float, seeds: [UInt32]) async -> [CGImage?] {
+        guard isAvailable else { return seeds.map { _ in nil } }
+        return await withCheckedContinuation { (cont: CheckedContinuation<[CGImage?], Never>) in
             queue.async {
                 cont.resume(returning: self.renderOnQueue(
-                    cutoutOnWhite: cutoutOnWhite, prompt: prompt, negativePrompt: negativePrompt,
-                    strength: strength, steps: steps, guidance: guidance, seed: seed))
+                    startingImage: startingImage, prompt: prompt, negativePrompt: negativePrompt,
+                    strength: strength, steps: steps, guidance: guidance, seeds: seeds))
             }
         }
     }
@@ -147,42 +172,66 @@ final class StudioRenderer: @unchecked Sendable {
         return built
     }
 
-    private func renderOnQueue(cutoutOnWhite: CGImage, prompt: String, negativePrompt: String,
-                               strength: Float, steps: Int, guidance: Float, seed: UInt32) -> CGImage? {
+    private func renderOnQueue(startingImage: CGImage?, prompt: String, negativePrompt: String,
+                               strength: Float, steps: Int, guidance: Float, seeds: [UInt32]) -> [CGImage?] {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard !seeds.isEmpty else { return [] }
         let start = CFAbsoluteTimeGetCurrent()
-        do {
-            guard let input = Self.flattenedOnWhite(cutoutOnWhite, size: Self.imageSize) else { return nil }
-            let pipe = try preparedPipeline()
-            let setup = CFAbsoluteTimeGetCurrent() - start
-
-            var config = StableDiffusionPipeline.Configuration(prompt: prompt)
-            config.negativePrompt = negativePrompt
-            config.startingImage = input
-            config.strength = min(max(strength, 0.01), 0.99)  // 1.0 would silently switch to text-to-image
-            config.stepCount = max(1, steps)
-            config.guidanceScale = guidance
-            config.seed = seed
-            config.imageCount = 1
-            config.disableSafety = true
-            config.schedulerType = .dpmSolverMultistepScheduler  // DPM-Solver++ (2nd order)
-            config.schedulerTimestepSpacing = .karras
-            config.rngType = .torchRNG  // same noise as torch.manual_seed(seed) on CPU in diffusers
-
-            var ranSteps = 0
-            let images = try pipe.generateImages(configuration: config) { progress in
-                ranSteps = progress.step + 1
-                return true
-            }
-            guard let image = images.first ?? nil else { return nil }
-            let total = CFAbsoluteTimeGetCurrent() - start
-            stateLock.withLock { _lastStats = RenderStats(setupSeconds: setup, totalSeconds: total, denoisingSteps: ranSteps) }
-            log.info("Studio render: \(ranSteps) steps in \(total, format: .fixed(precision: 1))s (setup \(setup, format: .fixed(precision: 1))s)")
-            return image
-        } catch {
-            log.error("Studio render failed: \(String(describing: error), privacy: .public)")
-            return nil
+        var input: CGImage?
+        if let startingImage {
+            input = Self.flattenedOnWhite(startingImage, size: Self.imageSize)
+            if input == nil { return seeds.map { _ in nil } }
         }
+        var pipe: StableDiffusionPipeline
+        do {
+            pipe = try preparedPipeline()
+        } catch {
+            log.error("Studio pipeline setup failed: \(String(describing: error), privacy: .public)")
+            return seeds.map { _ in nil }
+        }
+        let setup = CFAbsoluteTimeGetCurrent() - start
+        // Several seeds: keep the models loaded between them (the copy shares the same ManagedMLModels),
+        // then unload everything at the end.
+        let batch = seeds.count > 1
+        if batch { pipe.reduceMemory = false }
+        defer { if batch { pipe.unloadResources() } }
+
+        var config = StableDiffusionPipeline.Configuration(prompt: prompt)
+        config.negativePrompt = negativePrompt
+        config.startingImage = input
+        // < 1: strength 1.0 would silently switch an img2img request to text-to-image.
+        config.strength = input == nil ? 1 : min(max(strength, 0.01), 0.99)
+        config.stepCount = max(1, steps)
+        config.guidanceScale = guidance
+        config.imageCount = 1
+        config.disableSafety = true
+        config.schedulerType = .dpmSolverMultistepScheduler  // DPM-Solver++ (2nd order)
+        config.schedulerTimestepSpacing = .karras
+        config.rngType = .torchRNG  // same noise as torch.manual_seed(seed) on CPU in diffusers
+
+        var ranSteps = 0
+        var results: [CGImage?] = []
+        for seed in seeds {
+            config.seed = seed
+            do {
+                let images = try pipe.generateImages(configuration: config) { progress in
+                    ranSteps = progress.step + 1
+                    return true
+                }
+                results.append(images.first ?? nil)
+            } catch {
+                log.error("Studio render (seed \(seed)) failed: \(String(describing: error), privacy: .public)")
+                results.append(nil)
+            }
+        }
+        let total = CFAbsoluteTimeGetCurrent() - start
+        if results.contains(where: { $0 != nil }) {
+            let stats = RenderStats(setupSeconds: setup, totalSeconds: total, denoisingSteps: ranSteps,
+                                    imageCount: seeds.count, textToImage: input == nil)
+            stateLock.withLock { _lastStats = stats }
+        }
+        log.info("Studio render (\(input == nil ? "text2img" : "img2img", privacy: .public)): \(seeds.count) image(s) x \(ranSteps) steps in \(total, format: .fixed(precision: 1))s")
+        return results
     }
 
     /// Letterboxes `image` onto an opaque white `size`x`size` sRGB canvas (transparency becomes white).

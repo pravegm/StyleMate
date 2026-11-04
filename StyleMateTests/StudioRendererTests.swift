@@ -5,12 +5,14 @@ import Testing
 import UIKit
 @testable import StyleMate
 
-/// On-device studio render (SD 1.5-class img2img) end to end in the simulator: a real garment cutout
-/// from a CC0 fixture photo, composited on white, rendered at 512x512 with a few steps. The input and the
-/// render are written to $REPORT_DIR/studio/ (the `ci-report` artifact) for visual review.
+/// On-device studio render (SD 1.5-class) end to end in the simulator, both modes:
+/// - img2img: a real garment cutout from a CC0 fixture photo, on white, 2 seeds in one load
+///   (6 steps at strength 0.5 -> 3 denoising steps each);
+/// - text-to-image: a flat-lay prompt, 4 steps.
+/// Inputs, renders and timings go to $REPORT_DIR/studio/ (the `ci-report` artifact) for visual review.
 ///
 /// The simulator has no Neural Engine, so Core ML runs the (ANE-oriented, SPLIT_EINSUM_V2) models on the
-/// CPU: slow (minutes) but numerically the same graph the phone runs.
+/// CPU: slow (minutes) but the same graph the phone runs.
 @Suite(.serialized)
 struct StudioRendererTests {
     private static var env: [String: String] { ProcessInfo.processInfo.environment }
@@ -29,62 +31,78 @@ struct StudioRendererTests {
         return dir
     }
 
+    static let negative = "person, mannequin, body, hands, text, watermark, blurry, lowres, deformed, cartoon"
+
     @Test func modelsAreBundled() {
         #expect(StudioRenderer.shared.isAvailable, "StudioModels.bundle missing from the app (scripts/build_studio_models.sh)")
     }
 
-    @Test(.timeLimit(.minutes(45)))
-    func rendersGarmentFromCutout() async throws {
+    @Test(.timeLimit(.minutes(60)))
+    func rendersImg2ImgAndText2Img() async throws {
         try #require(StudioRenderer.shared.isAvailable)
+        let size = StudioRenderer.imageSize
         let (cutout, source) = try Self.fixtureCutout()
-        let input = try #require(StudioRenderer.flattenedOnWhite(cutout, size: StudioRenderer.imageSize))
+        let input = try #require(StudioRenderer.flattenedOnWhite(cutout, size: size))
         try Self.writePNG(input, "input.png")
+        let inPx = try #require(Self.rgbPixels(input, size: size))
 
-        let prompt = "professional studio product photo of a \(source.product), clean white background, " +
-            "soft even lighting, realistic fabric texture, sharp focus, e-commerce catalog"
-        let negative = "person, mannequin, body, hands, text, watermark, blurry, lowres, deformed, cartoon"
-
-        // Dedicated instance so this test can pick compute units without touching the app's singleton.
+        // Dedicated instance so the test can pick compute units without touching the app's singleton.
         let renderer = StudioRenderer()
-        var units: [(String, MLComputeUnits)] = [("cpuAndNeuralEngine", .cpuAndNeuralEngine), ("cpuOnly", .cpuOnly)]
-        var output: CGImage?
+        var summary: [String: Any] = ["source": source.fixture, "product": source.product]
+
+        // 1. img2img, two seeds in one load. Fall back to CPU-only if the default units can't run here.
+        let imgPrompt = "professional studio product photo of a \(source.product), clean white background, " +
+            "soft even lighting, realistic fabric texture, sharp focus, e-commerce catalog"
+        let seeds: [UInt32] = [42, 7]
+        var renders: [CGImage?] = []
         var usedUnits = ""
-        while output == nil, !units.isEmpty {
-            let (name, cu) = units.removeFirst()
+        for (name, cu) in [("cpuAndNeuralEngine", MLComputeUnits.cpuAndNeuralEngine), ("cpuOnly", .cpuOnly)] {
             renderer.computeUnits = cu
-            output = await renderer.render(cutoutOnWhite: input, prompt: prompt, negativePrompt: negative,
-                                           strength: 0.5, steps: 6, guidance: 6.5, seed: 42)
+            renders = await renderer.render(startingImage: input, prompt: imgPrompt, negativePrompt: Self.negative,
+                                            strength: 0.5, steps: 6, guidance: 6.5, seeds: seeds)
             usedUnits = name
-            if output == nil { print("[Report] studio render with \(name) returned nil") }
+            if renders.allSatisfy({ $0 != nil }) { break }
+            print("[Report] studio img2img with \(name) failed: \(renders.map { $0 == nil ? "nil" : "ok" })")
         }
+        let img2imgStats = renderer.lastStats
+        let images = try renders.map { try #require($0, "img2img render returned nil (\(usedUnits))") }
+        var img2img: [[String: Any]] = []
+        for (seed, image) in zip(seeds, images) {
+            try Self.writePNG(image, "img2img_seed\(seed).png")
+            let m = try Self.metrics(image, reference: inPx, size: size)
+            img2img.append(["seed": seed, "meanAbsDiffVsInput": m.diff, "std": m.std])
+            #expect(image.width == size && image.height == size)
+            #expect(m.std > 8, "img2img render (seed \(seed)) is blank / flat")
+            #expect(m.diff > 2, "img2img render (seed \(seed)) is (almost) identical to the input")
+            #expect(m.diff < 120, "img2img render (seed \(seed)) is unrelated to the input")
+        }
+        let seedPx = try images.map { try #require(Self.rgbPixels($0, size: size)) }
+        let seedDiff = Self.meanAbsDiff(seedPx[0], seedPx[1])
+        #expect(seedDiff > 0.5, "different seeds gave the same image")
+        summary["img2img"] = ["computeUnits": usedUnits, "steps": 6, "strength": 0.5, "guidance": 6.5,
+                              "prompt": imgPrompt, "renders": img2img, "seedToSeedDiff": seedDiff,
+                              "stats": Self.json(img2imgStats)] as [String: Any]
+
+        // 2. text-to-image (no starting image; the VAE encoder isn't used).
+        let txtPrompt = "flat lay product photo of a navy wool overcoat, neatly laid out on a plain white " +
+            "background, top-down view, soft studio lighting, realistic fabric texture, e-commerce catalog"
+        let t2i = await renderer.render(startingImage: nil, prompt: txtPrompt, negativePrompt: Self.negative,
+                                        strength: 1, steps: 4, guidance: 7, seed: 42)
+        let txtStats = renderer.lastStats
         renderer.unload()
-        let image = try #require(output, "studio render returned nil with every compute unit")
-        try Self.writePNG(image, "render.png")
+        let txtImage = try #require(t2i, "text-to-image render returned nil (\(usedUnits))")
+        try Self.writePNG(txtImage, "text2img_seed42.png")
+        let tm = try Self.metrics(txtImage, reference: inPx, size: size)
+        #expect(txtImage.width == size && txtImage.height == size)
+        #expect(tm.std > 8, "text-to-image render is blank / flat")
+        summary["text2img"] = ["steps": 4, "guidance": 7, "prompt": txtPrompt, "std": tm.std,
+                               "stats": Self.json(txtStats)] as [String: Any]
 
-        let stats = renderer.lastStats
-        let inPx = try #require(Self.rgbPixels(input, size: StudioRenderer.imageSize))
-        let outPx = try #require(Self.rgbPixels(image, size: StudioRenderer.imageSize))
-        let diff = zip(inPx, outPx).reduce(0.0) { $0 + abs(Double($1.0) - Double($1.1)) } / Double(inPx.count)
-        let mean = outPx.reduce(0.0) { $0 + Double($1) } / Double(outPx.count)
-        let std = (outPx.reduce(0.0) { $0 + pow(Double($1) - mean, 2) } / Double(outPx.count)).squareRoot()
-
-        let summary: [String: Any] = [
-            "source": source.fixture, "product": source.product, "computeUnits": usedUnits,
-            "width": image.width, "height": image.height, "steps": 6, "strength": 0.5, "guidance": 6.5, "seed": 42,
-            "denoisingSteps": stats?.denoisingSteps ?? -1, "setupSeconds": stats?.setupSeconds ?? -1,
-            "totalSeconds": stats?.totalSeconds ?? -1, "meanAbsDiffVsInput": diff, "outputMean": mean, "outputStd": std,
-            "prompt": prompt, "negativePrompt": negative,
-        ]
         let json = try JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys])
         try json.write(to: Self.reportDir.appendingPathComponent("render.json"))
-        print("[Report] studio render (\(usedUnits)): \(stats?.denoisingSteps ?? -1) steps in " +
-              "\(String(format: "%.1f", stats?.totalSeconds ?? -1))s (setup \(String(format: "%.1f", stats?.setupSeconds ?? -1))s), " +
-              "diff vs input \(String(format: "%.1f", diff)), std \(String(format: "%.1f", std))")
-
-        #expect(image.width == StudioRenderer.imageSize && image.height == StudioRenderer.imageSize)
-        #expect(std > 8, "render is blank / flat")
-        #expect(diff > 2, "render is (almost) identical to the input")
-        #expect(diff < 120, "render is unrelated to the input (noise?)")
+        print("[Report] studio (\(usedUnits)) img2img: 2 seeds x \(img2imgStats?.denoisingSteps ?? -1) steps in " +
+              "\(String(format: "%.1f", img2imgStats?.totalSeconds ?? -1))s (setup \(String(format: "%.1f", img2imgStats?.setupSeconds ?? -1))s); " +
+              "text2img: \(txtStats?.denoisingSteps ?? -1) steps in \(String(format: "%.1f", txtStats?.totalSeconds ?? -1))s")
     }
 
     // MARK: - Helpers
@@ -110,6 +128,12 @@ struct StudioRendererTests {
         return (crop, (fixture, "coat"))
     }
 
+    private static func json(_ s: StudioRenderer.RenderStats?) -> [String: Any] {
+        guard let s else { return [:] }
+        return ["setupSeconds": s.setupSeconds, "totalSeconds": s.totalSeconds, "denoisingSteps": s.denoisingSteps,
+                "imageCount": s.imageCount, "textToImage": s.textToImage]
+    }
+
     private static func render(_ image: UIImage) -> CGImage? {
         UIGraphicsImageRenderer(size: image.size).image { _ in image.draw(at: .zero) }.cgImage
     }
@@ -117,6 +141,19 @@ struct StudioRendererTests {
     private static func writePNG(_ image: CGImage, _ name: String) throws {
         let data = try #require(UIImage(cgImage: image).pngData())
         try data.write(to: reportDir.appendingPathComponent(name))
+    }
+
+    private static func metrics(_ image: CGImage, reference: [UInt8], size: Int) throws -> (diff: Double, std: Double) {
+        let px = try #require(rgbPixels(image, size: size))
+        let mean = px.reduce(0.0) { $0 + Double($1) } / Double(px.count)
+        let variance = px.reduce(0.0) { acc, v in acc + (Double(v) - mean) * (Double(v) - mean) } / Double(px.count)
+        return (meanAbsDiff(reference, px), variance.squareRoot())
+    }
+
+    private static func meanAbsDiff(_ a: [UInt8], _ b: [UInt8]) -> Double {
+        var sum = 0.0
+        for i in 0..<min(a.count, b.count) { sum += abs(Double(a[i]) - Double(b[i])) }
+        return sum / Double(max(1, min(a.count, b.count)))
     }
 
     /// RGB bytes (no alpha) of `image` drawn at size x size.
@@ -130,6 +167,9 @@ struct StudioRendererTests {
             return true
         }
         guard ok else { return nil }
-        return rgba.enumerated().filter { $0.offset % 4 != 3 }.map { $0.element }
+        var rgb = [UInt8]()
+        rgb.reserveCapacity(size * size * 3)
+        for i in stride(from: 0, to: rgba.count, by: 4) { rgb.append(contentsOf: rgba[i..<i + 3]) }
+        return rgb
     }
 }
