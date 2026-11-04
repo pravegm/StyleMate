@@ -7,7 +7,29 @@ Status legend: **BLOCKER** (rejection or legal exposure), **HIGH** (likely rejec
 first reviews), **MED**, **LOW**. "Owner" is whoever holds the file. This doc only
 reports problems; it does not change those files.
 
-## 0. Top blockers in priority order
+## Status update: re-audited on `main` @ 5f27503 (2026-11-04, evening)
+
+**Done on `main` since this audit was first written:**
+- **Gemini removed.** `000f692` merged the on-device stylist; there are no `generativelanguage` or `GeminiConsent` references left. Gate (1) in §7 is met.
+- **Most Info.plist fixes from §2** (`9354be8`):
+  - Accurate privacy copy and coarse weather coordinates.
+  - The push mode and `aps-environment` are gone, and so is the debug Photos-add string.
+  - `ITSAppUsesNonExemptEncryption` is set.
+  - `UIBackgroundModes` now holds only `processing`, backed by `BGTaskSchedulerPermittedIdentifiers` for the background scan. That is a legitimate use.
+- **TestFlight workflow** on `main` (`ea34e15`; docs/TESTFLIGHT.md). §8 is kept here as the design reference.
+- **Required-reason APIs re-checked** on 5f27503: still UserDefaults only, so the manifest is still accurate. The CI build log shows `CpResource … StyleMate.app/PrivacyInfo.xcprivacy`, so it is bundled.
+
+**Still open, in priority order:**
+1. **Model licences:** nothing has changed. The same SCRFD (`buffalo_l`), AdaFace, FASHN and Fashionpedia-SegFormer weights are built by `scripts/`.
+2. **Placeholder links:** `LoginView.swift:117,120` still point to `your-terms-url.com` / `your-privacy-url.com`. There is no hosted privacy policy yet.
+3. **Login wall and Google Sign-In:**
+   - `StyleMateApp` still shows `LoginView` until sign-in.
+   - The GoogleSignIn SDK still blocks "Data Not Collected". Its packages GoogleUtilities and Promises also bundle their own manifests (CI build log).
+   - Profile deletion still leaves the Core Data outfit history in place.
+4. **No sample or demo path for App Review.** The reviewer's empty library means an empty app.
+5. **The iPad is still targeted** (`TARGETED_DEVICE_FAMILY = "1,2"`), and the app is about 420 MB (§4).
+
+## 0. Top blockers in priority order (original audit @ f843e59)
 
 1. **Model licences (legal).** Three of the five bundled models (SCRFD, FASHN, the Fashionpedia
    SegFormer) are non-commercial-only, and AdaFace's training data is research-only. Do not
