@@ -17,7 +17,8 @@ struct TodayOutfitSheet: View {
     @State private var showAddProductSheet = false
     @State private var addProductStep: AddProductStep? = nil
     @State private var expandedCategory: Category? = nil
-    @State private var isAddingProduct: Bool = false
+    @State private var savedToastText = "Saved"
+    @State private var noticeDismissWork: DispatchWorkItem? = nil
 
     // Swipe gesture state
     @State private var dragOffset: CGSize = .zero
@@ -49,6 +50,7 @@ struct TodayOutfitSheet: View {
     private var contextLine: String {
         var parts: [String] = []
         if let type = homeVM.selectedOutfitType { parts.append(type.rawValue) }
+        if let mood = homeVM.selectedMood { parts.append(mood.label) }
         if let tempC = homeVM.lastCelsius {
             let temp = homeVM.displayFahrenheit ? Int((tempC * 9.0 / 5.0) + 32) : Int(tempC)
             parts.append("\(temp)°\(homeVM.displayFahrenheit ? "F" : "C")")
@@ -146,16 +148,40 @@ struct TodayOutfitSheet: View {
 
             if homeVM.isLoading {
                 Color.black.opacity(0.18).ignoresSafeArea()
-                ProgressView(isAddingProduct ? "Adding…" : "Shuffling…")
+                ProgressView("Styling…")
                     .padding(DS.Spacing.xl)
                     .background(DS.Colors.backgroundCard)
                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
             }
 
+            // Stylist notices ("That's your only pair of shoes that works here").
+            if let notice = homeVM.stylistNotice {
+                VStack {
+                    Spacer()
+                    HStack(spacing: DS.Spacing.xs) {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundStyle(DS.Colors.accent)
+                        Text(notice)
+                            .font(DS.Font.subheadline)
+                            .foregroundStyle(DS.Colors.textPrimary)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.vertical, DS.Spacing.sm)
+                    .dsGlassBar(cornerRadius: DS.Radius.card)
+                    .padding(.horizontal, DS.Spacing.screenH)
+                    .padding(.bottom, 120)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .allowsHitTesting(false)
+                .zIndex(9)
+                .id(notice)
+            }
+
             if showSavedOverlay {
                 VStack {
                     Spacer()
-                    Label("Saved", systemImage: "checkmark.circle.fill")
+                    Label(savedToastText, systemImage: "checkmark.circle.fill")
                         .font(DS.Font.title3)
                         .foregroundColor(.white)
                         .padding(.vertical, DS.Spacing.md)
@@ -222,9 +248,16 @@ struct TodayOutfitSheet: View {
         .onChange(of: homeVM.batchIndex) { _ in
             lockedItemIDs.removeAll()   // locks are per-look; clear when swiping to the next
         }
-        .onChange(of: homeVM.isLoading) { loading in
-            if !loading { isAddingProduct = false }
+        .onChange(of: homeVM.stylistNotice) { notice in
+            guard notice != nil else { return }
+            noticeDismissWork?.cancel()
+            let work = DispatchWorkItem {
+                withAnimation(DS.Motion.smooth) { homeVM.stylistNotice = nil }
+            }
+            noticeDismissWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4, execute: work)
         }
+        .animation(DS.Motion.smooth, value: homeVM.stylistNotice)
         // First-generation coach tour, hosted over this sheet (its controls only
         // exist here). Reads the look / shuffle / actions anchors below.
         .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
@@ -342,6 +375,9 @@ struct TodayOutfitSheet: View {
                             .font(DS.Font.subheadline)
                             .foregroundStyle(DS.Colors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+                            // The on-device model may rewrite the note a beat later.
+                            .contentTransition(.opacity)
+                            .animation(.easeInOut(duration: 0.3), value: outfit.explanation)
                     }
                     .padding(DS.Spacing.md)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -443,10 +479,15 @@ struct TodayOutfitSheet: View {
             if !feet.isEmpty { flatLayRow(feet, maxHeight: 92) }
             if !accessories.isEmpty {
                 HStack(spacing: DS.Spacing.xl) {
-                    ForEach(accessories) { flatLayPiece($0, maxHeight: 56) }
+                    ForEach(accessories) { item in
+                        flatLayPiece(item, maxHeight: 56)
+                            .transition(.scale(scale: 0.85).combined(with: .opacity))
+                    }
                 }
             }
         }
+        // Shuffle / add swap pieces in place: cross-fade the changed piece.
+        .animation(DS.Motion.smooth, value: items.map { $0.id })
         .frame(maxWidth: .infinity)
         .padding(.vertical, DS.Spacing.xl)
         .padding(.horizontal, DS.Spacing.lg)
@@ -456,7 +497,10 @@ struct TodayOutfitSheet: View {
 
     private func flatLayRow(_ items: [WardrobeItem], maxHeight: CGFloat) -> some View {
         HStack(alignment: .bottom, spacing: DS.Spacing.lg) {
-            ForEach(items) { flatLayPiece($0, maxHeight: maxHeight) }
+            ForEach(items) { item in
+                flatLayPiece(item, maxHeight: maxHeight)
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+            }
         }
         .frame(maxWidth: .infinity)
     }
@@ -727,7 +771,7 @@ struct TodayOutfitSheet: View {
             VStack(spacing: DS.Spacing.xs) {
                 if homeVM.savedCount > 0 {
                     Label(
-                        "\(homeVM.savedCount) outfit\(homeVM.savedCount == 1 ? "" : "s") saved for today",
+                        "\(homeVM.savedCount) outfit\(homeVM.savedCount == 1 ? "" : "s") logged to your calendar",
                         systemImage: "heart.fill"
                     )
                     .font(DS.Font.subheadline)
@@ -744,6 +788,9 @@ struct TodayOutfitSheet: View {
                 Button(action: {
                     Haptics.light()
                     isPresented = false
+                    // The calendar already jumps to the logged day; this asks the
+                    // tab bar to switch to it (if it's listening).
+                    NotificationCenter.default.post(name: .showOutfitsCalendar, object: nil)
                 }) {
                     HStack(spacing: DS.Spacing.xs) {
                         Image(systemName: "calendar")
@@ -757,6 +804,23 @@ struct TodayOutfitSheet: View {
             Text("Want more suggestions?")
                 .font(DS.Font.subheadline)
                 .foregroundColor(DS.Colors.textSecondary)
+
+            // Change the mood before restyling.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DS.Spacing.xs) {
+                    ForEach(OutfitMood.allCases) { mood in
+                        DSChip(title: mood.label, systemImage: mood.icon,
+                               isSelected: homeVM.selectedMood == mood) {
+                            withAnimation(DS.Motion.snappy) {
+                                homeVM.selectedMood = homeVM.selectedMood == mood ? nil : mood
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, DS.Spacing.micro)
+                .padding(.vertical, DS.Spacing.micro)
+            }
+            .scrollClipDisabled()
 
             Button(action: {
                 Haptics.medium()
@@ -808,7 +872,7 @@ struct TodayOutfitSheet: View {
                             ForEach(products, id: \.self) { product in
                                 Button(action: {
                                     addProductStep = nil
-                                    isAddingProduct = true
+                                    Haptics.light()
                                     homeVM.addProductToOutfit(
                                         category: category,
                                         productType: product,
@@ -843,9 +907,12 @@ struct TodayOutfitSheet: View {
 
     private func saveOutfitForDate(_ date: Date) {
         guard let outfit = currentOutfit else { return }
-        outfitsVM.addOutfit(date: date, items: outfit.items, source: "gemini")
+        outfitsVM.addOutfit(date: date, items: outfit.items, source: MyOutfitsViewModel.Source.stylist)
         homeVM.saveCurrentOutfit()
         Haptics.success()
+        savedToastText = Calendar.current.isDateInToday(date)
+            ? "Logged for today"
+            : "Logged for \(date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))"
         showSavedOverlay = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             showSavedOverlay = false
