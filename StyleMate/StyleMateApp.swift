@@ -20,9 +20,6 @@ struct StyleMateApp: App {
         _wardrobeVM = StateObject(wrappedValue: wardrobe)
         // Background task handlers must be registered before launch finishes.
         BackgroundScanCoordinator.shared.configure(auth: auth, wardrobe: wardrobe)
-        #if DEBUG
-        DebugOrientation.startIfRequested()   // `-uiTestOrientation portrait` (Duo CI seated pass)
-        #endif
     }
 
     var body: some Scene {

@@ -10,8 +10,7 @@ import XCTest
 /// screen also proves the app keeps its state across cover -> inner -> half-open -> cover.
 ///
 /// Skipped unless `DUO_BRIDGE_URL` is set (`TEST_RUNNER_DUO_BRIDGE_URL` for xcodebuild), so ci.yml's
-/// iPhone run of StyleMateUITests ignores it. `DUO_SEATED=1` adds a pass with `-uiTestOrientation portrait`
-/// (Apple's seated / tabletop pose on the inner display).
+/// iPhone run of StyleMateUITests ignores it.
 final class DuoScreensTests: E2ETestCase {
 
     override func setUpWithError() throws {
@@ -39,23 +38,10 @@ final class DuoScreensTests: E2ETestCase {
         XCTAssertTrue(count.waitForExistence(timeout: 20), "Closet doesn't show the seeded items")
         shoot("02-closet")
 
-        // Item page.
-        let tee = app.buttons.matching(NSPredicate(format: "label ENDSWITH 'T-Shirt'")).firstMatch
-        if scrollUntilHittable(tee, maxSwipes: 4) {
-            tee.tap()
-            let editDetails = itemPage()
-            XCTAssertTrue(editDetails.waitForExistence(timeout: 15), "Item page didn't open")
+        // Item page (via the Tops chip, so the tile isn't half under the pinned filter bar).
+        if openFirstTee() {
             shoot("03-item")
-            // Only go back from a pushed page (never tap the closet's own Select by mistake).
-            if editDetails.exists {
-                let backByID = app.navigationBars.buttons["BackButton"]
-                let back = backByID.exists ? backByID : app.navigationBars.buttons.matching(NSPredicate(format:
-                    "identifier != 'closet.select' AND identifier != 'closet.add' AND identifier != 'itemDetail.more'")).firstMatch
-                if back.waitForExistence(timeout: 5) { back.tap() }
-                _ = waitToDisappear(editDetails, timeout: 10)
-            }
-        } else {
-            XCTFail("No T-shirt tile to open")
+            goBack()
         }
 
         // Add sheet (a fixed-height sheet: check it on every display).
@@ -90,36 +76,55 @@ final class DuoScreensTests: E2ETestCase {
         shoot("07-profile")
     }
 
-    // MARK: - Seated (tabletop) pose
-
-    @MainActor
-    func test02_DuoSeatedScreens() throws {
-        guard bridgeURL != nil else { throw XCTSkip("DUO_BRIDGE_URL not set: not on the Duo CI") }
-        guard ProcessInfo.processInfo.environment["DUO_SEATED"] == "1" else { throw XCTSkip("DUO_SEATED != 1") }
-        app = makeApp()
-        app.launchArguments += ["-uiTestOrientation", "portrait"]
-        app.launch()
-        dismissSpringboardAlertIfPresent()
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 60) || tabButton("Home").exists,
-                      "The main tab UI never appeared")
-        _ = waitForAny([text("Your Wardrobe"), text("Style for an occasion")], timeout: 20)
-        shoot("seated-01-home")
-
-        openTab("Wardrobe")
-        let tee = app.buttons.matching(NSPredicate(format: "label ENDSWITH 'T-Shirt'")).firstMatch
-        if scrollUntilHittable(tee, maxSwipes: 4) {
-            tee.tap()
-            _ = itemPage().waitForExistence(timeout: 15)
-            shoot("seated-03-item")
-        }
-
-        openTab("Home")
-        if openOutfitDeck() {
-            shoot("seated-05-outfit-deck")
-        }
-    }
+    // No seated (tabletop) pass: the Duo simulator shows the inner display sideways and simctl can't rotate it,
+    // and without UIRequiresFullScreen (which StyleMate must not set) iOS refuses programmatic rotation:
+    // "The current windowing mode does not allow for programmatic changes to interface orientation" (Duo run
+    // 41913178351). Seated pose needs the real device.
 
     // MARK: - Steps
+
+    /// Closet -> Tops chip -> first T-shirt -> its item page. Leaves the filter on "Tops".
+    @MainActor
+    private func openFirstTee() -> Bool {
+        let topsChip = app.buttons.matching(NSPredicate(format:
+            "identifier == 'closet.filter.tops' OR label BEGINSWITH 'Tops,'")).firstMatch
+        if topsChip.waitForExistence(timeout: 10) { topsChip.tap() }
+        let tee = app.buttons.matching(NSPredicate(format: "label ENDSWITH 'T-Shirt'")).firstMatch
+        guard scrollUntilHittable(tee, maxSwipes: 4) else { XCTFail("No T-shirt tile to open"); return false }
+        tee.tap()
+        let editDetails = itemPage()
+        if !editDetails.waitForExistence(timeout: 10) {
+            // One retry: the first tap can land while the grid is still settling after the scroll.
+            if tee.exists, tee.isHittable { tee.tap() }
+        }
+        guard editDetails.waitForExistence(timeout: 10) else {
+            snap("item-page-missing")
+            XCTFail("Item page didn't open")
+            return false
+        }
+        return true
+    }
+
+    /// Pops the item page (only call when it is open: the first nav-bar button elsewhere is "Select").
+    @MainActor
+    private func goBack() {
+        let editDetails = itemPage()
+        // On the Duo the navigation bar's buttons live in the trailing system rail (not under
+        // app.navigationBars), so look for the back button anywhere, then fall back to the edge swipe.
+        let back = app.buttons.matching(NSPredicate(format:
+            "identifier == 'BackButton' OR label == 'Back' OR label == 'Wardrobe'")).firstMatch
+        if back.waitForExistence(timeout: 5), back.isHittable {
+            back.tap()
+        }
+        if !waitToDisappear(editDetails, timeout: 5) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+        }
+        if !waitToDisappear(editDetails, timeout: 5) {
+            note("back-buttons", visibleButtonLabels())
+            XCTFail("Couldn't leave the item page")
+        }
+    }
 
     /// Home -> occasion -> Generate -> the deck's "1 of N" (answering the weather prompt).
     @MainActor
@@ -184,20 +189,29 @@ final class DuoScreensTests: E2ETestCase {
         var request = URLRequest(url: url)
         request.timeoutInterval = 300
         let done = expectation(description: "bridge \(name)")
-        var reply = ""
+        let box = ReplyBox()
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error {
-                reply = "error: \(error.localizedDescription)"
+                box.set("error: \(error.localizedDescription)")
             } else {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                reply = "\(status) " + (data.flatMap { String(data: $0, encoding: .utf8) } ?? "")
+                box.set("\(status) " + (data.flatMap { String(data: $0, encoding: .utf8) } ?? ""))
             }
             done.fulfill()
         }.resume()
         wait(for: [done], timeout: 320)
+        let reply = box.value
         print("[DuoShot] \(name): \(reply)")
         XCTAssertTrue(reply.hasPrefix("200"), "Duo bridge failed for \(name): \(reply)")
         // The phone is closed again: the app is back on the cover display. Give it a beat to settle.
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 2.0)
     }
+}
+
+/// The bridge's reply, written on URLSession's queue and read after the wait.
+private final class ReplyBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var text = "no reply"
+    var value: String { lock.lock(); defer { lock.unlock() }; return text }
+    func set(_ s: String) { lock.lock(); text = s; lock.unlock() }
 }
