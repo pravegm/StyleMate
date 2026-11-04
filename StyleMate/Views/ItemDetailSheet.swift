@@ -18,6 +18,7 @@ struct ItemDetailView: View {
     @State private var confirmRemove = false
     @State private var showFullImage = false
     @State private var appeared = false
+    @State private var showOriginal = false
 
     init(item: WardrobeItem, wear: WearStat?, onDelete: @escaping (WardrobeItem) -> Void) {
         self.itemID = item.id
@@ -87,17 +88,38 @@ struct ItemDetailView: View {
     // MARK: - Hero
 
     private func hero(_ item: WardrobeItem) -> some View {
-        Button {
-            Haptics.light()
-            showFullImage = true
-        } label: {
-            AsyncItemTile(path: item.gridImagePath, height: nil, cornerRadius: DS.Radius.hero,
-                          inset: 28, upgradePath: item.fullImagePath)
+        // Items with an on-device studio render can flip to the original cutout
+        // from the user's own photo — the AI image is never the only record.
+        let original = StudioStore.shared.originalCutout(for: item)
+        let showingOriginal = showOriginal && original != nil
+        return VStack(spacing: DS.Spacing.sm) {
+            Button {
+                Haptics.light()
+                showFullImage = true
+            } label: {
+                Group {
+                    if showingOriginal, let original {
+                        AsyncItemTile(path: original, height: nil, cornerRadius: DS.Radius.hero, inset: 28, upgradePath: nil)
+                    } else {
+                        AsyncItemTile(path: item.gridImagePath, height: nil, cornerRadius: DS.Radius.hero,
+                                      inset: 28, upgradePath: item.fullImagePath)
+                    }
+                }
                 .dsCardShadow(cornerRadius: DS.Radius.hero)
+            }
+            .buttonStyle(DSTapBounce())
+            .accessibilityLabel(showingOriginal ? "Cut out from your photo" : "Photo of \(ClosetText.displayName(item))")
+            .accessibilityHint("Opens the photo full screen")
+
+            if original != nil {
+                Picker("Image", selection: $showOriginal) {
+                    Text("Studio").tag(false)
+                    Text("From your photo").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityHint("Studio images are created on your iPhone from your photo")
+            }
         }
-        .buttonStyle(DSTapBounce())
-        .accessibilityLabel("Photo of \(ClosetText.displayName(item))")
-        .accessibilityHint("Opens the photo full screen")
     }
 
     // MARK: - Header
