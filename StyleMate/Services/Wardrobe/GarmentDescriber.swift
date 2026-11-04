@@ -38,10 +38,9 @@ enum GarmentDescriber {
     @available(iOS 27.0, *)
     private static func describeWithModel(_ cutout: UIImage, product: String, colors: [String]) async -> Description? {
         let model = SystemLanguageModel.default
-        guard model.isAvailable, let cg = FashionClassifier.onWhite(cutout.cgImage!, side: 512) else { return nil }
-        let session = LanguageModelSession(model: model) {
-            "You are a precise fashion cataloguer. You describe one clothing item or accessory from a product photo."
-        }
+        guard model.isAvailable, let src = cutout.cgImage, let cg = FashionClassifier.onWhite(src, side: 512) else { return nil }
+        let instructions = "You are a precise fashion cataloguer. You describe one clothing item or accessory from a product photo."
+        let session = LanguageModelSession(model: model, instructions: instructions)
         do {
             let colorText = colors.joined(separator: ", ")
             let response = try await session.respond(generating: GarmentNotes.self) {
