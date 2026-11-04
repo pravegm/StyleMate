@@ -24,6 +24,10 @@ on:
         description: "Build and App Store-sign, check the signature, but do NOT upload"
         type: boolean
         default: false
+      archive_only:
+        description: "Only archive the Release build and check its contents (no secrets needed)"
+        type: boolean
+        default: false
 
 concurrency:
   group: testflight
@@ -40,6 +44,7 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - name: Check the secrets
+        if: ${{ !inputs.archive_only }}
         run: |
           missing=""
           for s in ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY APPLE_TEAM_ID; do
@@ -91,6 +96,7 @@ jobs:
           [ -f StyleMate/Secrets.swift ] || printf 'enum Secrets {}\n' > StyleMate/Secrets.swift
 
       - name: Write the API key
+        if: ${{ !inputs.archive_only }}
         run: |
           umask 077
           KEY="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
@@ -132,6 +138,7 @@ jobs:
           if strings "$APP/StyleMate" | grep -q "uiTestSeedWardrobe"; then echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1; fi
 
       - name: Export locally and check the App Store signature
+        if: ${{ !inputs.archive_only }}
         run: |
           set -o pipefail
           cat > "$RUNNER_TEMP/ExportLocal.plist" <<EOF
@@ -163,7 +170,7 @@ jobs:
           ls -la "$RUNNER_TEMP"/local/*.ipa
 
       - name: Upload to App Store Connect
-        if: ${{ !inputs.check_only }}
+        if: ${{ !inputs.check_only && !inputs.archive_only }}
         run: |
           set -o pipefail
           cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
@@ -192,7 +199,7 @@ jobs:
           grep -qE "\*\* EXPORT SUCCEEDED \*\*|Upload succeeded|Uploaded" export.log
 
       - name: Summary
-        if: success() && !inputs.check_only
+        if: success() && !inputs.check_only && !inputs.archive_only
         env:
           NOTES: ${{ inputs.notes }}
         run: |
