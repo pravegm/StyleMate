@@ -761,7 +761,7 @@ class PhotoScanService: ObservableObject {
             )
 
             if let fp = seg.featurePrint {
-                ItemEmbeddingStore.shared.set(fp, quality: seg.quality, for: wardrobeItem.id)
+                ItemEmbeddingStore.shared.set(fp, quality: seg.quality, truncated: seg.truncated, for: wardrobeItem.id)
             }
             // Appears in the wardrobe straight away, while the scan goes on.
             wardrobeViewModel.items.append(wardrobeItem)
@@ -795,7 +795,7 @@ class PhotoScanService: ObservableObject {
         let updated = existing.withImages(imagePath: ip, croppedImagePath: ip, thumbnailPath: tp)
         wardrobeViewModel.items[idx] = updated
         wardrobeViewModel.syncItemToCloud(updated)
-        store.set(fp, quality: seg.quality, for: existing.id)
+        store.set(fp, quality: seg.quality, truncated: seg.truncated, for: existing.id)
         print("[StyleMate] Auto-scan: better photo of \(existing.product) (q \(String(format: "%.2f→%.2f", current, seg.quality)))")
     }
 

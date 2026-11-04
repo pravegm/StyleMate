@@ -196,6 +196,13 @@ struct RootView: View {
                 }
             }
         }
+        // Studio renders: whenever items arrive (scan, manual add, restore),
+        // turn their cutouts into lifelike catalog images in the background.
+        .task(id: wardrobeVM.items.count) {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard authService.isAuthenticated, scenePhase == .active else { return }
+            StudioQueue.shared.enqueueMissing(wardrobeVM)
+        }
         .onChange(of: scenePhase) { newPhase in
             switch newPhase {
             case .active:

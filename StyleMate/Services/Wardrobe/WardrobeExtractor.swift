@@ -20,6 +20,9 @@ enum WardrobeExtractor {
         /// 0...1: how good this photo of the item is (size, sharpness, not cut
         /// off by the frame, little occlusion).
         let quality: Float
+        /// Cut off by the photo's frame (the studio render then generates the
+        /// whole garment instead of refining a partial one).
+        var truncated: Bool = false
     }
 
     /// Items we never auto-add from a photo of a person (privacy + they're not
@@ -64,7 +67,8 @@ enum WardrobeExtractor {
                 print("[Wardrobe] drop low-quality \(attrs.product) q=\(String(format: "%.2f", q))")
                 continue
             }
-            items.append(Item(kind: inst.kind, attributes: attrs, cutout: cut.image, quality: q))
+            items.append(Item(kind: inst.kind, attributes: attrs, cutout: cut.image, quality: q,
+                              truncated: isTruncated(use.inst, crop: use.crop)))
         }
         items = dedupeWithinPhoto(items)
         print("[Wardrobe] extracted \(items.count) items in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s: " +
@@ -181,6 +185,13 @@ enum WardrobeExtractor {
     }
 
     // MARK: - Quality
+
+    private static func isTruncated(_ inst: GarmentInstance, crop: Crop) -> Bool {
+        let (x0, y0, x1, y1) = inst.box
+        let f = crop.photoInGrid, tol: CGFloat = 2
+        return CGFloat(y0) <= f.minY + tol || CGFloat(y1) >= f.maxY - tol
+            || CGFloat(x0) <= f.minX + tol || CGFloat(x1) >= f.maxX - tol
+    }
 
     private static func quality(_ inst: GarmentInstance, cut: GarmentCutout.Result, crop: Crop, photoSide: Float) -> Float {
         let size = min(1, photoSide / (inst.kind.isSmall ? 120 : 380))

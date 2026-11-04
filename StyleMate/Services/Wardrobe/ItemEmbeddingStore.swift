@@ -11,6 +11,8 @@ final class ItemEmbeddingStore {
     private struct Entry: Codable {
         var embedding: [Float]
         var quality: Float
+        /// The source view was cut off by the photo frame (optional: older files lack it).
+        var truncated: Bool?
     }
 
     private let lock = NSLock()
@@ -51,10 +53,16 @@ final class ItemEmbeddingStore {
         return entries[id.uuidString]?.quality
     }
 
-    func set(_ embedding: [Float], quality: Float, for id: UUID) {
+    func truncated(for id: UUID) -> Bool? {
         lock.lock(); defer { lock.unlock() }
         loadIfNeeded()
-        entries[id.uuidString] = Entry(embedding: embedding, quality: quality)
+        return entries[id.uuidString]?.truncated
+    }
+
+    func set(_ embedding: [Float], quality: Float, truncated: Bool = false, for id: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        loadIfNeeded()
+        entries[id.uuidString] = Entry(embedding: embedding, quality: quality, truncated: truncated)
         persist()
     }
 
