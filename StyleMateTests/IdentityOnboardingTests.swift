@@ -471,7 +471,17 @@ extension FaceMatchingTests {
         // The two clearest front-facing fixtures (the cap + sunglasses face in street_coat_cap is
         // correctly rejected by the library quality gate).
         let photo = try findYouFixture("kurta_dhoti_turban.jpg")
-        let other = try findYouFixture("casual_denim_jacket_hat.jpg")   // a clearly visible, different person
+        // A different person whose face passes the library quality gate (full-body street photos
+        // often have small / turned / sunglassed faces that are correctly rejected).
+        var otherPick: UIImage?
+        for name in ["casual_denim_jacket_hat.jpg", "flannel_shirt_group.jpg", "pink_coat_boots.jpg", "street_coat_scarf.jpg"] {
+            let candidate = try findYouFixture(name)
+            if !FaceSampleExtractor.scannedFaces(in: resized(candidate, longSide: 1024), assetId: "probe",
+                                                 anchors: [], fromSelfieAlbum: false).isEmpty {
+                otherPick = candidate; break
+            }
+        }
+        let other = try #require(otherPick, "no second fixture with a usable face")
 
         // The library pass works on ~640 px thumbnails; report how that resolution fares.
         let thumbFaces = FaceSampleExtractor.scannedFaces(in: resized(photo, longSide: 640), assetId: "thumb",
