@@ -14,7 +14,8 @@ StyleMate finds the photos of *you* in your library, cuts out every garment and 
   - **confident** → analysed straight away (in a multi-person photo only *your* body is isolated via a person-instance mask, so other people's clothes are never extracted); very confident matches also **teach the gallery** a new angle of your face;
   - **probably you** → queued for an **"Is this you?"** review (home banner → `FaceReviewView`); confirming teaches the gallery and extracts those outfits;
   - anyone else → skipped.
-- The scan downloads iCloud-only originals when needed ("Optimize iPhone Storage"), retries photos that failed to load, and checkpoints progress to `Application Support/ScanProgress/` so it can pause/resume.
+- The scan (`PhotoScanService` + `Services/Scan/`) starts with the **last 12 months**, newest first, with items appearing live ("All photos" is one tap away). It skips screenshots, tiny images and panoramas, keeps only the best frame of a burst / same-moment group, pipelines loading and identity ahead of extraction, and paces itself by thermal state and Low Power Mode.
+- It downloads iCloud-only originals when needed ("Optimize iPhone Storage"), retries photos that failed to load, and checkpoints progress to `Application Support/ScanProgress/` so it resumes exactly. It keeps going briefly when you leave the app, continues **overnight while charging** (`BGProcessingTask`), and picks up **new photos automatically** when you come back (PhotoKit persistent change history).
 
 ### 2. Building the wardrobe (on-device garment extraction — `Services/Wardrobe/`)
 
@@ -49,7 +50,7 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and appear i
 
 - **Onboarding**: welcome → about you → photo-scan explainer → selfie → photo permission → reference builder → initial library scan (pause/resume from the home banner). A one-time coach-mark tour introduces the main features.
 - **Home**: greeting, weather, wardrobe summary, "Style Me" with mood chips, scan progress, "Is this you?" review banner, last-scan results.
-- **My Wardrobe**: closet grid grouped by category, product subgroups, item detail, edit any field, delete (with CloudKit cleanup). Add via Camera / Gallery / Auto-scan.
+- **My Wardrobe**: a closet of cutout tiles on shelves (tops & layers, bottoms, dresses, footwear, bags, accessories, jewelry); filter by shelf, colour and pattern; sort by newest, colour or how often you wear it; search; tap to zoom into an item page (attributes, wear history, edit, "Not mine — remove"); multi-select to remove misidentified items. Add via Camera / Gallery / Auto-scan.
 - **My Outfits**: calendar of logged outfits.
 - **Profile**: name, email, gender/age, preferred styles, cloud sync status, tour replay, data deletion.
 - **Authentication**: Sign in with Apple and Sign in with Google.
@@ -85,7 +86,7 @@ StyleMate/
 
 ## Permissions
 
-Declared in `Info.plist`: **Photos** (wardrobe building and scan), **Camera** (selfie and item capture), **Location** (optional, weather only). Entitlements: Sign in with Apple, iCloud / CloudKit.
+Declared in `Info.plist`: **Photos** (wardrobe building and scan), **Camera** (selfie and item capture), **Location** (optional, weather only); `UIBackgroundModes` `remote-notification` + `processing`, and `BGTaskSchedulerPermittedIdentifiers` = `com.stylemates.StyleMate.photoscan` (overnight scan). Entitlements: Sign in with Apple, iCloud / CloudKit. Core ML runs on CPU + Neural Engine only (no GPU, which iOS forbids in the background).
 
 ## Setup
 

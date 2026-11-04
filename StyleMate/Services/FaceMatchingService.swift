@@ -138,7 +138,7 @@ class FaceMatchingService {
 
         do {
             let config = MLModelConfiguration()
-            config.computeUnits = .all
+            config.computeUnits = .cpuAndNeuralEngine   // no GPU: iOS forbids GPU work in the background (overnight scan)
             mlModel = try MLModel(contentsOf: url, configuration: config)
             print("[FaceMatch] Model loaded successfully")
             return true

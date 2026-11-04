@@ -59,7 +59,7 @@ final class SCRFDDetector {
             return false
         }
         let cfg = MLModelConfiguration()
-        cfg.computeUnits = .all
+        cfg.computeUnits = .cpuAndNeuralEngine   // no GPU: iOS forbids GPU work in the background (overnight scan)
         model = try? MLModel(contentsOf: url, configuration: cfg)
         if model == nil { print("[SCRFD] ERROR: failed to load model") }
         else { print("[SCRFD] detector loaded") }
