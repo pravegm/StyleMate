@@ -20,6 +20,9 @@ struct StyleMateApp: App {
         _wardrobeVM = StateObject(wrappedValue: wardrobe)
         // Background task handlers must be registered before launch finishes.
         BackgroundScanCoordinator.shared.configure(auth: auth, wardrobe: wardrobe)
+        #if DEBUG
+        DebugOrientation.startIfRequested()   // `-uiTestOrientation portrait` (Duo CI seated pass)
+        #endif
     }
 
     var body: some Scene {
@@ -30,6 +33,8 @@ struct StyleMateApp: App {
                 .environmentObject(onboardingManager)
                 .environmentObject(tutorialManager)
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                // iPhone Duo / large displays: \.duoLayout (posture, fold, wide layout). Views/Components/DuoLayout.swift
+                .duoLayoutReader()
                 .onOpenURL { url in
                     GIDSignIn.sharedInstance.handle(url)
                 }
