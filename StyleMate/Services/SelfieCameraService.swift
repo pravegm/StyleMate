@@ -111,14 +111,14 @@ class SelfieCameraService: NSObject, ObservableObject {
             self.captureSession.commitConfiguration()
 
             self.captureSession.startRunning()
-            print("[StyleMate] Selfie camera session started")
+            dlog("[StyleMate] Selfie camera session started")
         }
     }
 
     func stop() {
         sessionQueue.async { [weak self] in
             self?.captureSession.stopRunning()
-            print("[StyleMate] Selfie camera session stopped")
+            dlog("[StyleMate] Selfie camera session stopped")
         }
     }
 
@@ -222,7 +222,7 @@ class SelfieCameraService: NSObject, ObservableObject {
             captureState = .searching
         } else {
             captureState = .captured
-            print("[StyleMate] Selfie: all \(frames.count) reference frames accepted")
+            dlog("[StyleMate] Selfie: all \(frames.count) reference frames accepted")
         }
     }
 
@@ -385,7 +385,7 @@ extension SelfieCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
             guard let self else { return }
             if !self.captureSession.isRunning {
                 self.captureSession.startRunning()
-                print("[StyleMate] Camera session restarted for retake")
+                dlog("[StyleMate] Camera session restarted for retake")
             }
         }
     }
@@ -410,7 +410,7 @@ extension SelfieCameraService: AVCapturePhotoCaptureDelegate {
 
         Task { @MainActor in
             let cropped = Self.cropToOval(normalized, previewSize: self.previewSize, oval: self.ovalRect) ?? normalized
-            print("[StyleMate] Selfie frame \(self.step.label) captured (\(Int(cropped.size.width))x\(Int(cropped.size.height))), checking")
+            dlog("[StyleMate] Selfie frame \(self.step.label) captured (\(Int(cropped.size.width))x\(Int(cropped.size.height))), checking")
             self.handleCaptured(cropped)
         }
     }
@@ -419,9 +419,9 @@ extension SelfieCameraService: AVCapturePhotoCaptureDelegate {
     /// baking any rotation/mirroring into the pixel data.
     private nonisolated static func renderUpOrientation(_ image: UIImage) -> UIImage {
         guard image.imageOrientation != .up, image.cgImage != nil else { return image }
-        let size = image.size
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { _ in
+        // Scale 1: the default renderer format uses the screen scale (9x the pixels).
+        let size = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        return ImageDownsampler.render(size: size) { _ in
             image.draw(in: CGRect(origin: .zero, size: size))
         }
     }

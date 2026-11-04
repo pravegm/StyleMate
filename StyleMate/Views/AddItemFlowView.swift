@@ -23,6 +23,11 @@ struct AddItemFlowView: View {
     @State private var resolvedImages: [UIImage] = []
     @State private var ambiguousQueue: [Ambiguous] = []
     @State private var didStartResolving = false
+    /// The picked photos downsampled to ≤ 2048 px (a 24–48 MP photo is 96–190 MB decoded;
+    /// extraction never needs more). Everything downstream uses these, not `images`.
+    @State private var workingImages: [UIImage] = []
+    /// True while a "which one is you?" pick is being isolated (Vision + AdaFace, off-main).
+    @State private var isPicking = false
 
     var body: some View {
         Group {
@@ -46,22 +51,33 @@ struct AddItemFlowView: View {
 
     // MARK: - Resolution
 
+    /// Downsamples one photo at a time off the main thread, so at most one full-size decode
+    /// is alive at once.
+    private static func downsampled(_ images: [UIImage]) async -> [UIImage] {
+        await Task.detached(priority: .userInitiated) { () -> [UIImage] in
+            images.map { image in autoreleasepool { ImageDownsampler.downsample(image: image) } }
+        }.value
+    }
+
     private func resolveAll() async {
+        let working = await Self.downsampled(images)
+        workingImages = working
+
         guard let userId = authService.user?.id else {
-            print("[Identity] No signed-in user — skipping identity gating, analyzing whole photos")
-            resolvedImages = images
+            dlog("[Identity] No signed-in user — skipping identity gating, analyzing whole photos")
+            resolvedImages = working
             phase = .review
             return
         }
 
-        print("[Identity] Resolving \(images.count) uploaded photo(s)…")
+        dlog("[Identity] Resolving \(working.count) uploaded photo(s)…")
         var resolved: [UIImage] = []
         var ambiguous: [Ambiguous] = []
         var isolatedCount = 0
 
-        for image in images {
+        for image in working {
             let resolution = await Task.detached(priority: .userInitiated) {
-                FaceMatchingService.shared.resolveIdentity(in: image, userId: userId)
+                autoreleasepool { FaceMatchingService.shared.resolveIdentity(in: image, userId: userId) }
             }.value
 
             switch resolution {
@@ -77,30 +93,44 @@ struct AddItemFlowView: View {
 
         resolvedImages = resolved
         ambiguousQueue = ambiguous
-        print("[Identity] Resolved \(images.count): \(resolved.count - isolatedCount) whole, \(isolatedCount) auto-isolated, \(ambiguous.count) need 'which is you?'")
+        dlog("[Identity] Resolved \(working.count): \(resolved.count - isolatedCount) whole, \(isolatedCount) auto-isolated, \(ambiguous.count) need 'which is you?'")
         advance()
     }
 
     private func advance() {
         if ambiguousQueue.isEmpty {
-            if resolvedImages.isEmpty { resolvedImages = images }   // safety net
+            if resolvedImages.isEmpty { resolvedImages = workingImages.isEmpty ? images : workingImages }   // safety net
             phase = .review
         } else {
             phase = .disambiguating
         }
     }
 
+    /// Person isolation (Vision instance mask) and learning the picked face (AdaFace) run
+    /// off the main thread; taps while one is in flight are ignored.
     private func pick(_ person: DetectedPerson?, in ambiguous: Ambiguous) {
-        let userId = authService.user?.id ?? ""
-        if let person {
-            let isolated = FaceMatchingService.shared.isolateChosenPerson(
-                person, in: ambiguous.image, totalFaces: ambiguous.people.count, userId: userId)
-            resolvedImages.append(isolated ?? ambiguous.image)
-        } else {
+        guard !isPicking, ambiguousQueue.first?.id == ambiguous.id else { return }
+        guard let person else {
             resolvedImages.append(ambiguous.image)   // "use whole photo"
+            ambiguousQueue.removeFirst()
+            advance()
+            return
         }
-        ambiguousQueue.removeFirst()
-        advance()
+        isPicking = true
+        let userId = authService.user?.id ?? ""
+        let image = ambiguous.image
+        let total = ambiguous.people.count
+        Task { @MainActor in
+            let isolated = await Task.detached(priority: .userInitiated) {
+                autoreleasepool {
+                    FaceMatchingService.shared.isolateChosenPerson(person, in: image, totalFaces: total, userId: userId)
+                }
+            }.value
+            resolvedImages.append(isolated ?? image)
+            if ambiguousQueue.first?.id == ambiguous.id { ambiguousQueue.removeFirst() }
+            isPicking = false
+            advance()
+        }
     }
 
     // MARK: - Views
