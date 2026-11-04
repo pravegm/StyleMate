@@ -518,9 +518,38 @@ struct AddOutfitSheet: View {
     @State private var showSavedOverlay = false
     @State private var selectedItems: Set<WardrobeItem> = []
     @State private var notes: String = ""
-    @State private var expandedCategories: Set<Category> = []
-    @State private var expandedProducts: Set<String> = []
-    @State private var previewImage: PreviewImage? = nil
+    @State private var shelf: ClosetSection? = nil
+    @State private var previewItem: WardrobeItem? = nil
+    @Environment(\.duoLayout) private var duo
+
+    private static let maxPieces = 10
+
+    /// Shelves that have something on them, in closet order.
+    private var groups: [ClosetGroup] {
+        ClosetEngine.grouped(Array(wardrobeVM.items.reversed()))
+    }
+
+    private var currentShelf: ClosetSection? { shelf ?? groups.first?.section }
+
+    private var shelfItems: [WardrobeItem] {
+        groups.first(where: { $0.section == currentShelf })?.items ?? []
+    }
+
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: duo.isWideLayout ? 6 : 3)
+    }
+
+    private func toggle(_ item: WardrobeItem) {
+        if selectedItems.contains(item) {
+            Haptics.light()
+            withAnimation(DS.Motion.snappy) { _ = selectedItems.remove(item) }
+        } else if selectedItems.count < Self.maxPieces {
+            Haptics.selection()
+            withAnimation(DS.Motion.snappy) { _ = selectedItems.insert(item) }
+        } else {
+            Haptics.warning()
+        }
+    }
 
     public init(selectedDate: Date, initialItems: [OutfitItem]? = nil, initialNotes: String? = nil, onSave: @escaping ([WardrobeItem], String?) -> Void) {
         self.selectedDate = selectedDate
@@ -541,10 +570,17 @@ struct AddOutfitSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                    Text("Pick up to 10 pieces for \(selectedDate.formatted(date: .abbreviated, time: .omitted))")
+                    Text("Pick up to \(Self.maxPieces) pieces for \(selectedDate.formatted(date: .abbreviated, time: .omitted))")
                         .font(DS.Font.subheadline)
                         .foregroundStyle(DS.Colors.textSecondary)
                         .padding(.top, DS.Spacing.xs)
+
+                    LazyVGrid(columns: gridColumns, spacing: 10) {
+                        ForEach(shelfItems) { item in
+                            pieceCell(item)
+                        }
+                    }
+                    .animation(DS.Motion.snappy, value: currentShelf)
 
                     VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                         Text("Notes (optional)")
@@ -557,20 +593,13 @@ struct AddOutfitSheet: View {
                                         in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
                             .foregroundStyle(DS.Colors.textPrimary)
                     }
-
-                    OutfitItemSelectionList(
-                        selectedItems: $selectedItems,
-                        expandedCategories: $expandedCategories,
-                        expandedProducts: $expandedProducts,
-                        previewImage: $previewImage
-                    )
-                    .environmentObject(wardrobeVM)
+                    .padding(.top, DS.Spacing.sm)
                 }
                 .padding(.horizontal, DS.Spacing.screenH)
-                .padding(.top, DS.Spacing.xs)
                 .padding(.bottom, DS.Spacing.xl)
             }
             .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+            .safeAreaInset(edge: .top, spacing: 0) { shelfBar }
             .safeAreaInset(edge: .bottom) { bottomBar }
             .overlay {
                 if showSavedOverlay {
@@ -590,16 +619,9 @@ struct AddOutfitSheet: View {
                     Button("Cancel") { dismiss() }
                 }
             }
-            .sheet(item: $previewImage) { wrapper in
-                VStack {
-                    Spacer()
-                    ZoomableImage(image: wrapper.image).padding()
-                    Spacer()
-                    Button("Close") { previewImage = nil }
-                        .buttonStyle(DSSecondaryButton())
-                        .padding(.horizontal, DS.Spacing.screenH)
-                        .padding(.bottom, DS.Spacing.lg)
-                }
+            .sheet(item: $previewItem) { item in
+                FullItemImageViewer(path: item.fullImagePath, fallbackPath: item.gridImagePath,
+                                    title: ClosetText.displayName(item))
             }
             .onAppear {
                 if let initialItems = initialItems {
@@ -609,6 +631,48 @@ struct AddOutfitSheet: View {
                     selectedItems = Set(wardrobeItems)
                 }
                 if let initialNotes = initialNotes { notes = initialNotes }
+            }
+        }
+    }
+
+    /// Shelf tabs, pinned under the title.
+    private var shelfBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: DS.Spacing.xs) {
+                ForEach(groups) { group in
+                    let picked = group.items.filter { selectedItems.contains($0) }.count
+                    ClosetChip(title: group.section.chipTitle, systemImage: group.section.iconName,
+                               count: picked > 0 ? picked : group.items.count,
+                               isSelected: currentShelf == group.section) {
+                        withAnimation(DS.Motion.snappy) { shelf = group.section }
+                    }
+                    .accessibilityLabel("\(group.section.chipTitle), \(group.items.count) items" +
+                                        (picked > 0 ? ", \(picked) picked" : ""))
+                    .accessibilityIdentifier("composer.shelf.\(group.section.rawValue)")
+                }
+            }
+            .padding(.horizontal, DS.Spacing.screenH)
+            .padding(.vertical, DS.Spacing.xs)
+        }
+        .background(.bar)
+    }
+
+    /// One piece: the closet tile with a check, tap to pick, long-press to view.
+    private func pieceCell(_ item: WardrobeItem) -> some View {
+        let picked = selectedItems.contains(item)
+        return Button {
+            toggle(item)
+        } label: {
+            ClosetItemCell(item: item, isSelecting: true, isSelected: picked, showsCaption: true)
+        }
+        .buttonStyle(DSTapBounce())
+        .accessibilityIdentifier("composer.item.\(item.id.uuidString)")
+        .contextMenu {
+            Button { toggle(item) } label: {
+                Label(picked ? "Remove from outfit" : "Add to outfit", systemImage: picked ? "minus.circle" : "plus.circle")
+            }
+            Button { previewItem = item } label: {
+                Label("View larger", systemImage: "arrow.up.left.and.arrow.down.right")
             }
         }
     }

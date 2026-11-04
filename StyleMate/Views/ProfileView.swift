@@ -506,15 +506,12 @@ struct ProfileView: View {
     private var syncStatusIndicator: some View {
         switch cloudKitService.syncStatus {
         case .syncing:
+            // A system symbol effect: honours Reduce Motion and doesn't leak a
+            // repeatForever animation into the rest of the list.
             Image(systemName: "arrow.triangle.2.circlepath")
                 .foregroundColor(DS.Colors.accent)
-                .rotationEffect(.degrees(syncRotation))
-                .onAppear {
-                    withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
-                        syncRotation = 360
-                    }
-                }
-                .onDisappear { syncRotation = 0 }
+                .symbolEffect(.rotate, options: .repeating)
+                .accessibilityLabel("Syncing")
         case .success:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(DS.Colors.success)

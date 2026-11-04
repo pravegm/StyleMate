@@ -176,9 +176,9 @@ final class StyleMateE2ETests: E2ETestCase {
         XCTAssertTrue(anyElement(NSPredicate(format: "label == 'Add Outfit'")).waitForExistence(timeout: 10),
                       "Add Outfit composer didn't open")
 
-        pickInComposer(category: "Tops", product: "T-Shirts", itemSuffix: "T-Shirt")
-        pickInComposer(category: "Bottoms", product: "Jeans", itemSuffix: "Jeans")
-        pickInComposer(category: "Footwear", product: "Sneakers", itemSuffix: "Sneaker")
+        pickInComposer(shelf: "tops", title: "Tops", itemSuffix: "T-Shirt")
+        pickInComposer(shelf: "bottoms", title: "Bottoms", itemSuffix: "Jeans")
+        pickInComposer(shelf: "footwear", title: "Footwear", itemSuffix: "Sneaker")
         snap("composer-three-items-selected")
 
         let saveOutfit = button(id: "outfits.composer.save", label: "Save Outfit")
@@ -295,21 +295,20 @@ final class StyleMateE2ETests: E2ETestCase {
         }
     }
 
-    /// In the manual composer: expand a category, expand a product group, tick the first item.
+    /// In the manual composer: open a shelf tab, tick the first item whose name ends with `itemSuffix`.
     @MainActor
-    private func pickInComposer(category: String, product: String, itemSuffix: String) {
-        let categoryRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", category)).firstMatch
-        tapScrollingIfNeeded(categoryRow)
-        let productRow = app.staticTexts[product]
-        tapScrollingIfNeeded(productRow)
-        // Item rows: a select button labelled with the item's name (newer UI) or the name as text.
-        let byButton = app.buttons.matching(NSPredicate(format:
-            "label ENDSWITH %@ AND NOT (label BEGINSWITH 'Preview')", itemSuffix)).firstMatch
-        let item = byButton.waitForExistence(timeout: 5) ? byButton
-            : app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ AND label != %@", itemSuffix, product)).firstMatch
-        tapScrollingIfNeeded(item)
-        // Collapse again so the next category sits near the top and clear of the bottom bar.
-        if categoryRow.isHittable { categoryRow.tap() }
+    private func pickInComposer(shelf: String, title: String, itemSuffix: String) {
+        let tab = app.buttons.matching(NSPredicate(format:
+            "identifier == %@ OR label BEGINSWITH %@", "composer.shelf.\(shelf)", "\(title),")).firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 10), "No \(title) shelf tab in the composer")
+        tab.tap()
+        // Grid tiles are buttons labelled with the item's name (the tray's are "<name>, selected").
+        let item = app.buttons.matching(NSPredicate(format:
+            "identifier BEGINSWITH 'composer.item.' AND label ENDSWITH %@", itemSuffix)).firstMatch
+        XCTAssertTrue(scrollUntilHittable(item, maxSwipes: 4), "No \(itemSuffix) on the \(title) shelf")
+        item.tap()
+        XCTAssertTrue(anyElement(NSPredicate(format: "label BEGINSWITH 'Selected ('")).waitForExistence(timeout: 5),
+                      "Picking \(itemSuffix) didn't add it to the tray")
     }
 
     @MainActor
