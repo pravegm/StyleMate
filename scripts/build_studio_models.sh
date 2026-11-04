@@ -19,4 +19,3 @@ pip install -q "numpy<2" "torch==2.5.1" "coremltools==8.3.0" "diffusers==0.30.2"
 # --no-deps: its setup.py pulls diffusionkit (SD3 only; stubbed in convert_studio_model.py) and unpinned extras.
 pip install -q --no-deps "git+https://github.com/apple/ml-stable-diffusion.git@${MLSD_REF}"
 python convert_studio_model.py "$@"
-du -sh ../StyleMate/ML/Studio/StudioModels.bundle ../StyleMate/ML/Studio/StudioModels.bundle/*

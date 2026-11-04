@@ -149,6 +149,15 @@ def main():
     with open(os.path.join(opts.out, "studio_manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
     log.info(f"Wrote {opts.out}: {json.dumps(manifest)}")
+
+    def size_mb(path):
+        if os.path.isfile(path):
+            return os.path.getsize(path) / 1e6
+        return sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(path) for f in fs) / 1e6
+
+    for name in sorted(os.listdir(opts.out)):
+        log.info(f"  {size_mb(os.path.join(opts.out, name)):8.1f} MB  {name}")
+    log.info(f"  {size_mb(opts.out):8.1f} MB  total")
     if not opts.keep_work:
         shutil.rmtree(opts.work, ignore_errors=True)
 
