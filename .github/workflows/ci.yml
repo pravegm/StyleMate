@@ -197,13 +197,16 @@ jobs:
           xcrun simctl boot "$UDID" || true
 
       - name: Build for testing
+        # Unlike the unit-test job, the app must actually run here, so it is ad-hoc signed
+        # ("Sign to Run Locally", no team or profile needed for the simulator). That embeds the
+        # simulated entitlements; without them CKContainer.default() throws at launch.
         run: |
           set -o pipefail
           xcodebuild build-for-testing \
             -project StyleMate.xcodeproj -scheme StyleMate \
             -destination "id=$SIM" \
             -derivedDataPath "$RUNNER_TEMP/dd" \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
             2>&1 | tee ui-build.log | grep -E "error:|warning: .*StyleMateUITests/|warning: .*StyleMate/Debug/|\*\* TEST BUILD" || true
           grep -q "\*\* TEST BUILD SUCCEEDED \*\*" ui-build.log
 
@@ -214,6 +217,7 @@ jobs:
           xcrun simctl install "$SIM" "$APP"
           BUNDLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
           echo "Bundle id: $BUNDLE"
+          codesign -d --entitlements - "$APP" 2>&1 | head -20 || true
           xcrun simctl privacy "$SIM" grant location "$BUNDLE" || true
           xcrun simctl privacy "$SIM" grant photos "$BUNDLE" || true
           xcrun simctl location "$SIM" set 51.5072,-0.1276 || true
@@ -255,6 +259,8 @@ jobs:
                   if not os.path.isfile(src):
                       continue
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  if name.startswith("Debug description"):                      # XCTest query-debug noise
+                      continue
                   stem, ext = os.path.splitext(name)
                   stem = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", stem)        # drop xcresult's _0_<UUID>
                   stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-")
