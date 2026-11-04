@@ -146,7 +146,7 @@ struct FirstRunTests {
 
     // MARK: Auto-log
 
-    private static func item(_ cat: Category, _ product: String, _ color: String) -> WardrobeItem {
+    private static func item(_ cat: StyleMate.Category, _ product: String, _ color: String) -> WardrobeItem {
         WardrobeItem(category: cat, product: product, colors: [color], brand: "", pattern: .solid, imagePath: "x.png")
     }
 
