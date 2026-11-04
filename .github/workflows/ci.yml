@@ -28,7 +28,7 @@ concurrency:
 jobs:
   models:
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
       - name: Restore face models
@@ -42,11 +42,24 @@ jobs:
       - name: Build face models
         if: steps.cache.outputs.cache-hit != 'true'
         run: bash scripts/build_face_models.sh
+      - name: Restore wardrobe models
+        id: wcache
+        uses: actions/cache@v4
+        with:
+          path: StyleMate/ML
+          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+      - name: Build wardrobe models
+        if: steps.wcache.outputs.cache-hit != 'true'
+        run: bash scripts/build_wardrobe_models.sh
       - name: Check the models
         run: |
-          du -sh MobileFaceNet.mlpackage SCRFD10G.mlpackage
+          du -sh MobileFaceNet.mlpackage SCRFD10G.mlpackage StyleMate/ML/*
           test -f MobileFaceNet.mlpackage/Manifest.json
           test -f SCRFD10G.mlpackage/Manifest.json
+          test -f StyleMate/ML/GarmentParser.mlpackage/Manifest.json
+          test -f StyleMate/ML/GarmentLabeler.mlpackage/Manifest.json
+          test -f StyleMate/ML/FashionEncoder.mlpackage/Manifest.json
+          test -f StyleMate/ML/FashionVocabulary.json
 
   test:
     needs: models
@@ -63,6 +76,12 @@ jobs:
             MobileFaceNet.mlpackage
             SCRFD10G.mlpackage
           key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          fail-on-cache-miss: true
+      - name: Restore wardrobe models
+        uses: actions/cache/restore@v4
+        with:
+          path: StyleMate/ML
+          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
           fail-on-cache-miss: true
 
       - name: Select Xcode
@@ -123,7 +142,7 @@ jobs:
             -only-testing:StyleMateTests \
             -resultBundlePath "$RUNNER_TEMP/tests.xcresult" \
             2>&1 | tee test.log | grep -E "✔|✘|Test .*(passed|failed)|error:|\[Report\]|\*\* TEST" || true
-          grep -q "\*\* TEST SUCCEEDED \*\*" test.log
+          grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" test.log
 
       - name: Upload report
         if: always()

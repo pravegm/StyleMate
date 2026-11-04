@@ -1,0 +1,92 @@
+{
+  "upper_inner": {"template": "a photo of {}", "labels": [
+    ["Tops|T-Shirts", "a plain t-shirt"], ["Tops|Graphic Tees", "a graphic print t-shirt"], ["Tops|Polo T-Shirts", "a polo shirt"],
+    ["Tops|Shirts", "a shirt"], ["Tops|Button-Down Shirts", "a button-down oxford shirt"], ["Tops|Flannel Shirts", "a flannel check shirt"],
+    ["Tops|Blouses", "a blouse"], ["Tops|Henley", "a henley shirt"], ["Tops|Tank Tops", "a tank top"], ["Tops|Camisoles", "a camisole"],
+    ["Tops|Crop Tops", "a crop top"], ["Tops|Tube Tops", "a tube top"], ["Tops|Off-Shoulder Tops", "an off-shoulder top"],
+    ["Tops|Halter Tops", "a halter top"], ["Tops|Corset Tops", "a corset top"], ["Tops|Wrap Tops", "a wrap top"], ["Tops|Bodysuits", "a bodysuit"],
+    ["Tops|Mesh Tops", "a mesh top"], ["Tops|Turtlenecks", "a turtleneck top"], ["Tops|Tunics", "a tunic"],
+    ["Mid-Layers|Hoodies", "a hoodie"], ["Mid-Layers|Sweatshirts", "a sweatshirt"], ["Mid-Layers|Sweaters", "a knit sweater"],
+    ["Mid-Layers|Pullovers", "a pullover"], ["Mid-Layers|Quarter-Zips", "a quarter-zip pullover"],
+    ["Ethnic Wear|Kurta", "a men's kurta"], ["Ethnic Wear|Kurti", "a women's kurti"], ["Ethnic Wear|Choli", "a choli blouse"],
+    ["Activewear|Athletic Tops", "an athletic sports top"], ["Activewear|Sports Bras", "a sports bra"]
+  ]},
+  "upper_outer": {"template": "a photo of {}", "labels": [
+    ["Outerwear|Jackets", "a jacket"], ["Outerwear|Leather Jackets", "a leather jacket"], ["Outerwear|Denim Jackets", "a denim jacket"],
+    ["Outerwear|Bomber Jackets", "a bomber jacket"], ["Outerwear|Puffer Jackets", "a puffer jacket"], ["Outerwear|Coats", "a coat"],
+    ["Outerwear|Overcoats", "a long wool overcoat"], ["Outerwear|Trench Coats", "a trench coat"], ["Outerwear|Blazers", "a blazer"],
+    ["Outerwear|Parkas", "a parka"], ["Outerwear|Windbreakers", "a windbreaker"], ["Outerwear|Raincoats", "a raincoat"],
+    ["Outerwear|Shirt Jackets", "a shirt jacket shacket"], ["Outerwear|Capes", "a cape"],
+    ["Mid-Layers|Cardigans", "a cardigan"], ["Mid-Layers|Fleece Jackets", "a fleece jacket"], ["Mid-Layers|Vests", "a vest"],
+    ["Mid-Layers|Gilets", "a gilet"], ["Mid-Layers|Hoodies", "a zip hoodie"], ["Mid-Layers|Shrugs", "a shrug"], ["Mid-Layers|Ponchos", "a poncho"],
+    ["Ethnic Wear|Nehru Jacket", "a nehru jacket"], ["Ethnic Wear|Sherwani", "a sherwani"], ["Ethnic Wear|Bandhgala", "a bandhgala jacket"],
+    ["Activewear|Active Jackets", "a sports track jacket"]
+  ]},
+  "lower": {"template": "a photo of {}", "labels": [
+    ["Bottoms|Jeans", "jeans"], ["Bottoms|Trousers", "trousers"], ["Bottoms|Chinos", "chinos"], ["Bottoms|Cargo Pants", "cargo pants"],
+    ["Bottoms|Wide-Leg Pants", "wide-leg pants"], ["Bottoms|Palazzo Pants", "palazzo pants"], ["Bottoms|Linen Pants", "linen pants"],
+    ["Bottoms|Sweatpants", "sweatpants"], ["Bottoms|Joggers", "joggers"], ["Bottoms|Leggings", "leggings"], ["Bottoms|Shorts", "shorts"],
+    ["Bottoms|Capris", "capri pants"], ["Bottoms|Culottes", "culottes"], ["Bottoms|Skirts", "a skirt"], ["Bottoms|Mini Skirts", "a mini skirt"],
+    ["Bottoms|Skorts", "a skort"], ["Activewear|Track Pants", "track pants"], ["Activewear|Yoga Pants", "yoga pants"],
+    ["Activewear|Athletic Shorts", "athletic shorts"], ["Activewear|Cycling Shorts", "cycling shorts"],
+    ["Ethnic Wear|Salwar", "a salwar"], ["Ethnic Wear|Churidar", "churidar pants"], ["Ethnic Wear|Patiala Pants", "patiala pants"],
+    ["Ethnic Wear|Dhoti", "a dhoti"], ["Ethnic Wear|Lehenga", "a lehenga skirt"], ["Ethnic Wear|Sharara", "sharara pants"]
+  ]},
+  "onepiece": {"template": "a photo of {}", "labels": [
+    ["One-Pieces|Dresses", "a dress"], ["One-Pieces|Wrap Dresses", "a wrap dress"], ["One-Pieces|Maxi Dresses", "a maxi dress"],
+    ["One-Pieces|Shirt Dresses", "a shirt dress"], ["One-Pieces|Gowns", "an evening gown"], ["One-Pieces|Jumpsuits", "a jumpsuit"],
+    ["One-Pieces|Rompers", "a romper"], ["One-Pieces|Dungarees", "dungarees overalls"],
+    ["Ethnic Wear|Saree", "a saree"], ["Ethnic Wear|Anarkali", "an anarkali suit"], ["Ethnic Wear|Kurti", "a long kurti"],
+    ["Activewear|Tennis Dresses", "a tennis dress"], ["Activewear|Swimwear", "a swimsuit"]
+  ]},
+  "footwear": {"template": "a photo of {}", "labels": [
+    ["Footwear|Sneakers", "sneakers"], ["Footwear|Boots", "boots"], ["Footwear|Ankle Boots", "ankle boots"], ["Footwear|Chelsea Boots", "chelsea boots"],
+    ["Footwear|Sandals", "sandals"], ["Footwear|Slides", "slide sandals"], ["Footwear|Espadrilles", "espadrilles"], ["Footwear|Loafers", "loafers"],
+    ["Footwear|Oxford Shoes", "oxford shoes"], ["Footwear|Formal Shoes", "formal dress shoes"], ["Footwear|Mules", "mules"], ["Footwear|Flats", "ballet flats"],
+    ["Footwear|Heels", "high heels"], ["Footwear|Platform Shoes", "platform shoes"], ["Footwear|Clogs", "clogs"], ["Footwear|Slippers", "slippers"]
+  ]},
+  "eyewear": {"template": "a photo of {}", "labels": [
+    ["Accessories|Sunglasses", "sunglasses with tinted lenses"], ["Accessories|Eyeglasses", "clear prescription eyeglasses"]
+  ]},
+  "headwear": {"template": "a photo of {}", "labels": [
+    ["Accessories|Baseball Caps", "a baseball cap"], ["Accessories|Beanies", "a knit beanie"], ["Accessories|Fedoras", "a fedora hat"],
+    ["Accessories|Bucket Hats", "a bucket hat"], ["Accessories|Sun Hats", "a wide-brim sun hat"], ["Accessories|Berets", "a beret"],
+    ["Accessories|Bandanas", "a bandana"], ["Accessories|Turbans", "a turban"], ["Accessories|Headbands", "a headband"],
+    ["Accessories|Scarves", "a headscarf"], ["Accessories|Hair Accessories", "a hair clip accessory"]
+  ]},
+  "bag": {"template": "a photo of {}", "labels": [
+    ["Accessories|Handbags", "a handbag"], ["Accessories|Tote Bags", "a tote bag"], ["Accessories|Crossbody Bags", "a crossbody bag"],
+    ["Accessories|Backpacks", "a backpack"], ["Accessories|Clutches", "a clutch purse"], ["Accessories|Fanny Packs", "a fanny pack belt bag"],
+    ["Accessories|Briefcases", "a briefcase"], ["Accessories|Messenger Bags", "a messenger bag"], ["Accessories|Wallets", "a wallet"]
+  ]},
+  "neckwear": {"template": "a photo of {}", "labels": [
+    ["Accessories|Scarves", "a scarf"], ["Accessories|Ties", "a necktie"], ["Accessories|Bowties", "a bow tie"], ["Ethnic Wear|Dupatta", "a dupatta"]
+  ]},
+  "jewelry": {"template": "a photo of {}", "labels": [
+    ["Accessories|Watches", "a wrist watch"], ["Accessories|Bracelets", "a bracelet"], ["Accessories|Necklaces", "a necklace"],
+    ["Accessories|Chains", "a chain necklace"], ["Accessories|Pendants", "a pendant necklace"], ["Accessories|Earrings", "earrings"], ["Accessories|Rings", "a ring"]
+  ]},
+  "pattern": {"template": "a garment with a {} pattern", "labels": [
+    ["Solid", "solid plain single color"], ["Stripes", "striped"], ["Checks", "small check"], ["Plaid", "plaid tartan"], ["Polka Dot", "polka dot"],
+    ["Floral", "floral print"], ["Animal Print", "leopard animal print"], ["Camouflage", "camouflage"], ["Geometric", "geometric print"],
+    ["Houndstooth", "houndstooth"], ["Paisley", "paisley"], ["Tie-Dye", "tie-dye"]
+  ]},
+  "material": {"template": "a garment made of {}", "labels": [
+    ["Cotton", "cotton"], ["Denim", "denim"], ["Wool", "wool"], ["Knit", "chunky knit"], ["Leather", "leather"], ["Faux Leather", "shiny faux leather"],
+    ["Silk", "silk"], ["Satin", "satin"], ["Linen", "linen"], ["Polyester", "polyester"], ["Fleece", "fleece"], ["Suede", "suede"],
+    ["Nylon", "nylon"], ["Velvet", "velvet"], ["Mesh", "mesh"], ["Canvas", "canvas"], ["Corduroy", "corduroy"], ["Tweed", "tweed"], ["Jersey", "jersey"]
+  ]},
+  "sleeve": {"template": "a top with {}", "labels": [
+    ["Sleeveless", "no sleeves, sleeveless"], ["Short Sleeve", "short sleeves"], ["3/4 Sleeve", "three-quarter sleeves"], ["Long Sleeve", "long sleeves"]
+  ]},
+  "neckline": {"template": "a top with a {}", "labels": [
+    ["Crew Neck", "crew neck"], ["V-Neck", "v-neck"], ["Scoop Neck", "scoop neck"], ["Turtleneck", "turtleneck"], ["Collared", "shirt collar"],
+    ["Hooded", "hood"], ["Off-Shoulder", "off-shoulder neckline"], ["Square Neck", "square neckline"], ["Halter", "halter neck"], ["Strapless", "strapless neckline"]
+  ]},
+  "length": {"template": "a {} garment", "labels": [
+    ["Cropped", "cropped"], ["Short", "short, above the knee"], ["Knee-Length", "knee-length"], ["Midi", "midi length"], ["Full-Length", "full-length, ankle length"]
+  ]},
+  "fit": {"template": "a {} garment", "labels": [
+    ["Slim", "slim fit, tight"], ["Regular", "regular fit"], ["Relaxed", "relaxed loose fit"], ["Oversized", "oversized baggy"]
+  ]}
+}
