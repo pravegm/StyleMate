@@ -183,7 +183,10 @@ final class StyleMateE2ETests: E2ETestCase {
         XCTAssertTrue(waitToDisappear(saveOutfit, timeout: 10), "Composer didn't close after saving")
 
         assertTodayHasLoggedOutfit(expectedSourceLabel: "Manual")
-        XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS 'T-Shirts'")).exists, "Logged outfit doesn't show the T-shirt")
+        for product in ["T-Shirts", "Jeans", "Sneakers"] {
+            XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS %@", product)).exists,
+                          "Logged outfit is missing the picked \(product)")
+        }
         snap("calendar-today-with-manual-outfit")
     }
 
@@ -295,7 +298,7 @@ final class StyleMateE2ETests: E2ETestCase {
         tapScrollingIfNeeded(categoryRow)
         let productRow = app.staticTexts[product]
         tapScrollingIfNeeded(productRow)
-        let item = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", itemSuffix)).firstMatch
+        let item = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ AND label != %@", itemSuffix, product)).firstMatch
         tapScrollingIfNeeded(item)
         // Collapse again so the next category sits near the top and clear of the bottom bar.
         if categoryRow.isHittable { categoryRow.tap() }
