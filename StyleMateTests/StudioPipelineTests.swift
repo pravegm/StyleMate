@@ -127,10 +127,11 @@ struct StudioPipelineTests {
             let a = item.attributes
             let full = StudioPlan.make(product: a.product, category: a.category, colors: a.colors, pattern: a.pattern,
                                        material: a.material, sleeve: a.sleeveLength, neckline: a.neckline, details: nil,
-                                       kind: item.kind, truncated: item.truncated, cutout: item.cutout.cgImage)
-            // Simulator CPU: 2 candidates for a generate (20 steps each), 1 for a refine.
+                                       kind: item.kind, truncated: item.truncated, cutout: item.cutout.cgImage,
+                                       embedding: a.embedding)
+            // Simulator CPU: 2 candidates each (the app renders 3 / 2).
             let plan = StudioPlan(mode: full.mode, prompt: full.prompt, negativePrompt: full.negativePrompt,
-                                  candidates: item.kind == .lower ? 1 : 2, productLabel: full.productLabel, isSolid: full.isSolid,
+                                  candidates: 2, productLabel: full.productLabel, isSolid: full.isSolid,
                                   template: full.template, templateStrength: full.templateStrength)
             let stem = a.product.replacingOccurrences(of: " ", with: "")
             try? item.cutout.pngData()?.write(to: out.appendingPathComponent("\(stem)_cutout.png"))
@@ -171,6 +172,17 @@ struct StudioPipelineTests {
                 "c\(c["candidate"] ?? ""): sim=\(c["similarity"] ?? "-") \(c["rejection"] ?? "")"
             }
             print("[Report] studio \(a.product): \(verdict) — " + lines.joined(separator: "; "))
+            // What this costs on a phone: the simulator runs the UNet on its CPU. Estimate for an
+            // A17 Pro / A18 Pro-class Neural Engine, ~1 s per denoising step of the 6-bit SD 1.5
+            // UNet at 512 px (Apple ml-stable-diffusion benchmarks) plus ~10 s of model loads.
+            // NOT measured on a device.
+            var stepsPerImage = StudioPlan.steps
+            if case .refine(let s) = plan.mode { stepsPerImage = Int(Float(StudioPlan.steps) * s) }
+            else if plan.template != nil { stepsPerImage = Int(Float(StudioPlan.steps) * plan.templateStrength) }
+            let ane = 10 + stepsPerImage * plan.candidates
+            print("[Report] studio \(a.product): simulator \(entry["seconds"] ?? 0)s for \(plan.candidates) x \(stepsPerImage) steps; " +
+                  "estimated ~\(ane)s on an iPhone Neural Engine (not measured)")
+            entry["ane_estimate_seconds"] = ane
             report.append(entry)
         }
         if let json = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
@@ -256,7 +268,7 @@ struct StudioPipelineTests {
         #expect(plan.template != nil, "a jacket should get a fabric template")
         if case .generate = plan.mode {} else { Issue.record("jackets should be generated") }
         #expect(StudioPlan.estimatedTokens(plan.prompt) <= StudioPlan.maxPromptTokens, "\(plan.prompt)")
-        #expect(plan.prompt.hasPrefix("blue and white denim jacket"), "\(plan.prompt)")
+        #expect(plan.prompt.hasPrefix("blue denim jacket"), "plain garments name only their main colour: \(plan.prompt)")
         #expect(plan.prompt.contains("isolated product photo"))
         for w in ["flat lay", "top-down", "neatly arranged"] { #expect(!plan.prompt.contains(w), "\(plan.prompt)") }
         #expect(plan.negativePrompt.contains("sherpa lining"))

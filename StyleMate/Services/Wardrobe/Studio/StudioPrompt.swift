@@ -47,7 +47,7 @@ struct StudioPlan {
 
     static func negative(for kind: GarmentKind) -> String {
         switch kind {
-        case .outerLayer: return baseNegative + ", shirt underneath, white t-shirt, inner layer, sherpa lining, fur collar, patch"
+        case .outerLayer: return baseNegative + ", shirt underneath, white t-shirt, inner layer, sherpa lining, white collar, patch"
         case .innerTop: return baseNegative + ", jacket, layered, second shirt, collar tag"
         case .onePiece: return baseNegative + ", jacket, belt, second garment"
         case .footwear: return baseNegative + ", single shoe, socks, feet, box"
@@ -65,7 +65,16 @@ struct StudioPlan {
 
     static func make(product: String, category: Category, colors: [String], pattern: Pattern,
                      material: String?, sleeve: SleeveLength?, neckline: Neckline?, details: String?,
-                     kind: GarmentKind, truncated: Bool, cutout: CGImage? = nil) -> StudioPlan {
+                     kind: GarmentKind, truncated: Bool, cutout: CGImage? = nil, embedding: [Float]? = nil) -> StudioPlan {
+        var details = details
+        // Rips are what make a pair of jeans that pair: say so when the encoder sees them
+        // (lab: ripped jeans +0.033/+0.042 over "plain", all other bottoms <= +0.001).
+        if kind == .lower, let e = embedding, let vocab = WardrobeML.shared.vocabulary {
+            let s = vocab.scores(in: "lower_details", for: e)
+            if let r = s["ripped"], let p = s["plain"], r - p > 0.015 {
+                details = ["ripped knees, distressed", details].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+            }
+        }
         let desc = describe(product: product, colors: colors, pattern: pattern, material: material,
                             sleeve: sleeve, neckline: neckline, details: details)
         let label = "\(category.rawValue)|\(product)", solid = pattern == .solid
@@ -133,7 +142,9 @@ struct StudioPlan {
     static func describe(product: String, colors: [String], pattern: Pattern, material: String?,
                          sleeve: SleeveLength?, neckline: Neckline?, details: String?) -> String {
         var words: [String] = []
-        let names = colors.prefix(2).map(colorWord)
+        // A plain garment gets only its main colour: "blue and black denim jacket"
+        // (a shadow cluster) painted dark patchy sleeves in CI.
+        let names = colors.prefix(pattern == .solid ? 1 : 2).map(colorWord)
         if !names.isEmpty { words.append(names.joined(separator: " and ")) }
         if pattern != .solid { words.append(pattern.rawValue.lowercased()) }
         if let m = material, !m.isEmpty, !product.lowercased().contains(m.lowercased()) {

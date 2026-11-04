@@ -71,6 +71,10 @@
     ["stack", "a stack of folded clothes"], ["flatlay", "a flat lay of several clothing items with accessories"],
     ["panel", "a t-shirt with a white rectangle on it"], ["person", "a person wearing clothes"], ["mannequin", "a mannequin"]
   ]},
+  "lower_details": {"template": "a photo of {}", "labels": [
+    ["ripped", "ripped jeans with torn knees"], ["ripped", "distressed jeans with holes"],
+    ["plain", "plain jeans without holes"], ["plain", "smooth plain trousers"]
+  ]},
   "hair_check": {"template": "a photo of {}", "labels": [
     ["Hair", "a person's hair"], ["Hair", "long dark hair"], ["Accessories|Turbans", "a turban"], ["Accessories|Scarves", "a headscarf hijab"]
   ]},

@@ -405,6 +405,9 @@ enum ColorNamer {
             if L >= 42 { return "Tan" }
             return L >= 22 ? "Brown" : "Black"
         }
+        // Dark blues sit on the blue/purple hue boundary (rgb 20,30,70 is h≈293):
+        // navy is one of the commonest wardrobe colours, so it wins there.
+        if L < 32 && h >= 240 && h < 305 { return "Navy" }
         switch h {
         case 345..., ..<20:                                         // reds and pinks
             if L < 32 { return C >= 15 ? "Burgundy" : "Charcoal" }

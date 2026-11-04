@@ -219,7 +219,8 @@ final class StudioQueue: ObservableObject {
         let plan = StudioPlan.make(product: item.product, category: item.category, colors: item.colors,
                                    pattern: item.pattern, material: item.material, sleeve: item.sleeveLength,
                                    neckline: item.neckline, details: item.details, kind: kind,
-                                   truncated: embeddingStore.truncated(for: item.id) ?? false, cutout: cutout.cgImage)
+                                   truncated: embeddingStore.truncated(for: item.id) ?? false, cutout: cutout.cgImage,
+                                   embedding: embeddingStore.embedding(for: item.id))
         let embedding: [Float]? = embeddingStore.embedding(for: item.id)
         let seed = Self.seed(for: item.id)
         let outcome: StudioPipeline.Outcome = await Task.detached(priority: .utility) {
