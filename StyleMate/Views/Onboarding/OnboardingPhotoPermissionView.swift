@@ -81,7 +81,7 @@ struct OnboardingPhotoPermissionView: View {
                 .opacity(titleVisible ? 1 : 0)
                 .animation(.spring(response: 0.5, dampingFraction: 0.8), value: titleVisible)
 
-            Text("Allow photo access to start building your wardrobe automatically.")
+            Text("Allow photo access so StyleMate can find you and build your wardrobe. Your photos are only looked at on this phone and never uploaded.")
                 .font(DS.Font.body)
                 .foregroundColor(DS.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -118,11 +118,11 @@ struct OnboardingPhotoPermissionView: View {
                 .font(.system(size: 40))
                 .foregroundColor(DS.Colors.warning)
 
-            Text("Limited Access")
+            Text("Only some photos shared")
                 .font(DS.Font.title2)
                 .foregroundColor(DS.Colors.textPrimary)
 
-            Text("Auto-scan needs full photo access to find your clothing. You can change this in Settings anytime.")
+            Text("StyleMate can only see the photos you picked, so it'll find fewer of your outfits. Allowing all photos works best, and they're still only looked at on this phone. You can change this in Settings anytime.")
                 .font(DS.Font.body)
                 .foregroundColor(DS.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -143,7 +143,7 @@ struct OnboardingPhotoPermissionView: View {
                     Haptics.light()
                     triggerCompletion()
                 } label: {
-                    Text("Continue Anyway")
+                    Text("Continue with selected photos")
                 }
                 .buttonStyle(DSSecondaryButton())
             }
