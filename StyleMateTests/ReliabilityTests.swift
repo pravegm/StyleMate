@@ -338,7 +338,8 @@ extension FaceMatchingTests {
         let user = Self.reliabilityUser
         let selfie = try relFixture("street_coat_cap.jpg")
         try relUseAsSelfie(selfie)
-        let anchor = try #require(svc.evaluateFaceForReference(in: try #require(selfie.cgImage))?.embedding)
+        let selfieCG = try #require(selfie.cgImage)
+        let anchor = try #require(svc.evaluateFaceForReference(in: selfieCG)?.embedding)
 
         // A stranger can't be learned however high the (gallery) similarity claims to be.
         let strangerCG = try #require(try relFixture("street_coat_boots.jpg").cgImage)
