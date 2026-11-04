@@ -2,19 +2,34 @@ import AVFoundation
 import Vision
 import SwiftUI
 
+/// Front-camera capture for the identity reference: three frames (looking straight, then a
+/// slight turn each way), each checked with the same SCRFD + AdaFace models the scan uses before
+/// it's accepted. More than one angle gives the reference something to match profile and
+/// three-quarter photos against, which a single straight-on selfie can't.
 @MainActor
 class SelfieCameraService: NSObject, ObservableObject {
     @Published var isFaceDetected: Bool = false
     @Published var faceRect: CGRect = .zero
+    /// The accepted front frame (the primary reference).
     @Published var capturedImage: UIImage? = nil
     @Published var captureState: CaptureState = .searching
     @Published var cameraPermissionDenied: Bool = false
+    /// Live guidance while framing ("Move closer", "Now turn the other way").
     @Published var qualityWarning: String? = nil
 
+    /// Which of the three frames we're on.
+    @Published var step: SelfieStep = .front
+    /// Accepted frames, in `SelfieStep` order.
+    @Published var frames: [UIImage] = []
+    /// A frame was captured and is being checked.
+    @Published var isChecking = false
+    /// Friendly copy explaining why the last frame wasn't used.
+    @Published var frameFeedback: String? = nil
+
     enum CaptureState {
-        case searching
-        case detected
-        case captured
+        case searching   // waiting for a good, still face in the right pose
+        case detected    // countdown to capture
+        case captured    // all frames accepted
         case denied
     }
 
@@ -27,13 +42,21 @@ class SelfieCameraService: NSObject, ObservableObject {
     private let sessionQueue = DispatchQueue(label: "com.stylemate.selfie.session")
     private var faceDetectedDuration: TimeInterval = 0
     private var lastFaceDetectionTime: Date?
-    private let requiredFaceDuration: TimeInterval = 1.5
     private var isCapturing = false
+
+    private var frontEmbedding: [Float]?
+    /// Sign of the live yaw on the first turn, so the second turn goes the other way.
+    private var firstTurnSign: Float = 0
+    private var rejectionsThisStep = 0
+    private var stepStartedAt = Date()
+    private var lastYaw: Float?
 
     /// Geometry of the on-screen preview + oval guide, set by the view. Used to
     /// crop the full-frame photo down to what the user framed in the oval.
     var previewSize: CGSize = .zero
     var ovalRect: CGRect = .zero
+
+    private var requiredFaceDuration: TimeInterval { step == .front ? 1.2 : 0.7 }
 
     func configure() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -142,14 +165,70 @@ class SelfieCameraService: NSObject, ObservableObject {
         return UIImage(cgImage: cropped)
     }
 
-    // nonisolated: pure image-encode + file write, no actor state — lets callers
-    // run it off the main thread (avoids blocking the UI on confirm).
-    // Stored in Application Support (excluded from iCloud Backup, file-protected), at the
-    // path recorded under `selfieReferencePath_<userId>` that FaceMatchingService reads.
+    /// Saves the front frame where FaceMatchingService reads it (`selfieReferencePath_<userId>`).
+    /// nonisolated: pure encode + file write, safe off the main thread.
     nonisolated func saveSelfie(_ image: UIImage, userId: String) {
-        guard let data = image.jpegData(compressionQuality: 0.95) else { return }
-        let saved = LocalStore.saveSelfie(data, userId: userId) != nil
-        dlog("[StyleMate] Selfie saved: \(saved)")
+        SelfieReferenceStore.savePrimary(image, userId: userId)
+    }
+
+    // MARK: - Frame check
+
+    private func handleCaptured(_ image: UIImage) {
+        isChecking = true
+        let step = self.step
+        let front = frontEmbedding
+        Task {
+            let result = await IdentityWorker.shared.run {
+                SelfieFrameChecker.check(image, step: step, frontEmbedding: front)
+            }
+            self.finishCheck(image, result: result)
+        }
+    }
+
+    private func finishCheck(_ image: UIImage, result: SelfieFrameResult) {
+        isChecking = false
+        isCapturing = false
+        guard captureState != .captured else { return }
+
+        // Quality issues are forgiven after two tries (a reference that's a bit dark beats being
+        // stuck); issues that would poison the reference (no face, someone else) never are.
+        if let issue = result.issue, issue.isBlocking || rejectionsThisStep < 2 {
+            rejectionsThisStep += 1
+            frameFeedback = issue.message
+            Haptics.warning()
+            resetCountdown()
+            captureState = .searching
+            return
+        }
+
+        frames.append(image)
+        frameFeedback = nil
+        rejectionsThisStep = 0
+        Haptics.success()
+        switch step {
+        case .front:
+            capturedImage = image
+            frontEmbedding = result.embedding
+        case .left:
+            if let y = lastYaw, abs(y) > 0.05 { firstTurnSign = y > 0 ? 1 : -1 }
+        case .right:
+            break
+        }
+
+        if let next = step.next {
+            step = next
+            stepStartedAt = Date()
+            resetCountdown()
+            captureState = .searching
+        } else {
+            captureState = .captured
+            dlog("[StyleMate] Selfie: all \(frames.count) reference frames accepted")
+        }
+    }
+
+    private func resetCountdown() {
+        faceDetectedDuration = 0
+        lastFaceDetectionTime = nil
     }
 }
 
@@ -159,83 +238,115 @@ extension SelfieCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
     nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
+        // Live framing only (presence, size, pose). The identity embedding never uses Vision
+        // landmarks; each captured frame is checked with SCRFD + AdaFace.
         let request = VNDetectFaceRectanglesRequest { [weak self] request, _ in
             guard let self else { return }
             let faces = (request.results as? [VNFaceObservation] ?? []).filter { $0.confidence > 0.7 }
             let detected = !faces.isEmpty
-            let faceRect = faces.first?.boundingBox ?? .zero
+            let face = faces.max { $0.boundingBox.width < $1.boundingBox.width }
+            let faceRect = face?.boundingBox ?? .zero
+            let yaw: Float? = face?.yaw.map { $0.floatValue }
             let faceCount = faces.count
 
             Task { @MainActor in
-                self.processFaceDetection(detected: detected, rect: faceRect, faceCount: faceCount)
+                self.processFaceDetection(detected: detected, rect: faceRect, faceCount: faceCount, yaw: yaw)
             }
         }
+        request.revision = VNDetectFaceRectanglesRequestRevision3
 
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .leftMirrored, options: [:])
         try? handler.perform([request])
     }
 
     @MainActor
-    private func processFaceDetection(detected: Bool, rect: CGRect, faceCount: Int) {
-        guard captureState != .captured else { return }
+    private func processFaceDetection(detected: Bool, rect: CGRect, faceCount: Int, yaw: Float?) {
+        guard captureState != .captured, captureState != .denied, !isChecking, !isCapturing else { return }
 
         isFaceDetected = detected
         faceRect = rect
+        lastYaw = yaw
 
-        if detected {
-            let quality = validateFaceQuality(rect: rect, faceCount: faceCount)
-            if !quality.isAcceptable {
-                qualityWarning = quality.warning
-                if captureState == .detected {
-                    captureState = .searching
-                    faceDetectedDuration = 0
-                    lastFaceDetectionTime = nil
-                }
-                return
-            }
-
-            qualityWarning = nil
-
-            if captureState == .searching {
-                captureState = .detected
-                lastFaceDetectionTime = Date()
-                faceDetectedDuration = 0
-                dlog("[StyleMate] Face detected with good quality, starting countdown")
-            }
-
-            if let lastTime = lastFaceDetectionTime {
-                faceDetectedDuration = Date().timeIntervalSince(lastTime)
-                if faceDetectedDuration >= requiredFaceDuration && captureState == .detected {
-                    capturePhoto()
-                }
-            }
-        } else {
+        guard detected else {
             qualityWarning = nil
             if captureState == .detected {
                 captureState = .searching
-                faceDetectedDuration = 0
-                lastFaceDetectionTime = nil
+                resetCountdown()
             }
+            return
+        }
+
+        let quality = validateFaceQuality(rect: rect, faceCount: faceCount)
+        let pose = quality.isAcceptable ? poseCheck(yaw: yaw) : PoseCheck(ready: false, warning: nil)
+        guard quality.isAcceptable, pose.ready else {
+            qualityWarning = quality.warning ?? pose.warning
+            if captureState == .detected {
+                captureState = .searching
+                resetCountdown()
+            }
+            return
+        }
+
+        qualityWarning = nil
+
+        if captureState == .searching {
+            captureState = .detected
+            lastFaceDetectionTime = Date()
+            faceDetectedDuration = 0
+        }
+
+        if let lastTime = lastFaceDetectionTime {
+            faceDetectedDuration = Date().timeIntervalSince(lastTime)
+            if faceDetectedDuration >= requiredFaceDuration && captureState == .detected {
+                capturePhoto()
+            }
+        }
+    }
+
+    // MARK: - Pose
+
+    private struct PoseCheck {
+        let ready: Bool
+        let warning: String?
+    }
+
+    /// Vision yaw is in radians. Front: roughly straight on. Turns: a slight turn (about 10–40°),
+    /// the second one the opposite way to the first. Without a yaw reading, give the user a
+    /// moment to turn before capturing.
+    private func poseCheck(yaw: Float?) -> PoseCheck {
+        let elapsed = Date().timeIntervalSince(stepStartedAt)
+        switch step {
+        case .front:
+            if let y = yaw, abs(y) > 0.3 { return PoseCheck(ready: false, warning: "Look straight at the camera") }
+            return PoseCheck(ready: true, warning: nil)
+        case .left, .right:
+            guard let y = yaw else { return PoseCheck(ready: elapsed > 1.6, warning: nil) }
+            if abs(y) > 0.75 { return PoseCheck(ready: false, warning: "Not quite so far, just a slight turn") }
+            if abs(y) < 0.15 { return PoseCheck(ready: false, warning: nil) }
+            if step == .right, firstTurnSign != 0, (y > 0 ? Float(1) : Float(-1)) == firstTurnSign {
+                return PoseCheck(ready: false, warning: "Now turn the other way")
+            }
+            return PoseCheck(ready: elapsed > 0.5, warning: nil)
         }
     }
 
     // MARK: - Face Quality Validation
 
-    private struct FaceQuality {
+    private struct LiveFaceQuality {
         let isAcceptable: Bool
         let warning: String?
     }
 
     /// Validates that the detected face is large enough, centered, and alone.
     /// `rect` is in Vision's normalized coordinate space (0..1).
-    private func validateFaceQuality(rect: CGRect, faceCount: Int) -> FaceQuality {
+    private func validateFaceQuality(rect: CGRect, faceCount: Int) -> LiveFaceQuality {
         if faceCount > 1 {
-            return FaceQuality(isAcceptable: false, warning: "Only one person should be in frame")
+            return LiveFaceQuality(isAcceptable: false, warning: "Only one person should be in frame")
         }
 
         let minFaceWidth: CGFloat = 0.25
         if rect.width < minFaceWidth {
-            return FaceQuality(isAcceptable: false, warning: "Move closer to the camera")
+            return LiveFaceQuality(isAcceptable: false, warning: "Move closer to the camera")
         }
 
         let faceCenterX = rect.midX
@@ -245,22 +356,29 @@ extension SelfieCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
         let isVerticallyCentered = faceCenterY >= centerMargin && faceCenterY <= (1.0 - centerMargin)
 
         if !isHorizontallyCentered || !isVerticallyCentered {
-            return FaceQuality(isAcceptable: false, warning: "Center your face in the oval")
+            return LiveFaceQuality(isAcceptable: false, warning: "Center your face in the oval")
         }
 
-        return FaceQuality(isAcceptable: true, warning: nil)
+        return LiveFaceQuality(isAcceptable: true, warning: nil)
     }
 
     // MARK: - Retake
 
     func retakeSelfie() {
         capturedImage = nil
+        frames = []
+        step = .front
+        frontEmbedding = nil
+        firstTurnSign = 0
+        rejectionsThisStep = 0
+        frameFeedback = nil
+        stepStartedAt = Date()
         captureState = .searching
         isFaceDetected = false
         faceRect = .zero
-        faceDetectedDuration = 0
-        lastFaceDetectionTime = nil
+        resetCountdown()
         isCapturing = false
+        isChecking = false
         qualityWarning = nil
 
         sessionQueue.async { [weak self] in
@@ -292,11 +410,8 @@ extension SelfieCameraService: AVCapturePhotoCaptureDelegate {
 
         Task { @MainActor in
             let cropped = Self.cropToOval(normalized, previewSize: self.previewSize, oval: self.ovalRect) ?? normalized
-            self.capturedImage = cropped
-            self.captureState = .captured
-            self.isCapturing = false
-            Haptics.success()
-            dlog("[StyleMate] Selfie captured & cropped to oval (\(Int(cropped.size.width))x\(Int(cropped.size.height)))")
+            dlog("[StyleMate] Selfie frame \(self.step.label) captured (\(Int(cropped.size.width))x\(Int(cropped.size.height))), checking")
+            self.handleCaptured(cropped)
         }
     }
 

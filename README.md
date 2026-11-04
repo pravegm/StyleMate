@@ -8,7 +8,8 @@ StyleMate finds the photos of *you* in your library, cuts out every garment and 
 
 ### 1. Finding you in your photos (on-device face matching)
 
-- During onboarding you take a selfie (`SelfieCameraService`) and can confirm more of your own faces from your library ("tap the photos that are you") to build a reference **gallery**.
+- During onboarding you take a **three-frame selfie** (straight on, then a slight turn each way; `SelfieCameraService`). Each frame is checked on-device (one face, big enough, centred, lit, no sunglasses) before it's accepted.
+- Then **Find yourself** (`Services/Identity/`, `FindYourselfView`) looks through up to ~1,500 recent photos, embeds every usable face, groups faces of the same person (greedy centroid clustering), ranks the groups by similarity to your selfie and asks "Is this you?" with one tap to confirm. The confirmed faces become your reference **gallery**, so the scan recognises you across angles, lighting and years.
 - Faces are detected and 5-point-landmarked by the bundled **InsightFace SCRFD-10G** detector (Core ML), aligned to a canonical 112×112, and embedded with **AdaFace IR-101 (WebFace12M)** (bundled as `MobileFaceNet.mlpackage`, filename kept for history). Embeddings are tagged with the model version so an upgrade rebuilds the gallery.
 - Each library photo is matched by **cosine similarity** against the gallery with tiered confidence and a runner-up margin:
   - **confident** → analysed straight away (in a multi-person photo only *your* body is isolated via a person-instance mask, so other people's clothes are never extracted); very confident matches that also match your **selfie** (and clearly beat anyone else in the shot) **teach the gallery** a new angle of your face — learned faces are capped at half the gallery and never displace the selfie or faces you confirmed;
@@ -48,7 +49,7 @@ Kept outfits are logged to Core Data (`DatedOutfit` + `OutfitItem`) and appear i
 
 ## Major features
 
-- **Onboarding**: welcome → about you → photo-scan explainer → selfie → photo permission → reference builder → initial library scan (pause/resume from the home banner). A one-time coach-mark tour introduces the main features.
+- **Onboarding**: welcome → about you → photo-scan explainer → three-frame selfie → photo permission → Find yourself → initial library scan (pause/resume from the home banner). A one-time coach-mark tour introduces the main features.
 - **Home**: greeting, weather, wardrobe summary, "Style Me" with mood chips, scan progress, "Is this you?" review banner, last-scan results.
 - **My Wardrobe**: a closet of cutout tiles on shelves (tops & layers, bottoms, dresses, footwear, bags, accessories, jewelry); filter by shelf, colour and pattern; sort by newest, colour or how often you wear it; search; tap to zoom into an item page (attributes, wear history, edit, "Not mine — remove"); multi-select to remove misidentified items. Add via Camera / Gallery / Auto-scan.
 - **My Outfits**: calendar of logged outfits.
@@ -73,6 +74,7 @@ StyleMate/
 │   ├── Outfits/                 # OutfitEngine, StyleKnowledge, OutfitMood, StyleIntentParser, OnDeviceStylist
 │   ├── ImageAnalysisService     # thin entry point to the wardrobe pipeline
 │   ├── SCRFDDetector / FaceMatchingService   # face detection, alignment, AdaFace embeddings, identity resolution
+│   ├── Identity/                # "Find yourself": face clustering + ranking, library pass, selfie frame checks
 │   ├── PhotoScanService         # library scan, identity gate, "Is this you?" queue
 │   ├── DuplicateDetector        # visual + attribute duplicate matching
 │   ├── OutfitValidator / OutfitLogic

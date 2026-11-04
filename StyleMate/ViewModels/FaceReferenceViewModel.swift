@@ -1,277 +1,386 @@
 import UIKit
 import Photos
 
-/// One candidate face surfaced from the user's library for the "tap which photos
-/// are you" reference builder.
+/// One face in an "Is this you?" grid.
 struct FaceCandidate: Identifiable {
-    let id = UUID()
+    /// Index of the face in the library pass.
+    let id: Int
     let assetId: String
     let thumbnail: UIImage
     let embedding: [Float]
+    /// Confidence it belongs with the group (cluster centroid / confirmed-face similarity).
     let similarity: Float
     var isSelected: Bool
 }
 
-/// Drives the reference-gallery builder: scans the user's Selfies + Portrait
-/// photos on-device, ranks the detected faces by similarity to the current
-/// reference (the onboarding selfie anchor), and lets the user confirm which
-/// ones are them. Confirmed faces' embeddings are appended to the gallery.
+/// Drives "Find yourself": an on-device pass over the most recent library photos that finds
+/// every face (SCRFD on ~640 px thumbnails, AdaFace embeddings), groups faces of the same person,
+/// ranks the groups against the selfie, and asks "Is this you?" about the best one — then
+/// "Also you?" about faces that match what was confirmed. Confirmed faces are re-embedded at the
+/// scan's ~1600 px resolution and added to the reference gallery. Nothing leaves the phone.
 @MainActor
 final class FaceReferenceViewModel: ObservableObject {
 
-    enum Phase {
-        case idle, noPermission, scanning, ready, empty
+    enum Phase: Equatable {
+        case idle
+        case noPermission
+        case scanning
+        case reviewing
+        case saving
+        case finished
+        /// Faces were found but none was confirmed (or none looked like a person who recurs).
+        case nothingFound
+        /// The library (or the Limited selection) has no photos.
+        case emptyLibrary
     }
 
-    @Published var phase: Phase = .idle
+    enum Round: Equatable { case isThisYou, alsoYou }
+
+    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var round: Round = .isThisYou
     @Published var candidates: [FaceCandidate] = []
-    @Published var progress: Double = 0
-    @Published var addedCount: Int = 0
+    @Published private(set) var progress: Double = 0
+    @Published private(set) var scannedCount = 0
+    @Published private(set) var totalToScan = 0
+    @Published private(set) var likelyYouCount = 0
+    @Published private(set) var likelyYouPreview: [UIImage] = []
+    @Published private(set) var isLimitedAccess = false
+    @Published private(set) var canStopEarly = false
+    @Published private(set) var hasSelfieAnchor = false
+    @Published private(set) var addedCount = 0
+    @Published private(set) var confirmedCount = 0
+    /// 1-based index of the group being asked about (for "Not me" copy).
+    @Published private(set) var offerNumber = 1
 
-    private let candidateLimit = 120
-    /// A library face must match the selfie anchor at least this much to be
-    /// *offered* as "you". Same-person scores ~0.33–0.65 and other people ~0.00,
-    /// so this floor surfaces your varied shots while keeping strangers out. The
-    /// user still confirms, so a borderline that slips in is caught by eye; faces
-    /// >= highConfidenceThreshold are pre-checked.
-    static let referenceFloor: Float = 0.22
+    static let scanLimit = LibraryFaceScanner.defaultLimit
+    static let gridLimit = 48
+    static let alsoYouLimit = 36
+    /// A face this close to the selfie shows up in the live "found you" strip.
+    static let likelyYouThreshold: Float = 0.35
+    /// Stop early once the selfie has clearly found plenty of you.
+    static let earlyStopMinPhotos = 400
+    static let earlyStopStrongFaces = 60
 
-    var selectedCount: Int { candidates.filter { $0.isSelected }.count }
-    var hasAnchorRanking: Bool { candidates.contains { $0.similarity > 0 } }
+    var selectedCount: Int { candidates.filter(\.isSelected).count }
+
+    private var userId = ""
+    private var faces: [ScannedFace] = []
+    private var clusters: [FaceCluster] = []
+    private var offers: [RankedCluster] = []
+    private var offerIndex = 0
+    private var offeredFaces = Set<Int>()
+    private var confirmed: [Int] = []
+    private var anchors: [[Float]] = []
+    private var refined: [Int: [Float]] = [:]
+    private var refineTask: Task<Void, Never>?
+    private var stopRequested = false
+    private var running = false
+    private let imageManager = PHCachingImageManager()
 
     // MARK: - Scan
 
+    func start(forUser userId: String) async {
+        guard phase == .idle else { return }
+        await scan(forUser: userId)
+    }
+
     func scan(forUser userId: String) async {
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard !running else { return }
+        running = true
+        defer { running = false }
+        self.userId = userId
+        reset()
+
+        var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if status == .notDetermined {
-            let newStatus = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-            guard newStatus == .authorized || newStatus == .limited else {
-                dlog("[FaceRef] Photo permission denied")
-                phase = .noPermission; return
-            }
-        } else if status != .authorized && status != .limited {
-            dlog("[FaceRef] Photo permission not granted (status=\(status.rawValue))")
-            phase = .noPermission; return
+            status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         }
-
+        guard status == .authorized || status == .limited else {
+            dlog("[FindYou] Photo access not granted (status=\(status.rawValue))")
+            phase = .noPermission
+            return
+        }
+        isLimitedAccess = status == .limited
         phase = .scanning
-        progress = 0
-        candidates = []
 
-        // Ensure the selfie anchor is loaded so similarity ranking has a reference.
-        let hasAnchor = FaceMatchingService.shared.loadReference(forUser: userId)
-        dlog("[FaceRef] Scanning library (Selfies + Portraits); anchor loaded=\(hasAnchor), gallery=\(FaceMatchingService.shared.referenceCount)")
+        // The selfie step rebuilds the identity in the background; rank against the new one.
+        await IdentityBuild.waitUntilIdle()
+        let uid = userId
+        anchors = await IdentityWorker.shared.run { SelfieReferenceStore.prepareAnchors(forUser: uid) }
+        hasSelfieAnchor = !anchors.isEmpty
 
-        let assets = Self.fetchCandidateAssets(limit: candidateLimit)
-        dlog("[FaceRef] Found \(assets.count) candidate photos")
+        let (assets, selfieIds) = LibraryFaceScanner.fetchCandidateAssets(limit: Self.scanLimit)
+        totalToScan = assets.count
+        dlog("[FindYou] Looking at \(assets.count) photos (limited=\(isLimitedAccess), anchors=\(anchors.count))")
         guard !assets.isEmpty else {
-            dlog("[FaceRef] No Selfies/Portrait photos found -> empty state")
-            phase = .empty; return
+            phase = .emptyLibrary
+            return
         }
 
-        let manager = PHImageManager.default()
-        let options = PHImageRequestOptions()
-        options.deliveryMode = .highQualityFormat
-        options.resizeMode = .fast
-        options.isNetworkAccessAllowed = true
-        options.isSynchronous = false
-
-        var results: [FaceCandidate] = []
-        for (index, asset) in assets.enumerated() {
-            // Embed faces at the same resolution the auto-scan uses (~1600px),
-            // not a tiny 600px thumbnail. A small face upscaled from 600px embeds
-            // poorly and — worse — its stored vector then won't match the sharp
-            // vector the scan computes for the SAME face, so a confirmed photo gets
-            // skipped during the scan. Matching resolutions keeps them consistent.
-            let image = await loadImage(asset, manager: manager, options: options,
-                                        targetSize: CGSize(width: 1600, height: 1600))
-            progress = Double(index + 1) / Double(assets.count)
-
-            // Bake EXIF orientation into pixels. `.cgImage` drops the UIImage's
-            // orientation, so a rotated library photo would be fed sideways to the
-            // detector and align rotated — never matching the upright selfie anchor.
-            if index == 0, let o = image?.imageOrientation {
-                dlog("[FaceRef] first candidate imageOrientation = \(o.rawValue) (0 = up)")
+        let manager = imageManager
+        let side = LibraryFaceScanner.thumbnailSide
+        let cacheSize = CGSize(width: side, height: side)
+        let cacheOptions = LibraryFaceScanner.requestOptions(network: false)
+        let window = 40
+        var cachedUpTo = 0
+        func cacheAhead(from i: Int) {
+            let end = min(assets.count, i + window)
+            guard end > cachedUpTo else { return }
+            let start = max(i, cachedUpTo)
+            manager.startCachingImages(for: Array(assets[start..<end]), targetSize: cacheSize,
+                                       contentMode: .aspectFit, options: cacheOptions)
+            if start > window {
+                manager.stopCachingImages(for: Array(assets[max(0, start - 2 * window)..<(start - window)]),
+                                          targetSize: cacheSize, contentMode: .aspectFit, options: cacheOptions)
             }
-            guard let cg = Self.uprightCGImage(image) else { continue }
+            cachedUpTo = end
+        }
+        func load(_ index: Int) -> Task<UIImage?, Never> {
+            let asset = assets[index]
+            return Task { await LibraryFaceScanner.loadImage(asset, manager: manager, side: side, network: false, timeout: 4) }
+        }
 
-            // Face detect + embed off the main thread (CoreML is CPU-heavy).
-            let eval: (UIImage, [Float], Float)? = await Task.detached(priority: .userInitiated) {
-                guard let r = FaceMatchingService.shared.evaluateFaceForReference(in: cg) else { return nil }
-                return (UIImage(cgImage: r.displayCrop), r.embedding, r.similarity)
-            }.value
+        let started = Date()
+        let anchorsCopy = anchors
+        var strong = 0
+        var next: Task<UIImage?, Never>? = load(0)
+        cacheAhead(from: 0)
 
-            if let eval {
-                results.append(FaceCandidate(assetId: asset.localIdentifier,
-                                             thumbnail: eval.0, embedding: eval.1,
-                                             similarity: eval.2, isSelected: false))
+        for i in assets.indices {
+            if Task.isCancelled { next?.cancel(); manager.stopCachingImagesForAllAssets(); return }
+            if stopRequested { break }
+            let image = await next?.value
+            next = i + 1 < assets.count ? load(i + 1) : nil
+            if i + window / 2 >= cachedUpTo { cacheAhead(from: i + 1) }
+
+            if let image {
+                let assetId = assets[i].localIdentifier
+                let isSelfie = selfieIds.contains(assetId)
+                let found = await IdentityWorker.shared.run {
+                    FaceSampleExtractor.scannedFaces(in: image, assetId: assetId, anchors: anchorsCopy, fromSelfieAlbum: isSelfie)
+                }
+                for f in found {
+                    faces.append(f)
+                    if f.anchorSimilarity >= Self.likelyYouThreshold {
+                        strong += 1
+                        likelyYouCount = strong
+                        if let thumb = UIImage(data: f.thumbnailJPEG) {
+                            likelyYouPreview.append(thumb)
+                            if likelyYouPreview.count > 8 { likelyYouPreview.removeFirst() }
+                        }
+                    }
+                }
             }
-        }
-
-        guard !results.isEmpty else {
-            dlog("[FaceRef] No usable faces detected in \(assets.count) candidates -> empty state")
-            phase = .empty; return
-        }
-
-        // With a selfie anchor, KEEP ONLY faces that plausibly are the user. A
-        // different person (e.g. a partner — even more so a different gender)
-        // scores far below this floor, so this stops the gallery being polluted
-        // with someone else's face. The selfie just taken is the ground truth.
-        if hasAnchor {
-            let before = results.count
-            // Distribution diagnostic: of the detected faces, how many land in each
-            // similarity band? Tells us whether faces are being filtered because they
-            // genuinely don't match (<0.10), are just under the bar (0.10..floor), or
-            // pass. If many sit just under the floor, recall is a tuning problem; if
-            // almost all are <0.10, same-person scoring is still broken.
-            let b1 = results.filter { $0.similarity < 0.10 }.count
-            let b2 = results.filter { $0.similarity >= 0.10 && $0.similarity < Self.referenceFloor }.count
-            let b3 = results.filter { $0.similarity >= Self.referenceFloor }.count
-            let topScores = results.map { $0.similarity }.sorted(by: >).prefix(12)
-                .map { String(format: "%.2f", $0) }.joined(separator: ",")
-            dlog("[FaceRef] facesDetected=\(before) | <0.10:\(b1)  0.10–\(Self.referenceFloor):\(b2)  >=\(Self.referenceFloor):\(b3) | top: \(topScores)")
-            results = results.filter { $0.similarity >= Self.referenceFloor }
-            dlog("[FaceRef] Kept \(results.count)/\(before) faces matching your selfie (>= \(Self.referenceFloor))")
-            guard !results.isEmpty else {
-                dlog("[FaceRef] No library faces matched your selfie strongly enough -> empty")
-                phase = .empty; return
+            scannedCount = i + 1
+            progress = Double(i + 1) / Double(assets.count)
+            if !canStopEarly, !faces.isEmpty, i >= 150 || Date().timeIntervalSince(started) > 12 {
+                canStopEarly = true
+            }
+            if hasSelfieAnchor, i + 1 >= Self.earlyStopMinPhotos, strong >= Self.earlyStopStrongFaces {
+                dlog("[FindYou] Early stop: \(strong) strong matches after \(i + 1) photos")
+                break
             }
         }
+        next?.cancel()
+        manager.stopCachingImagesForAllAssets()
+        dlog("[FindYou] Pass done: \(faces.count) faces in \(scannedCount) photos, \(strong) close to the selfie, \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
+        await buildOffers()
+    }
 
-        // Rank best-first, then drop near-identical faces (burst shots / very
-        // similar selfies) so the grid shows distinct photos and the gallery
-        // isn't stuffed with redundant copies of the same face.
-        results.sort { $0.similarity > $1.similarity }
-        var deduped: [FaceCandidate] = []
-        for cand in results {
-            let isNearDup = deduped.contains { Self.cosine($0.embedding, cand.embedding) > 0.90 }
-            if !isNearDup { deduped.append(cand) }
+    /// "Show me what you found": stop the pass and group what's been seen so far.
+    func finishScanningNow() {
+        stopRequested = true
+    }
+
+    private func reset() {
+        phase = .idle
+        round = .isThisYou
+        candidates = []
+        progress = 0
+        scannedCount = 0
+        totalToScan = 0
+        likelyYouCount = 0
+        likelyYouPreview = []
+        canStopEarly = false
+        addedCount = 0
+        confirmedCount = 0
+        offerNumber = 1
+        faces = []
+        clusters = []
+        offers = []
+        offerIndex = 0
+        offeredFaces = []
+        confirmed = []
+        refined = [:]
+        refineTask?.cancel()
+        refineTask = nil
+        stopRequested = false
+    }
+
+    // MARK: - Group + rank
+
+    private func buildOffers() async {
+        guard !faces.isEmpty else {
+            phase = .nothingFound
+            return
         }
-        let removed = results.count - deduped.count
-        results = deduped
-
-        // Pre-check only the confident matches; faces between the floor and the
-        // confidence bar are shown unchecked for the user to confirm (these are
-        // the angled/varied shots that enrich the gallery). Without an anchor we
-        // can't rank, so nothing is pre-checked.
-        for i in results.indices {
-            results[i].isSelected = hasAnchor && results[i].similarity >= FaceMatchingService.highConfidenceThreshold
+        let embeddings = faces.map(\.embedding)
+        let qualities = faces.map(\.quality)
+        let assetIds = faces.map(\.assetId)
+        let selfieFlags = faces.map(\.fromSelfieAlbum)
+        let anchorsCopy = anchors
+        let result = await Task.detached(priority: .userInitiated) { () -> ([FaceCluster], [RankedCluster]) in
+            let clusters = FaceClustering.cluster(embeddings: embeddings, qualities: qualities, assetIds: assetIds)
+            let ranked = FaceClustering.rank(clusters, anchors: anchorsCopy, fromSelfieAlbum: selfieFlags)
+            return (clusters, ranked)
+        }.value
+        clusters = result.0
+        offers = FaceClustering.offers(from: result.1)
+        let summary = offers.map { "\($0.cluster.size)@\($0.anchorSimilarity.map { String(format: "%.2f", $0) } ?? "-")" }
+        dlog("[FindYou] \(clusters.count) groups (\(clusters.filter { $0.size >= 2 }.count) recurring); offers: \(summary)")
+        offerIndex = 0
+        if offers.isEmpty {
+            phase = .nothingFound
+        } else {
+            presentOffer()
         }
-        candidates = results
-        phase = .ready
-        let top = results.first?.similarity ?? 0
-        let bottom = results.last?.similarity ?? 0
-        dlog("[FaceRef] Ready: \(results.count) distinct faces (\(removed) near-dupes removed), sim [\(String(format: "%.3f", bottom))..\(String(format: "%.3f", top))], pre-selected \(selectedCount)\(hasAnchor ? "" : " (no selfie anchor)")")
     }
 
-    /// Returns the image's pixels with EXIF orientation baked in (upright). `.cgImage`
-    /// alone discards orientation, which would feed rotated faces to the detector.
-    nonisolated static func uprightCGImage(_ image: UIImage?) -> CGImage? {
-        guard let image else { return nil }
-        if image.imageOrientation == .up { return image.cgImage }
-        let fmt = UIGraphicsImageRendererFormat.default()
-        fmt.scale = 1
-        return UIGraphicsImageRenderer(size: image.size, format: fmt).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: image.size))
-        }.cgImage
+    private func presentOffer() {
+        let offer = offers[offerIndex]
+        offerNumber = offerIndex + 1
+        let picks = FaceClustering.reviewPicks(for: offer.cluster, embeddings: faces.map(\.embedding),
+                                               assetIds: faces.map(\.assetId), limit: Self.gridLimit)
+        offeredFaces.formUnion(offer.cluster.members)
+        show(picks, round: .isThisYou)
     }
 
-    /// Cosine similarity of two L2-normalized embeddings (a dot product).
-    private static func cosine(_ a: [Float], _ b: [Float]) -> Float {
-        guard a.count == b.count else { return 0 }
-        var sum: Float = 0
-        for i in 0..<a.count { sum += a[i] * b[i] }
-        return sum
+    private func show(_ picks: [ReviewPick], round: Round) {
+        candidates = picks.map { p in
+            let f = faces[p.face]
+            return FaceCandidate(id: p.face, assetId: f.assetId, thumbnail: UIImage(data: f.thumbnailJPEG) ?? UIImage(),
+                                 embedding: f.embedding, similarity: p.confidence, isSelected: p.preselected)
+        }
+        self.round = round
+        phase = .reviewing
+        startRefining(picks.map(\.face))
     }
 
-    // MARK: - Selection
+    // MARK: - Review actions
 
-    func toggle(_ id: UUID) {
+    func toggle(_ id: Int) {
         guard let idx = candidates.firstIndex(where: { $0.id == id }) else { return }
         candidates[idx].isSelected.toggle()
     }
 
-    // MARK: - Confirm
+    func setAll(selected: Bool) {
+        for i in candidates.indices { candidates[i].isSelected = selected }
+    }
 
-    @discardableResult
-    func confirm(forUser userId: String) -> Int {
-        let embeddings = candidates.filter { $0.isSelected }.map { $0.embedding }
-        guard !embeddings.isEmpty else {
-            dlog("[FaceRef] Confirm tapped with 0 selected")
-            return 0
+    /// "Yes, that's me" / "Add these".
+    func confirmSelection() {
+        let selected = candidates.filter(\.isSelected).map(\.id)
+        guard !selected.isEmpty else { return }
+        confirmed.append(contentsOf: selected)
+        // Faces shown but left unchecked are someone else: never offer them again.
+        offeredFaces.formUnion(candidates.map(\.id))
+
+        if round == .isThisYou {
+            let picks = FaceClustering.alsoYouPicks(
+                confirmed: confirmed.map { faces[$0].embedding }, anchors: anchors, clusters: clusters,
+                embeddings: faces.map(\.embedding), assetIds: faces.map(\.assetId),
+                excludeFaces: offeredFaces, excludeAssets: Set(confirmed.map { faces[$0].assetId }),
+                limit: Self.alsoYouLimit)
+            dlog("[FindYou] Confirmed \(selected.count); \(picks.count) 'also you?' candidates")
+            if !picks.isEmpty {
+                offeredFaces.formUnion(picks.map(\.face))
+                show(picks, round: .alsoYou)
+                return
+            }
         }
-        let added = FaceMatchingService.shared.addReferenceEmbeddings(embeddings, forUser: userId)
+        Task { await save() }
+    }
+
+    /// "Not me": try the next group, or end without adding anything.
+    func rejectGroup() {
+        guard round == .isThisYou else {
+            Task { await save() }
+            return
+        }
+        offerIndex += 1
+        if offerIndex < offers.count {
+            presentOffer()
+        } else {
+            refineTask?.cancel()
+            candidates = []
+            phase = confirmed.isEmpty ? .nothingFound : .saving
+            if !confirmed.isEmpty { Task { await save() } }
+        }
+    }
+
+    /// "Skip" on the "Also you?" round.
+    func skipAlsoYou() {
+        Task { await save() }
+    }
+
+    // MARK: - Re-embed at the scan's resolution
+
+    private func startRefining(_ ids: [Int]) {
+        refineTask?.cancel()
+        let targets = ids.filter { refined[$0] == nil }.map { (id: $0, face: faces[$0]) }
+        guard !targets.isEmpty else { return }
+        let manager = imageManager
+        refineTask = Task { [weak self] in
+            for t in targets {
+                if Task.isCancelled { return }
+                let emb = await LibraryFaceScanner.refinedEmbedding(assetId: t.face.assetId, box: t.face.box,
+                                                                    expected: t.face.embedding, manager: manager)
+                if let emb { self?.refined[t.id] = emb }
+            }
+        }
+    }
+
+    private func save() async {
+        phase = .saving
+        candidates = []
+        refineTask?.cancel()
+        await refineTask?.value
+        refineTask = nil
+
+        // Finish re-embedding what the user confirmed, within a short budget. Anything left keeps
+        // its thumbnail embedding, which is still a confirmed face of the user.
+        let deadline = Date().addingTimeInterval(8)
+        for id in confirmed where refined[id] == nil {
+            if Date() > deadline { break }
+            let f = faces[id]
+            if let e = await LibraryFaceScanner.refinedEmbedding(assetId: f.assetId, box: f.box,
+                                                                 expected: f.embedding, manager: imageManager) {
+                refined[id] = e
+            }
+        }
+        let embeddings = confirmed.map { refined[$0] ?? faces[$0].embedding }
+        let refinedCount = confirmed.filter { refined[$0] != nil }.count
+        let uid = userId
+        let added = await IdentityWorker.shared.run { () -> Int in
+            let current = FaceMatchingService.shared.loadReference(forUser: uid) ? FaceMatchingService.shared.referenceCount : 0
+            // Leave room for faces the scan learns, but always add a solid set: when a re-run
+            // finds the gallery full, the oldest learned faces make way (selfie anchors stay).
+            let room = min(48, max(20, FaceMatchingService.galleryCap - 2 - current))
+            let picks = FaceClustering.galleryPicks(embeddings, maxCount: room)
+            return FaceMatchingService.shared.addReferenceEmbeddings(picks, forUser: uid)
+        }
+        confirmedCount = confirmed.count
         addedCount = added
-        dlog("[FaceRef] Confirmed \(embeddings.count) faces; \(added) new added; gallery now \(FaceMatchingService.shared.referenceCount)")
-        return added
+        dlog("[FindYou] Saved: \(confirmed.count) confirmed (\(refinedCount) re-embedded at \(Int(LibraryFaceScanner.refineSide))px), \(added) added to the gallery")
+        phase = .finished
     }
 
-    // MARK: - Library Fetch
+    // MARK: - Limited access
 
-    /// Candidate photos likely to contain the user, best-prior first: Selfies
-    /// album, then Portrait-mode photos, then recent general library photos. The
-    /// general-library fill is what surfaces the user across varied poses (not
-    /// just front-facing selfies); the selfie-match floor filters out everyone else.
-    private nonisolated static func fetchCandidateAssets(limit: Int) -> [PHAsset] {
-        var assets: [PHAsset] = []
-        var seen = Set<String>()
-
-        func collect(_ result: PHFetchResult<PHAsset>) {
-            result.enumerateObjects { asset, _, stop in
-                if !seen.contains(asset.localIdentifier) {
-                    seen.insert(asset.localIdentifier)
-                    assets.append(asset)
-                }
-                if assets.count >= limit { stop.pointee = true }
-            }
-        }
-
-        // 1. Selfies album.
-        let selfieAlbums = PHAssetCollection.fetchAssetCollections(
-            with: .smartAlbum, subtype: .smartAlbumSelfPortraits, options: nil)
-        selfieAlbums.enumerateObjects { collection, _, _ in
-            let opts = PHFetchOptions()
-            opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            collect(PHAsset.fetchAssets(in: collection, options: opts))
-        }
-
-        // 2. Portrait-mode photos.
-        if assets.count < limit {
-            let opts = PHFetchOptions()
-            opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            opts.predicate = NSPredicate(format: "(mediaSubtypes & %d) != 0",
-                                         PHAssetMediaSubtype.photoDepthEffect.rawValue)
-            collect(PHAsset.fetchAssets(with: .image, options: opts))
-        }
-
-        // 3. Recent general-library photos. Selfies/Portraits alone are too narrow
-        //    (a user with few selfies sees almost nothing), so fill the rest of the
-        //    budget with recent photos. The selfie-match floor downstream keeps only
-        //    the ones that are actually the user, across varied poses.
-        if assets.count < limit {
-            let opts = PHFetchOptions()
-            opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            opts.fetchLimit = limit * 6   // over-fetch; most won't contain the user
-            collect(PHAsset.fetchAssets(with: .image, options: opts))
-        }
-
-        return Array(assets.prefix(limit))
-    }
-
-    private func loadImage(_ asset: PHAsset, manager: PHImageManager,
-                           options: PHImageRequestOptions, targetSize: CGSize) async -> UIImage? {
-        await withCheckedContinuation { continuation in
-            let lock = NSLock()
-            var resumed = false
-            manager.requestImage(for: asset, targetSize: targetSize,
-                                 contentMode: .aspectFit, options: options) { image, info in
-                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if degraded { return }
-                lock.lock(); defer { lock.unlock() }
-                guard !resumed else { return }
-                resumed = true
-                continuation.resume(returning: image)
-            }
+    func shareMorePhotos() {
+        let uid = userId
+        LibraryFaceScanner.presentLimitedLibraryPicker { [weak self] in
+            Task { @MainActor in await self?.scan(forUser: uid) }
         }
     }
 }

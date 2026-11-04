@@ -66,7 +66,6 @@ class WardrobeViewModel: ObservableObject {
         "wardrobe_\(userId.replacingOccurrences(of: "@", with: "_").replacingOccurrences(of: ".", with: "_"))"
     }
 
-    private func storageKey(for email: String) -> String { WardrobeViewModel.storageKey(for: email) }
 
     func load(forUser email: String) {
         currentUserEmail = email
@@ -87,7 +86,7 @@ class WardrobeViewModel: ObservableObject {
 
     func save(forUser email: String) {
         guard !email.isEmpty else { return }
-        let key = storageKey(for: email)
+        let key = WardrobeViewModel.storageKey(for: email)
         let codableItems = items.map { WardrobeItemCodable(from: $0) }
         if let data = try? JSONEncoder().encode(codableItems) {
             UserDefaults.standard.set(data, forKey: key)

@@ -111,7 +111,7 @@ struct OnboardingWelcomeView: View {
                 .opacity(titleVisible ? 1 : 0)
                 .animation(.spring(response: 0.55, dampingFraction: 0.8), value: titleVisible)
 
-            Text("AI-powered outfit suggestions from your own wardrobe")
+            Text("Outfit ideas from the clothes you already own, worked out privately on your phone")
                 .font(DS.Font.callout)
                 .foregroundColor(DS.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -127,9 +127,9 @@ struct OnboardingWelcomeView: View {
 
     private var featurePills: some View {
         HStack(spacing: DS.Spacing.xs) {
-            featurePill(icon: "camera.viewfinder", label: "Auto-detect", visible: pill1Visible)
-            featurePill(icon: "sparkles", label: "AI styling", visible: pill2Visible)
-            featurePill(icon: "icloud.fill", label: "iCloud sync", visible: pill3Visible)
+            featurePill(icon: "camera.viewfinder", label: "Finds your clothes", visible: pill1Visible)
+            featurePill(icon: "sparkles", label: "Daily outfits", visible: pill2Visible)
+            featurePill(icon: "lock.shield.fill", label: "On your phone", visible: pill3Visible)
         }
     }
 
