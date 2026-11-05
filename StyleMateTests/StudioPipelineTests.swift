@@ -63,7 +63,7 @@ struct StudioPipelineTests {
 
     @Test func shoesHatsAndTrousersGetProductTemplates() throws {
         let cut = Self.square(r: 40, g: 40, b: 44)
-        let cases: [(String, GarmentKind, Category, StudioTemplate.Shape)] = [
+        let cases: [(String, GarmentKind, StyleMate.Category, StudioTemplate.Shape)] = [
             ("Sneakers", .footwear, .footwear, .sneaker), ("Boots", .footwear, .footwear, .boot),
             ("Chelsea Boots", .footwear, .footwear, .chelsea), ("Ankle Boots", .footwear, .footwear, .chelsea),
             ("Loafers", .footwear, .footwear, .loafer), ("Oxford Shoes", .footwear, .footwear, .loafer),
@@ -151,6 +151,23 @@ struct StudioPipelineTests {
         let px = try #require(GarmentCutout.rgbaPixels(cut.image))
         #expect(px[(256 * 512 + 256) * 4 + 3] > 200, "centre should be opaque")
         #expect(px[(10 * 512 + 10) * 4 + 3] < 20, "corner should be transparent")
+    }
+
+    @Test func productShotThatChangedColourIsRejected() throws {
+        try #require(WardrobeExtractor.isAvailable, "needs the bundled FashionEncoder")
+        let black = try #require(StudioPipeline.isolateProduct(Self.square(r: 20, g: 20, b: 24))).image
+        let emb = try #require(FashionClassifier.onWhite(black, side: 224).flatMap { WardrobeML.shared.embed($0) })
+        let plan = StudioPlan.make(product: "Sneakers", category: .footwear, colors: ["Black"], pattern: .solid, material: "Knit",
+                                   sleeve: nil, neckline: nil, details: nil, kind: .footwear, truncated: false, cutout: black)
+        #expect(plan.productShot && plan.template != nil)
+        // A light-grey "shoe" for a black one.
+        let c = try #require(StudioPipeline.evaluate(Self.square(r: 200, g: 200, b: 200), reference: ColorStats(black),
+                                                     embedding: emb, plan: plan, minSimilarity: 0))
+        #expect(c.rejection?.hasPrefix("colour drift") == true, "\(c.rejection ?? "accepted") ΔL \(c.colourDriftL)")
+        // The same colour passes that check.
+        let same = try #require(StudioPipeline.evaluate(Self.square(r: 22, g: 22, b: 26), reference: ColorStats(black),
+                                                        embedding: emb, plan: plan, minSimilarity: 0))
+        #expect(same.rejection?.hasPrefix("colour drift") != true, "\(same.rejection ?? "")")
     }
 
     @Test func colourMatchingMovesTowardTheRealGarment() throws {

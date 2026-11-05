@@ -220,8 +220,13 @@ enum StudioTemplate {
     /// `solid`: a plain garment — sample only fabric of its main colour (an open
     /// coat's cutout also holds a scarf end or the dark strip between its
     /// halves, which the model would otherwise paint on as a print).
-    static func render(cutout: CGImage, shape: Shape, solid: Bool = false, side: Int = 512) -> CGImage? {
-        if let parts = parts(shape) { return renderProduct(cutout: cutout, shape: shape, parts: parts, solid: solid, side: side) }
+    /// `backdrop`: the canvas grey (1 = white). Light products (a white sneaker,
+    /// white jeans) go on light grey, so the render's product can be told from
+    /// its background (on white, keying ate a white shoe's toe and laces).
+    static func render(cutout: CGImage, shape: Shape, solid: Bool = false, side: Int = 512, backdrop: CGFloat = 1) -> CGImage? {
+        if let parts = parts(shape) {
+            return renderProduct(cutout: cutout, shape: shape, parts: parts, solid: solid, side: side, backdrop: backdrop)
+        }
         return renderFlatLay(cutout: cutout, shape: shape, solid: solid, side: side)
     }
 
@@ -344,7 +349,7 @@ enum StudioTemplate {
     /// colour), then one shared light — brighter on top, a soft rim toward the
     /// edges — and a soft contact shadow, the same for every item so renders
     /// across the closet share a look.
-    static func renderProduct(cutout: CGImage, shape: Shape, parts: [Part], solid: Bool, side: Int) -> CGImage? {
+    static func renderProduct(cutout: CGImage, shape: Shape, parts: [Part], solid: Bool, side: Int, backdrop: CGFloat = 1) -> CGImage? {
         guard let raw = (solid ? fabricPatch(cutout, mainColourOnly: true) : nil) ?? fabricPatch(cutout),
               let mean = meanColour(raw) else { return nil }
         // A plain item's patch keeps its fine texture (knit, grain, wash) but not
@@ -357,7 +362,7 @@ enum StudioTemplate {
                                   space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
         else { return nil }
         let canvas = CGRect(x: 0, y: 0, width: s, height: s)
-        ctx.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+        ctx.setFillColor(red: backdrop, green: backdrop, blue: backdrop, alpha: 1)
         ctx.fill(canvas)
         func path(_ pts: [(CGFloat, CGFloat)]) -> CGPath {
             let p = CGMutablePath()

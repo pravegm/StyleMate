@@ -77,6 +77,26 @@ Sizes come from CI run 41829764408 (`du -sh`).
   - Include the Apache-2.0 licence text and any NOTICE in an in-app Acknowledgements screen (Profile → About).
   - State that the model was converted and quantized (Apache §4(b): modified files carry a notice).
 
+### 2.6 Studio render model (`StudioModels.bundle`, DreamShaper 8 on SD 1.5)
+
+- **Licence:** CreativeML OpenRAIL-M (Lykon/dreamshaper-8 model card; Stable Diffusion 1.5).
+  Commercial use is allowed; the licence's use restrictions (Attachment A) must be passed on in
+  the app's terms.
+- **Studio coverage work (Nov 2026) added no model weights.** Shoes, hats and full-length trousers
+  are drawn from procedural product templates (`StudioTemplate`: polygons filled with the item's
+  own fabric, drawn in code), not from new networks. Considered and not bundled:
+  - **ControlNet** (canny / lineart / softedge for SD 1.5) from the cutout's edges. Apple's Core ML
+    pipeline supports it, but it needs a second ~700 MB network and a UNet re-converted with
+    ControlNet inputs, and every step runs both. Worse, it would lock the render to the worn
+    pose (bent knees, a pair at street angles), which is exactly what the templates remove.
+  - **IP-Adapter**: needs a CLIP image tower and adapter attention layers that Apple's
+    ml-stable-diffusion pipeline does not implement.
+  - **LCM-LoRA** (fewer steps): changes every category's look; not evaluated for launch.
+  No licence for any of these is relied on, so none is recorded as cleared.
+- **Test fixtures only:** some `StyleMateTests/Fixtures/studio/` cutouts were cut offline with
+  the FASHN parser (research/evaluation use, never shipped) from CC0 photos (see
+  `StyleMateTests/Fixtures/CREDITS.md`).
+
 ## 3. A caveat that applies to every "permissive" face model
 
 Almost every public face detector and recogniser was trained on research-only data:

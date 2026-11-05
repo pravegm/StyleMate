@@ -70,13 +70,18 @@ enum StudioPipeline {
         let secondObject: Float
         /// Largest near-white blob inside the product, as a share of it.
         let whitePanel: Float
+        /// The render's own colour (before colour matching) against the item's:
+        /// mean lightness difference and mean a/b distance in CIELAB.
+        var colourDriftL: Float = 0
+        var colourDriftAB: Float = 0
         /// Why it can't be used (nil = acceptable).
         let rejection: String?
 
         var summary: [String: Any] {
             ["score": score, "similarity": similarity, "body": body, "product": product, "plain": plain,
              "qcMargin": qcMargin, "touchesFrame": touchesFrame, "coverage": coverage,
-             "secondObject": secondObject, "whitePanel": whitePanel, "rejection": rejection ?? ""]
+             "secondObject": secondObject, "whitePanel": whitePanel, "colourDriftL": colourDriftL,
+             "colourDriftAB": colourDriftAB, "rejection": rejection ?? ""]
         }
     }
 
@@ -107,6 +112,15 @@ enum StudioPipeline {
     /// this of the product prompt. Lab calibration (Nov 2026): renders of a
     /// person -0.050…-0.031, good catalog renders -0.110…-0.061.
     static var qcMarginReject: Float = -0.045
+
+    /// A product-shot template render (shoes, hats, trousers) starts from the
+    /// item's own fabric, so its colour stays close (lab, Nov 2026: |ΔL| ≤ 13, Δab ≤ 7 over shoes, a cap, trousers).
+    /// FashionSigLIP similarity barely sees colour between a single side-view
+    /// shoe and a worn pair (a black-sneaker render scored higher against a
+    /// white sneaker than against its own), so a render that drifted this far
+    /// is rejected rather than trusted to colour matching.
+    static var maxColourDriftL: Float = 28
+    static var maxColourDriftAB: Float = 16
 
     static func minSimilarity(for plan: StudioPlan) -> Float {
         if case .generate = plan.mode { return plan.template == nil ? minSimilarityGenerate : minSimilarityTemplate }
@@ -174,6 +188,11 @@ enum StudioPipeline {
                          minSimilarity: Float = 0) -> Candidate? {
         guard let cut = isolateProduct(render, keepPairs: plan.map(isPaired) ?? true) else { return nil }
         var image = cut.image
+        var driftL: Float = 0, driftAB: Float = 0
+        if let ref = reference, let own = ColorStats(cut.image) {
+            driftL = own.mean.0 - ref.mean.0
+            driftAB = hypot(own.mean.1 - ref.mean.1, own.mean.2 - ref.mean.2)
+        }
         if let ref = reference, let matched = ColorStats.match(image, to: ref) { image = matched }
         let framed = GarmentCutout.frame(image)
         guard let fcg = framed.cgImage, let onWhite = FashionClassifier.onWhite(fcg, side: 224),
@@ -198,6 +217,7 @@ enum StudioPipeline {
         let lightGarment = (reference?.mean.0 ?? 50) > 72
         var isGenerate = false
         if let plan, case .generate = plan.mode { isGenerate = true }
+        let productShot = isGenerate && plan?.template != nil && plan?.productShot == true
         let whitePanel = lightGarment ? 0 : interiorWhiteBlob(cut.image)
 
         var rejection: String?
@@ -206,11 +226,15 @@ enum StudioPipeline {
         else if cut.secondObject >= 0.15 { rejection = "second object (\(String(format: "%.2f", cut.secondObject)))" }
         else if whitePanel >= 0.03 { rejection = "white panel (\(String(format: "%.3f", whitePanel)))" }
         else if body > 0.25 { rejection = "body / mannequin (\(String(format: "%.2f", body)))" }
+        else if productShot, abs(driftL) > maxColourDriftL || driftAB > maxColourDriftAB {
+            rejection = "colour drift (ΔL \(String(format: "%+.0f", driftL)), Δab \(String(format: "%.0f", driftAB)))"
+        }
         else if isGenerate, qcMargin > qcMarginReject { rejection = "looks like a failed render (qc +\(String(format: "%.3f", qcMargin)))" }
         else if sim < minSimilarity { rejection = "not the same item (sim \(String(format: "%.3f", sim)) < \(minSimilarity))" }
         return Candidate(image: framed, score: score, similarity: sim, body: body, product: product, plain: plain,
                          qcMargin: qcMargin, touchesFrame: cut.touchesFrame, coverage: cut.coverage,
-                         secondObject: cut.secondObject, whitePanel: whitePanel, rejection: rejection)
+                         secondObject: cut.secondObject, whitePanel: whitePanel,
+                         colourDriftL: driftL, colourDriftAB: driftAB, rejection: rejection)
     }
 
     /// The product, without its white background: Vision's foreground instance
@@ -296,9 +320,18 @@ enum StudioPipeline {
         #endif
     }
 
-    /// Background = near-white pixels connected to the image border.
+    /// Background = pixels connected to the image border that are near-white,
+    /// or, on a grey backdrop (light products), close to the border's own grey.
     static func whiteKeyMask(_ px: [UInt8], w: Int, h: Int) -> [UInt8] {
-        func isBG(_ i: Int) -> Bool { px[i * 4] > 232 && px[i * 4 + 1] > 232 && px[i * 4 + 2] > 232 }
+        var border: [[Int]] = [[], [], []]
+        for x in stride(from: 0, to: w, by: 4) { for i in [x, (h - 1) * w + x] { for c in 0..<3 { border[c].append(Int(px[i * 4 + c])) } } }
+        for y in stride(from: 0, to: h, by: 4) { for i in [y * w, y * w + w - 1] { for c in 0..<3 { border[c].append(Int(px[i * 4 + c])) } } }
+        let bg = border.map { $0.sorted()[$0.count / 2] }
+        let white = bg.allSatisfy { $0 > 232 }
+        func isBG(_ i: Int) -> Bool {
+            if white { return px[i * 4] > 232 && px[i * 4 + 1] > 232 && px[i * 4 + 2] > 232 }
+            return abs(Int(px[i * 4]) - bg[0]) < 22 && abs(Int(px[i * 4 + 1]) - bg[1]) < 22 && abs(Int(px[i * 4 + 2]) - bg[2]) < 22
+        }
         var bg = [Bool](repeating: false, count: w * h)
         var stack: [Int] = []
         for x in 0..<w { stack.append(x); stack.append((h - 1) * w + x) }
