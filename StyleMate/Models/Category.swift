@@ -58,6 +58,10 @@ class WardrobeViewModel: ObservableObject {
     }
     private(set) var currentUserEmail: String = ""
     private var suspendSaving = false
+    /// Stored entries this build can't read (an unknown category or pattern, a missing key),
+    /// as their raw JSON. They aren't shown, but every save writes them back unchanged, so a
+    /// newer build (or a fix) still finds them. Never dropped.
+    private(set) var unreadableEntries: [Data] = []
 
     /// The UserDefaults key a user's wardrobe is stored under. Apple ids / emails contain
     /// dots, so the raw id is NOT the key — anything that deletes or reads the wardrobe
@@ -66,29 +70,46 @@ class WardrobeViewModel: ObservableObject {
         "wardrobe_\(userId.replacingOccurrences(of: "@", with: "_").replacingOccurrences(of: ".", with: "_"))"
     }
 
+    /// Where a wardrobe blob that isn't a JSON array at all is copied before anything can
+    /// overwrite it.
+    static func unreadableBackupKey(for userId: String) -> String { storageKey(for: userId) + "_unreadable" }
 
+    /// Loading never writes: the stored data is only rewritten by a real change, so a build
+    /// that can't read part of it can't shrink it.
     func load(forUser email: String) {
+        let stored = WardrobeViewModel.loadStored(forUser: email)
+        suspendSaving = true
         currentUserEmail = email
         ledger = SyncLedger.load(userKey: WardrobeViewModel.storageKey(for: email))
-        items = WardrobeViewModel.loadItems(forUser: email)
+        unreadableEntries = stored.unreadable
+        items = stored.items
+        suspendSaving = false
+        if !stored.unreadable.isEmpty {
+            dlog("[Wardrobe] Kept \(stored.unreadable.count) stored items this build can't read")
+        }
     }
 
     /// Decodes a user's stored wardrobe (empty when there is none).
     static func loadItems(forUser email: String) -> [WardrobeItem] {
-        guard let data = UserDefaults.standard.data(forKey: storageKey(for: email)),
-              let decoded = try? JSONDecoder().decode([WardrobeItemCodable].self, from: data) else {
-            return []
+        loadStored(forUser: email).items
+    }
+
+    static func loadStored(forUser email: String) -> WardrobeStorage.Decoded {
+        guard let data = UserDefaults.standard.data(forKey: storageKey(for: email)) else {
+            return WardrobeStorage.Decoded(items: [], unreadable: [], isArray: true)
         }
-        // Sanitize on load: clears garment fields wrongly attached to accessories/footwear
-        // in older data. The didSet re-saves the cleaned set, so this self-heals once.
-        return decoded.compactMap { $0.toWardrobeItem()?.sanitizedAttributes() }
+        let decoded = WardrobeStorage.decode(data)
+        if !decoded.isArray, UserDefaults.standard.data(forKey: unreadableBackupKey(for: email)) == nil {
+            UserDefaults.standard.set(data, forKey: unreadableBackupKey(for: email))
+            dlog("[Wardrobe] Stored wardrobe unreadable; backed it up before any save")
+        }
+        return decoded
     }
 
     func save(forUser email: String) {
         guard !email.isEmpty else { return }
         let key = WardrobeViewModel.storageKey(for: email)
-        let codableItems = items.map { WardrobeItemCodable(from: $0) }
-        if let data = try? JSONEncoder().encode(codableItems) {
+        if let data = WardrobeStorage.encode(items, keeping: unreadableEntries) {
             UserDefaults.standard.set(data, forKey: key)
         }
     }
@@ -100,6 +121,7 @@ class WardrobeViewModel: ObservableObject {
         items = []
         suspendSaving = false
         currentUserEmail = ""
+        unreadableEntries = []
         ledger = SyncLedger()
     }
 
@@ -386,6 +408,7 @@ class WardrobeViewModel: ObservableObject {
 
         if currentUserEmail == userId { clear() }
         UserDefaults.standard.removeObject(forKey: key)
+        UserDefaults.standard.removeObject(forKey: WardrobeViewModel.unreadableBackupKey(for: userId))
         for legacy in ["wardrobe_\(userId)", "wardrobeData_\(userId)"] {
             UserDefaults.standard.removeObject(forKey: legacy)
         }
@@ -559,8 +582,9 @@ struct WardrobeItemCodable: Codable {
         id = try container.decode(String.self, forKey: .id)
         category = try container.decode(String.self, forKey: .category)
         product = try container.decode(String.self, forKey: .product)
-        colors = try container.decode([String].self, forKey: .colors)
-        brand = try container.decode(String.self, forKey: .brand)
+        // Colours and brand are optional detail: an entry without them is still the user's piece.
+        colors = try container.decodeIfPresent([String].self, forKey: .colors) ?? []
+        brand = try container.decodeIfPresent(String.self, forKey: .brand) ?? ""
         pattern = try container.decode(String.self, forKey: .pattern)
         imagePath = try container.decode(String.self, forKey: .imagePath)
         croppedImagePath = try container.decodeIfPresent(String.self, forKey: .croppedImagePath)
@@ -594,4 +618,50 @@ struct WardrobeItemCodable: Codable {
             details: details
         )
     }
-} 
+}
+
+/// How a wardrobe is read from and written to its UserDefaults blob (a JSON array of
+/// `WardrobeItemCodable`). Reading is per entry: one entry this build can't read (a key
+/// missing, a category or pattern it doesn't know) no longer empties the whole closet, and
+/// its raw JSON is handed back so the next save keeps it.
+enum WardrobeStorage {
+    struct Decoded {
+        var items: [WardrobeItem]
+        /// Raw JSON of each entry that couldn't be read, in stored order.
+        var unreadable: [Data]
+        /// False when the blob isn't a JSON array at all (nothing could be read).
+        var isArray: Bool
+    }
+
+    static func decode(_ data: Data) -> Decoded {
+        guard let entries = (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) as? [Any] else {
+            return Decoded(items: [], unreadable: [], isArray: false)
+        }
+        let decoder = JSONDecoder()
+        var items: [WardrobeItem] = []
+        var unreadable: [Data] = []
+        for entry in entries {
+            guard let raw = try? JSONSerialization.data(withJSONObject: entry, options: [.fragmentsAllowed]) else { continue }
+            // Sanitize on load: clears garment fields wrongly attached to accessories/footwear
+            // in older data. Loading doesn't save, so the cleaned copy is written by the next change.
+            if let stored = try? decoder.decode(WardrobeItemCodable.self, from: raw),
+               let item = stored.toWardrobeItem()?.sanitizedAttributes() {
+                items.append(item)
+            } else {
+                unreadable.append(raw)
+            }
+        }
+        return Decoded(items: items, unreadable: unreadable, isArray: true)
+    }
+
+    /// The items, followed by the kept unreadable entries exactly as they were read.
+    static func encode(_ items: [WardrobeItem], keeping unreadable: [Data] = []) -> Data? {
+        guard let data = try? JSONEncoder().encode(items.map { WardrobeItemCodable(from: $0) }) else { return nil }
+        guard !unreadable.isEmpty else { return data }
+        guard var all = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else { return nil }
+        for raw in unreadable {
+            if let entry = try? JSONSerialization.jsonObject(with: raw, options: [.fragmentsAllowed]) { all.append(entry) }
+        }
+        return try? JSONSerialization.data(withJSONObject: all)
+    }
+}
