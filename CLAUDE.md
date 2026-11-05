@@ -46,7 +46,8 @@
   InsightFace licence (MODEL-LICENSING §7).
 - **YuNet input is BGR raw 0–255**, 640×640 letterboxed top-left; landmarks come out in ArcFace
   order (image-left eye first). It is trained for 10–300 px faces, so a frame-filling selfie
-  face needs the pad retry (image shrunk into 352 / 224 px of the input). **SFace input is RGB
+  face needs the pad retry (image shrunk into 352 / 224 px of the input). "Find yourself" reads
+  960 px thumbnails (one 640 detector pass; photos ≥ 1100 px also get the small-face tile pass). **SFace input is RGB
   raw 0–255** (it normalizes inside the graph). Embeddings are flip-averaged (face + mirror),
   which is why there is no separate mirror selfie anchor any more.
 - Always use `FaceDetector.shared` (never a concrete detector) and warp with the detector's

@@ -4,7 +4,7 @@ import Photos
 /// One face found in the library during "Find yourself".
 struct ScannedFace {
     let assetId: String
-    /// L2-normalized face embedding (from the ~640 px thumbnail).
+    /// L2-normalized face embedding (from the ~960 px thumbnail).
     let embedding: [Float]
     /// 0…1 (size, detector score, pose); see `FaceQuality.libraryScore`.
     let quality: Float
@@ -125,7 +125,13 @@ enum FaceSampleExtractor {
 /// PhotoKit side of "Find yourself": which photos to look at and how to load them.
 enum LibraryFaceScanner {
     static let defaultLimit = 1500
-    static let thumbnailSide: CGFloat = 640
+    /// 960 (was 640): a distant face in a group / full-body shot gets 1.5x the pixels to embed.
+    /// On LFW faces of ~24 px at 640 (~36 px at 960) this raised SFace's TAR at FAR 1e-5 a lot
+    /// (docs/MODEL-LICENSING.md §8.2). The detector still makes one 640 pass (no tiles below
+    /// 1100 px); the PhotoKit cache window shrinks to keep the cached bytes about the same.
+    static let thumbnailSide: CGFloat = 960
+    /// Photos PhotoKit decodes ahead of the pass, sized to ~40 thumbnails at 640 px.
+    static var cacheWindow: Int { max(12, Int((40 * 640 * 640 / (thumbnailSide * thumbnailSide)).rounded())) }
     static let refineSide: CGFloat = 1600
     /// Older Selfies-album photos added on top of the recent window, for age / look variety.
     static let extraSelfies = 150

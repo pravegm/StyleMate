@@ -317,6 +317,7 @@ The same 150 LFW identities, the probe photo degraded; each model at its own FAR
 | Case | Old: SCRFD + AdaFace | New: YuNet (+ tiles) + SFace |
 |---|---|---|
 | Distant face, ~24 px in a 640 px "Find yourself" thumbnail | missed 0.0%, TAR 99.3% / 99.3% | missed 2.7%, TAR 82.0% / 64.7% |
+| Same distant face in the **960 px** thumbnail the app now uses (~36 px) | — | missed 1.3%, TAR 88.0% / 80.0% |
 | Distant face, ~48 px in a 1600 px scan photo (detector sees ~19 px; new stack tiles) | missed 2.0%, TAR 97.3% / 97.3% | missed 0.7%, TAR 95.3% / 90.0% |
 | Sunglasses (dark lenses painted over the eyes from the landmarks; synthetic) | missed 0.7%, TAR 98.7% / 98.7% | missed 0.0%, TAR 89.3% / 68.0% |
 | Frame-filling selfie face (needs the pad retry) | missed 0.7%, TAR 98.7% / 98.7% | missed 0.0%, TAR 94.7% / 90.0% |
@@ -324,7 +325,7 @@ The same 150 LFW identities, the probe photo degraded; each model at its own FAR
 Old-stack probes were flip-averaged here (its gallery was not), a small advantage to it. LFW has
 too few strong profiles for a profile row; on the fixtures the cap + sunglasses + profile face is
 the weakest same-person score for both stacks (§8.5). **This is where the free stack is clearly
-worse:** tiny, occluded and turned faces lose 10–35 points of TAR at strict FAR. In the app those
+worse:** tiny, occluded and turned faces lose 10–35 points of TAR at strict FAR (the 960 px thumbnail wins back about half of it for distant faces). In the app those
 photos mostly drop from auto-add to "Is this you?" or, below 0.45, are skipped; nothing about them
 raises the risk of adding a stranger.
 
@@ -336,6 +337,7 @@ raises the risk of adding a stranger.
 | 3-frame selfie gallery instead of one photo | TAR at FAR 1e-5: pair 97.0% → 3-photo gallery 98.4% (subset) | Yes (already in the app) |
 | **Top-2 consensus** instead of max over the gallery | with a **10-photo** gallery (after "Find yourself"), TAR at FAR 1e-5: max 74.4% → top-2 99.5% (the max admits more strangers the bigger the gallery gets) | Yes, for auto-add / multi-person / learning; review keeps the single best |
 | Small-face tile pass (2x2 overlapping 60% tiles at full input, for photos ≥ 1100 px) | 48 px faces in 1600 px photos: misses 5.6% → 0.3%, TAR at FAR 1e-5 79.0% → 93.8% | Yes |
+| "Find yourself" thumbnail 640 → 960 px | ~24 px faces (now ~36 px): misses 2.7% → 1.3%, TAR at FAR 1e-4 / 1e-5 82.0 / 64.7% → 88.0 / 80.0%. Lab CPU time per photo unchanged (one 640 detector pass either way: 82 → 76 ms); PhotoKit cache window 40 → 18 photos so cached bytes stay ~66 MB | Yes |
 | Quality-weighted crops / templates | Not adopted: quality is already a gate (detector score, size, yaw) and the gallery picks are a diverse spread; no measured gain to justify a weighting | No |
 | Confirmed library faces as extra templates ("Is this you?" picks) | Already the gallery design; the consensus score is what makes a large gallery safe (row above) | Yes |
 

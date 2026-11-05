@@ -14,7 +14,7 @@ struct FaceCandidate: Identifiable {
 }
 
 /// Drives "Find yourself": an on-device pass over the most recent library photos that finds
-/// every face (YuNet on ~640 px thumbnails, SFace embeddings), groups faces of the same person,
+/// every face (YuNet on ~960 px thumbnails, SFace embeddings), groups faces of the same person,
 /// ranks the groups against the selfie, and asks "Is this you?" about the best one — then
 /// "Also you?" about faces that match what was confirmed. Confirmed faces are re-embedded at the
 /// scan's ~1600 px resolution and added to the reference gallery. Nothing leaves the phone.
@@ -121,7 +121,7 @@ final class FaceReferenceViewModel: ObservableObject {
         let side = LibraryFaceScanner.thumbnailSide
         let cacheSize = CGSize(width: side, height: side)
         let cacheOptions = LibraryFaceScanner.requestOptions(network: false)
-        let window = 40
+        let window = LibraryFaceScanner.cacheWindow
         var cachedUpTo = 0
         func cacheAhead(from i: Int) {
             let end = min(assets.count, i + window)

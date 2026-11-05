@@ -6,8 +6,10 @@ import simd
 /// estimated from the 5 landmarks (img-left eye, img-right eye, nose, img-left mouth, img-right mouth).
 /// Pure functions, unit-tested.
 enum FaceQuality {
-    // Library faces (measured on the ~640 px thumbnails used for the "Find yourself" pass).
-    static let minLibraryFacePixels: Float = 24
+    // Library faces (measured on the ~960 px thumbnails used for the "Find yourself" pass).
+    // 32 px at 960 is 21 px at the old 640: a little more inclusive than before, since the
+    // bigger thumbnail gives those faces enough pixels to embed.
+    static let minLibraryFacePixels: Float = 32
     static let minLibraryDetectorScore: Float = FaceModelProfile.active.minLibraryDetectorScore
     /// Past ~40° of yaw the 5-point alignment degrades and embeddings stop being reliable.
     static let maxLibraryYaw: Float = 0.9
