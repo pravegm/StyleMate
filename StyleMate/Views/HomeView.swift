@@ -576,6 +576,10 @@ struct HomeView: View {
                     .padding(.vertical, DS.Spacing.micro)
                 }
                 .scrollClipDisabled()
+                // Wide: the row is a pane beside the fold, so cut it at the pane's sides (not above and below,
+                // where the cards' shadows show). Unclipped, the cards ran under the floating tab bar and,
+                // scrolled, back across the fold.
+                .clipShape(SideClip(isActive: duo.isWideLayout))
             }
         } else {
             VStack(spacing: DS.Spacing.md) {
@@ -617,6 +621,16 @@ struct HomeView: View {
                     .foregroundStyle(DS.Colors.textSecondary)
             }
         }
+    }
+}
+
+/// Clips a horizontal row at its leading and trailing edges only, so shadows and the press bounce still show
+/// above and below. Inactive, it clips nothing.
+private struct SideClip: Shape {
+    var isActive: Bool
+
+    func path(in rect: CGRect) -> Path {
+        Path(isActive ? rect.insetBy(dx: 0, dy: -60) : rect.insetBy(dx: -10_000, dy: -10_000))
     }
 }
 

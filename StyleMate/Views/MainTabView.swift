@@ -90,7 +90,10 @@ private struct ProfileTab: View {
 
     var body: some View {
         let wide = duo.isWideLayout
-        let fold = duo.posture == .book ? duo.crease(in: frame).map { ($0.minX, $0.maxX) } : nil
+        // Flat or half-open: split at the fold (a top-to-bottom one), not at the middle.
+        let fold: (CGFloat, CGFloat)? = duo.foldBand(in: frame).flatMap { c in
+            c.height > c.width ? (c.minX, c.maxX) : nil
+        }
         ProfilePanesLayout(fold: fold, gutter: DS.Spacing.lg) {
             ProfileView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

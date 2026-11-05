@@ -36,7 +36,10 @@ struct ClosetItemCell: View {
                 Text(ClosetText.displayProduct(item.product))
                     .font(DS.Font.caption1)
                     .foregroundStyle(DS.Colors.textSecondary)
-                    .lineLimit(1)
+                    // Two lines: the Duo's narrow grid columns cut "Leather Jacket" to "Leather Jack…".
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 2)
             }
         }

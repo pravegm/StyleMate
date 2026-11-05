@@ -5,10 +5,11 @@ import StoreKitTest
 ///
 /// The test navigates the real app (demo user, seeded wardrobe: the DebugLaunchSupport launch hooks) while the
 /// phone is CLOSED, i.e. on the cover display: that is `XCUIScreen.main`, where XCUITest taps land reliably
-/// (taps on the inner display are not). At each screen it calls the host-side bridge (`scripts/duo_bridge.py`,
-/// plain HTTP on 127.0.0.1), which captures the cover display, opens the hinge flat (180°) and captures the
-/// inner display, folds to half-open (~110°) and captures it again, then closes the phone and answers. So each
-/// screen also proves the app keeps its state across cover -> inner -> half-open -> cover.
+/// (taps on the inner display are not). At each screen it steps the host-side bridge (`scripts/duo_bridge.py`,
+/// plain HTTP on 127.0.0.1): capture the cover display, open the hinge flat (180°) and capture the inner display,
+/// fold to half-open (~110°) and capture it again, close the phone. So each screen also proves the app keeps its
+/// state across cover -> inner -> half-open -> cover. Flat and half-open it also checks that no control's frame
+/// crosses the fold, with the band the app itself reports (DuoLayout's DEBUG log, read by the bridge).
 ///
 /// Skipped unless `DUO_BRIDGE_URL` is set (`TEST_RUNNER_DUO_BRIDGE_URL` for xcodebuild), so ci.yml's
 /// iPhone run of StyleMateUITests ignores it.
@@ -276,17 +277,29 @@ final class DuoScreensTests: E2ETestCase {
 
     // MARK: - Bridge
 
-    /// Attaches the cover-display state (XCUIScreen.main), then asks the host to shoot cover / flat / half-open.
+    /// Attaches the cover-display state (XCUIScreen.main), then has the host shoot cover / flat / half-open one
+    /// step at a time. Flat and half-open, it checks that no control sits on the fold before closing the phone.
     @MainActor
     private func shoot(_ name: String) {
         snap("\(name)-xcui")
+        guard bridge(name, "cover") != nil else { return }
+        if let flat = bridge(name, "flat") { assertNothingOnFold("\(name)-flat", reading: flat, posture: "flat") }
+        if let half = bridge(name, "half") { assertNothingOnFold("\(name)-half", reading: half, posture: "book") }
+        _ = bridge(name, "closed")
+        // The phone is closed again: the app is back on the cover display. Give it a beat to settle.
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 2.0)
+    }
+
+    /// One bridge step (`/pose`): moves the hinge, captures `<name>-<to>.png`, returns the reply (nil on failure).
+    @MainActor
+    private func bridge(_ name: String, _ to: String) -> String? {
         guard let base = bridgeURL,
-              var components = URLComponents(string: base + "/shoot") else { return }
-        components.queryItems = [URLQueryItem(name: "name", value: name)]
-        guard let url = components.url else { return }
+              var components = URLComponents(string: base + "/pose") else { return nil }
+        components.queryItems = [URLQueryItem(name: "name", value: name), URLQueryItem(name: "to", value: to)]
+        guard let url = components.url else { return nil }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 300
-        let done = expectation(description: "bridge \(name)")
+        request.timeoutInterval = 150
+        let done = expectation(description: "bridge \(name) \(to)")
         let box = ReplyBox()
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error {
@@ -297,12 +310,95 @@ final class DuoScreensTests: E2ETestCase {
             }
             done.fulfill()
         }.resume()
-        wait(for: [done], timeout: 320)
+        wait(for: [done], timeout: 170)
         let reply = box.value
-        print("[DuoShot] \(name): \(reply)")
-        XCTAssertTrue(reply.hasPrefix("200"), "Duo bridge failed for \(name): \(reply)")
-        // The phone is closed again: the app is back on the cover display. Give it a beat to settle.
-        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 2.0)
+        print("[DuoShot] \(name)-\(to): \(reply)")
+        guard reply.hasPrefix("200") else {
+            XCTFail("Duo bridge failed for \(name)-\(to): \(reply)")
+            return nil
+        }
+        return reply
+    }
+
+    // MARK: - Fold check
+
+    /// Flat or half-open, on the inner display: no control may cross the fold. The band and the window size are
+    /// the app's own DuoLayout reading (its DEBUG duo-log.txt, read by the bridge); the controls come from this
+    /// test's accessibility snapshot of the app, each clipped to the scroll views around it (a chip scrolled out
+    /// of its pane isn't on screen).
+    @MainActor
+    private func assertNothingOnFold(_ shot: String, reading: String, posture: String) {
+        guard let layout = AppDuoLayout(reading) else {
+            XCTFail("\(shot): the app reported no fold (\(reading))")
+            return
+        }
+        XCTAssertEqual(layout.posture, posture, "\(shot): the app reports posture \(layout.posture)")
+        guard let root = try? app.snapshot() else {
+            XCTFail("\(shot): no accessibility snapshot of the app")
+            return
+        }
+        let window = root.frame
+        guard abs(window.width - layout.window.width) < 2, abs(window.height - layout.window.height) < 2 else {
+            XCTFail("\(shot): the accessibility snapshot is \(Int(window.width)) × \(Int(window.height)) pt but the "
+                    + "app's window \(Int(layout.window.width)) × \(Int(layout.window.height)) pt: not the inner display")
+            return
+        }
+        let band = layout.fold.offsetBy(dx: window.minX, dy: window.minY)
+        var crossing: [String] = []
+        var checked = 0
+        func walk(_ node: XCUIElementSnapshot, clip: CGRect) {
+            let clip = Self.clippingTypes.contains(node.elementType) ? clip.intersection(node.frame) : clip
+            if Self.controlTypes.contains(node.elementType), !Self.systemIdentifiers.contains(node.identifier) {
+                let shown = node.frame.intersection(clip)
+                if !shown.isNull, shown.width >= 1, shown.height >= 1 {
+                    checked += 1
+                    // 1 pt of slack for rounding at the band's edges.
+                    if shown.maxX > band.minX + 1, shown.minX < band.maxX - 1,
+                       shown.maxY > band.minY + 1, shown.minY < band.maxY - 1 {
+                        let name = node.identifier.isEmpty ? node.label : node.identifier
+                        crossing.append("type \(node.elementType.rawValue) '\(name.prefix(40))' x \(Int(shown.minX))-\(Int(shown.maxX))")
+                    }
+                }
+            }
+            for child in node.children { walk(child, clip: clip) }
+        }
+        walk(root, clip: window)
+        print("[DuoFold] \(shot): fold x \(Int(band.minX))-\(Int(band.maxX)), \(checked) controls, \(crossing.count) on it")
+        if !crossing.isEmpty { note("\(shot)-on-fold", crossing.joined(separator: "\n")) }
+        XCTAssertTrue(checked > 0, "\(shot): no controls in the accessibility snapshot")
+        XCTAssertTrue(crossing.isEmpty, "\(shot): \(crossing.count) control(s) on the fold (x \(Int(band.minX))-"
+                      + "\(Int(band.maxX))): " + crossing.prefix(6).joined(separator: "; "))
+    }
+
+    /// Things you tap or type into.
+    private static let controlTypes: Set<XCUIElement.ElementType> = [
+        .button, .cell, .link, .textField, .secureTextField, .searchField, .textView, .switch, .toggle, .slider,
+        .stepper, .segmentedControl, .picker, .menuButton, .popUpButton,
+    ]
+    /// Containers that clip what they hold (a horizontal chip row, a list).
+    private static let clippingTypes: Set<XCUIElement.ElementType> = [.scrollView, .table, .collectionView]
+    /// The system's tap-outside-to-dismiss region behind a sheet spans the whole display.
+    private static let systemIdentifiers: Set<String> = ["PopoverDismissRegion"]
+}
+
+/// The bridge's reading of the app's DuoLayout: "200 ok fold=456,0,40,669 window=951x669 posture=flat".
+private struct AppDuoLayout {
+    var fold: CGRect
+    var window: CGSize
+    var posture: String
+
+    init?(_ reply: String) {
+        var fields: [String: String] = [:]
+        for word in reply.split(separator: " ") {
+            let pair = word.split(separator: "=", maxSplits: 1).map(String.init)
+            if pair.count == 2 { fields[pair[0]] = pair[1] }
+        }
+        let f = (fields["fold"] ?? "").split(separator: ",").compactMap { Double($0) }
+        let w = (fields["window"] ?? "").split(separator: "x").compactMap { Double($0) }
+        guard f.count == 4, w.count == 2, f[2] > 0 || f[3] > 0 else { return nil }
+        fold = CGRect(x: f[0], y: f[1], width: f[2], height: f[3])
+        window = CGSize(width: w[0], height: w[1])
+        posture = fields["posture"] ?? "unknown"
     }
 }
 

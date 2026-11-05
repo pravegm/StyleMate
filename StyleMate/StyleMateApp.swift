@@ -304,38 +304,13 @@ private struct AddSourceSheet: View {
                 .padding(.top, DS.Spacing.md)
                 .padding(.bottom, DS.Spacing.lg)
 
-            VStack(spacing: DS.Spacing.sm) {
-                addOptionRow(
-                    icon: "photo.on.rectangle.angled",
-                    iconColor: DS.Colors.accent,
-                    title: "Choose from Gallery",
-                    subtitle: "Pick photos of your clothes",
-                    delay: 0,
-                    action: onGallery
-                )
-                .accessibilityIdentifier("addSource.gallery")
-
-                addOptionRow(
-                    icon: "camera.fill",
-                    iconColor: DS.Colors.accent,
-                    title: "Take a Photo",
-                    subtitle: "Snap a picture of what you're wearing",
-                    delay: 1,
-                    action: onCamera
-                )
-                .accessibilityIdentifier("addSource.camera")
-
-                if showAutoScan {
-                    addOptionRow(
-                        icon: "sparkles.rectangle.stack.fill",
-                        iconColor: DS.Colors.accent,
-                        title: "Auto-Scan Photos",
-                        subtitle: "Finds your outfits in your photos, on your iPhone",
-                        delay: 2,
-                        action: onAutoScan
-                    )
-                    .accessibilityIdentifier("addSource.autoScan")
-                }
+            // One column of rows. Open flat on the Duo the sheet is centred on the fold, so the rows go in two
+            // columns either side of it (half-open the sheet sits on one half and stays one column).
+            FoldAwareSplit(gutter: DS.Spacing.lg, stackedSpacing: DS.Spacing.sm, minimumWidth: 0, requiresFold: true) {
+                galleryRow
+                if showAutoScan { cameraRow }
+            } trailing: {
+                if showAutoScan { autoScanRow } else { cameraRow }
             }
             .padding(.horizontal, DS.Spacing.lg)
             .padding(.bottom, DS.Spacing.lg)
@@ -348,6 +323,42 @@ private struct AddSourceSheet: View {
                 appeared = true
             }
         }
+    }
+
+    private var galleryRow: some View {
+        addOptionRow(
+            icon: "photo.on.rectangle.angled",
+            iconColor: DS.Colors.accent,
+            title: "Choose from Gallery",
+            subtitle: "Pick photos of your clothes",
+            delay: 0,
+            action: onGallery
+        )
+        .accessibilityIdentifier("addSource.gallery")
+    }
+
+    private var cameraRow: some View {
+        addOptionRow(
+            icon: "camera.fill",
+            iconColor: DS.Colors.accent,
+            title: "Take a Photo",
+            subtitle: "Snap a picture of what you're wearing",
+            delay: 1,
+            action: onCamera
+        )
+        .accessibilityIdentifier("addSource.camera")
+    }
+
+    private var autoScanRow: some View {
+        addOptionRow(
+            icon: "sparkles.rectangle.stack.fill",
+            iconColor: DS.Colors.accent,
+            title: "Auto-Scan Photos",
+            subtitle: "Finds your outfits in your photos, on your iPhone",
+            delay: 2,
+            action: onAutoScan
+        )
+        .accessibilityIdentifier("addSource.autoScan")
     }
 
     @ViewBuilder
