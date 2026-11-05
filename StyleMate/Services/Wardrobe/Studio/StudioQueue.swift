@@ -16,7 +16,8 @@ final class StudioStore {
 
     /// Bump to re-render every item after a pipeline change.
     /// 2: stricter render gate, new prompts, UUID seeds (Nov 2026).
-    static let version = 2
+    /// 3: product templates for shoes, hats and all trousers (Nov 2026).
+    static let version = 3
 
     private let lock = NSLock()
     private var entries: [String: Entry] = [:]
@@ -244,7 +245,7 @@ final class StudioQueue: ObservableObject {
                                    pattern: item.pattern, material: item.material, sleeve: item.sleeveLength,
                                    neckline: item.neckline, details: item.details, kind: kind,
                                    truncated: embeddingStore.truncated(for: item.id) ?? false, cutout: cutout.cgImage,
-                                   embedding: embeddingStore.embedding(for: item.id))
+                                   embedding: embeddingStore.embedding(for: item.id), fit: item.fit)
         let embedding: [Float]? = embeddingStore.embedding(for: item.id)
         let seed = Self.seed(for: item.id)
         let perf = PerfLog.begin(.studioRender)

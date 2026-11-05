@@ -16,9 +16,13 @@
 - **The Mac runners are shared by every branch, so spend them deliberately.** A
   feature-branch push runs unit tests + the Release compile only (~45 min). Commit
   message tags: `[tests: StyleMateTests/TryOnTests, ...]` runs only those unit tests
-  (minutes, not 45); `[ui]` or `[full]` adds the UI tests + `e2e-screens`; `[skip ci]`
-  runs nothing. Docs-only pushes don't run. Each push cancels the branch's running
-  CI, so batch commits and push when you want a result, not after every commit.
+  (minutes, not 45); `[ui]` or `[full]` adds the UI tests + `e2e-screens`; `[studio]`
+  (or `[full]`) adds the three studio-coverage render shards (3 Macs, ~45 min);
+  `[skip ci]` runs nothing. Docs-only pushes don't run — nor does a push that is only
+  an empty commit (e.g. a bare `[full]` tag commit): for that, dispatch instead with
+  `gh workflow run ci.yml --ref <branch> -f ui_tests=true [-f studio=true]`. Each push
+  cancels the branch's running CI, so batch commits and push when you want a result,
+  not after every commit.
   Run `duo.yml` once per branch, right before asking for a merge. Merge `origin/main`
   into a branch once, just before that final full run — not after every main merge.
 

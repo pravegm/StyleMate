@@ -1,0 +1,66 @@
+{
+  "blacktee": {
+    "category": "Tops",
+    "product": "T-Shirts",
+    "fit": "Regular",
+    "sleeve": "Short Sleeve"
+  },
+  "navytee": {
+    "category": "Tops",
+    "product": "T-Shirts",
+    "fit": "Regular",
+    "sleeve": "Short Sleeve"
+  },
+  "tank": {
+    "category": "Tops",
+    "product": "Tank Tops",
+    "fit": "Regular",
+    "sleeve": "Sleeveless"
+  },
+  "flannel": {
+    "category": "Tops",
+    "product": "Flannel Shirts",
+    "fit": "Regular",
+    "sleeve": "Long Sleeve"
+  },
+  "kurta": {
+    "category": "Ethnic Wear",
+    "product": "Kurta",
+    "fit": "Regular",
+    "sleeve": "Long Sleeve"
+  },
+  "jacket": {
+    "category": "Outerwear",
+    "product": "Denim Jackets",
+    "fit": "Regular",
+    "sleeve": "Long Sleeve"
+  },
+  "greycoat": {
+    "category": "Outerwear",
+    "product": "Coats",
+    "fit": "Regular",
+    "sleeve": "Long Sleeve"
+  },
+  "pinkcoat": {
+    "category": "Outerwear",
+    "product": "Coats",
+    "fit": "Regular",
+    "sleeve": "Long Sleeve"
+  },
+  "dress": {
+    "category": "One-Pieces",
+    "product": "Dresses",
+    "fit": "Regular",
+    "sleeve": "Sleeveless"
+  },
+  "bluejeans": {
+    "category": "Bottoms",
+    "product": "Jeans",
+    "fit": "Regular"
+  },
+  "whitejeans": {
+    "category": "Bottoms",
+    "product": "Jeans",
+    "fit": "Regular"
+  }
+}

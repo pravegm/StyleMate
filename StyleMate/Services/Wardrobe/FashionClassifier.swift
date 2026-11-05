@@ -103,7 +103,11 @@ enum FashionClassifier {
            m.margin > 0.004 {
             material = m.label
         }
-        let clusters = ColorNamer.clusters(cg, scene: scene)
+        var clusters = ColorNamer.clusters(cg, scene: scene)
+        // A light-grey coat in sunlight measures as white (its lit side is as bright
+        // as a white shirt's in shade): ask the encoder, which sees the heather
+        // texture and the contrast against the white backdrop.
+        clusters = ColorNamer.resolveLightNeutral(clusters, tone: vocab.scores(in: "neutral_tone", for: emb))
         // A print must clearly beat "Solid" — zero-shot happily calls a plain grey
         // jersey "houndstooth" by a hair; rare prints need a bigger margin, and
         // denim's wash and rips are not a print.
@@ -381,6 +385,32 @@ enum ColorNamer {
         }
         return inner.count > 200 ? inner : all
     }
+
+    /// White vs light grey. Lightness alone can't tell them apart outdoors: a
+    /// light-grey wool coat's sunlit side (L 77–99) is as bright as a white
+    /// shirt in shade (L 74–93), and their shadow-to-light spread overlaps too
+    /// (benchmark, Nov 2026: four grey coats named White). FashionSigLIP zero-shot
+    /// ("a photo of a {white | bright white | ivory} garment" vs "{light grey |
+    /// silver grey | heather grey}", the `neutral_tone` vocabulary group) sees
+    /// the heather texture and how the fabric sits against the white backdrop:
+    /// on the benchmark the grey coats scored white−grey −0.060…−0.008, the
+    /// white shirts, kurta, dhoti, tank, jeans and sneakers +0.012…+0.059.
+    /// So a near-neutral White or Cream main colour that the encoder reads as
+    /// grey is named Silver (the app's light grey). Without the group (an older
+    /// vocabulary) nothing changes.
+    static func resolveLightNeutral(_ clusters: [(name: String, lab: (Float, Float, Float), share: Float, first: Bool)],
+                                    tone: [String: Float])
+        -> [(name: String, lab: (Float, Float, Float), share: Float, first: Bool)] {
+        guard var main = clusters.first, ["White", "Cream"].contains(main.name),
+              hypot(main.lab.1, main.lab.2) < 12,
+              let white = tone["White"], let grey = tone["Silver"], grey - white > lightGreyMargin else { return clusters }
+        main.name = "Silver"
+        return [main] + clusters.dropFirst()
+    }
+
+    /// How much more "light grey" than "white" the encoder must find a garment
+    /// (cosine gap) before a White main colour is renamed Silver.
+    static var lightGreyMargin: Float = 0
 
     /// The app's colour name for a Lab colour.
     static func name(_ c: (Float, Float, Float)) -> String {

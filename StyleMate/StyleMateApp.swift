@@ -187,6 +187,9 @@ struct RootView: View {
         .onAppear {
             hasPhotoAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan
             if let id = authService.user?.id { activateProfile(id) }
+            #if DEBUG
+            TryOnDebugSeed.applyIfNeeded()   // UI tests only (-uiTestSeedTryOn)
+            #endif
         }
         // Studio renders: whenever items arrive (scan, manual add, restore),
         // turn their cutouts into lifelike catalog images in the background.

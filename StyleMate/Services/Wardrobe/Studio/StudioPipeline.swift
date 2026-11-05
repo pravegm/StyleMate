@@ -70,13 +70,26 @@ enum StudioPipeline {
         let secondObject: Float
         /// Largest near-white blob inside the product, as a share of it.
         let whitePanel: Float
+        /// The render's own colour (before colour matching) against the item's:
+        /// mean lightness difference and mean a/b distance in CIELAB.
+        var colourDriftL: Float = 0
+        var colourDriftAB: Float = 0
+        /// The render's top zero-shot product in the planned product's group.
+        var bestProduct: String = ""
+        var bestProductScore: Float = 0
+        /// Zero-shot brand-mark and pair margins (shoe / hat product shots; −1 = not measured).
+        var logoMargin: Float = -1
+        var pairMargin: Float = -1
         /// Why it can't be used (nil = acceptable).
         let rejection: String?
 
         var summary: [String: Any] {
             ["score": score, "similarity": similarity, "body": body, "product": product, "plain": plain,
              "qcMargin": qcMargin, "touchesFrame": touchesFrame, "coverage": coverage,
-             "secondObject": secondObject, "whitePanel": whitePanel, "rejection": rejection ?? ""]
+             "secondObject": secondObject, "whitePanel": whitePanel, "colourDriftL": colourDriftL,
+             "colourDriftAB": colourDriftAB, "bestProduct": bestProduct, "bestProductScore": bestProductScore,
+             "logoMargin": logoMargin, "pairMargin": pairMargin,
+             "rejection": rejection ?? ""]
         }
     }
 
@@ -107,6 +120,25 @@ enum StudioPipeline {
     /// this of the product prompt. Lab calibration (Nov 2026): renders of a
     /// person -0.050…-0.031, good catalog renders -0.110…-0.061.
     static var qcMarginReject: Float = -0.045
+
+    /// A product-shot template render (shoes, hats, trousers) starts from the
+    /// item's own fabric, so its colour stays close (lab, Nov 2026: |ΔL| ≤ 13, Δab ≤ 7 over shoes, a cap, trousers).
+    /// FashionSigLIP similarity barely sees colour between a single side-view
+    /// shoe and a worn pair (a black-sneaker render scored higher against a
+    /// white sneaker than against its own), so a render that drifted this far
+    /// is rejected rather than trusted to colour matching.
+    static var maxColourDriftL: Float = 28
+
+    /// Shoe and hat renders that grew a brand mark (a swoosh on a plain white
+    /// sneaker, a crest on a plain black cap) are rejected: zero-shot `render_logo`
+    /// Logo − Plain. On 30 labelled CI candidates (Nov 2026) the logo ones scored
+    /// ≥ +0.021, the clean ones ≤ +0.011.
+    static var maxLogoMargin: Float = 0.016
+    /// A shoe template asks for one shoe; `shoe_count` Pair − Single above this is a
+    /// pair (overlapping pairs are one connected object, so the second-object check
+    /// misses them). CI: a pair of loafers −0.007, single shoes ≤ −0.021.
+    static var maxPairMargin: Float = -0.015
+    static var maxColourDriftAB: Float = 16
 
     static func minSimilarity(for plan: StudioPlan) -> Float {
         if case .generate = plan.mode { return plan.template == nil ? minSimilarityGenerate : minSimilarityTemplate }
@@ -163,15 +195,24 @@ enum StudioPipeline {
 
     // MARK: - Candidate evaluation
 
-    /// Kinds whose product is two separate objects (a pair of shoes).
-    private static func isPaired(_ label: String) -> Bool { label.hasPrefix("Footwear|") }
+    /// Renders whose product is two separate objects: a pair of shoes refined
+    /// from the worn pair. A shoe template asks for ONE shoe, so a second shoe
+    /// there is a second object (the closet keeps one look).
+    private static func isPaired(_ plan: StudioPlan) -> Bool { plan.productLabel.hasPrefix("Footwear|") && plan.template == nil }
 
     /// Returns the measured candidate (with a `rejection` reason when it fails a
     /// hard check), or nil when nothing is separable from the background.
     static func evaluate(_ render: CGImage, reference: ColorStats?, embedding: [Float], plan: StudioPlan? = nil,
                          minSimilarity: Float = 0) -> Candidate? {
-        guard let cut = isolateProduct(render, keepPairs: plan.map { isPaired($0.productLabel) } ?? true) else { return nil }
+        let core = plan.flatMap { p in p.productShot ? p.templateShape.flatMap { StudioTemplate.core($0, side: render.width) } : nil }
+        guard let cut = isolateProduct(render, keepPairs: plan.map(isPaired) ?? true,
+                                       core: render.width == render.height ? core : nil) else { return nil }
         var image = cut.image
+        var driftL: Float = 0, driftAB: Float = 0
+        if let ref = reference, let own = ColorStats(cut.image) {
+            driftL = own.mean.0 - ref.mean.0
+            driftAB = hypot(own.mean.1 - ref.mean.1, own.mean.2 - ref.mean.2)
+        }
         if let ref = reference, let matched = ColorStats.match(image, to: ref) { image = matched }
         let framed = GarmentCutout.frame(image)
         guard let fcg = framed.cgImage, let onWhite = FashionClassifier.onWhite(fcg, side: 224),
@@ -182,20 +223,37 @@ enum StudioPipeline {
         // Does it read as the right kind of product (and, for plain items, as
         // plain)? Zero-shot against the bundled vocabulary.
         var product: Float = 0, plain: Float = 0, qcMargin: Float = -1
+        var bestProduct = "", bestProductScore: Float = 0
+        var logoMargin: Float = -1, pairMargin: Float = -1
+        let family = plan?.templateShape.map(StudioTemplate.family)
         if let plan, let vocab = WardrobeML.shared.vocabulary {
             for group in ["upper_inner", "upper_outer", "lower", "onepiece", "footwear", "bag", "headwear", "eyewear", "neckwear", "jewelry"] {
-                if let s = vocab.scores(in: group, for: e)[plan.productLabel] { product = s; break }
+                let scores = vocab.scores(in: group, for: e)
+                if let s = scores[plan.productLabel] {
+                    product = s
+                    if let top = scores.max(by: { $0.value < $1.value }) { bestProduct = top.key; bestProductScore = top.value }
+                    break
+                }
             }
             score += 0.25 * product
             if plan.isSolid, let solid = vocab.scores(in: "pattern", for: e)["Solid"] { plain = solid; score += 0.15 * solid }
             // Known failure looks (a person wearing it, a stack of tees, a flat
             // lay with props, a white panel) must stay well below the product.
             if let worst = vocab.scores(in: "render_qc", for: e).values.max(), product > 0 { qcMargin = worst - product }
+            if family == .footwear || family == .headwear {
+                let l = vocab.scores(in: "render_logo", for: e)
+                if let a = l["Logo"], let b = l["Plain"] { logoMargin = a - b }
+            }
+            if family == .footwear {
+                let c = vocab.scores(in: "shoe_count", for: e)
+                if let a = c["Pair"], let b = c["Single"] { pairMargin = a - b }
+            }
         }
         // A light garment legitimately has white areas; only check darker ones.
         let lightGarment = (reference?.mean.0 ?? 50) > 72
         var isGenerate = false
         if let plan, case .generate = plan.mode { isGenerate = true }
+        let productShot = isGenerate && plan?.template != nil && plan?.productShot == true
         let whitePanel = lightGarment ? 0 : interiorWhiteBlob(cut.image)
 
         var rejection: String?
@@ -204,21 +262,35 @@ enum StudioPipeline {
         else if cut.secondObject >= 0.15 { rejection = "second object (\(String(format: "%.2f", cut.secondObject)))" }
         else if whitePanel >= 0.03 { rejection = "white panel (\(String(format: "%.3f", whitePanel)))" }
         else if body > 0.25 { rejection = "body / mannequin (\(String(format: "%.2f", body)))" }
+        else if productShot, abs(driftL) > maxColourDriftL || driftAB > maxColourDriftAB {
+            rejection = "colour drift (ΔL \(String(format: "%+.0f", driftL)), Δab \(String(format: "%.0f", driftAB)))"
+        }
+        else if productShot, logoMargin > maxLogoMargin {
+            rejection = "brand logo (\(String(format: "%+.3f", logoMargin)))"
+        }
+        else if productShot, pairMargin > maxPairMargin {
+            rejection = "a pair, not one shoe (\(String(format: "%+.3f", pairMargin)))"
+        }
         else if isGenerate, qcMargin > qcMarginReject { rejection = "looks like a failed render (qc +\(String(format: "%.3f", qcMargin)))" }
         else if sim < minSimilarity { rejection = "not the same item (sim \(String(format: "%.3f", sim)) < \(minSimilarity))" }
         return Candidate(image: framed, score: score, similarity: sim, body: body, product: product, plain: plain,
                          qcMargin: qcMargin, touchesFrame: cut.touchesFrame, coverage: cut.coverage,
-                         secondObject: cut.secondObject, whitePanel: whitePanel, rejection: rejection)
+                         secondObject: cut.secondObject, whitePanel: whitePanel,
+                         colourDriftL: driftL, colourDriftAB: driftAB, bestProduct: bestProduct,
+                         bestProductScore: bestProductScore, logoMargin: logoMargin, pairMargin: pairMargin,
+                         rejection: rejection)
     }
 
     /// The product, without its white background: Vision's foreground instance
     /// mask on device (every instance, so a second object is measured, then the
     /// largest kept), or white-keying where Vision isn't available (simulator).
-    static func isolateProduct(_ render: CGImage, keepPairs: Bool = true)
+    /// `core`: where a product shot's template put the product (w×h, row 0 = top);
+    /// the white key never floods into it.
+    static func isolateProduct(_ render: CGImage, keepPairs: Bool = true, core: [Bool]? = nil)
         -> (image: CGImage, touchesFrame: Bool, coverage: Float, secondObject: Float)? {
         let w = render.width, h = render.height
         guard var px = GarmentCutout.rgbaPixels(render) else { return nil }
-        var alpha = visionMask(render) ?? whiteKeyMask(px, w: w, h: h)
+        var alpha = visionMask(render) ?? whiteKeyMask(px, w: w, h: h, core: core?.count == w * h ? core : nil)
         let second = keepLargestComponent(&alpha, w: w, h: h, keepPairs: keepPairs)
         var any = false, touches = false, opaque = 0
         for y in 0..<h {
@@ -294,9 +366,19 @@ enum StudioPipeline {
         #endif
     }
 
-    /// Background = near-white pixels connected to the image border.
-    static func whiteKeyMask(_ px: [UInt8], w: Int, h: Int) -> [UInt8] {
-        func isBG(_ i: Int) -> Bool { px[i * 4] > 232 && px[i * 4 + 1] > 232 && px[i * 4 + 2] > 232 }
+    /// Background = pixels connected to the image border that are near-white,
+    /// or, on a grey backdrop (light products), close to the border's own grey.
+    static func whiteKeyMask(_ px: [UInt8], w: Int, h: Int, core: [Bool]? = nil) -> [UInt8] {
+        var border: [[Int]] = [[], [], []]
+        for x in stride(from: 0, to: w, by: 4) { for i in [x, (h - 1) * w + x] { for c in 0..<3 { border[c].append(Int(px[i * 4 + c])) } } }
+        for y in stride(from: 0, to: h, by: 4) { for i in [y * w, y * w + w - 1] { for c in 0..<3 { border[c].append(Int(px[i * 4 + c])) } } }
+        let key = border.map { $0.sorted()[$0.count / 2] }
+        let white = key.allSatisfy { $0 > 232 }
+        func isBG(_ i: Int) -> Bool {
+            if let core, core[i] { return false }
+            if white { return px[i * 4] > 232 && px[i * 4 + 1] > 232 && px[i * 4 + 2] > 232 }
+            return abs(Int(px[i * 4]) - key[0]) < 22 && abs(Int(px[i * 4 + 1]) - key[1]) < 22 && abs(Int(px[i * 4 + 2]) - key[2]) < 22
+        }
         var bg = [Bool](repeating: false, count: w * h)
         var stack: [Int] = []
         for x in 0..<w { stack.append(x); stack.append((h - 1) * w + x) }
