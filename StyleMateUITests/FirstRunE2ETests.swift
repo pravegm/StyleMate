@@ -148,8 +148,8 @@ class FirstRunE2ETests: E2ETestCase {
 
         // Delete Account explains what goes and the Settings steps, and can be cancelled.
         app.buttons.matching(NSPredicate(format: "identifier == 'profile.account.delete' OR label == 'Delete Account'")).firstMatch.tap()
-        let steps = anyElement(NSPredicate(format: "identifier == 'deleteAccount.settingsSteps' OR label CONTAINS 'Stop Using'"))
-        XCTAssertTrue(steps.waitForExistence(timeout: 10), "Delete Account doesn't explain the Settings steps")
+        let settingsSteps = anyElement(NSPredicate(format: "identifier == 'deleteAccount.settingsSteps' OR label CONTAINS 'Stop Using'"))
+        XCTAssertTrue(settingsSteps.waitForExistence(timeout: 10), "Delete Account doesn't explain the Settings steps")
         snap("delete-account")
         app.buttons.matching(NSPredicate(format: "identifier == 'deleteAccount.cancel' OR label == 'Keep my account'")).firstMatch.tap()
 
