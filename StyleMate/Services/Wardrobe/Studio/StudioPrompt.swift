@@ -95,6 +95,14 @@ struct StudioPlan {
     /// from the worn cutout, which mostly reproduced the street photo).
     static let productShotKinds: Set<GarmentKind> = [.lower, .footwear, .headwear]
 
+    /// The cutout reads as a low shoe rather than a boot (`footwear_height` zero-shot;
+    /// CI fixtures: boat shoes −0.036, patent boots +0.083).
+    static func isLowShoe(_ embedding: [Float]) -> Bool {
+        guard let s = WardrobeML.shared.vocabulary?.scores(in: "footwear_height", for: embedding),
+              let boot = s["Boot"], let low = s["Low"] else { return false }
+        return boot - low < 0
+    }
+
     static func make(product: String, category: Category, colors: [String], pattern: Pattern,
                      material: String?, sleeve: SleeveLength?, neckline: Neckline?, details: String?,
                      kind: GarmentKind, truncated: Bool, cutout: CGImage? = nil, embedding: [Float]? = nil,
@@ -111,18 +119,25 @@ struct StudioPlan {
         let label = "\(category.rawValue)|\(product)", solid = pattern == .solid
         let layered: Set<GarmentKind> = [.innerTop, .outerLayer, .onePiece]
         // Template-guided: start from a product silhouette in the item's own fabric.
-        var template: CGImage?, strength: Float = 0.65, templateShape: StudioTemplate.Shape?
+        var template: CGImage?, strength: Float = 0.65, templateShape: StudioTemplate.Shape?, lowShoe = false
         if useTemplates, let cutout, layered.contains(kind) || truncated || productShotKinds.contains(kind),
-           let shape = StudioTemplate.shape(product: product, kind: kind, sleeve: sleeve, fit: itemFit) {
+           var shape = StudioTemplate.shape(product: product, kind: kind, sleeve: sleeve, fit: itemFit) {
+            // A boot template for a low shoe drew a tall suede boot for boat shoes named "Boots"
+            // (CI, Nov 2026): the encoder judges the cutout's height itself.
+            if kind == .footwear, shape == .boot || shape == .chelsea, let e = embedding, isLowShoe(e) {
+                shape = .loafer; lowShoe = true
+            }
             template = StudioTemplate.render(cutout: cutout, shape: shape, solid: solid)
             strength = StudioTemplate.strength(shape)
             templateShape = shape
         }
         if layered.contains(kind) || truncated || template != nil {
             let productShot = template != nil && productShotKinds.contains(kind)
-            let name = kind == .footwear && template != nil ? singleShoe(product) : product
-            let desc = describe(product: name, colors: colors, pattern: pattern, material: material,
+            let name = kind == .footwear && template != nil ? (lowShoe ? "shoe" : singleShoe(product)) : product
+            var desc = describe(product: name, colors: colors, pattern: pattern, material: material,
                                 sleeve: sleeve, neckline: neckline, details: details)
+            // Shoes and caps grew invented brand marks (a swoosh, a crest): ask for a plain one.
+            if productShot, solid, kind == .footwear || kind == .headwear { desc += ", plain unbranded" }
             let anchor = template == nil ? textAnchor : templateAnchor
             let prompt: String
             switch kind {

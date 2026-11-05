@@ -128,6 +128,17 @@ struct StudioPipelineTests {
         #expect(at(0.50, 0.655).0 > 170, "light sole, got \(at(0.50, 0.655))")
     }
 
+    @Test func renderCheckVocabularyIsBundled() throws {
+        try #require(WardrobeExtractor.isAvailable, "needs the bundled vocabulary")
+        let vocab = try #require(WardrobeML.shared.vocabulary)
+        let e = [Float](repeating: 0.036, count: 768)
+        for (group, labels) in [("neutral_tone", ["White", "Silver"]), ("render_logo", ["Logo", "Plain"]),
+                                ("shoe_count", ["Pair", "Single"]), ("footwear_height", ["Boot", "Low"])] {
+            let s = vocab.scores(in: group, for: e)
+            #expect(labels.allSatisfy { s[$0] != nil }, "\(group): \(s.keys.sorted())")
+        }
+    }
+
     @Test func lightGreyIsNotWhite() {
         typealias C = (name: String, lab: (Float, Float, Float), share: Float, first: Bool)
         let sunlitGreyCoat: [C] = [("White", (83, 1, -3), 0.78, true), ("Black", (24, 1, -3), 0.13, false)]

@@ -177,9 +177,11 @@ enum StudioTemplate {
                     Part(fill: .opening, points: [(0.51, 0.20), (0.79, 0.20), (0.79, 0.225), (0.51, 0.225)]),
                     Part(fill: .sole, points: [(0.08, 0.69), (0.89, 0.69), (0.89, 0.73), (0.88, 0.77), (0.72, 0.77), (0.70, 0.73), (0.10, 0.73)])]
         case .loafer:
-            return [f([(0.10, 0.65), (0.12, 0.59), (0.20, 0.55), (0.33, 0.52), (0.45, 0.50), (0.56, 0.48), (0.70, 0.485),
-                       (0.84, 0.48), (0.89, 0.52), (0.90, 0.65)]),
-                    Part(fill: .opening, points: [(0.52, 0.485), (0.70, 0.49), (0.85, 0.485), (0.84, 0.51), (0.70, 0.515), (0.53, 0.51)]),
+            // As tall as a real low shoe (height ≈ 0.38 of its length): a flatter one
+            // let the model fit two loafers into it (CI, Nov 2026).
+            return [f([(0.10, 0.65), (0.12, 0.58), (0.20, 0.52), (0.32, 0.48), (0.44, 0.45), (0.56, 0.42), (0.70, 0.425),
+                       (0.84, 0.42), (0.89, 0.47), (0.90, 0.65)]),
+                    Part(fill: .opening, points: [(0.52, 0.425), (0.70, 0.43), (0.85, 0.425), (0.84, 0.45), (0.70, 0.455), (0.53, 0.45)]),
                     Part(fill: .sole, points: [(0.09, 0.64), (0.91, 0.64), (0.91, 0.68), (0.90, 0.72), (0.76, 0.72), (0.75, 0.68), (0.11, 0.68)])]
         case .heel:
             return [Part(fill: .sole, points: [(0.80, 0.46), (0.87, 0.46), (0.855, 0.76), (0.835, 0.76)]),
@@ -350,10 +352,14 @@ enum StudioTemplate {
     static func renderProduct(cutout: CGImage, shape: Shape, parts: [Part], solid: Bool, side: Int, backdrop: CGFloat = 1) -> CGImage? {
         guard let raw = (solid ? fabricPatch(cutout, mainColourOnly: true) : nil) ?? fabricPatch(cutout),
               let mean = meanColour(raw) else { return nil }
-        // A plain item's patch keeps its fine texture (knit, grain, wash) but not
-        // its larger blotches: mirror-tiled, those read as a print.
-        let patch = solid ? (flattened(raw, mean: mean) ?? raw) : raw
         let fam = family(shape)
+        // A plain item's patch keeps its fine texture (knit, grain, wash) but not
+        // its larger blotches: mirror-tiled, those read as a print. Plain shoes and
+        // hats get only their colour with a fine grain: mirror tiles meet in small
+        // symmetric motifs that the model turned into a crest on a cap and a logo on
+        // a sneaker (CI, Nov 2026).
+        let plainAccessory = solid && (fam == .footwear || fam == .headwear)
+        let patch = plainAccessory ? (grain(mean: mean) ?? raw) : solid ? (flattened(raw, mean: mean) ?? raw) : raw
         let sole = fam == .footwear ? soleColour(cutout, fabric: mean) : mean
         let s = CGFloat(side)
         guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
@@ -479,6 +485,23 @@ enum StudioTemplate {
                 ctx.restoreGState()
             }
         }
+    }
+
+    /// A 64×64 tile of `mean` with a fine, motif-free grain (±3 levels).
+    static func grain(mean: (CGFloat, CGFloat, CGFloat), side: Int = 64) -> CGImage? {
+        var px = [UInt8](repeating: 255, count: side * side * 4)
+        var state: UInt32 = 0x9E37_79B9
+        let m = [mean.0, mean.1, mean.2].map { Int($0 * 255) }
+        for i in 0..<(side * side) {
+            state = state &* 1_664_525 &+ 1_013_904_223
+            let d = Int(state >> 29) - 3          // -3...4, the same for all channels
+            for c in 0..<3 { px[i * 4 + c] = UInt8(min(max(m[c] + d, 0), 255)) }
+        }
+        guard let ctx = CGContext(data: &px, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
+        else { return nil }
+        return ctx.makeImage()
     }
 
     /// Mean colour of an opaque image, 0...1.

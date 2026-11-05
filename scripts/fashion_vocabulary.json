@@ -78,6 +78,19 @@
   "hair_check": {"template": "a photo of {}", "labels": [
     ["Hair", "a person's hair"], ["Hair", "long dark hair"], ["Accessories|Turbans", "a turban"], ["Accessories|Scarves", "a headscarf hijab"]
   ]},
+  "render_logo": {"template": "{}", "labels": [
+    ["Logo", "a photo of a sneaker with a swoosh logo on the side"], ["Logo", "a photo of a baseball cap with a team logo on the front"],
+    ["Logo", "a photo of a shoe with a brand logo"], ["Plain", "a photo of a plain sneaker with no logo"],
+    ["Plain", "a photo of a plain baseball cap with no logo"], ["Plain", "a photo of a plain shoe"]
+  ]},
+  "shoe_count": {"template": "{}", "labels": [
+    ["Pair", "a photo of a pair of shoes, one in front of the other"], ["Pair", "a photo of two matching shoes together"],
+    ["Single", "a photo of exactly one shoe, side view"], ["Single", "a photo of a single shoe on its own"]
+  ]},
+  "footwear_height": {"template": "a photo of {}", "labels": [
+    ["Boot", "an ankle boot"], ["Boot", "a tall boot"], ["Boot", "a lace-up boot"],
+    ["Low", "a low-cut shoe"], ["Low", "a loafer"], ["Low", "a boat shoe"], ["Low", "a low sneaker"]
+  ]},
   "neutral_tone": {"template": "a photo of a {} garment", "labels": [
     ["White", "white"], ["White", "bright white"], ["White", "ivory"], ["Silver", "light grey"], ["Silver", "silver grey"], ["Silver", "heather grey"]
   ]},

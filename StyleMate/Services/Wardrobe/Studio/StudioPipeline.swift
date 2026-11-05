@@ -77,6 +77,9 @@ enum StudioPipeline {
         /// The render's top zero-shot product in the planned product's group.
         var bestProduct: String = ""
         var bestProductScore: Float = 0
+        /// Zero-shot brand-mark and pair margins (shoe / hat product shots; −1 = not measured).
+        var logoMargin: Float = -1
+        var pairMargin: Float = -1
         /// Why it can't be used (nil = acceptable).
         let rejection: String?
 
@@ -85,6 +88,7 @@ enum StudioPipeline {
              "qcMargin": qcMargin, "touchesFrame": touchesFrame, "coverage": coverage,
              "secondObject": secondObject, "whitePanel": whitePanel, "colourDriftL": colourDriftL,
              "colourDriftAB": colourDriftAB, "bestProduct": bestProduct, "bestProductScore": bestProductScore,
+             "logoMargin": logoMargin, "pairMargin": pairMargin,
              "rejection": rejection ?? ""]
         }
     }
@@ -124,6 +128,16 @@ enum StudioPipeline {
     /// white sneaker than against its own), so a render that drifted this far
     /// is rejected rather than trusted to colour matching.
     static var maxColourDriftL: Float = 28
+
+    /// Shoe and hat renders that grew a brand mark (a swoosh on a plain white
+    /// sneaker, a crest on a plain black cap) are rejected: zero-shot `render_logo`
+    /// Logo − Plain. On 30 labelled CI candidates (Nov 2026) the logo ones scored
+    /// ≥ +0.021, the clean ones ≤ +0.011.
+    static var maxLogoMargin: Float = 0.016
+    /// A shoe template asks for one shoe; `shoe_count` Pair − Single above this is a
+    /// pair (overlapping pairs are one connected object, so the second-object check
+    /// misses them). CI: a pair of loafers −0.007, single shoes ≤ −0.021.
+    static var maxPairMargin: Float = -0.015
     static var maxColourDriftAB: Float = 16
 
     static func minSimilarity(for plan: StudioPlan) -> Float {
@@ -210,6 +224,8 @@ enum StudioPipeline {
         // plain)? Zero-shot against the bundled vocabulary.
         var product: Float = 0, plain: Float = 0, qcMargin: Float = -1
         var bestProduct = "", bestProductScore: Float = 0
+        var logoMargin: Float = -1, pairMargin: Float = -1
+        let family = plan?.templateShape.map(StudioTemplate.family)
         if let plan, let vocab = WardrobeML.shared.vocabulary {
             for group in ["upper_inner", "upper_outer", "lower", "onepiece", "footwear", "bag", "headwear", "eyewear", "neckwear", "jewelry"] {
                 let scores = vocab.scores(in: group, for: e)
@@ -224,6 +240,14 @@ enum StudioPipeline {
             // Known failure looks (a person wearing it, a stack of tees, a flat
             // lay with props, a white panel) must stay well below the product.
             if let worst = vocab.scores(in: "render_qc", for: e).values.max(), product > 0 { qcMargin = worst - product }
+            if family == .footwear || family == .headwear {
+                let l = vocab.scores(in: "render_logo", for: e)
+                if let a = l["Logo"], let b = l["Plain"] { logoMargin = a - b }
+            }
+            if family == .footwear {
+                let c = vocab.scores(in: "shoe_count", for: e)
+                if let a = c["Pair"], let b = c["Single"] { pairMargin = a - b }
+            }
         }
         // A light garment legitimately has white areas; only check darker ones.
         let lightGarment = (reference?.mean.0 ?? 50) > 72
@@ -241,13 +265,20 @@ enum StudioPipeline {
         else if productShot, abs(driftL) > maxColourDriftL || driftAB > maxColourDriftAB {
             rejection = "colour drift (ΔL \(String(format: "%+.0f", driftL)), Δab \(String(format: "%.0f", driftAB)))"
         }
+        else if productShot, logoMargin > maxLogoMargin {
+            rejection = "brand logo (\(String(format: "%+.3f", logoMargin)))"
+        }
+        else if productShot, pairMargin > maxPairMargin {
+            rejection = "a pair, not one shoe (\(String(format: "%+.3f", pairMargin)))"
+        }
         else if isGenerate, qcMargin > qcMarginReject { rejection = "looks like a failed render (qc +\(String(format: "%.3f", qcMargin)))" }
         else if sim < minSimilarity { rejection = "not the same item (sim \(String(format: "%.3f", sim)) < \(minSimilarity))" }
         return Candidate(image: framed, score: score, similarity: sim, body: body, product: product, plain: plain,
                          qcMargin: qcMargin, touchesFrame: cut.touchesFrame, coverage: cut.coverage,
                          secondObject: cut.secondObject, whitePanel: whitePanel,
                          colourDriftL: driftL, colourDriftAB: driftAB, bestProduct: bestProduct,
-                         bestProductScore: bestProductScore, rejection: rejection)
+                         bestProductScore: bestProductScore, logoMargin: logoMargin, pairMargin: pairMargin,
+                         rejection: rejection)
     }
 
     /// The product, without its white background: Vision's foreground instance
