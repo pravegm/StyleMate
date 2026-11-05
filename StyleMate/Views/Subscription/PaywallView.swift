@@ -74,7 +74,7 @@ struct PaywallView: View {
                 heroHeader
                 plans
                 benefits
-                legal
+                disclosureText
             }
             .padding(.horizontal, DS.Spacing.screenH)
             .padding(.top, DS.Spacing.xxl)
@@ -84,9 +84,11 @@ struct PaywallView: View {
         }
         .scrollIndicators(.hidden)
         .safeAreaInset(edge: .bottom) {
+            // Price, Restore, Terms and Privacy always in view (3.1.2), not below the fold.
             VStack(spacing: DS.Spacing.xs) {
                 purchaseButton
                 priceLine
+                legalLinks
             }
             .padding(.horizontal, DS.Spacing.screenH)
             .padding(.top, DS.Spacing.sm)
@@ -358,6 +360,12 @@ struct PaywallView: View {
 
     private var legal: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            legalLinks
+            disclosureText
+        }
+    }
+
+    private var legalLinks: some View {
             HStack(spacing: DS.Spacing.md) {
                 Button {
                     Task { await restore() }
@@ -376,14 +384,17 @@ struct PaywallView: View {
             }
             .font(DS.Font.footnote.weight(.semibold))
             .foregroundStyle(DS.Colors.accent)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
             .frame(maxWidth: .infinity)
+    }
 
-            Text(disclosure)
-                .font(DS.Font.caption2)
-                .foregroundStyle(DS.Colors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("paywall.disclosure")
-        }
+    private var disclosureText: some View {
+        Text(disclosure)
+            .font(DS.Font.caption2)
+            .foregroundStyle(DS.Colors.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("paywall.disclosure")
     }
 
     private var disclosure: String {

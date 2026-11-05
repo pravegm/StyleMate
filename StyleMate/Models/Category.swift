@@ -637,7 +637,7 @@ class WardrobeViewModel: ObservableObject {
         }
         for flag in ["thumbnailMigrationComplete_", "thumbnailScaleMigration_v1_", "bgRemovalMigrationComplete_",
                      "zoneCropMigrationComplete_", "hasMigratedBackgroundRemoval_", "hasMigratedThumbnails_",
-                     "hasMigratedZoneCrop_"] {
+                     "hasMigratedZoneCrop_", "closetReadyMilestones_"] {
             UserDefaults.standard.removeObject(forKey: flag + userId)
         }
 

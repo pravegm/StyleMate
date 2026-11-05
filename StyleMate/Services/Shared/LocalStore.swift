@@ -130,6 +130,12 @@ enum LocalStore {
         return url
     }
 
+    /// The profile has a reference selfie (without one the scan can't recognise anyone).
+    static func hasSelfie(userId: String) -> Bool {
+        guard !userId.isEmpty, let stored = UserDefaults.standard.string(forKey: selfieKey(userId)) else { return false }
+        return resolveSelfiePath(stored, userId: userId) != nil
+    }
+
     /// Resolves a stored selfie path to a file that exists, migrating a legacy
     /// `Documents/` selfie into `Application Support/Selfie/` on the way (and updating the
     /// stored path). The app container's absolute path can change across reinstalls and

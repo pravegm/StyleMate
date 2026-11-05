@@ -242,6 +242,8 @@ struct RootView: View {
                   authService.isAuthenticated,
                   !userId.isEmpty,
                   !UserDefaults.standard.bool(forKey: scanKey),
+                  // No selfie (skipped): nobody to recognise; Home offers the selfie instead.
+                  LocalStore.hasSelfie(userId: userId),
                   PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan,
                   !PhotoScanService.shared.isWorking,
                   PhotoScanService.shared.scanState == .idle else { return }

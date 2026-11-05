@@ -174,4 +174,19 @@ struct FirstRunTests {
         #expect(SampleLibrary.sampleItemIDs(forUser: "u", defaults: d) == [a, b])
         #expect(SampleLibrary.sampleItemIDs(forUser: "other", defaults: d).isEmpty)
     }
+
+    // MARK: Closet-ready notifications
+
+    @MainActor
+    @Test func closetReadyFiresOncePerMilestone() {
+        #expect(ClosetReadyNotifier.milestones == [10, 25, 50])
+        #expect(ClosetReadyNotifier.milestone(reachedBy: 9, fired: []) == nil)
+        #expect(ClosetReadyNotifier.milestone(reachedBy: 10, fired: []) == 10)
+        #expect(ClosetReadyNotifier.milestone(reachedBy: 11, fired: [10]) == nil)
+        #expect(ClosetReadyNotifier.milestone(reachedBy: 26, fired: [10]) == 25)
+        // A big jump announces only the highest one.
+        #expect(ClosetReadyNotifier.milestone(reachedBy: 60, fired: []) == 50)
+        #expect(ClosetReadyNotifier.milestone(reachedBy: 80, fired: [10, 25, 50]) == nil)
+        #expect(ClosetReadyNotifier.title(for: 25) == "Your closet is ready: 25 pieces")
+    }
 }

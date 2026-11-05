@@ -861,6 +861,8 @@ class PhotoScanService: ObservableObject {
             wardrobeViewModel.syncItemToCloud(wardrobeItem)
             scanAddedItemIDs.append(wardrobeItem.id)
             itemsFound = scanAddedItemIDs.count
+            // First scan, app in the background: "Your closet is ready: 25 pieces" (if allowed).
+            if gated { ClosetReadyNotifier.shared.closetGrew(to: PremiumGate.countedItems(in: wardrobeViewModel), userId: userId) }
             outcome.added.append(wardrobeItem.id)
             print("[StyleMate] Auto-scan: Added \(prod) (\(cat.rawValue)) to wardrobe")
         }

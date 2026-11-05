@@ -88,7 +88,8 @@ class FirstRunE2ETests: E2ETestCase {
     }
 
     /// 2. Welcome → Get Started → Sign in with Apple (test account) → selfie (skipped: no camera in
-    ///    the simulator) → photos (pre-granted by CI) → Find yourself → scanning → Home.
+    ///    the simulator) → photos (pre-granted by CI) → Home. With no selfie there's no Find
+    ///    yourself or scan screen (both would be dead ends): Home offers the selfie and the samples.
     @MainActor
     func test06_OnboardingSignInToHome() throws {
         launchFresh()
@@ -129,6 +130,12 @@ class FirstRunE2ETests: E2ETestCase {
         }
         XCTAssertTrue(tabs.waitForExistence(timeout: 10), "Onboarding never reached Home (screens seen: \(seen.sorted()))")
         note("onboarding-screens", seen.sorted().joined(separator: "\n"))
+        XCTAssertFalse(seen.contains("find-yourself-continue") || seen.contains("scanning"),
+                       "Without a selfie onboarding still showed Find yourself / the scan screen: \(seen.sorted())")
+        let noSelfie = anyElement(NSPredicate(format: "identifier == 'home.noSelfie' OR label CONTAINS 'Take a selfie to find your outfit photos'"))
+        XCTAssertTrue(noSelfie.waitForExistence(timeout: 10), "Home doesn't offer the selfie after it was skipped")
+        XCTAssertTrue(anyElement(NSPredicate(format: "identifier == 'home.noSelfie.trySamples' OR label CONTAINS 'Try with sample photos'")).exists,
+                      "Home doesn't offer the sample photos")
         snap("home-after-onboarding")
 
         // No coach-mark tour auto-starts any more.

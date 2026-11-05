@@ -1,4 +1,5 @@
 import SwiftUI
+import Photos
 
 /// Home's first-run and daily-habit cards, owned by the product side so Home
 /// needs only one call site (`HomeFirstRunCards(homeVM: homeVM)`):
@@ -23,6 +24,11 @@ struct HomeFirstRunCards: View {
     @ObservedObject private var morning = MorningLookScheduler.shared
     @ObservedObject private var router = NotificationRouter.shared
     @State private var showHeld = false
+    @State private var showSelfie = false
+    @State private var showFindYourself = false
+    @State private var tookSelfie = false
+    /// Re-read when a selfie sheet closes (the file lives on disk, not in observed state).
+    @State private var hasSelfie = true
 
     private var userId: String { auth.user?.id ?? "" }
     private var sampleCount: Int { SampleLibrary.sampleCount(in: wardrobe.items, userId: userId) }
@@ -39,12 +45,19 @@ struct HomeFirstRunCards: View {
 
     var body: some View {
         VStack(spacing: DS.Spacing.sm) {
+            if !hasSelfie {
+                // Onboarding skipped the selfie: nothing can be found in the photos yet.
+                NoSelfieCard(onSelfie: { Haptics.light(); showSelfie = true },
+                             onSamples: sampleCount == 0 && wardrobe.items.isEmpty && SampleLibrary.isAvailable && !scan.isWorking
+                                ? { Haptics.medium(); SampleLibrary.start(userId: userId, wardrobe: wardrobe) } : nil)
+            }
+
             if sampleCount > 0 {
                 SampleWardrobeBanner(count: sampleCount) {
                     Haptics.medium()
                     withAnimation(DS.Motion.smooth) { SampleLibrary.removeSamples(from: wardrobe, userId: userId) }
                 }
-            } else if showSampleOffer {
+            } else if showSampleOffer, hasSelfie {
                 EmptyClosetSampleCard {
                     Haptics.medium()
                     SampleLibrary.start(userId: userId, wardrobe: wardrobe)
@@ -80,7 +93,22 @@ struct HomeFirstRunCards: View {
             UncertainItemsSheet(isPresented: $showHeld)
                 .environmentObject(wardrobe)
         }
+        // Selfie, then Find yourself, then the first scan (what onboarding would have done).
+        .sheet(isPresented: $showSelfie, onDismiss: {
+            hasSelfie = selfieOnFile()
+            if tookSelfie {
+                tookSelfie = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showFindYourself = true }
+            }
+        }) {
+            RetakeSelfieSheet(onRetaken: { tookSelfie = true })
+                .environmentObject(auth)
+        }
+        .sheet(isPresented: $showFindYourself, onDismiss: startFirstScan) {
+            FaceReferenceBuilderView(userId: userId, isPresented: $showFindYourself)
+        }
         .task(id: userId) {
+            hasSelfie = selfieOnFile()
             held.load(forUser: userId)
             wearLog.load(forUser: userId)
             await morning.refreshAuthorization()
@@ -104,14 +132,81 @@ struct HomeFirstRunCards: View {
         }
     }
 
+    private func selfieOnFile() -> Bool {
+        #if DEBUG
+        // The UI tests' demo user stands in for someone who took the selfie in onboarding.
+        if DebugLaunchSupport.isUITestSession { return true }
+        #endif
+        return LocalStore.hasSelfie(userId: userId)
+    }
+
+    /// After a late selfie: the first library scan, exactly as onboarding starts it.
+    private func startFirstScan() {
+        guard hasSelfie, !userId.isEmpty, !scan.isWorking,
+              PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan else { return }
+        let gender = auth.user?.gender
+        Task {
+            await PhotoScanService.shared.startScan(forUser: userId, dateRange: OnboardingScanningView.firstScanRange,
+                                                    userGender: gender, wardrobeViewModel: wardrobe,
+                                                    trigger: .initial, firstLook: true)
+        }
+    }
+
     private var hasAnyCard: Bool {
-        sampleCount > 0 || !held.items.isEmpty || !wardrobe.lockedItems.isEmpty || wardrobe.allowanceNotice != nil || wearLog.next(loggedDays: loggedDays) != nil
+        !hasSelfie || sampleCount > 0 || !held.items.isEmpty || !wardrobe.lockedItems.isEmpty || wardrobe.allowanceNotice != nil || wearLog.next(loggedDays: loggedDays) != nil
             || (hasLoggedOutfit && morning.shouldOffer)
             || showSampleOffer
     }
 }
 
 // MARK: - Cards
+
+/// "Take a selfie to find your outfit photos": shown while the profile has no selfie (it was
+/// skipped in onboarding). The scan needs one to recognise the person; sample photos are the other
+/// way to see the app work.
+struct NoSelfieCard: View {
+    let onSelfie: () -> Void
+    var onSamples: (() -> Void)?
+
+    var body: some View {
+        CardShell {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                    Image(systemName: "person.crop.square.badge.camera")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(DS.Colors.accent)
+                        .frame(width: 36, height: 36)
+                        .background(DS.Colors.accentSoft, in: Circle())
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Take a selfie to find your outfit photos")
+                            .font(DS.Font.headline)
+                            .foregroundStyle(DS.Colors.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("StyleMate recognises you from one quick selfie, then builds your closet from your photos, all on this iPhone.")
+                            .font(DS.Font.subheadline)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Button(action: onSelfie) {
+                    Label("Take a selfie", systemImage: "camera.fill")
+                }
+                .buttonStyle(DSPrimaryButton())
+                .accessibilityIdentifier("home.noSelfie.takeSelfie")
+                if let onSamples {
+                    Button(action: onSamples) {
+                        Label("Try with sample photos", systemImage: "sparkles")
+                    }
+                    .buttonStyle(DSSecondaryButton())
+                    .accessibilityIdentifier("home.noSelfie.trySamples")
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.noSelfie")
+    }
+}
 
 private struct CardShell<Content: View>: View {
     @ViewBuilder let content: Content

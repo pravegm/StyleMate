@@ -139,7 +139,9 @@ Paste into each subscription's **Review Information › Review Notes**, and into
 > Sign in with your own Apple ID (Sign in with Apple is the only sign-in; StyleMate asks for the
 > name only, never the email). To reach the paywall quickly: on the welcome screen tap "Try with
 > sample photos", sign in, and a full sample wardrobe is built on the device in a minute or two.
-> Then open Profile › StyleMate Premium › "See Premium plans". The paywall also opens
+> Then open Profile › StyleMate Premium › "See Premium plans". (If you skip the selfie during
+> onboarding, Home offers the selfie and the sample photos; the photo scan needs a selfie to
+> recognise you.) The paywall also opens
 > from Wardrobe › + › Choose from Gallery once the closet holds 50 of your own items, and from the
 > "N more pieces found — Unlock with Premium" card on Home when the photo scan has found more than
 > 50. (Sample-photo items don't count towards the 50.)

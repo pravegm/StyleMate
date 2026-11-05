@@ -74,10 +74,12 @@ struct OnboardingView: View {
         }
     }
 
-    /// Granted (fully or limited) → Find yourself, then the scan. Denied → Home
-    /// (camera and the photo picker still work).
+    /// Granted (fully or limited) with a selfie → Find yourself, then the scan. No selfie (skipped)
+    /// or photos denied → Home, where a card offers the selfie and the sample photos (the scan can't
+    /// recognise anyone without a selfie, so Find yourself and the scan screen would be dead ends).
     private func handlePhotoPermissionDone() {
-        if PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan {
+        let hasSelfie = LocalStore.hasSelfie(userId: authService.user?.id ?? "")
+        if PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan, hasSelfie {
             go(to: .findYourself)
         } else {
             completeOnboarding()

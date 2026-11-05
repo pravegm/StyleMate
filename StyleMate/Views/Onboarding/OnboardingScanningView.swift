@@ -49,7 +49,12 @@ struct OnboardingScanningView: View {
                 .padding(.top, DS.Spacing.lg)
 
             if foundItems.isEmpty {
-                placeholderGrid
+                // A failed library scan (nobody to recognise) shows no loading skeleton.
+                if case .error = scan.scanState, mode == .library {
+                    EmptyView()
+                } else {
+                    placeholderGrid
+                }
             } else {
                 LazyVGrid(columns: columns, spacing: DS.Spacing.xs) {
                     ForEach(foundItems) { item in
