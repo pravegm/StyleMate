@@ -473,7 +473,10 @@ extension FaceMatchingTests {
         #expect(svc.loadReference(forUser: user))
         #expect(svc.gallerySummary().selfie == selfieAnchorCount)
         let match = svc.findUserInPhoto(cg)
-        #expect((match.similarity ?? 0) > 0.9)
+        // The selfie photo still matches its own anchor (single best), and the gallery consensus
+        // (mean of the two best entries: the anchor + a synthetic view at cosine c) still auto-adds.
+        #expect((match.bestSingleSimilarity ?? 0) > 0.9)
+        #expect((match.similarity ?? 0) >= FaceMatchingService.highConfidenceThreshold)
         svc.clearReference(forUser: user)
     }
 }

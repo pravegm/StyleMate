@@ -3,9 +3,9 @@
 LICENSED-ONLY. Convert InsightFace w600k_r50 (ArcFace ResNet-50, WebFace600K, from buffalo_l)
 to Core ML (fp16).
 
-InsightFace's models are for non-commercial research only. This script is used ONLY by
-`FACE_MODEL_SET=buffalo_l scripts/build_face_models.sh`, which refuses to run without a signed
-InsightFace licence (docs/MODEL-LICENSING.md §7). Nothing in the shipping build calls it.
+InsightFace's models are for non-commercial research only. No build script calls this or
+downloads the weights; run it by hand only after a signed InsightFace licence
+(docs/MODEL-LICENSING.md §7).
 
 I/O: [1,3,112,112] RGB, (px-127.5)/127.5 (FaceModelProfile.insightFaceBuffaloL), 512-d out.
 

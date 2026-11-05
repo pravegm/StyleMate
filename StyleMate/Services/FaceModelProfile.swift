@@ -13,7 +13,8 @@ enum FaceModelSet: String {
     case openCVZoo
     /// InsightFace `buffalo_l`: SCRFD-10G + ArcFace w600k_r50. **Non-commercial** unless InsightFace
     /// grants a licence (recognition-oss-pack@insightface.ai). Not built, not bundled. Kept as a
-    /// ready plug-in: set `FaceModelProfile.active` and build with FACE_MODEL_SET=buffalo_l.
+    /// ready plug-in on the Swift side; the build has no path to these weights on purpose (the
+    /// manual steps after a signed licence are in docs/MODEL-LICENSING.md §7).
     case insightFaceBuffaloL
 }
 

@@ -2,9 +2,9 @@
 """
 LICENSED-ONLY. Convert InsightFace SCRFD-10G (det_10g.onnx from buffalo_l) to Core ML.
 
-InsightFace's models are for non-commercial research only. This script is used ONLY by
-`FACE_MODEL_SET=buffalo_l scripts/build_face_models.sh`, which refuses to run without a signed
-InsightFace licence (docs/MODEL-LICENSING.md §7). Nothing in the shipping build calls it.
+InsightFace's models are for non-commercial research only. No build script calls this or
+downloads the weights; run it by hand only after a signed InsightFace licence
+(docs/MODEL-LICENSING.md §7).
 
 Fixed 640x640 input, RGB (px-127.5)/128. Outputs per stride 8/16/32: score, bbox-distance, kps.
 `SCRFDDetector.swift` decodes them (anchor centres, 2 anchors per cell, NMS 0.4).
