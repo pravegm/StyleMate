@@ -183,7 +183,7 @@ struct OnboardingPhotoPermissionView: View {
                 .frame(width: 90, height: 90)
             Image(systemName: name)
                 .font(.system(size: 40))
-                .foregroundColor(.white)
+                .foregroundColor(DS.Colors.onAccent)
         }
         .accessibilityHidden(true)
     }
