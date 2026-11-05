@@ -76,6 +76,12 @@ checked on 5 Nov: every model is inside the app and no test-only code ships (run
 the first scan run with the phone unlocked for a few minutes. Studio photos keep arriving in the
 background, and fastest when the phone is charging.
 
+**Then send us the numbers (10 minutes, once per phone)**: plugged in, open Profile → About →
+Diagnostics, press **Run benchmark**, do the **hinge check** on the Duo, and press **Share report**.
+It tells us how fast the AI really is on your iPhones (the cloud test Mac has no Neural Engine). The
+report contains timings and phone facts only. The licence credits the models need are under Profile →
+About → Acknowledgements.
+
 ## Decisions only you can make (before App Store launch, not before TestFlight)
 
 1. **Model licences: the one real launch blocker.** Three of the bundled models are licensed for

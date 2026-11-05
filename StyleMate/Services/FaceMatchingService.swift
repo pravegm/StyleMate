@@ -716,6 +716,7 @@ class FaceMatchingService {
     /// isolatable match is skipped (returns nil). Returns the image to analyze
     /// (whole for a confident solo match, isolated user for multi-person).
     func resolveIdentityForScan(in cgImage: CGImage, fullImage: UIImage, userId: String) -> ScanIdentity {
+        let perf = PerfLog.begin(.faceIdentity); defer { perf.end() }
         _ = loadReference(forUser: userId)
         let match = findUserInPhoto(cgImage)
         let sim = match.similarity ?? -1

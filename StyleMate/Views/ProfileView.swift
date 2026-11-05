@@ -379,7 +379,7 @@ struct ProfileView: View {
                         .font(DS.Font.caption2)
                 }
 
-                Section("App Information") {
+                Section("About") {
                     Button {
                         Haptics.light()
                         tutorialManager.resetSeen(.generation)   // re-arm the result-screen tour too
@@ -401,6 +401,11 @@ struct ProfileView: View {
                     } label: {
                         Text("Sample photo credits")
                     }
+
+                    NavigationLink { AcknowledgementsView() } label: { Text("Acknowledgements") }
+                        .accessibilityIdentifier("profile.acknowledgements")
+                    NavigationLink { DiagnosticsView() } label: { Text("Diagnostics") }
+                        .accessibilityIdentifier("profile.diagnostics")
 
                     HStack {
                         Text("Version")

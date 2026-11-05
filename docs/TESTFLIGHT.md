@@ -135,5 +135,10 @@ everything else works.
 - **iPhone Duo**: try each screen open flat, half-open, and on the cover screen when closed.
 - **Premium** (after step 6): the paywall from Home's "more pieces found" card, a free-trial
   purchase, the pieces unlocking, and Profile › StyleMate Premium.
+- **Diagnostics (once on each phone, about 10 minutes)**: plug the phone in, then open **Profile → About →
+  Diagnostics** and press **Run benchmark**. Keep StyleMate on screen until it says Done. On the Duo, also do the
+  **iPhone Duo hinge** check on the same screen (open flat, hold at about 90°, close, tapping **Record** each
+  time). Then press **Share report** and send it to us (Mail, Messages or Notes all work). The report has
+  timings and phone facts only: no photos, faces or clothes.
 
 The app is large (about 1.3 GB, mostly the on-device AI models), so install it on Wi-Fi.

@@ -63,7 +63,7 @@ class E2ETestCase: XCTestCase {
         ] + darkModeArguments
         addUIInterruptionMonitor(withDescription: "System permission alerts") { alert in
             for label in ["Allow While Using App", "Allow Once", "Allow Full Access", "Allow", "OK"] {
-                let button = alert.buttons[label].firstMatch   // iOS 27.2 sim lists the Allow button twice (nested)
+                let button = alert.buttons.matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label)).firstMatch   // iOS 27 alerts can list a button twice
                 if button.exists { button.tap(); return true }
             }
             return false
@@ -90,7 +90,7 @@ class E2ETestCase: XCTestCase {
         let alert = springboard.alerts.firstMatch
         guard alert.exists else { return }
         for label in ["Allow While Using App", "Allow Once", "Allow Full Access", "Allow", "OK"] {
-            let button = alert.buttons[label].firstMatch   // iOS 27.2 sim lists the Allow button twice (nested)
+            let button = alert.buttons.matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label)).firstMatch   // iOS 27 alerts can list a button twice
             if button.exists { button.tap(); return }
         }
     }
