@@ -143,7 +143,7 @@ final class DuoScreensTests: E2ETestCase {
         let card = app.buttons.matching(NSPredicate(format:
             "identifier == 'premium.lockedCard' OR label CONTAINS 'more pieces found'")).firstMatch
         guard card.waitForExistence(timeout: 60) else { XCTFail("No locked-pieces card on Home"); return }
-        shoot("08-home-locked")
+        shoot("20-home-locked")
 
         card.tap()
         let annual = app.buttons["paywall.plan.annual"]
@@ -151,7 +151,7 @@ final class DuoScreensTests: E2ETestCase {
         // The purchase itself is proven by SubscriptionE2ETests on the iPhone simulator: after a hinge
         // cycle the Duo simulator's accessibility tree still shows the screen under a full-screen
         // cover (run 42007188514), so it can't be driven from here.
-        shoot("09-paywall")
+        shoot("21-paywall")
 
         // Buy the annual plan from the test side (StoreKit Test): the app hears it on
         // Transaction.updates, the paywall turns into the success screen and the pieces unlock.
@@ -162,13 +162,13 @@ final class DuoScreensTests: E2ETestCase {
         }
         wait(for: [bought], timeout: 60)
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "unlock")], timeout: 4)
-        shoot("10-paywall-success")
+        shoot("22-paywall-success")
         // "Done" sits at the bottom centre of the cover display (tapped by position: see above).
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.9)).tap()
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "dismiss")], timeout: 2)
         openTab("Profile")
         _ = anyElement(NSPredicate(format: "identifier == 'profile.premium.status'")).waitForExistence(timeout: 10)
-        shoot("11-profile-premium")
+        shoot("23-profile-premium")
     }
 
     // No seated (tabletop) pass: the Duo simulator shows the inner display sideways and simctl can't rotate it,

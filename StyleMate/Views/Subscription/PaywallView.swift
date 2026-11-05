@@ -400,9 +400,45 @@ struct PaywallView: View {
 
     // MARK: Success
 
+    /// Phone / cover: one centred column. Wide (Duo inner display): the message on one half, the
+    /// pieces and Done on the other, split on the crease when half-open, so nothing crosses the fold.
+    @ViewBuilder
     private var successView: some View {
+        if duo.isWideLayout {
+            VStack(spacing: 0) {
+                Spacer(minLength: DS.Spacing.xl)
+                FoldAwareSplit(gutter: DS.Spacing.xl, stackedSpacing: DS.Spacing.lg) {
+                    successMessage
+                        .frame(maxWidth: 400)
+                        .frame(maxWidth: .infinity)
+                } trailing: {
+                    VStack(spacing: DS.Spacing.lg) {
+                        successTiles
+                        doneButton
+                    }
+                    .frame(maxWidth: 400)
+                    .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, DS.Spacing.lg)
+                Spacer(minLength: DS.Spacing.xl)
+            }
+        } else {
+            VStack(spacing: DS.Spacing.lg) {
+                Spacer(minLength: DS.Spacing.xl)
+                successMessage
+                successTiles
+                Spacer(minLength: DS.Spacing.lg)
+                doneButton
+            }
+            .padding(.horizontal, DS.Spacing.screenH)
+            .padding(.bottom, DS.Spacing.lg)
+            .frame(maxWidth: 560)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var successMessage: some View {
         VStack(spacing: DS.Spacing.lg) {
-            Spacer(minLength: DS.Spacing.xl)
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 64, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
@@ -412,6 +448,7 @@ struct PaywallView: View {
                 Text("Welcome to Premium")
                     .font(DS.Font.title1)
                     .foregroundStyle(DS.Colors.textPrimary)
+                    .multilineTextAlignment(.center)
                     .accessibilityAddTraits(.isHeader)
                 Text(successDetail)
                     .font(DS.Font.callout)
@@ -420,28 +457,30 @@ struct PaywallView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("paywall.successDetail")
             }
-            if !ownedPreview.isEmpty {
-                HStack(spacing: DS.Spacing.xs) {
-                    ForEach(ownedPreview.prefix(4)) { item in
-                        AsyncItemTile(path: item.gridImagePath, height: 64, cornerRadius: 14, inset: 6)
-                            .frame(width: 64)
-                    }
-                }
-                .accessibilityHidden(true)
-            }
-            Spacer(minLength: DS.Spacing.lg)
-            Button("Done") {
-                Haptics.light()
-                dismiss()
-            }
-            .buttonStyle(DSPrimaryButton())
-            .frame(maxWidth: 420)
-            .accessibilityIdentifier("paywall.done")
         }
-        .padding(.horizontal, DS.Spacing.screenH)
-        .padding(.bottom, DS.Spacing.lg)
-        .frame(maxWidth: 560)
-        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var successTiles: some View {
+        if !ownedPreview.isEmpty {
+            HStack(spacing: DS.Spacing.xs) {
+                ForEach(ownedPreview.prefix(4)) { item in
+                    AsyncItemTile(path: item.gridImagePath, height: 64, cornerRadius: 14, inset: 6)
+                        .frame(width: 64)
+                }
+            }
+            .accessibilityHidden(true)
+        }
+    }
+
+    private var doneButton: some View {
+        Button("Done") {
+            Haptics.light()
+            dismiss()
+        }
+        .buttonStyle(DSPrimaryButton())
+        .frame(maxWidth: 420)
+        .accessibilityIdentifier("paywall.done")
     }
 
     private var successDetail: String {
