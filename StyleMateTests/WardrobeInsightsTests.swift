@@ -42,8 +42,8 @@ struct WardrobeInsightsTests {
         let i = WardrobeInsights.compute(items: [tee, jeans, coat, boots, dress], logs: logs, now: now)
 
         #expect(i.total == 5)
-        // Ties (jeans and boots, twice each) go to the more recently worn.
-        #expect(i.mostWorn.map(\.item.id) == [tee.id, boots.id, jeans.id, coat.id])
+        // Jeans and boots tie (twice each, last worn the same day): wardrobe order breaks it.
+        #expect(i.mostWorn.map(\.item.id) == [tee.id, jeans.id, boots.id, coat.id])
         #expect(i.mostWorn.first?.count == 3)
         // Never worn first, then the longest since.
         #expect(i.notWorn.map(\.id) == [dress.id, coat.id])

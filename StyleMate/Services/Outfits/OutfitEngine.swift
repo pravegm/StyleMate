@@ -44,8 +44,12 @@ struct OutfitEngine {
         /// Learned taste (colour pairings, pieces, formality per occasion), capped at ±`tasteCap`.
         var taste = 1.0
         var tasteCap = 2.0
-        /// Taste can lift a look only if its taste-free score is within this of the best one.
+        /// Taste can lift the *first* look only if its taste-free score is within this of the best one…
         var tasteWindow = 1.2
+        /// …and options 2–5 only within this: wide enough for a habit the rules rate a little lower
+        /// (a tee with smart trousers on an everyday plan), too narrow for a look that's wrong for
+        /// the weather (bare legs on a cool day alone cost 2, open shoes 1.8 more).
+        var tasteDeckWindow = 2.0
         /// MMR penalty per unit of overlap with an already-chosen look.
         var variety = 1.5
         /// Max per-item random nudge; 0 makes the engine fully greedy.
@@ -422,8 +426,10 @@ private final class StylingPass {
         let base: Double
         /// The bounded taste term.
         let taste: Double
-        /// What selection ranks by: base + taste (see `diverseSelection` for the window).
+        /// What selection ranks by: base + taste (see `diverseSelection` for the windows).
         var score: Double
+        /// The same for the first pick, with the narrower window.
+        var firstScore: Double
         let palette: PaletteAnalysis
         let signature: String
         let idSet: Set<UUID>
@@ -433,6 +439,7 @@ private final class StylingPass {
             self.base = base
             self.taste = taste
             self.score = base + taste
+            self.firstScore = base + taste
             self.palette = palette
             // Same rule as OutfitValidator: accessories don't make a look different.
             let core = items.filter { $0.isClothing }.map { $0.id.uuidString }.sorted()
@@ -1221,15 +1228,20 @@ private final class StylingPass {
     /// garment at two looks (shoes at three); the second relaxes caps for small
     /// wardrobes. Identical cores are never repeated.
     ///
-    /// Taste can only lift a look whose taste-free score is within `tasteWindow` of the
-    /// best one; below that it can only push down. So a learned favourite reorders the
-    /// good looks, but can never put a look the stylist rates clearly worse (wrong for
+    /// Taste can only lift a look whose taste-free score is within a window of the best
+    /// one (`tasteWindow` for the first pick, `tasteDeckWindow` for the rest); below that it
+    /// can only push down. So a learned favourite reorders the good looks and can bring a
+    /// habit into the deck, but never puts a look the stylist rates clearly worse (wrong for
     /// the weather or the occasion) on top.
     func diverseSelection(_ candidates: [Candidate], count: Int) -> [Candidate] {
         let bestBase = candidates.map { $0.base }.max() ?? 0
+        func lifted(_ c: Candidate, window: Double) -> Double {
+            c.base + (c.base >= bestBase - window ? c.taste : min(0, c.taste))
+        }
         let ranked = candidates.map { c -> Candidate in
             var c = c
-            c.score = c.base + (c.base >= bestBase - weights.tasteWindow ? c.taste : min(0, c.taste))
+            c.score = lifted(c, window: weights.tasteDeckWindow)
+            c.firstScore = lifted(c, window: weights.tasteWindow)
             return c
         }
         var pool = ranked.sorted { $0.score != $1.score ? $0.score > $1.score : $0.signature < $1.signature }
@@ -1245,7 +1257,7 @@ private final class StylingPass {
                 for (i, c) in pool.enumerated() {
                     if signatures.contains(c.signature) { continue }
                     if strict && violatesCaps(c, usage) { continue }
-                    let value = c.score - weights.variety * overlap(c, chosen)
+                    let value = chosen.isEmpty ? c.firstScore : c.score - weights.variety * overlap(c, chosen)
                     if value > bestValue {
                         bestValue = value
                         bestIndex = i

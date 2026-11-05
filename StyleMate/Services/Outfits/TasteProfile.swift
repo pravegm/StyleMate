@@ -19,7 +19,7 @@ import Foundation
 // "Reset style learning" wipes it.
 //
 // The engine reads it as one bounded term next to the recency penalty
-// (`StylingPass.tasteFit`); see `OutfitEngine` for the guard that keeps learning
+// (`StylingPass.tasteFit`); see `OutfitEngine.diverseSelection` for the windows that keep learning
 // from ever promoting a look the stylist wouldn't otherwise rate near the top.
 
 /// What one action in the deck says about taste.
