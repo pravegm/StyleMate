@@ -55,7 +55,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: StyleMate/ML
-          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          key: wardrobe-models-v2-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json', 'scripts/garment/model.json', 'scripts/garment/export.py', 'scripts/garment/head.py', 'scripts/garment/backbone.py') }}
           fail-on-cache-miss: true
 
       - name: Select Xcode 27.1
