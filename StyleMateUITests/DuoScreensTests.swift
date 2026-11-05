@@ -152,6 +152,23 @@ final class DuoScreensTests: E2ETestCase {
         // cycle the Duo simulator's accessibility tree still shows the screen under a full-screen
         // cover (run 42007188514), so it can't be driven from here.
         shoot("09-paywall")
+
+        // Buy the annual plan from the test side (StoreKit Test): the app hears it on
+        // Transaction.updates, the paywall turns into the success screen and the pieces unlock.
+        let bought = expectation(description: "annual bought")
+        Task {
+            _ = try? await session.buyProduct(identifier: "com.stylemates.StyleMate.premium.annual", options: [])
+            bought.fulfill()
+        }
+        wait(for: [bought], timeout: 60)
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "unlock")], timeout: 4)
+        shoot("10-paywall-success")
+        // "Done" sits at the bottom centre of the cover display (tapped by position: see above).
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.9)).tap()
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "dismiss")], timeout: 2)
+        openTab("Profile")
+        _ = anyElement(NSPredicate(format: "identifier == 'profile.premium.status'")).waitForExistence(timeout: 10)
+        shoot("11-profile-premium")
     }
 
     // No seated (tabletop) pass: the Duo simulator shows the inner display sideways and simctl can't rotate it,
