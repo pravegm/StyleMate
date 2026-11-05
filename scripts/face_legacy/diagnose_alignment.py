@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# RESEARCH ONLY: not used by any build, never ship its output (see scripts/face_legacy/README.md).
 """
 Ground-truth test: is the AdaFace model + preprocessing fine (so the APP's
 Vision-based alignment is the bug), or is something about our AdaFace usage wrong?

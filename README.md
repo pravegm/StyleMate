@@ -10,8 +10,8 @@ StyleMate finds the photos of *you* in your library, cuts out every garment and 
 
 - During onboarding you take a **three-frame selfie** (straight on, then a slight turn each way; `SelfieCameraService`). Each frame is checked on-device (one face, big enough, centred, lit, no sunglasses) before it's accepted.
 - Then **Find yourself** (`Services/Identity/`, `FindYourselfView`) looks through up to ~1,500 recent photos, embeds every usable face, groups faces of the same person (greedy centroid clustering), ranks the groups by similarity to your selfie and asks "Is this you?" with one tap to confirm. The confirmed faces become your reference **gallery**, so the scan recognises you across angles, lighting and years.
-- Faces are detected and 5-point-landmarked by the bundled **InsightFace SCRFD-10G** detector (Core ML), aligned to a canonical 112×112, and embedded with **AdaFace IR-101 (WebFace12M)** (bundled as `MobileFaceNet.mlpackage`, filename kept for history). Embeddings are tagged with the model version so an upgrade rebuilds the gallery.
-- Each library photo is matched by **cosine similarity** against the gallery with tiered confidence and a runner-up margin:
+- Faces are detected and 5-point-landmarked by the bundled **YuNet** detector (OpenCV Zoo, MIT; Core ML), aligned to the canonical ArcFace 112×112 template, and embedded with **SFace** (OpenCV Zoo, Apache-2.0; 128-d, flip-averaged). Large library photos get an extra pass over four overlapping tiles, so distant faces aren't missed. Every similarity bar lives in one profile (`FaceModelProfile`), calibrated on LFW; embeddings are tagged with the model version so a model change rebuilds the gallery. Both models are commercially usable; the earlier InsightFace SCRFD + AdaFace pair (non-commercial) is no longer built or shipped (`docs/MODEL-LICENSING.md`).
+- Each library photo is matched by **cosine similarity** against the gallery with tiered confidence and a runner-up margin. Auto-adding needs the gallery's consensus (the mean of the two best-matching gallery faces), so one odd gallery entry can never pull a stranger in; review needs one good match:
   - **confident** → analysed straight away (in a multi-person photo only *your* body is isolated via a person-instance mask, so other people's clothes are never extracted); very confident matches that also match your **selfie** (and clearly beat anyone else in the shot) **teach the gallery** a new angle of your face — learned faces are capped at half the gallery and never displace the selfie or faces you confirmed;
   - **probably you** → queued for an **"Is this you?"** review (home banner → `FaceReviewView`); confirming teaches the gallery and extracts those outfits;
   - anyone else → skipped.
@@ -80,7 +80,7 @@ The calendar also **fills itself** (`Services/Insights/WearLogSuggestions`): whe
 ## Architecture
 
 - **Language / UI**: Swift, SwiftUI (UIKit interop for `ImagePicker` and camera capture). MVVM.
-- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder, and the studio-render diffusion model (DreamShaper 8 img2img: text encoder, UNet, VAE encoder/decoder). Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
+- **On-device ML (Core ML)**: YuNet face detector, SFace face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder, and the studio-render diffusion model (DreamShaper 8 img2img: text encoder, UNet, VAE encoder/decoder). Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
 - **Try-on files**: the chosen body photo and finished try-ons under `Application Support/TryOn/` (local only, excluded from backup).
 - **Local persistence**: `UserDefaults` (wardrobe items per user, sync ledger), wardrobe images / thumbnails / outfit-history snapshots under `Application Support/wardrobe_images/`, the selfie under `Application Support/Selfie/`, the face gallery under `Application Support/FaceReference/` (with per-entry provenance: selfie / confirmed / learned), item embeddings under `Application Support/WardrobeEmbeddings/items.bin` (compact binary, written off the main thread, debounced), studio renders' bookkeeping under `Application Support/Studio/`, Core Data (outfit history, scoped per user; a damaged store is moved to `Application Support/CoreDataBackups/` instead of crashing). Personal files are excluded from iCloud Backup and use `completeUntilFirstUserAuthentication` file protection (`LocalStore`); older builds' `Documents/` files are moved there automatically.
 - **Cloud**: CloudKit private DB only (your own iCloud). No third-party AI services.
@@ -89,6 +89,7 @@ The calendar also **fills itself** (`Services/Insights/WearLogSuggestions`): whe
 ```
 StyleMate/
 ├── Models/                      # WardrobeItem, Category (+ WardrobeViewModel), ProductType, OutfitType, User, Core Data model
+├── FaceModels/                  # git-ignored: FaceDetectYuNet / FaceEmbedSFace .mlpackage (scripts/build_face_models.sh)
 ├── ML/                          # git-ignored: GarmentParser / GarmentLabeler / FashionEncoder .mlpackage + FashionVocabulary.json;
 │                                #   Studio/StudioModels.bundle (compiled diffusion .mlmodelc + tokenizer)
 ├── Services/
@@ -97,7 +98,8 @@ StyleMate/
 │   ├── TryOn/                   # "On you": body analysis, garment warp + composite, differential-diffusion harmonise, gate, queue, cache
 │   ├── Outfits/                 # OutfitEngine, StyleKnowledge, OutfitMood, StyleIntentParser, OnDeviceStylist
 │   ├── ImageAnalysisService     # thin entry point to the wardrobe pipeline
-│   ├── SCRFDDetector / FaceMatchingService   # face detection, alignment, AdaFace embeddings, identity resolution
+│   ├── FaceModelProfile / FaceDetector*      # face models' I/O contract + every similarity bar; YuNet (ships), SCRFD (licensed plug-in only)
+│   ├── FaceMatchingService      # alignment, SFace embeddings, gallery, identity resolution
 │   ├── Identity/                # "Find yourself": face clustering + ranking, library pass, selfie frame checks
 │   ├── PhotoScanService         # library scan, identity gate, "Is this you?" queue
 │   ├── DuplicateDetector        # visual + attribute duplicate matching
@@ -136,11 +138,11 @@ To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
 1. `git clone https://github.com/pravegm/StyleMate.git`
 2. Generate the git-ignored models (Python 3.11):
    ```bash
-   bash scripts/build_face_models.sh       # -> MobileFaceNet.mlpackage + SCRFD10G.mlpackage at the repo root
+   bash scripts/build_face_models.sh       # -> StyleMate/FaceModels/FaceDetectYuNet + FaceEmbedSFace .mlpackage
    bash scripts/build_wardrobe_models.sh   # -> StyleMate/ML/*.mlpackage + FashionVocabulary.json
    bash scripts/build_studio_models.sh     # -> StyleMate/ML/Studio/StudioModels.bundle (macOS + Xcode, 30-90 min)
    ```
-   The face embedder takes **BGR** input (handled in `createInputMultiArray`); see `scripts/convert_adaface.py`, `convert_scrfd.py` and `convert_wardrobe_models.py` (each parity-checks Core ML against PyTorch).
+   YuNet takes BGR raw 0–255, SFace RGB raw 0–255 (see `FaceModelProfile`); `scripts/convert_face_models.py` and `convert_wardrobe_models.py` parity-check Core ML against the originals. `scripts/check_face_models.sh` is the licence gate CI and TestFlight run on the built app.
 3. `open StyleMate.xcodeproj`, set your signing team, and run (a real device for the selfie camera).
 
 ### iPhone Duo
@@ -158,7 +160,7 @@ StyleMate runs natively full screen on the iPhone Duo's inner and cover displays
 
 ## Licensing note
 
-The bundled model weights come with their own licences, several of which are research / non-commercial (SCRFD, AdaFace's training data, the SegFormer-based parsers). The studio-render model (DreamShaper 8) is CreativeML OpenRAIL-M: commercial use is allowed, but its use restrictions must be passed on in the app's terms. They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
+The bundled model weights come with their own licences. The face models (YuNet MIT, SFace Apache-2.0) are commercially usable; the SegFormer-based garment parsers are still research / non-commercial. The studio-render model (DreamShaper 8) is CreativeML OpenRAIL-M: commercial use is allowed, but its use restrictions must be passed on in the app's terms. They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
 
 ## License
 

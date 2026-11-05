@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# RESEARCH ONLY: not used by any build, never ship its output (see scripts/face_legacy/README.md).
 """
 Runs the EXACT app pipeline on real user photos placed in debug_photos/:
   SCRFD detect (+ padding fallback) -> warpAligned -> AdaFace embed (BGR)

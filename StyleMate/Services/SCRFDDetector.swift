@@ -2,29 +2,13 @@ import CoreML
 import CoreGraphics
 import Foundation
 
-/// A face detected by SCRFD: pixel-space box + 5-point landmarks (in the canonical
-/// ArcFace order img-left-eye, img-right-eye, nose, img-left-mouth, img-right-mouth)
-/// + detector confidence. Landmarks are in original-image pixel coords (top-left).
-struct DetectedFace {
-    let boxPixels: CGRect            // top-left origin, image pixels
-    let keypoints: [SIMD2<Float>]    // top-left pixels, ArcFace order
-    let score: Float
-
-    /// Vision-style normalized box (bottom-left origin) for mask / isolation code.
-    func normalizedBox(imageWidth: Int, imageHeight: Int) -> CGRect {
-        let w = CGFloat(imageWidth), h = CGFloat(imageHeight)
-        guard w > 0, h > 0 else { return .zero }
-        return CGRect(x: boxPixels.minX / w,
-                      y: 1.0 - (boxPixels.maxY / h),
-                      width: boxPixels.width / w,
-                      height: boxPixels.height / h)
-    }
-}
-
-/// InsightFace SCRFD-10G face detector (Core ML). Replaces Apple Vision's
-/// landmarks, which were too imprecise for ArcFace/AdaFace alignment. Verified
-/// offline: SCRFD landmarks → AdaFace same-person 0.988 (vs ~0.2 with Vision).
-final class SCRFDDetector {
+/// InsightFace SCRFD-10G face detector (Core ML), from `buffalo_l`.
+///
+/// **Not bundled.** InsightFace's models are licensed for non-commercial research only; this is
+/// the plug-in for `FaceModelSet.insightFaceBuffaloL`, to be used only with a signed InsightFace
+/// licence (docs/MODEL-LICENSING.md §7). The shipping detector is `YuNetDetector`.
+/// Input RGB, (px-127.5)/128, 640x640 letterboxed top-left; outputs 5 landmarks in ArcFace order.
+final class SCRFDDetector: FaceDetecting {
     static let shared = SCRFDDetector()
 
     private let inputSize = 640
@@ -58,16 +42,7 @@ final class SCRFDDetector {
     /// Call with `lock` held.
     private func ensureLoadedLocked() -> MLModel? {
         if let model { return model }
-        guard let url = Bundle.main.url(forResource: "SCRFD10G", withExtension: "mlmodelc")
-                ?? Bundle.main.url(forResource: "SCRFD10G", withExtension: "mlpackage") else {
-            dlog("[SCRFD] ERROR: SCRFD10G model not found in bundle")
-            return nil
-        }
-        let cfg = MLModelConfiguration()
-        cfg.computeUnits = .cpuAndNeuralEngine   // no GPU: iOS forbids GPU work in the background (overnight scan)
-        model = try? MLModel(contentsOf: url, configuration: cfg)
-        if model == nil { dlog("[SCRFD] ERROR: failed to load model") }
-        else { dlog("[SCRFD] detector loaded") }
+        model = FaceDetectorSupport.loadModel(FaceModelProfile.insightFaceBuffaloL.detectorResource, tag: "SCRFD")
         return model
     }
 
@@ -78,9 +53,9 @@ final class SCRFDDetector {
     /// needs the face to be a sub-region. (Verified offline: face-fills-frame crop → 0
     /// detections; +40% margin → detected.) The retry costs a second pass on a 3.2x larger
     /// image, so library / scan photos (where "no face" is the common, correct answer)
-    /// must pass `padRetry: false`; keep it on for selfie frames and face crops. The
-    /// default stays `true` for existing callers.
-    func detect(in cgImage: CGImage, scoreThreshold: Float = 0.5, padRetry: Bool = true) -> [DetectedFace] {
+    /// must pass `padRetry: false`; keep it on for selfie frames and face crops.
+    func detect(in cgImage: CGImage, scoreThreshold: Float?, padRetry: Bool) -> [DetectedFace] {
+        let scoreThreshold = scoreThreshold ?? FaceModelProfile.insightFaceBuffaloL.detectorThreshold
         let faces = detectCore(in: cgImage, scoreThreshold: scoreThreshold)
         if !faces.isEmpty || !padRetry { return faces }
 
@@ -121,13 +96,13 @@ final class SCRFDDetector {
 
         for s in strides {
             let n = (inputSize / s) * (inputSize / s) * numAnchors
-            guard let scArr = outputArray(out, count: n, inner: 1),
-                  let bbArr = outputArray(out, count: n, inner: 4),
-                  let kpArr = outputArray(out, count: n, inner: 10) else {
+            guard let scArr = FaceDetectorSupport.outputArray(out, count: n, inner: 1),
+                  let bbArr = FaceDetectorSupport.outputArray(out, count: n, inner: 4),
+                  let kpArr = FaceDetectorSupport.outputArray(out, count: n, inner: 10) else {
                 dlog("[SCRFD] stride \(s): outputs not matched (need score[\(n),1] bbox[\(n),4] kps[\(n),10])")
                 continue
             }
-            let sc = floats(scArr), bb = floats(bbArr), kp = floats(kpArr)
+            let sc = FaceDetectorSupport.floats(scArr), bb = FaceDetectorSupport.floats(bbArr), kp = FaceDetectorSupport.floats(kpArr)
             let ac = anchorCenters[s]!
             let fs = Float(s)
             for i in 0..<n where sc[i] >= scoreThreshold {
@@ -150,7 +125,7 @@ final class SCRFDDetector {
             }
         }
 
-        let keep = nms(boxes: boxes, scores: scores, iou: 0.4)
+        let keep = FaceDetectorSupport.nms(boxes: boxes, scores: scores, iou: 0.4)
         return keep.map { DetectedFace(boxPixels: boxes[$0], keypoints: kpss[$0], score: scores[$0]) }
     }
 
@@ -229,59 +204,5 @@ final class SCRFDDetector {
         // the old flip made SCRFD's input upside down (low scores, garbage landmarks).
         ctx.draw(cg, in: CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
         return pixels
-    }
-
-    // MARK: - Output helpers
-
-    /// Finds the output whose flattened layout is [count, inner], tolerant of any
-    /// leading batch dims (e.g. [N,inner] or [1,N,inner]). The (count, inner) pair
-    /// is unique per output even when totals collide (e.g. 12800x1 vs 3200x4).
-    private func outputArray(_ out: MLFeatureProvider, count: Int, inner: Int) -> MLMultiArray? {
-        for name in out.featureNames {
-            if let v = out.featureValue(for: name)?.multiArrayValue,
-               v.count == count * inner, (v.shape.last?.intValue ?? -1) == inner {
-                return v
-            }
-        }
-        return nil
-    }
-
-    private func floats(_ a: MLMultiArray) -> [Float] {
-        let n = a.count
-        // Fast path only for plain contiguous Float32. For anything else (e.g. the
-        // Float16 outputs an ML-program emits, which may be non-contiguous), use the
-        // element accessor — it converts via NSNumber and respects strides, so it's
-        // always correct (raw Float16 dataPointer reads silently returned garbage).
-        if a.dataType == .float32, (a.strides.last?.intValue ?? 0) == 1 {
-            let p = a.dataPointer.bindMemory(to: Float.self, capacity: n)
-            return Array(UnsafeBufferPointer(start: p, count: n))
-        }
-        return (0..<n).map { a[$0].floatValue }
-    }
-
-    // MARK: - NMS
-
-    private func nms(boxes: [CGRect], scores: [Float], iou: CGFloat) -> [Int] {
-        let order = scores.indices.sorted { scores[$0] > scores[$1] }
-        var keep: [Int] = []
-        var removed = Set<Int>()
-        for (oi, i) in order.enumerated() {
-            if removed.contains(i) { continue }
-            keep.append(i)
-            for oj in (oi+1)..<order.count {
-                let j = order[oj]
-                if removed.contains(j) { continue }
-                if overlap(boxes[i], boxes[j]) > iou { removed.insert(j) }
-            }
-        }
-        return keep
-    }
-
-    private func overlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
-        let inter = a.intersection(b)
-        if inter.isNull { return 0 }
-        let interArea = inter.width * inter.height
-        let union = a.width * a.height + b.width * b.height - interArea
-        return union > 0 ? interArea / union : 0
     }
 }

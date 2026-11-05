@@ -118,4 +118,4 @@ No new weights ship. The try-on uses Apple Vision (part of iOS), the app's garme
 MODEL-LICENSING.md — being replaced on `feat/garment-commercial`; the try-on only reads its standard
 FASHN classes through `GarmentSegmenter.P`), FashionSigLIP (Apache-2.0) for the gate and dreamshaper-8
 (CreativeML OpenRAIL-M, already shipped for studio renders) for the harmonise pass and the model body.
-Details and the rejected VTON models: MODEL-LICENSING.md §7.
+Details and the rejected VTON models: MODEL-LICENSING.md §10.

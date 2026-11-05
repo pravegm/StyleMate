@@ -1,3 +1,5 @@
+> **RESEARCH ONLY / historical.** Not used by any build. InsightFace models are non-commercial. See `scripts/face_legacy/README.md`.
+
 # MobileFaceNet CoreML Setup (run on Mac)
 
 This document contains all the steps needed to convert the ONNX model to CoreML and add it to the Xcode project. Run these steps once on your Mac.
