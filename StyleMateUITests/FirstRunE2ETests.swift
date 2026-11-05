@@ -9,6 +9,7 @@ class FirstRunE2ETests: E2ETestCase {
     private func launchFresh() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestResetState", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            + darkModeArguments
         addUIInterruptionMonitor(withDescription: "System permission alerts") { alert in
             for label in ["Allow While Using App", "Allow Full Access", "Allow", "OK"] {
                 let button = alert.buttons[label]
@@ -95,7 +96,9 @@ class FirstRunE2ETests: E2ETestCase {
             dismissSpringboardAlertIfPresent()
             for step in steps where step.element.exists && step.element.isHittable {
                 snapOnce(step.key)
-                step.element.tap()
+                // The flow can advance on its own between the check and the tap
+                // (e.g. the selfie step moving on); only tap what's still there.
+                if step.element.exists && step.element.isHittable { step.element.tap() }
                 break
             }
             if anyElement(NSPredicate(format: "identifier == 'onboarding.scanCounter'")).exists { snapOnce("scanning") }

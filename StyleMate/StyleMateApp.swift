@@ -34,7 +34,16 @@ struct StyleMateApp: App {
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 // iPhone Duo / large displays: \.duoLayout (posture, fold, wide layout). Views/Components/DuoLayout.swift
                 .duoLayoutReader()
+                // UI tests' dark-mode pass (`-uiTestDarkMode`); nil = follow the system.
+                .preferredColorScheme(Self.forcedColorScheme)
         }
+    }
+
+    private static var forcedColorScheme: ColorScheme? {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-uiTestDarkMode") { return .dark }
+        #endif
+        return nil
     }
 }
 

@@ -23,6 +23,10 @@ class E2ETestCase: XCTestCase {
     /// "-dark" for the dark-mode pass, "" otherwise.
     var appearanceSuffix: String { Self.usesDarkAppearance ? "-dark" : "" }
 
+    /// Launch arguments that force the app into dark appearance (the DEBUG hook in
+    /// StyleMateApp; `XCUIDevice.appearance` alone didn't reach the app on CI).
+    var darkModeArguments: [String] { Self.usesDarkAppearance ? ["-uiTestDarkMode"] : [] }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         step = 0
@@ -56,7 +60,7 @@ class E2ETestCase: XCTestCase {
         app.launchArguments = [
             "-uiTestResetState", "-uiTestDemoUser", "-uiTestSkipOnboarding", "-uiTestSeedWardrobe",
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
-        ]
+        ] + darkModeArguments
         addUIInterruptionMonitor(withDescription: "System permission alerts") { alert in
             for label in ["Allow While Using App", "Allow Once", "Allow Full Access", "Allow", "OK"] {
                 let button = alert.buttons[label]
