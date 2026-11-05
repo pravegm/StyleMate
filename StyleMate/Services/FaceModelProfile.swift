@@ -97,9 +97,16 @@ extension FaceModelProfile {
     /// The profile the app runs. Change only together with the bundled models (build_face_models.sh).
     static let active: FaceModelProfile = .openCVZoo
 
-    /// YuNet + SFace. Bars calibrated on LFW (13,233 photos, 3M impostor pairs, a 3-photo gallery
-    /// protocol) so that each one admits strangers no more often than the AdaFace bar it replaces
-    /// (equal false-accept rate). See docs/MODEL-LICENSING.md §8 for the measurements.
+    /// YuNet + SFace. Every bar is calibrated on LFW (evaluation only; docs/MODEL-LICENSING.md §8:
+    /// 610 identities, 3- and 10-photo galleries, 2.7M impostor comparisons). SFace scores
+    /// strangers higher than AdaFace did (mean 0.10, 1 in 1,000 above 0.37) and the user's own
+    /// photos about as high (median 0.70), so the bars that keep strangers out moved up:
+    /// - auto-add 0.58 on the top-2 consensus: no LFW stranger above it except label errors
+    ///   (FAR <= 7.5e-7 with 3 gallery photos), TAR 94% (3 photos) / 98% (10 photos);
+    /// - review 0.45 on the single best match: FAR 9e-5 (3 photos) / 4e-4 (10), i.e. a few
+    ///   strangers per 10,000 library faces reach "Is this you?";
+    /// - learning 0.65 consensus + 0.55 against the selfie itself + 0.15 lead;
+    /// - the clustering link stays 0.5 (pairwise FAR 8e-6), the offer floor rises to 0.25.
     static let openCVZoo = FaceModelProfile(
         set: .openCVZoo,
         modelVersion: "yunet2023mar_sface2021dec_flip",
@@ -112,14 +119,14 @@ extension FaceModelProfile {
         embeddingDimension: 128,
         flipAverage: true,
         galleryConsensus: 2,
-        highConfidence: 0.55, borderline: 0.30, multiPerson: 0.58, ambiguityMargin: 0.08,
-        autoLearn: 0.62, autoLearnSelfie: 0.50, autoLearnMargin: 0.15,
+        highConfidence: 0.58, borderline: 0.45, multiPerson: 0.62, ambiguityMargin: 0.08,
+        autoLearn: 0.65, autoLearnSelfie: 0.55, autoLearnMargin: 0.15,
         galleryDuplicate: 0.95, learnedDuplicate: 0.90,
-        clusterLink: 0.5, offerFloor: 0.15, preselect: 0.40,
-        alsoYouCluster: 0.40, alsoYouMember: 0.30, alsoYouSingle: 0.45, alsoYouPreselect: 0.50,
-        likelyYou: 0.35, sameFaceInPhoto: 0.85, refineAgreement: 0.45,
-        selfieTurnMinSimilarity: 0.30,
-        detectorThreshold: 0.6, minLibraryDetectorScore: 0.6, minSelfieDetectorScore: 0.65)
+        clusterLink: 0.5, offerFloor: 0.25, preselect: 0.45,
+        alsoYouCluster: 0.40, alsoYouMember: 0.33, alsoYouSingle: 0.48, alsoYouPreselect: 0.52,
+        likelyYou: 0.45, sameFaceInPhoto: 0.85, refineAgreement: 0.5,
+        selfieTurnMinSimilarity: 0.35,
+        detectorThreshold: 0.6, minLibraryDetectorScore: 0.75, minSelfieDetectorScore: 0.8)
 
     /// InsightFace buffalo_l (SCRFD-10G + w600k_r50). Only with a signed InsightFace licence.
     /// w600k_r50 is RGB, (px - 127.5) / 127.5, 512-d. Bars: equal-FAR calibration on the same LFW

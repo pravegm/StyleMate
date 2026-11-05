@@ -27,22 +27,28 @@ final class YuNetDetector: FaceDetecting {
 
     private var profile: FaceModelProfile { .active }
 
-    /// Library photos at least this big also get the small-face tile pass.
+    /// Photos at least this big also get the small-face tile pass.
     static let tileMinSide = 1100
+    /// A face only a tile found must be this sure (real faces score ~0.85-0.95; the tile pass's
+    /// false alarms on the fixtures scored 0.61-0.71) ...
+    static let tileOnlyMinScore: Float = 0.8
+    /// ... and this small at the full pass's scale (detector pixels): anything bigger the full pass
+    /// would have found itself, so a tile-only find that size is a false alarm.
+    static let tileOnlyMaxSide: CGFloat = 48
 
     func detect(in cgImage: CGImage, scoreThreshold: Float?, padRetry: Bool) -> [DetectedFace] {
         let threshold = scoreThreshold ?? profile.detectorThreshold
-        let faces = detectCore(in: cgImage, fit: inputSize, threshold: threshold)
-        if !padRetry {
-            // Library / scan photo. A 1600 px photo letterboxed to 640 shrinks a 48 px face to
-            // 19 px, at the edge of YuNet's range: look again at four overlapping 60% tiles, each
-            // at the full input (faces ~2.5x bigger). On LFW faces pasted into 1600 px frames this
-            // took misses from 5.6% to 0% and TAR at FAR 1e-5 from 79% to 94%
-            // (docs/MODEL-LICENSING.md §8). Faces found twice are merged by NMS.
-            guard max(cgImage.width, cgImage.height) >= Self.tileMinSide else { return faces }
-            return mergeWithTiles(faces, in: cgImage, threshold: threshold)
+        var faces = detectCore(in: cgImage, fit: inputSize, threshold: threshold)
+        // A 1600 px photo letterboxed to 640 shrinks a 48 px face to 19 px, at the edge of YuNet's
+        // range: look again at four overlapping 60% tiles, each at the full input (faces ~2.5x
+        // bigger). On LFW faces pasted into 1600 px frames this took misses from 5.6% to 0% and
+        // TAR at FAR 1e-5 from 79% to 94% (docs/MODEL-LICENSING.md §8). It runs in every mode, so
+        // one image always gives the same faces and landmarks (a selfie anchor and the same photo
+        // in the scan must embed identically).
+        if max(cgImage.width, cgImage.height) >= Self.tileMinSide {
+            faces = mergeWithTiles(faces, in: cgImage, threshold: threshold)
         }
-        if !faces.isEmpty { return faces }
+        if !faces.isEmpty || !padRetry { return faces }
         // A frame-filling face (selfie frame, tight face crop) is over YuNet's ~300 px range at
         // 640: place the image in a smaller square of the input (the rest stays black, which is
         // the same as padding it) and look again.
@@ -56,6 +62,7 @@ final class YuNetDetector: FaceDetecting {
     private func mergeWithTiles(_ full: [DetectedFace], in cgImage: CGImage, threshold: Float) -> [DetectedFace] {
         let w = cgImage.width, h = cgImage.height
         let tw = w * 3 / 5, th = h * 3 / 5
+        let fullScale = CGFloat(inputSize) / CGFloat(max(w, h))
         var extra: [DetectedFace] = []
         for (ox, oy) in [(0, 0), (w - tw, 0), (0, h - th), (w - tw, h - th)] {
             let tileRect = CGRect(x: ox, y: oy, width: tw, height: th)
@@ -71,6 +78,11 @@ final class YuNetDetector: FaceDetecting {
                 let cutRight = box.maxX > inner.maxX && tileRect.maxX < CGFloat(w)
                 let cutBottom = box.maxY > inner.maxY && tileRect.maxY < CGFloat(h)
                 if cutLeft || cutTop || cutRight || cutBottom { continue }
+                let seenByFull = full.contains { FaceDetectorSupport.overlap($0.boxPixels, box) > 0.3 }
+                if !seenByFull,
+                   f.score < Self.tileOnlyMinScore || min(box.width, box.height) * fullScale >= Self.tileOnlyMaxSide {
+                    continue
+                }
                 extra.append(DetectedFace(boxPixels: box,
                                           keypoints: f.keypoints.map { SIMD2<Float>($0.x + dx, $0.y + dy) },
                                           score: f.score))
