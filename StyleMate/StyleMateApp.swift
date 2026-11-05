@@ -105,7 +105,6 @@ struct RootView: View {
             .presentationDetents([.medium])
             // Regular width (Duo inner display): a sheet sized to its rows.
             .presentationSizing(.fitted)
-            .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $pickerItems, maxSelectionCount: 15, matching: .images)
@@ -293,6 +292,13 @@ private struct AddSourceSheet: View {
     let showAutoScan: Bool
 
     @State private var appeared = false
+    @Environment(\.duoLayout) private var duo
+    @State private var frame: CGRect = .zero
+
+    /// The rows are in two columns either side of the fold (the FoldAwareSplit below, `requiresFold`).
+    private var isSplit: Bool {
+        duo.isWideLayout && duo.foldRunsThrough(frame)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -318,6 +324,13 @@ private struct AddSourceSheet: View {
         // Top-aligned without a Spacer, so a fitted sheet is exactly its rows.
         .frame(maxHeight: .infinity, alignment: .top)
         .background(DS.Colors.backgroundPrimary)
+        // The grabber is centred on the sheet, so on the fold when the sheet is (open flat on the Duo).
+        .presentationDragIndicator(isSplit ? .hidden : .visible)
+        // x and width only (the fold runs top to bottom), so sliding up doesn't update it on every frame.
+        .onGeometryChange(for: CGRect.self) { proxy in
+            let r = proxy.frame(in: .global)
+            return CGRect(x: r.minX, y: 0, width: r.width, height: 1)
+        } action: { frame = $0 }
         .onAppear {
             withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
                 appeared = true
@@ -374,7 +387,11 @@ private struct AddSourceSheet: View {
             Haptics.medium()
             action()
         }) {
-            HStack(spacing: DS.Spacing.md) {
+            // A row (icon, text, chevron); a tile (icon above the text) in the narrow columns either side of
+            // the fold, where a row's title wrapped ("Choose / from Gallery").
+            let layout = isSplit ? AnyLayout(VStackLayout(alignment: .leading, spacing: DS.Spacing.sm))
+                                 : AnyLayout(HStackLayout(spacing: DS.Spacing.md))
+            layout {
                 Image(systemName: icon)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundColor(iconColor)
@@ -389,16 +406,21 @@ private struct AddSourceSheet: View {
                     Text(subtitle)
                         .font(DS.Font.caption1)
                         .foregroundColor(DS.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .multilineTextAlignment(.leading)
 
-                Spacer()
+                if !isSplit {
+                    Spacer()
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(DS.Colors.textTertiary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DS.Spacing.md)
-            .padding(.vertical, DS.Spacing.sm)
+            .padding(.vertical, isSplit ? DS.Spacing.md : DS.Spacing.sm)
             .background(DS.Colors.backgroundCard)
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
             .dsCardShadow()

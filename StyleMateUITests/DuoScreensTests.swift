@@ -338,17 +338,38 @@ final class DuoScreensTests: E2ETestCase {
             return
         }
         let window = root.frame
-        guard abs(window.width - layout.window.width) < 2, abs(window.height - layout.window.height) < 2 else {
+        let size = layout.window
+        let upright = abs(window.width - size.width) < 2 && abs(window.height - size.height) < 2
+        let sideways = abs(window.width - size.height) < 2 && abs(window.height - size.width) < 2
+        guard upright || sideways else {
             XCTFail("\(shot): the accessibility snapshot is \(Int(window.width)) × \(Int(window.height)) pt but the "
-                    + "app's window \(Int(layout.window.width)) × \(Int(layout.window.height)) pt: not the inner display")
+                    + "app's window \(Int(size.width)) × \(Int(size.height)) pt: not the inner display")
             return
         }
-        let band = layout.fold.offsetBy(dx: window.minX, dy: window.minY)
+        // The Duo simulator's accessibility tree is in the inner panel's native portrait frame (669 × 951, Duo run
+        // 42122596437) while the app lays out sideways (951 × 669): the app's x then runs along the tree's y, one
+        // way or the other. The band covers both readings (they differ by 1 pt: the fold is all but centred).
+        let f = layout.fold
+        let band: CGRect
+        if upright {
+            band = f.offsetBy(dx: window.minX, dy: window.minY)
+        } else {
+            let lo = min(f.minX, size.width - f.maxX), hi = max(f.maxX, size.width - f.minX)
+            band = CGRect(x: window.minX + f.minY, y: window.minY + lo, width: f.height, height: hi - lo)
+        }
+        let along = upright ? "x" : "y"
+        func span(_ r: CGRect) -> String {
+            upright ? "\(Int(r.minX))-\(Int(r.maxX))" : "\(Int(r.minY))-\(Int(r.maxY))"
+        }
         var crossing: [String] = []
         var checked = 0
+        var extent = CGRect.null
+        var homeTab: CGRect?
         func walk(_ node: XCUIElementSnapshot, clip: CGRect) {
             let clip = Self.clippingTypes.contains(node.elementType) ? clip.intersection(node.frame) : clip
             if Self.controlTypes.contains(node.elementType), !Self.systemIdentifiers.contains(node.identifier) {
+                if node.label == "Home", homeTab == nil { homeTab = node.frame }
+                extent = extent.union(node.frame)
                 let shown = node.frame.intersection(clip)
                 if !shown.isNull, shown.width >= 1, shown.height >= 1 {
                     checked += 1
@@ -356,18 +377,27 @@ final class DuoScreensTests: E2ETestCase {
                     if shown.maxX > band.minX + 1, shown.minX < band.maxX - 1,
                        shown.maxY > band.minY + 1, shown.minY < band.maxY - 1 {
                         let name = node.identifier.isEmpty ? node.label : node.identifier
-                        crossing.append("type \(node.elementType.rawValue) '\(name.prefix(40))' x \(Int(shown.minX))-\(Int(shown.maxX))")
+                        crossing.append("type \(node.elementType.rawValue) '\(name.prefix(40))' \(along) \(span(shown))")
                     }
                 }
             }
             for child in node.children { walk(child, clip: clip) }
         }
         walk(root, clip: window)
-        print("[DuoFold] \(shot): fold x \(Int(band.minX))-\(Int(band.maxX)), \(checked) controls, \(crossing.count) on it")
+        print("[DuoFold] \(shot): tree \(Int(window.width))x\(Int(window.height)) (\(upright ? "upright" : "sideways")), "
+              + "fold \(along) \(span(band)), \(checked) controls, \(crossing.count) on it; controls span "
+              + "\(extent.isNull ? "-" : "\(Int(extent.minX)),\(Int(extent.minY)) \(Int(extent.width))x\(Int(extent.height))"), "
+              + "Home tab \(homeTab.map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" } ?? "-")")
         if !crossing.isEmpty { note("\(shot)-on-fold", crossing.joined(separator: "\n")) }
         XCTAssertTrue(checked > 0, "\(shot): no controls in the accessibility snapshot")
-        XCTAssertTrue(crossing.isEmpty, "\(shot): \(crossing.count) control(s) on the fold (x \(Int(band.minX))-"
-                      + "\(Int(band.maxX))): " + crossing.prefix(6).joined(separator: "; "))
+        // The tab bar's Home button is always on screen: outside the tree's frame, the controls would be in
+        // another coordinate space than the band.
+        if let home = homeTab {
+            XCTAssertTrue(window.insetBy(dx: -2, dy: -2).contains(home),
+                          "\(shot): the Home tab (\(home)) is outside the \(Int(window.width)) × \(Int(window.height)) tree")
+        }
+        XCTAssertTrue(crossing.isEmpty, "\(shot): \(crossing.count) control(s) on the fold (\(along) \(span(band))): "
+                      + crossing.prefix(6).joined(separator: "; "))
     }
 
     /// Things you tap or type into.

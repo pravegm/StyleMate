@@ -26,6 +26,7 @@ import SwiftUI
 //     duo.creaseInGlobal the fold (active or not) in global coordinates, nil without one
 //     duo.crease(in:)    the ACTIVE fold in a view's coordinate space, given that view's global frame
 //     duo.foldBand(in:)  the fold to lay out around: the active one half-open, the inactive one flat
+//     duo.foldRunsThrough(_:) a top-to-bottom fold with part of the view on each side (a centred sheet, flat)
 // - `DuoCreaseReader { crease in ... }`: a GeometryReader that hands you the active fold in its own coordinates
 //   (nil when flat, closed, or not a Duo). Use it at the top of a full-screen view, not inside a ScrollView.
 // - `FoldAwareSplit(gutter: 24) { leading } trailing: { trailing }`: two panes side by side on a wide layout,
@@ -103,6 +104,13 @@ struct DuoLayoutState: Equatable {
         guard isHalfOpen || posture == .flat, let c = creaseInGlobal,
               c.intersects(frame.insetBy(dx: -1, dy: -1)) else { return nil }
         return c.offsetBy(dx: -frame.minX, dy: -frame.minY)
+    }
+
+    /// A top-to-bottom fold runs through the view, with part of it on each side (a sheet centred on the fold
+    /// when flat), not just across its edge (a half-open sheet whose rounded corner reaches into the band).
+    func foldRunsThrough(_ frame: CGRect) -> Bool {
+        guard let b = foldBand(in: frame), b.height > b.width else { return false }
+        return b.minX > 0 && b.maxX < frame.width
     }
 }
 
@@ -283,8 +291,8 @@ struct FoldAwareSplit<Leading: View, Trailing: View>: View {
     var leadingFraction: CGFloat = 0.5
     /// The container must be at least this wide to split (a Split View window on the Duo is ~475 pt).
     var minimumWidth: CGFloat = 560
-    /// Split only when a top-to-bottom fold crosses the container; stack otherwise (a centred sheet whose rows
-    /// only need two columns to clear the fold when the phone is open flat).
+    /// Split only when a top-to-bottom fold runs through the container (`foldRunsThrough`); stack otherwise (a
+    /// centred sheet whose rows only need two columns to clear the fold when the phone is open flat).
     var requiresFold = false
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
@@ -298,7 +306,8 @@ struct FoldAwareSplit<Leading: View, Trailing: View>: View {
         let foldAcross = fold.map { $0.width > $0.height } ?? false
         let tabletop = axis == .vertical && foldAcross
         let foldDown = fold != nil && !foldAcross
-        let split = tabletop || (duo.isWideLayout && frame.width >= minimumWidth && (foldDown || !requiresFold))
+        let split = tabletop || (duo.isWideLayout && frame.width >= minimumWidth
+                                 && (!requiresFold || duo.foldRunsThrough(frame.rect)))
         let band: (CGFloat, CGFloat)?
         if let c = fold, tabletop {
             band = (c.minY, c.maxY)
