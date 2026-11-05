@@ -211,7 +211,10 @@ struct ScanProgressBanner: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(DS.Colors.textTertiary)
 
-            Text("Scan complete. No new items found.")
+            // Past the free tier's 50, new finds wait for Premium (Home's card) instead of joining the closet.
+            let waiting = LockedItemsStore.shared.count
+            Text(waiting > 0 ? "Scan complete. \(waiting) piece\(waiting == 1 ? " is" : "s are") waiting for Premium."
+                             : "Scan complete. No new items found.")
                 .font(DS.Font.subheadline)
                 .foregroundColor(DS.Colors.textSecondary)
         }
