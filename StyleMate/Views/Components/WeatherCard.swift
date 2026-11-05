@@ -81,6 +81,20 @@ struct WeatherInlineRow: View {
                                 .lineLimit(1)
                         }
                     }
+
+                    // MET Norway and Open-Meteo (CC BY 4.0) ask for a credit next to their data.
+                    Menu {
+                        Link("Weather data: MET Norway", destination: URL(string: "https://api.met.no")!)
+                        Link("Weather data: Open-Meteo.com (CC BY 4.0)", destination: URL(string: "https://open-meteo.com")!)
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(DS.Font.caption1)
+                            .foregroundColor(DS.Colors.textTertiary)
+                            .frame(minWidth: 28, minHeight: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Weather data sources")
+                    .accessibilityIdentifier("home.weatherSources")
                 }
             } else {
                 HStack(spacing: DS.Spacing.xs) {
