@@ -95,10 +95,15 @@ class FirstRunE2ETests: E2ETestCase {
         while Date() < deadline, !tabs.exists {
             dismissSpringboardAlertIfPresent()
             for step in steps where step.element.exists && step.element.isHittable {
+                // The flow can advance on its own between the check and the tap (the selfie
+                // step moves on by itself without a camera), and an element tap whose query
+                // no longer matches fails the test. Capture the frame now, tap that point.
+                let frame = step.element.frame
                 snapOnce(step.key)
-                // The flow can advance on its own between the check and the tap
-                // (e.g. the selfie step moving on); only tap what's still there.
-                if step.element.exists && step.element.isHittable { step.element.tap() }
+                if !frame.isEmpty {
+                    app.coordinate(withNormalizedOffset: .zero)
+                        .withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+                }
                 break
             }
             if anyElement(NSPredicate(format: "identifier == 'onboarding.scanCounter'")).exists { snapOnce("scanning") }

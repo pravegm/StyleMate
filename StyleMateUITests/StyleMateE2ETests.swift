@@ -110,6 +110,7 @@ class StyleMateE2ETests: E2ETestCase {
         let piece = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'outfit.piece.'")).firstMatch
         if piece.waitForExistence(timeout: 10) {
             piece.tap()
+            _ = XCTWaiter.wait(for: [XCTestExpectation(description: "selection settles")], timeout: 0.8)
             snap("option-1-piece-selected")
         }
 
