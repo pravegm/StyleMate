@@ -203,7 +203,7 @@ final class DiagnosticsBenchmark: ObservableObject {
         let a = item.attributes
         let plan = StudioPlan.make(product: a.product, category: a.category, colors: a.colors, pattern: a.pattern,
                                    material: a.material, sleeve: a.sleeveLength, neckline: a.neckline, details: nil,
-                                   kind: item.kind, truncated: item.truncated, cutout: cg, embedding: a.embedding)
+                                   kind: item.kind, truncated: item.truncated, cutout: cg, embedding: a.embedding, fit: a.fit)
         result.studioItem = a.product
         let cutout = item.cutout, embedding = a.embedding
         for run in 0..<rounds {

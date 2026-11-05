@@ -12,7 +12,7 @@ import UIKit
 /// classifier, planned by `StudioPlan.make`, rendered by the bundled diffusion
 /// model (2 candidates; the app renders 3) and gated by `StudioPipeline`.
 ///
-/// Heavy (the simulator runs the UNet on its CPU, ~6 min per candidate), so it
+/// Heavy (the simulator runs the UNet on its CPU, ~2–4 min per candidate), so it
 /// only runs in CI's `studio` job, one shard of the manifest per runner
 /// (`STUDIO_SHARD`); everywhere else it returns at once. Everything lands in
 /// $REPORT_DIR/studio_coverage: `<item>_cutout/_template/_raw<k>/_cand<k>/_studio.png`

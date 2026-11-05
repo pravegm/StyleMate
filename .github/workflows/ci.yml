@@ -208,7 +208,7 @@ jobs:
 
   # Studio renders for every product family (StudioCoverageTests: shoes, hats, full-length
   # trousers, a light-grey coat) from the fixed cutouts in StyleMateTests/Fixtures/studio. The
-  # simulator runs the diffusion UNet on its CPU (~6 min per candidate), so the manifest is split
+  # simulator runs the diffusion UNet on its CPU (~2–4 min per candidate), so the manifest is split
   # over three runners; each uploads `studio-coverage-<shard>` (renders + coverage_shard<n>.json).
   studio:
     needs: models

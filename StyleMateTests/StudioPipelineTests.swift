@@ -160,8 +160,8 @@ struct StudioPipelineTests {
         let plan = StudioPlan.make(product: "Sneakers", category: .footwear, colors: ["Black"], pattern: .solid, material: "Knit",
                                    sleeve: nil, neckline: nil, details: nil, kind: .footwear, truncated: false, cutout: black)
         #expect(plan.productShot && plan.template != nil)
-        // A light-grey "shoe" for a black one.
-        let c = try #require(StudioPipeline.evaluate(Self.square(r: 200, g: 200, b: 200), reference: ColorStats(black),
+        // A mid-grey "shoe" for a black one.
+        let c = try #require(StudioPipeline.evaluate(Self.square(r: 150, g: 150, b: 150), reference: ColorStats(black),
                                                      embedding: emb, plan: plan, minSimilarity: 0))
         #expect(c.rejection?.hasPrefix("colour drift") == true, "\(c.rejection ?? "accepted") ΔL \(c.colourDriftL)")
         // The same colour passes that check.

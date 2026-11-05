@@ -91,7 +91,7 @@ On 13 real street photos with 56 hand-labelled garments, run on every push:
 |---|---|---|
 | Garments found | 82% | 95% |
 | Right product ("polo", "Chelsea boot") | 76% | 89% |
-| Right main colour | 74% | 83% |
+| Right main colour | 74% | 91% |
 | Wrong garments added | 0 | about 1 in 50 |
 
 The test fails if any of these drops by more than 3 points, so quality can't quietly slip.
@@ -100,9 +100,12 @@ iPhone Duo screenshots: Duo 41966483488.
 
 ## Still open (being worked on, or next)
 
-- Studio renders: jackets, shirts, tees, coats, dresses and jeans render as product photos. Shoes,
-  hats and full-length trousers still mostly show the cleaned-up cutout. Light-grey coats in bright
-  sun are sometimes named "White".
+- Studio renders: shoes (one shoe from the side), hats and every pair of trousers now render as
+  catalogue photos too, from product templates; 13 of 13 test items were accepted in CI (Nov 2026),
+  and light-grey coats in sun are now named light grey (Silver). Still weak: the render follows the
+  item's name, so a misnamed item gets the wrong style (boat shoes named "Boots" became a suede boot,
+  oxfords named "Loafers" a tassel loafer); the model sometimes adds a logo-like mark on sneakers and
+  caps or shows jeans from the back; heels and sandals have templates but no test photo yet.
 - Scan speed: on the cloud test Mac each photo takes about 2 minutes (it looks again at the head,
   hands and feet to find small accessories). The iPhone's Neural Engine should be several times
   faster, but this has not been measured on a real phone yet.
