@@ -219,8 +219,8 @@ The garment retrain (§4.3 option 2) is on the critical path whatever happens wi
     creativeml-openrail-m; notice: Core ML, 6-bit palettized UNet + text encoder, no safety checker), Apple
     ml-stable-diffusion (MIT, LICENSE.md at the pinned commit), MET Norway (NLOD 2.0 + CC BY 4.0, "Based on
     data from MET Norway") and Open-Meteo (CC BY 4.0). There are no Swift packages (the project has no package
-    references). **Whoever adds or swaps a model adds / deletes its file there.** Still to add if they keep
-    shipping: SCRFD / AdaFace / FASHN parser / Fashionpedia labeler texts (NVIDIA SegFormer licence §3.1 asks
+    references). **Whoever adds or swaps a model adds / deletes its file there.** YuNet (`ACK-12-yunet.md`, MIT) and SFace (`ACK-13-sface.md`, Apache-2.0 + modification notice) were added on 5 Nov with the face swap; SCRFD / AdaFace no longer ship. Still to add if they keep
+    shipping: FASHN parser / Fashionpedia labeler texts (NVIDIA SegFormer licence §3.1 asks
     for a copy of the licence with any redistribution; Fashionpedia annotations are CC BY 4.0).
   - Open-Meteo's licence also asks for a link "next to any location Open-Meteo data are displayed"; the weather
     card shows none yet.
