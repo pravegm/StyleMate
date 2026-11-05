@@ -72,4 +72,4 @@ TestFlight builds use Apple's *Production* iCloud environment, which needs the a
 - **Outfits calendar**: the saved look is on today's date.
 - **iPhone Duo**: try each screen open flat, half-open, and on the cover screen when closed.
 
-The app is large (about 1.5 GB, mostly the on-device AI models), so install it on Wi-Fi.
+The app is large (about 1.3 GB, mostly the on-device AI models), so install it on Wi-Fi.

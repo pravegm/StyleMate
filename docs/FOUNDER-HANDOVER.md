@@ -54,7 +54,8 @@ Follow `docs/TESTFLIGHT.md` (about 15 minutes, once). In short:
 4. Press **Run workflow** on the TestFlight action. Install from TestFlight on the iPhone 17 Pro
    and the Duo.
 
-Install on Wi-Fi: the on-device models make the app large.
+Install on Wi-Fi: the on-device models make the app large (about 1.3 GB). The Release build was
+checked on 5 Nov: every model is inside the app and no test-only code ships (run 41959627949).
 
 **What to try first**: grant photo access to your full library (not "Selected photos") and let
 the first scan run with the phone unlocked for a few minutes. Studio photos keep arriving in the
@@ -74,10 +75,32 @@ background, and fastest when the phone is charging.
 3. **App Store listing**: a draft name, subtitle, keywords, description and screenshot plan are in
    `docs/APP-STORE-LISTING.md`.
 
+## How good the wardrobe is now (measured)
+
+On 13 real street photos with 56 hand-labelled garments, run on every push:
+
+| | Before the rebuild | Now |
+|---|---|---|
+| Garments found | 82% | 95% |
+| Right product ("polo", "Chelsea boot") | 76% | 89% |
+| Right main colour | 74% | 83% |
+| Wrong garments added | 0 | about 1 in 50 |
+
+The test fails if any of these drops by more than 3 points, so quality can't quietly slip.
+Last fully green run of everything on `main`: CI 41960213088 (commit 4ef8d47); iPhone Duo
+screenshots: Duo 41952107270.
+
 ## Still open (being worked on, or next)
 
-- Studio renders for trousers and skirts: the quality gate correctly rejects bad renders today,
-  so these still show the cutout more often than tops do.
+- Studio renders: jackets, shirts, tees, coats, dresses and jeans render as product photos. Shoes,
+  hats and full-length trousers still mostly show the cleaned-up cutout. Light-grey coats in bright
+  sun are sometimes named "White".
+- Scan speed: on the cloud test Mac each photo takes about 2 minutes (it looks again at the head,
+  hands and feet to find small accessories). The iPhone's Neural Engine should be several times
+  faster, but this has not been measured on a real phone yet.
+- After a restore to a new iPhone, items keep the picture they showed (studio photo or cutout), but
+  the "From your photo" original stays on the old phone. The new phone may also redraw some studio
+  photos once in the background. Harmless, but it wastes battery; fix by syncing the original too.
 - Real-device checks the simulator can't do: scan speed on a 10,000-photo library, render time on
   the Neural Engine, Duo hinge accuracy and the seated pose, the morning notification and
   background refresh.
