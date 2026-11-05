@@ -745,14 +745,18 @@ class PhotoScanService: ObservableObject {
         var matched: [UUID] = []
         /// Items StyleMate wasn't sure about, held for "tap to add".
         var held = 0
+        /// New items past the free tier's limit, kept locked for Premium (`LockedItemsStore`).
+        var locked = 0
     }
 
     /// Runs the on-device garment extractor on an image of the user and adds every
     /// new item it's sure about to the wardrobe. Duplicates of items already there
     /// are matched (and may upgrade the stored image); uncertain items (fragments,
     /// poor views, tiny jewelry — `ItemTrust`) are held for the user to add.
-    /// Nothing lands if the profile changed meanwhile.
+    /// Nothing lands if the profile changed meanwhile. `gated`: past the free tier's limit new
+    /// items are locked for Premium (`WardrobeAllowance`); off for the sample photos, which don't count.
     private func extractItems(from image: UIImage, userId: String, userGender: String?, holdUncertain: Bool = true,
+                              gated: Bool = true,
                               wardrobeViewModel: WardrobeViewModel) async -> ExtractionOutcome {
         await ExtractionGate.shared.acquire()   // shared with manual add
         let results = await ImageAnalysisService.shared.analyzeAndSegment(image: image, userGender: userGender)
@@ -782,6 +786,14 @@ class PhotoScanService: ObservableObject {
                     await upgradeImageIfBetter(dup.existingItem, with: seg, wardrobeViewModel: wardrobeViewModel)
                     outcome.matched.append(dup.existingItem.id)
                 }
+                continue
+            }
+            // Already found and waiting for Premium: don't lock the same garment twice.
+            if gated, !LockedItemsStore.shared.wardrobeItems(forUser: userId).isEmpty,
+               DuplicateDetector.shared.findBestMatch(
+                   category: cat, product: prod, colors: seg.colors, pattern: pat, material: seg.material,
+                   fit: seg.fit, neckline: seg.neckline, sleeveLength: seg.sleeveLength, brand: seg.brand,
+                   existingItems: LockedItemsStore.shared.wardrobeItems, featurePrint: seg.featurePrint) != nil {
                 continue
             }
 
@@ -831,6 +843,14 @@ class PhotoScanService: ObservableObject {
                                                 doubt: doubt, forUser: userId)
                 outcome.held += 1
                 print("[StyleMate] Auto-scan: held uncertain \(prod) (\(doubt.rawValue), q \(String(format: "%.2f", seg.quality)))")
+                continue
+            }
+            // Free tier full: the piece is kept (locked) for Premium instead of shown.
+            if gated, PremiumGate.freeSlots(in: wardrobeViewModel) == 0 {
+                LockedItemsStore.shared.lock(wardrobeItem, embedding: seg.featurePrint, quality: seg.quality,
+                                             truncated: seg.truncated, forUser: userId)
+                outcome.locked += 1
+                print("[StyleMate] Auto-scan: locked \(prod) for Premium (free tier full)")
                 continue
             }
             if let fp = seg.featurePrint {
@@ -1142,7 +1162,7 @@ class PhotoScanService: ObservableObject {
         for image in images {
             guard isCurrent(generation) else { return }
             let outcome = await extractItems(from: image, userId: userId, userGender: nil, holdUncertain: false,
-                                             wardrobeViewModel: wardrobeViewModel)
+                                             gated: false, wardrobeViewModel: wardrobeViewModel)
             guard isCurrent(generation) else {
                 // Removed / cancelled while this photo was being analysed: drop what it found.
                 SampleLibrary.deleteItems(Set(outcome.added), from: wardrobeViewModel)
