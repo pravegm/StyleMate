@@ -123,7 +123,15 @@ final class TryOnBodyLibrary: ObservableObject {
                     FaceMatchingService.shared.resolveIdentityForScan(in: fcg, fullImage: full, userId: userId)
                 }.value
                 guard case .analyze = identity else { continue }
-                best = (full, q, asset.localIdentifier)
+                // Prefer fitted clothes: a long wide coat leaves a lot to invent under a tee and jeans.
+                let bulk = await Task.detached(priority: .utility) { () -> Float in
+                    guard let up = Self.upright(full, maxSide: 2048),
+                          case .success(let m) = TryOnBodyAnalyzer.analyze(up) else { return 1 }
+                    return Self.clothingBulk(m)
+                }.value
+                let score = q - 0.6 * bulk
+                guard score > (best?.1 ?? 0.4) else { continue }
+                best = (full, score, asset.localIdentifier)
             }
         }
         if let b = best, await use(b.0, source: .library, score: b.1, assetId: b.2) { return }
@@ -247,6 +255,28 @@ final class TryOnBodyLibrary: ObservableObject {
         let armsOut = [pose.wL, pose.wR].filter { w in w.x < pose.sL.x + torso * 0.1 || w.x > pose.sR.x - torso * 0.1 }.count
         let conf = min(1, pose.minConfidence / 0.6)
         return 0.35 * sizeScore + 0.25 * Float(min(1, frontal / 0.7)) + 0.2 * conf + 0.2 * Float(armsOut) / 2
+    }
+
+    /// Share of the person that is clothing outside a close body envelope (torso band + limb capsules):
+    /// ~0 for fitted clothes, 0.15-0.3 for a long open coat or a wide skirt.
+    nonisolated static func clothingBulk(_ m: TryOnBodyModel) -> Float {
+        let limbs = TryOnCompositor.limbMask(m)
+        let half = 0.55 * max(m.shoulderW, m.hipW)
+        let u = m.u, v = m.v, T = m.torsoLen
+        var person = 0, outside = 0
+        for y in 0..<m.height {
+            for x in 0..<m.width {
+                let i = y * m.width + x
+                let l = m.labels[i]
+                guard l != TryOnLabel.background else { continue }
+                person += 1
+                guard TryOnLabel.clothing.contains(l), !limbs[i] else { continue }
+                let d = CGVector(dx: CGFloat(x) - m.shoMid.x, dy: CGFloat(y) - m.shoMid.y)
+                let across = abs(TOGeo.dot(d, u)), along = TOGeo.dot(d, v)
+                if across > half || along < -0.2 * T || along > T + 0.3 * m.thigh { outside += 1 }
+            }
+        }
+        return person > 0 ? Float(outside) / Float(person) : 1
     }
 
     /// A try-on of the generated model, cropped just under the chin (a neck-down catalogue shot, so
