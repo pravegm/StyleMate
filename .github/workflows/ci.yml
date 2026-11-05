@@ -10,12 +10,35 @@ name: CI
 #
 # Runs on every branch push, so parallel feature branches each get their own build + test signal.
 # The `ci-report` artifact holds build/test logs and the extraction test's cutouts.
+#
+# The macOS runners are shared by every branch, so a run only takes the jobs it needs (`plan`, on Linux):
+#   - main and pull requests: everything.
+#   - feature-branch push: unit tests + Release compile. Add `[ui]` (or `[full]`) to the commit message
+#     for the UI tests and screenshots, `[tests: StyleMateTests/TryOnTests, ...]` to run only those
+#     unit tests, `[skip ci]` for no run at all. Docs-only pushes don't run (and don't cancel a run).
+#   - Run workflow (dispatch): the `unit_tests` and `ui_tests` inputs do the same.
+# The `models` job only takes a Mac when a model cache is actually missing.
 
 on:
   push:
     branches: ['**']
+    paths-ignore: ['docs/**', '**/*.md']
   pull_request:
+    paths-ignore: ['docs/**', '**/*.md']
   workflow_dispatch:
+    inputs:
+      unit_tests:
+        description: "Only these unit tests, comma-separated (e.g. StyleMateTests/TryOnTests). Empty = all."
+        type: string
+        default: ""
+      ui_tests:
+        description: "Run the UI tests (e2e-screens)"
+        type: boolean
+        default: true
+      audit:
+        description: "Also run the concurrency audit (strict concurrency + Thread Sanitizer, ~1 h)"
+        type: boolean
+        default: false
   schedule:
     - cron: "0 4 * * 1"   # Mondays 04:00 UTC: concurrency audit (main only)
 
@@ -24,7 +47,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      build_models: ${{ steps.models.outputs.build }}
+      ui: ${{ steps.tier.outputs.ui }}
+      unit_tests: ${{ steps.tier.outputs.unit_tests }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pick the jobs
+        id: tier
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          MSG: ${{ github.event.head_commit.message }}
+          UI_INPUT: ${{ inputs.ui_tests }}
+          TESTS_INPUT: ${{ inputs.unit_tests }}
+        run: |
+          ui=false; tests=""
+          if [ "$REF" = "refs/heads/main" ] || [ "$EVENT" = "pull_request" ]; then
+            ui=true
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            [ "$UI_INPUT" = "true" ] && ui=true
+            tests="$TESTS_INPUT"
+          else
+            case "$MSG" in *"[ui]"*|*"[full]"*) ui=true;; esac
+            tests=$(printf '%s' "$MSG" | sed -n 's/.*\[tests:\([^]]*\)\].*/\1/p' | head -1)
+          fi
+          # Test identifiers only (StyleMateTests/Suite/test), so nothing else reaches xcodebuild.
+          tests=$(printf '%s' "$tests" | tr -cd 'A-Za-z0-9_/,.' )
+          echo "ui=$ui" >> "$GITHUB_OUTPUT"
+          echo "unit_tests=$tests" >> "$GITHUB_OUTPUT"
+          echo "UI tests: $ui | unit tests: ${tests:-all}"
+      - name: Are the model caches there?
+        id: models
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          FACE_KEY: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          WARDROBE_KEY: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          STUDIO_KEY: studio-models-v1-${{ hashFiles('scripts/build_studio_models.sh', 'scripts/convert_studio_model.py') }}
+        run: |
+          # A run can restore its own branch's caches and main's. Any doubt (API error) means build.
+          build=false
+          for k in "$FACE_KEY" "$WARDROBE_KEY" "$STUDIO_KEY"; do
+            n=$(gh api "repos/$REPO/actions/caches?key=$k&per_page=100" \
+                  --jq "[.actions_caches[] | select(.key == \"$k\" and (.ref == \"refs/heads/main\" or .ref == \"$REF\"))] | length" 2>/dev/null || echo 0)
+            echo "$k: $n"
+            [ "${n:-0}" -gt 0 ] || build=true
+          done
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
   models:
+    needs: plan
+    if: needs.plan.outputs.build_models == 'true'
     runs-on: xcode-27
     timeout-minutes: 100
     steps:
@@ -78,8 +158,9 @@ jobs:
           cat StudioModels.bundle/studio_manifest.json
 
   test:
-    needs: models
-    if: github.event_name != 'schedule'
+    needs: [plan, models]
+    # Runs when the models job was skipped (caches already there), not only when it succeeded.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.models.result != 'failure' && github.event_name != 'schedule' }}
     runs-on: xcode-27
     # 75 -> 120: the studio-render test runs SD img2img on the simulator's CPU.
     timeout-minutes: 120
@@ -164,17 +245,27 @@ jobs:
           bash scripts/check_face_models.sh "$APP"
 
       - name: Unit tests
+        env:
+          UNIT_TESTS: ${{ needs.plan.outputs.unit_tests }}
         run: |
           set -o pipefail
           # Pass the fixtures + report paths into the test process (xcodebuild strips the TEST_RUNNER_ prefix).
           export TEST_RUNNER_FIXTURES_DIR="$GITHUB_WORKSPACE/StyleMateTests/Fixtures"
           export TEST_RUNNER_REPORT_DIR="$RUNNER_TEMP/report"
           mkdir -p "$RUNNER_TEMP/report"
+          # `plan` picks all unit tests, or only the ones a commit asked for ([tests: ...]).
+          ONLY="-only-testing:StyleMateTests"
+          if [ -n "$UNIT_TESTS" ]; then
+            ONLY=""
+            IFS=',' read -ra T <<< "$UNIT_TESTS"
+            for t in "${T[@]}"; do [ -n "$t" ] && ONLY="$ONLY -only-testing:$t"; done
+          fi
+          echo "Testing: $ONLY"
           xcodebuild test-without-building \
             -project StyleMate.xcodeproj -scheme StyleMate \
             -destination "id=$SIM" \
             -derivedDataPath "$RUNNER_TEMP/dd" \
-            -only-testing:StyleMateTests \
+            $ONLY \
             -resultBundlePath "$RUNNER_TEMP/tests.xcresult" \
             2>&1 | tee test.log | grep -E "✔|✘|Test .*(passed|failed)|error:|\[Report\]|\*\* TEST" || true
           grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" test.log
@@ -213,8 +304,8 @@ jobs:
   # launch hooks (demo user, skipped onboarding, seeded wardrobe) and export every step's
   # screenshot from the .xcresult into the `e2e-screens` artifact. Independent of `test`.
   ui-tests:
-    needs: models
-    if: github.event_name != 'schedule'
+    needs: [plan, models]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.models.result != 'failure' && github.event_name != 'schedule' && needs.plan.outputs.ui == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 90
     steps:
@@ -352,8 +443,8 @@ jobs:
   # code, no simulator) so a Release-only compile error can't first show up in the TestFlight
   # workflow. Compile only — no signing, no tests — in parallel with the test jobs.
   release-build:
-    needs: models
-    if: github.event_name != 'schedule'
+    needs: [plan, models]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.models.result != 'failure' && github.event_name != 'schedule' }}
     runs-on: xcode-27
     timeout-minutes: 60
     steps:
@@ -410,9 +501,10 @@ jobs:
   #   1. a build with SWIFT_STRICT_CONCURRENCY=complete; the warning list is the report;
   #   2. the face-identity + reliability unit tests under Thread Sanitizer (they hammer the
   #      shared face service from several threads).
+  # On demand: Run workflow with `audit` ticked.
   concurrency-audit:
-    needs: models
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [plan, models]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.models.result != 'failure' && (github.event_name == 'schedule' || inputs.audit) }}
     runs-on: xcode-27
     timeout-minutes: 90
     steps:

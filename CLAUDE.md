@@ -13,6 +13,14 @@
   branch push runs `.github/workflows/ci.yml` (macOS `xcode-27` runner, simulator
   tests with the real models). Green CI is the bar; look at the `ci-report`
   artifact's cutouts for anything visual.
+- **The Mac runners are shared by every branch, so spend them deliberately.** A
+  feature-branch push runs unit tests + the Release compile only (~45 min). Commit
+  message tags: `[tests: StyleMateTests/TryOnTests, ...]` runs only those unit tests
+  (minutes, not 45); `[ui]` or `[full]` adds the UI tests + `e2e-screens`; `[skip ci]`
+  runs nothing. Docs-only pushes don't run. Each push cancels the branch's running
+  CI, so batch commits and push when you want a result, not after every commit.
+  Run `duo.yml` once per branch, right before asking for a merge. Merge `origin/main`
+  into a branch once, just before that final full run — not after every main merge.
 
 ## Fully on-device (founder decision, 4 Nov 2026)
 - No cloud AI. No photo, pixel, face or wardrobe data goes to any AI service.
