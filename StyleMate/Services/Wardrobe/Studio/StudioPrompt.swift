@@ -54,15 +54,19 @@ struct StudioPlan {
         "accessories, text, watermark, logo, label, white patch, cropped, cut off, frame, border, blurry, deformed"
 
     /// `productShot`: drawn from a product template (one shoe, side view; a hat
-    /// on its own; trousers laid out full length).
+    /// on its own; trousers laid out full length). Its words go FIRST: CLIP reads
+    /// 77 tokens and the base list alone is ~60, so words appended after it were
+    /// cut off (CI, Nov 2026: "back view" appended did nothing, jeans came out
+    /// from the back).
     static func negative(for kind: GarmentKind, productShot: Bool = false) -> String {
         switch kind {
         case .outerLayer: return baseNegative + ", shirt underneath, white t-shirt, inner layer, sherpa lining, white collar, patch"
         case .innerTop: return baseNegative + ", jacket, layered, second shirt, collar tag"
         case .onePiece: return baseNegative + ", jacket, belt, second garment"
-        case .footwear: return baseNegative + (productShot ? ", pair, two shoes, socks, feet, legs, box" : ", single shoe, socks, feet, box")
-        case .headwear: return baseNegative + (productShot ? ", head, hair, mannequin head, brand logo, emblem" : "")
-        case .lower: return baseNegative + (productShot ? ", legs, feet, shoes, top, shirt, back view, back pockets" : "")
+        case .footwear:
+            return productShot ? "pair, two shoes, brand logo, socks, feet, legs, " + baseNegative : baseNegative + ", single shoe, socks, feet, box"
+        case .headwear: return productShot ? "head, hair, brand logo, emblem, " + baseNegative : baseNegative
+        case .lower: return productShot ? "back view, back pockets, legs, feet, shoes, top, " + baseNegative : baseNegative
         default: return baseNegative
         }
     }

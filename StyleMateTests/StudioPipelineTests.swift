@@ -89,7 +89,7 @@ struct StudioPipelineTests {
         let shoe = StudioPlan.make(product: "Sneakers", category: .footwear, colors: ["White"], pattern: .solid, material: "Leather",
                                    sleeve: nil, neckline: nil, details: nil, kind: .footwear, truncated: false, cutout: cut)
         #expect(shoe.prompt.hasPrefix("white leather sneaker, single shoe, side view"), "\(shoe.prompt)")
-        #expect(shoe.negativePrompt.contains("two shoes") && !shoe.negativePrompt.contains("single shoe"))
+        #expect(shoe.negativePrompt.hasPrefix("pair, two shoes") && !shoe.negativePrompt.contains("single shoe"))
         #expect(shoe.templateStrength == 0.70)
         // No product pose for these: refined from the cutout, as before.
         for (product, kind) in [("Turbans", GarmentKind.headwear), ("Shorts", .lower), ("Skirts", .lower), ("Dhoti", .lower)] {
