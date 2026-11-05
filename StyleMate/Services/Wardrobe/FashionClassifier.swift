@@ -28,6 +28,9 @@ enum FashionClassifier {
         /// whatever it really is.
         var occluded = false
         var parts: GarmentInstance.PartShares?
+        /// Neckwear the segmenter confirmed as a tie (narrow strip below the collar);
+        /// otherwise "Ties" / "Bowties" are not on offer.
+        var allowTie = true
         static let none = Context()
     }
 
@@ -81,6 +84,9 @@ enum FashionClassifier {
         } else if let group = kind.vocabularyGroup {
             scored = vocab.scores(in: group, for: emb)
             if kind == .innerTop && context.occluded { scored = scored.filter { occludedTops.contains($0.key) } }
+            if kind == .neckwear && !context.allowTie {
+                scored["Accessories|Ties"] = nil; scored["Accessories|Bowties"] = nil
+            }
             for (l, p) in priors where scored[l] != nil { scored[l]! += p }
         }
         var category: Category = defaultCategory(resolvedKind)

@@ -180,6 +180,13 @@ enum GarmentSegmenter {
             } else {
                 groups[maj] = idx
             }
+            // A "tie" the labeler sees in a scarf region is usually a dark drape, a
+            // shawl end or a shadow: keep it a tie only if it looks like one,
+            // otherwise it's the scarf it hangs from.
+            if region == .scarf, let tie = groups[17], !isPlausibleTie(tie, parser: labels, logits: logits) {
+                groups[17] = nil
+                groups[26, default: []] += tie
+            }
             for (cls, pixels) in groups where !pixels.isEmpty {
                 pending.append((kind(forLabelerClass: cls, region: region), cls, pixels))
             }
@@ -208,6 +215,39 @@ enum GarmentSegmenter {
         }
         // Largest first: the hero garments lead the review list.
         return instances.sorted { $0.pixelCount > $1.pixelCount }
+    }
+
+    /// A necktie: a narrow vertical strip (at least 2.5x taller than wide) starting below
+    /// the face, centred on the torso, which the unrestricted labeler also calls a tie
+    /// for most of its pixels.
+    static func isPlausibleTie(_ pixels: [Int], parser: [UInt8], logits: [Float]) -> Bool {
+        let n = WardrobeML.gridCount, w = WardrobeML.gridW
+        guard Double(pixels.count) >= Double(n) * 0.001 else { return false }
+        var x0 = Int.max, y0 = Int.max, x1 = 0, y1 = 0, agree = 0
+        for i in pixels {
+            let x = i % w, y = i / w
+            x0 = min(x0, x); y0 = min(y0, y); x1 = max(x1, x + 1); y1 = max(y1, y + 1)
+            var best = 0, bestV = -Float.infinity
+            for c in 0..<27 {
+                let v = logits[c * n + i]
+                if v > bestV { bestV = v; best = c }
+            }
+            if best == 17 { agree += 1 }
+        }
+        let tw = x1 - x0, th = y1 - y0
+        guard th * 2 >= tw * 5, Float(agree) >= Float(pixels.count) * 0.6 else { return false }
+        // Below the face, centred on the torso / top.
+        var fy1 = -1, tx0 = Int.max, tx1 = 0
+        for (i, l) in parser.enumerated() {
+            if l == P.face.rawValue { fy1 = max(fy1, i / w) }
+            if l == P.torso.rawValue || l == P.top.rawValue || l == P.dress.rawValue {
+                tx0 = min(tx0, i % w); tx1 = max(tx1, i % w + 1)
+            }
+        }
+        if fy1 >= 0 && y0 < fy1 { return false }
+        guard tx1 > tx0 else { return false }
+        let cx = Double(x0 + x1) / 2, torsoCx = Double(tx0 + tx1) / 2
+        return abs(cx - torsoCx) <= 0.15 * Double(tx1 - tx0)
     }
 
     /// When the labeler, unrestricted, sees a top over trousers inside one
