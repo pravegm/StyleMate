@@ -100,7 +100,9 @@ class FirstRunE2ETests: E2ETestCase {
                 // The flow can advance on its own between the check and the tap (the selfie
                 // step moves on by itself without a camera), and an element tap whose query
                 // no longer matches fails the test. Capture the frame now, tap that point.
-                let frame = step.element.frame
+                // `snapshot()` throws (instead of failing the test, as `.frame` does) when the
+                // step has already gone; the next poll picks up whatever screen came next.
+                guard let frame = try? step.element.snapshot().frame else { break }
                 snapOnce(step.key)
                 if !frame.isEmpty {
                     app.coordinate(withNormalizedOffset: .zero)
