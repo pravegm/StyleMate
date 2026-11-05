@@ -65,6 +65,12 @@ enum WardrobeExtractor {
         var items: [Item] = []
         for use in uses {
             let inst = use.inst
+            // A small accessory GarmentNet is unsure of is the commonest phantom item (eyeglasses on
+            // a face, clogs at a hem): skip it; a clearer photo will find it.
+            if [.eyewear, .jewelry, .belt, .headwear, .bag, .footwear].contains(inst.kind), inst.confidence < 0.4 {
+                log("drop unsure \(inst.kind.rawValue) (p=\(String(format: "%.2f", inst.confidence)))")
+                continue
+            }
             let truncated = isTruncated(inst, crop: use.crop)
             var context = FashionClassifier.Context()
             // An inner top under an open layer, or cut off by the frame, is only partly seen.
@@ -470,10 +476,15 @@ enum WardrobeExtractor {
     /// differently; merge same-product results from one photo (keep the larger).
     private static func dedupeWithinPhoto(_ items: [Item]) -> [Item] {
         var out: [Item] = []
+        let upper: Set<GarmentKind> = [.innerTop, .outerLayer, .onePiece]
         for it in items {
             if let j = out.firstIndex(where: { o in
-                o.attributes.category == it.attributes.category &&
-                cosine(o.attributes.embedding, it.attributes.embedding) > 0.92
+                (o.attributes.category == it.attributes.category &&
+                 cosine(o.attributes.embedding, it.attributes.embedding) > 0.92)
+                // Two pieces of one upper garment GarmentNet split by class (a coat and its
+                // "vest" hem) look alike to FashionSigLIP whatever they were named.
+                || (upper.contains(o.kind) && upper.contains(it.kind) && o.box.intersects(it.box)
+                    && cosine(o.attributes.embedding, it.attributes.embedding) > 0.88)
             }) {
                 if it.quality > out[j].quality { out[j] = it }
             } else {

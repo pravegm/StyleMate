@@ -50,6 +50,8 @@ struct GarmentInstance {
     /// Part evidence for upper-body garments (share of the mask).
     struct PartShares { let hood: Float; let collar: Float; let lapel: Float; let sleeve: Float }
     var partShares: PartShares?
+    /// GarmentNet's mean probability for this item's class family over its pixels (0...1).
+    var confidence: Float = 1
 }
 
 /// Turns one GarmentNet map into per-item masks.
@@ -213,6 +215,13 @@ enum GarmentSegmenter {
         var instances: [GarmentInstance] = []
         for g in merged {
             if var inst = makeInstance(kind: g.kind, cls: g.cls, pixels: g.pixels, labels: labels) {
+                let fam = (1..<27).filter { family($0) == family(g.cls) && kind(forClass: $0) == g.kind }
+                var sum: Float = 0, n: Float = 0
+                for i in stride(from: 0, to: inst.mask.count, by: 5) where inst.mask[i] != 0 {
+                    for c in fam { sum += map.prob(c, i) }
+                    n += 1
+                }
+                inst.confidence = n > 0 ? sum / n : 0
                 if [.innerTop, .outerLayer, .onePiece].contains(g.kind) {
                     inst.partShares = partShares(mask: inst.mask, map: map)
                 }
