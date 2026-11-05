@@ -3,9 +3,10 @@ import Foundation
 // MARK: - Taste learning (on device, per profile)
 //
 // The stylist learns what this person actually likes from what they do in the
-// deck, and from nothing else:
+// deck and what they log as worn, and from nothing else:
 //
 //   Wear today      the look's pieces and colour pairings (+), the formality worn for the occasion
+//   Logged by hand  My Outfits / a confirmed "Wore this?": pieces and pairings (+), no occasion
 //   Keep (lock)     that piece (+); un-keeping takes it back
 //   Swap            the piece swapped out (−, gently)
 //   Skip            the look's pairings and pieces (− , weak); "Not my style" makes it a real
