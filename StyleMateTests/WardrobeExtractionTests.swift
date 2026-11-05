@@ -112,6 +112,15 @@ struct WardrobeExtractionTests {
         }
     }
 
+    /// A dark drape or shawl end is not a necktie (seen as fragmented "Ties" in CI and in
+    /// gallery imports).
+    @Test func noPhantomTies() throws {
+        try #require(WardrobeExtractor.isAvailable)
+        let items = try FixtureExtraction.run("street_coat_boots.jpg").items
+        let products = items.map { $0.attributes.product }
+        #expect(!products.contains("Ties") && !products.contains("Bowties"), "got \(products)")
+    }
+
     @Test func colourNamerBasics() {
         #expect(ColorNamer.dominantColors(Self.solid(r: 20, g: 30, b: 70)) == ["Navy"])
         #expect(ColorNamer.dominantColors(Self.solid(r: 245, g: 245, b: 245)) == ["White"])

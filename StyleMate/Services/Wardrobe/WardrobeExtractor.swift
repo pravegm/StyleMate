@@ -68,6 +68,7 @@ enum WardrobeExtractor {
             // An inner top under an open layer, or cut off by the frame, is only partly seen.
             context.occluded = inst.kind == .innerTop && (truncated || hasOuter)
             context.parts = inst.partShares
+            context.allowTie = inst.labelerClass == 17
             guard let cut = autoreleasepool(invoking: {
                       GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: inst, photoInGrid: use.crop.photoInGrid)
                   }),
