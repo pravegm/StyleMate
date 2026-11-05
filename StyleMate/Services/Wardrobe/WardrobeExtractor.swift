@@ -259,6 +259,9 @@ enum WardrobeExtractor {
         return (crop, nil)
     }
 
+    /// Set when a matte request ever hangs; later photos skip the matte.
+    nonisolated(unsafe) private static var matteDisabled = false
+
     /// Vision's person segmentation (balanced quality) as 8-bit coverage, or nil.
     private static func personMatte(_ image: CGImage) -> (w: Int, h: Int, v: [UInt8])? {
         let request = VNGeneratePersonSegmentationRequest()
@@ -269,8 +272,23 @@ enum WardrobeExtractor {
         // (measured: 94 s for one accurate matte vs 4 s on the CPU).
         request.usesCPUOnly = true
         #endif
-        let handler = VNImageRequestHandler(cgImage: image, options: [:])
-        guard (try? handler.perform([request])) != nil, let buffer = request.results?.first?.pixelBuffer else { return nil }
+        guard !matteDisabled else { return nil }
+        // The matte comes back at ~384x512 anyway: hand Vision a <= 768 px image.
+        let s = min(1, 768 / CGFloat(max(image.width, image.height)))
+        let small = s < 1 ? (resized(image, w: Int(CGFloat(image.width) * s), h: Int(CGFloat(image.height) * s)) ?? image) : image
+        // A watchdog: a Vision request that never returns must not stall a scan.
+        let done = DispatchSemaphore(value: 0)
+        var ok = false
+        DispatchQueue.global(qos: .userInitiated).async {
+            ok = (try? VNImageRequestHandler(cgImage: small, options: [:]).perform([request])) != nil
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + 20) == .success else {
+            matteDisabled = true
+            print("[Wardrobe] person matte timed out; continuing without it")
+            return nil
+        }
+        guard ok, let buffer = request.results?.first?.pixelBuffer else { return nil }
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         let mw = CVPixelBufferGetWidth(buffer), mh = CVPixelBufferGetHeight(buffer)
