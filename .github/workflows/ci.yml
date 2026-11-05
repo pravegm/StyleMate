@@ -15,9 +15,10 @@ name: CI
 #   - main and pull requests: everything.
 #   - feature-branch push: unit tests + Release compile. Add `[ui]` (or `[full]`) to the commit message
 #     for the UI tests and screenshots, `[tests: StyleMateTests/TryOnTests, ...]` to run only those
-#     unit tests, `[studio]` (or `[full]`) for the studio coverage renders (3 Macs, ~45 min),
-#     `[skip ci]` for no run at all. Docs-only pushes don't run (and don't cancel a run).
+#     unit tests, `[skip ci]` for no run at all. Docs-only pushes don't run (and don't cancel a run).
 #   - Run workflow (dispatch): the `unit_tests` and `ui_tests` inputs do the same.
+#   - Studio coverage renders (3 Macs, ~45 min): only with `[studio]` or `[full]` in the commit message
+#     (any branch, main included) or the dispatch input `studio`.
 # The `models` job only takes a Mac when a model cache is actually missing.
 
 on:
@@ -36,6 +37,10 @@ on:
         description: "Run the UI tests (e2e-screens)"
         type: boolean
         default: true
+      studio:
+        description: "Also run the studio coverage renders (3 Macs, ~45 min)"
+        type: boolean
+        default: false
       audit:
         description: "Also run the concurrency audit (strict concurrency + Thread Sanitizer, ~1 h)"
         type: boolean
@@ -67,18 +72,22 @@ jobs:
           REF: ${{ github.ref }}
           MSG: ${{ github.event.head_commit.message }}
           UI_INPUT: ${{ inputs.ui_tests }}
+          STUDIO_INPUT: ${{ inputs.studio }}
           TESTS_INPUT: ${{ inputs.unit_tests }}
         run: |
           ui=false; studio=false; tests=""
           if [ "$REF" = "refs/heads/main" ] || [ "$EVENT" = "pull_request" ]; then
-            ui=true; studio=true
+            ui=true
           elif [ "$EVENT" = "workflow_dispatch" ]; then
             [ "$UI_INPUT" = "true" ] && ui=true
-            [ "$UI_INPUT" = "true" ] && studio=true
+            [ "$STUDIO_INPUT" = "true" ] && studio=true
             tests="$TESTS_INPUT"
-          else
+          fi
+          # Studio coverage renders (3 Macs, ~45 min) only when asked, on any branch: they come from fixed
+          # fixture cutouts, so other branches' merges don't change them.
+          case "$MSG" in *"[studio]"*|*"[full]"*) studio=true;; esac
+          if [ "$REF" != "refs/heads/main" ] && [ "$EVENT" = "push" ]; then
             case "$MSG" in *"[ui]"*|*"[full]"*) ui=true;; esac
-            case "$MSG" in *"[studio]"*|*"[full]"*) studio=true;; esac
             tests=$(printf '%s' "$MSG" | sed -n 's/.*\[tests:\([^]]*\)\].*/\1/p' | head -1)
           fi
           # Test identifiers only (StyleMateTests/Suite/test), so nothing else reaches xcodebuild.
@@ -86,7 +95,7 @@ jobs:
           echo "ui=$ui" >> "$GITHUB_OUTPUT"
           echo "studio=$studio" >> "$GITHUB_OUTPUT"
           echo "unit_tests=$tests" >> "$GITHUB_OUTPUT"
-          echo "UI tests: $ui | unit tests: ${tests:-all}"
+          echo "UI tests: $ui | studio renders: $studio | unit tests: ${tests:-all}"
       - name: Are the model caches there?
         id: models
         env:
