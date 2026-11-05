@@ -354,7 +354,7 @@ enum WardrobeExtractor {
         let feetZone = (px0, py0 + ph * 3 / 4, px1, py1)
         let evidence: [(GarmentKind, [Int], Float, (Int, Int, Int, Int), CGFloat, String)] = [
             (.bag, [25], 0.35, personBox, 2.5, "bag"),
-            (.jewelry, [19], 0.15, personBox, 4, "wrist"),
+            (.jewelry, [19], 0.2, personBox, 4, "wrist"),
             (.footwear, [23, 24], 0.25, feetZone, 1.6, "feet")
         ]
         for (kind, classes, t, zone, grow, label) in evidence where !found.contains(kind) {
@@ -422,7 +422,20 @@ enum WardrobeExtractor {
                     uses[k] = Use(inst: m, crop: z, pixels: s.pixels, zoomed: true)
                 }
             }
-            for kind in zoom.wanted.subtracting(foundNow) {
+            // The close-up is paid for: also take a small accessory it finds that nobody asked
+            // for (the watch beside a re-segmented belt), when the full-body pass had at least
+            // some evidence of it in the same place.
+            let zoneInCrop = (Int((z.rect.minX - crop.rect.minX) / crop.rect.width * gw),
+                              Int((z.rect.minY - crop.rect.minY) / crop.rect.height * gh),
+                              Int((z.rect.maxX - crop.rect.minX) / crop.rect.width * gw),
+                              Int((z.rect.maxY - crop.rect.minY) / crop.rect.height * gh))
+            let bonusClasses: [GarmentKind: [Int]] = [.eyewear: [14], .headwear: [15, 16], .jewelry: [19], .bag: [25], .belt: [20]]
+            var bonus: Set<GarmentKind> = []
+            for (kind, classes) in bonusClasses where !foundNow.contains(kind) && !zoom.wanted.contains(kind)
+                && s.instances.contains(where: { $0.kind == kind }) && map.peak(classes, in: zoneInCrop).p >= 0.1 {
+                bonus.insert(kind)
+            }
+            for kind in zoom.wanted.union(bonus).subtracting(foundNow) {
                 guard let best = s.instances.filter({ $0.kind == kind }).max(by: { $0.pixelCount < $1.pixelCount }) else { continue }
                 // Bags and watches only: shoes the full-body pass merged into black
                 // trousers are exactly what the feet close-up is for.

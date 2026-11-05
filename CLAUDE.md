@@ -45,7 +45,7 @@
   for callers that count regions (studio render QC).
 - The FASHN / SegFormer converter is kept only as `scripts/research/` (non-commercial, unused);
   CI fails if `GarmentParser` / `GarmentLabeler` reappear in `StyleMate/ML` or the Release app.
-- Acknowledgement text: `StyleMate/Resources/Acknowledgements/ACK-12-garment-segmenter.md`.
+- Acknowledgement text: `StyleMate/Resources/Acknowledgements/ACK-14-garmentnet.md`.
 
 ## Face recognition (the app's USP — must be error-less)
 - Embedding model: **AdaFace IR-101 (WebFace12M)**, Core ML fp16 (~125 MB),
