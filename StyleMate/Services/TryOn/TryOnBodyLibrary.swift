@@ -28,14 +28,14 @@ final class TryOnBodyLibrary: ObservableObject {
     }
 
     enum Status: Equatable {
-        case none            // nothing chosen yet
+        case missing         // nothing chosen yet
         case searching       // looking through the user's photos
         case generating      // making the neutral model body
         case ready(BodyPhoto)
         case off             // the user turned try-on off
     }
 
-    @Published private(set) var status: Status = .none
+    @Published private(set) var status: Status = .missing
     private var model: TryOnBodyModel?
     private var modelFor: String?
 
@@ -126,7 +126,7 @@ final class TryOnBodyLibrary: ObservableObject {
                 best = (full, q, asset.localIdentifier)
             }
         }
-        if let (img, score, assetId) = best, await use(img, source: .library, score: score, assetId: assetId) { return }
+        if let b = best, await use(b.0, source: .library, score: b.1, assetId: b.2) { return }
         await useModelBody(gender: gender)
     }
 
@@ -138,12 +138,12 @@ final class TryOnBodyLibrary: ObservableObject {
         let s: Float?
         if let score { s = score } else { s = await Task.detached(priority: .userInitiated) { Self.quickScore(cg) }.value }
         guard let s, s >= 0.5 || source == .model || source == .sample else {
-            if status == .searching { status = current.map { .ready($0) } ?? .none }
+            if status == .searching { status = current.map { Status.ready($0) } ?? Status.missing }
             return false
         }
         let result = await Task.detached(priority: .userInitiated) { TryOnBodyAnalyzer.analyze(cg) }.value
         guard case .success(let m) = result else {
-            if status == .searching { status = current.map { .ready($0) } ?? .none }
+            if status == .searching { status = current.map { Status.ready($0) } ?? Status.missing }
             return false
         }
         let id = UUID().uuidString
@@ -178,7 +178,7 @@ final class TryOnBodyLibrary: ObservableObject {
             if await use(UIImage(cgImage: img), source: .model, score: 0.6) { return }
         }
         StudioRenderer.shared.unload()
-        status = .none
+        status = .missing
     }
 
     static var modelSteps = 20
@@ -190,8 +190,8 @@ final class TryOnBodyLibrary: ObservableObject {
 
     func turnOn() {
         TryOnAvailability.userEnabled = true
-        status = current.map { .ready($0) } ?? .none
-        if case .none = status,
+        status = current.map { Status.ready($0) } ?? Status.missing
+        if case .missing = status,
            let d = try? Data(contentsOf: stateURL), let b = try? JSONDecoder().decode(BodyPhoto.self, from: d) { status = .ready(b) }
     }
 
@@ -202,7 +202,7 @@ final class TryOnBodyLibrary: ObservableObject {
         try? FileManager.default.removeItem(at: candidatesURL)
         TryOnStore.shared.removeAll()
         model = nil; modelFor = nil
-        status = TryOnAvailability.userEnabled ? .none : .off
+        status = TryOnAvailability.userEnabled ? .missing : .off
     }
 
     #if DEBUG

@@ -9,14 +9,30 @@ enum TryOnRole: Int, Comparable {
 
     static func < (a: TryOnRole, b: TryOnRole) -> Bool { a.rawValue < b.rawValue }
 
+    /// Same split as `StudioQueue.kind(for:)` (main-actor isolated there, so mirrored here).
     static func of(_ item: WardrobeItem) -> TryOnRole {
-        switch StudioQueue.kind(for: item) {
-        case .some(.lower): return .bottom
-        case .some(.onePiece): return .onePiece
-        case .some(.innerTop): return .top
-        case .some(.outerLayer): return .outer
-        case .some(.footwear): return .shoes
-        default: return .accessory
+        let p = item.product
+        switch item.category {
+        case .outerwear: return .outer
+        case .midLayers:
+            return ["Cardigans", "Vests", "Gilets", "Fleece Jackets", "Shrugs", "Ponchos"].contains(p) ? .outer : .top
+        case .tops: return .top
+        case .onePieces: return .onePiece
+        case .bottoms: return .bottom
+        case .footwear: return .shoes
+        case .innerwear: return .accessory
+        case .activewear:
+            if p.contains("Shorts") || p.contains("Pants") || p.contains("Leggings") { return .bottom }
+            if p.contains("Jacket") { return .outer }
+            if p.contains("Dress") || p == "Swimwear" { return .onePiece }
+            return .top
+        case .ethnicWear:
+            if ["Salwar", "Churidar", "Dhoti", "Lungis", "Mundu", "Patiala Pants", "Sharara", "Ghagra", "Lehenga"].contains(p) { return .bottom }
+            if ["Saree", "Anarkali", "Palazzo Suit", "Jodhpuri Suit", "Pathani Suit"].contains(p) { return .onePiece }
+            if ["Nehru Jacket", "Sherwani", "Bandhgala"].contains(p) { return .outer }
+            if p == "Dupatta" { return .accessory }
+            return .top
+        case .accessories: return .accessory
         }
     }
 
@@ -120,7 +136,7 @@ struct TryOnGarmentShape {
         var hem = y0
         let bx0 = Int(cx - tw * 0.2), bx1 = Int(cx + tw * 0.2)
         for y in y0...y1 where (bx0...bx1).contains(where: { $0 >= 0 && $0 < width && opaque($0, y) }) { hem = y }
-        var sleeves: [Bool: (CGPoint, CGPoint)] = [:]
+        var sleeves: [Bool: (root: CGPoint, far: CGPoint)] = [:]
         let total = alpha.reduce(0) { $0 + ($1 > 128 ? 1 : 0) }
         for left in [true, false] {
             var pts: [CGPoint] = []
@@ -133,9 +149,9 @@ struct TryOnGarmentShape {
             let root = CGPoint(x: left ? l : r, y: CGFloat(y0) + 0.08 * CGFloat(H))
             let d = pts.map { TOGeo.dist($0, root) }
             let q = d.sorted()[Int(Double(d.count - 1) * 0.9)]
-            let far = zip(pts, d).filter { $0.1 >= q }.map(\.0)
+            let far = zip(pts, d).filter { $0.1 >= q }.map { $0.0 }
             let fx = far.reduce(0) { $0 + $1.x } / CGFloat(far.count), fy = far.reduce(0) { $0 + $1.y } / CGFloat(far.count)
-            sleeves[left] = (root, CGPoint(x: fx, y: fy))
+            sleeves[left] = (root: root, far: CGPoint(x: fx, y: fy))
         }
         return Top(y0: CGFloat(y0), hem: CGFloat(hem), cx: cx, tw: tw, left: l, right: r, sleeves: sleeves)
     }

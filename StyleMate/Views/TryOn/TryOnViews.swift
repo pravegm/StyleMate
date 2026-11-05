@@ -327,7 +327,8 @@ struct TryOnBodySheet: View {
             guard let item else { return }
             run {
                 guard let data = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: data) else { return }
-                if await !bodies.use(img, source: .picked) {
+                let ok = await bodies.use(img, source: .picked)
+                if !ok {
                     message = "That photo doesn't show one person head to feet, facing the camera. Try another."
                 }
             }
@@ -335,7 +336,8 @@ struct TryOnBodySheet: View {
         .onChange(of: cameraImage) { img in
             guard let img else { return }
             run {
-                if await !bodies.use(img, source: .camera) {
+                let ok = await bodies.use(img, source: .camera)
+                if !ok {
                     message = "Stand back so your whole body is in the frame, facing the camera."
                 }
             }
@@ -349,7 +351,7 @@ struct TryOnBodySheet: View {
         case .searching: return "Looking through your photos…"
         case .generating: return "Making a model…"
         case .off: return "On you is off"
-        case .none: return "No photo yet"
+        case .missing: return "No photo yet"
         }
     }
 

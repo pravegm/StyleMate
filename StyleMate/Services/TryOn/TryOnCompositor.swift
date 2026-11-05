@@ -136,7 +136,7 @@ enum TryOnCompositor {
         let T = body.torsoLen, thigh = body.thigh, shin = body.shin
         let knee = T + thigh
         if p.contains("crop") || g.length == .cropped { return 0.72 * T }
-        if g.role == .onePiece || ["dress", "gown", "anarkali", "jumpsuit"].contains(where: p.contains) {
+        if g.role == .onePiece || ["dress", "gown", "anarkali", "jumpsuit"].contains(where: { p.contains($0) }) {
             switch g.length {
             case .short: return T + 0.45 * thigh
             case .kneeLength: return knee
@@ -145,10 +145,10 @@ enum TryOnCompositor {
             default: return knee * 0.95
             }
         }
-        if ["trench", "overcoat", "parka", "long coat", "sherwani"].contains(where: p.contains) { return knee + 0.15 * shin }
+        if ["trench", "overcoat", "parka", "long coat", "sherwani"].contains(where: { p.contains($0) }) { return knee + 0.15 * shin }
         if p.contains("coat") { return knee - 0.05 * thigh }
-        if ["kurta", "tunic", "kurti"].contains(where: p.contains) { return T + 0.6 * thigh }
-        if ["jacket", "bomber", "blouson", "gilet", "vest"].contains(where: p.contains) { return 1.0 * T }
+        if ["kurta", "tunic", "kurti"].contains(where: { p.contains($0) }) { return T + 0.6 * thigh }
+        if ["jacket", "bomber", "blouson", "gilet", "vest"].contains(where: { p.contains($0) }) { return 1.0 * T }
         if p.contains("blazer") { return 1.12 * T }
         return 1.12 * T
     }
@@ -220,7 +220,7 @@ enum TryOnCompositor {
         let bWaist = TOGeo.add(body.hipMid, body.v, -0.18 * body.torsoLen)
         let gWaist = CGPoint(x: b.cx, y: b.y0)
         let p = g.product.lowercased()
-        let full = fullLength.contains(where: p.contains)
+        let full = fullLength.contains(where: { p.contains($0) })
         let legged = full || p.contains("short")
         var crotch = b.crotch
         if crotch == nil && legged { crotch = b.y0 + 0.34 * b.H }
