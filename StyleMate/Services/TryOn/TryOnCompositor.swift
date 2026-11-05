@@ -284,11 +284,12 @@ enum TryOnCompositor {
         ctx.translateBy(x: 0, y: CGFloat(H)); ctx.scaleBy(x: 1, y: -1)
         ctx.setStrokeColor(gray: 1, alpha: 1)
         ctx.setLineCap(.round)
-        let rad = max(2, 0.11 * body.shoulderW)
+        // Wide enough for a cap sleeve or a shoulder the new top leaves bare (lab: 0.11 left ghosts).
+        let rad = max(2, 0.16 * body.shoulderW)
         for left in [true, false] {
             let (S, E, Wr) = body.arm(left)
             ctx.setLineWidth(rad)
-            ctx.strokeLineSegments(between: [S, E, E, Wr])
+            ctx.strokeLineSegments(between: [body.shoMid, S, S, E, E, Wr])
             let (Hj, K, A) = body.leg(left)
             ctx.setLineWidth(rad * 1.5)
             ctx.strokeLineSegments(between: [Hj, K, K, A])
