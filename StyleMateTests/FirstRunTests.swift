@@ -3,59 +3,20 @@ import Testing
 import UIKit
 @testable import StyleMate
 
-/// First run + daily loop logic: the local profile (no login) and its migration, the
+/// First run + daily loop logic: the
 /// "First 40" ranking and hand-off, item trust, auto-log suggestions, the morning look's
 /// schedule and copy, and the bundled sample photos.
 struct FirstRunTests {
 
-    // MARK: Local profile
-
     private static func defaults() -> UserDefaults {
-        let name = "FirstRunTests.\(UUID().uuidString)"
+        let name = "FirstRunTests." + UUID().uuidString
         let d = UserDefaults(suiteName: name)!
         d.removePersistentDomain(forName: name)
         return d
     }
 
-    private static func user(_ id: String, created: TimeInterval = 0) -> User {
-        User(id: id, email: nil, name: "N", preferredStyles: [.everyday], notificationsEnabled: false,
-             dateCreated: Date(timeIntervalSince1970: created))
-    }
-
-    @Test func freshInstallCreatesAStableLocalProfile() {
-        let d = Self.defaults()
-        let first = AuthService.resolveLocalProfile(defaults: d)
-        #expect(UUID(uuidString: first.id) != nil)
-        #expect(d.string(forKey: AuthService.localProfileIDKey) == first.id)
-        let again = AuthService.resolveLocalProfile(defaults: d)
-        #expect(again.id == first.id)
-    }
-
-    @Test func appleOrGoogleUserKeepsTheirIdAndWardrobe() throws {
-        let d = Self.defaults()
-        let legacy = Self.user("001234.abcd.5678")
-        d.set("001234.abcd.5678", forKey: AuthService.legacyAuthUserIDKey)
-        d.set("apple", forKey: AuthService.legacyAuthProviderKey)
-        d.set(try JSONEncoder().encode(legacy), forKey: AuthService.currentUserObjectKey)
-        let resolved = AuthService.resolveLocalProfile(defaults: d)
-        #expect(resolved.id == "001234.abcd.5678")
-        #expect(d.string(forKey: AuthService.legacyAuthProviderKey) == nil)
-        #expect(AuthService.resolveLocalProfile(defaults: d).id == "001234.abcd.5678")
-    }
-
-    @Test func signedOutUserWithAWardrobeIsAdopted() {
-        let d = Self.defaults()
-        AuthService.saveUserProfiles(["old": Self.user("old", created: 10), "a.b@c": Self.user("a.b@c", created: 5)], defaults: d)
-        d.set(Data([1]), forKey: "wardrobe_a_b_c")   // WardrobeViewModel's key for "a.b@c"
-        #expect(AuthService.resolveLocalProfile(defaults: d).id == "a.b@c")
-    }
-
-    @Test func resetNeverReadoptsAnOldProfile() {
-        let d = Self.defaults()
-        AuthService.saveUserProfiles(["old": Self.user("old")], defaults: d)
-        let fresh = AuthService.resolveLocalProfile(defaults: d, adoptExisting: false)
-        #expect(fresh.id != "old")
-    }
+    // (The local profile's tests moved to AccountTests: Sign in with Apple replaced it, and an
+    // earlier on-device profile is adopted by the first account that signs in.)
 
     // MARK: First 40
 

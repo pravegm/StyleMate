@@ -1,19 +1,22 @@
 import SwiftUI
 import Photos
 
-/// Four screens to a filling closet: welcome/privacy → three-frame selfie →
+/// Welcome/privacy → Sign in with Apple (the only way in) → three-frame selfie →
 /// photo permission → Find yourself → scanning ("First 40"), then Home.
-/// "Try with sample photos" on the welcome screen skips straight to a sample
-/// scan. No account, no "about you" form (it lives in Profile), no tour.
+/// "Try with sample photos" on the welcome screen signs in, then goes straight to a
+/// sample scan. No "about you" form (it lives in Profile), no tour. A signed-in account
+/// that hasn't onboarded on this phone starts at the selfie.
 struct OnboardingView: View {
     @EnvironmentObject var onboardingManager: OnboardingManager
     @EnvironmentObject var authService: AuthService
 
     private enum Step: Int, CaseIterable {
-        case welcome, selfie, permission, findYourself, scanning
+        case welcome, signIn, selfie, permission, findYourself, scanning
     }
 
     @State private var step: Step = .welcome
+    /// "Try with sample photos" was tapped before signing in.
+    @State private var samplesAfterSignIn = false
     @State private var scanMode: OnboardingScanningView.Mode = .library
     @State private var selfieImage: UIImage? = nil
 
@@ -31,8 +34,10 @@ struct OnboardingView: View {
                     Group {
                         switch step {
                         case .welcome:
-                            OnboardingWelcomeView(onAdvance: { go(to: .selfie) },
+                            OnboardingWelcomeView(onAdvance: { go(to: authService.isAuthenticated ? .selfie : .signIn) },
                                                   onTrySamples: trySamplesAction)
+                        case .signIn:
+                            SignInView(onBack: { samplesAfterSignIn = false; go(to: .welcome) })
                         case .selfie:
                             OnboardingSelfieView(
                                 selfieImage: $selfieImage,
@@ -58,7 +63,15 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .onAppear { Haptics.prepare() }   // warm the Taptic Engine so the first tap is instant
+        .onAppear {
+            Haptics.prepare()   // warm the Taptic Engine so the first tap is instant
+            if authService.isAuthenticated, step == .welcome { step = .selfie }
+        }
+        // Signed in: carry on (a returning account that already onboarded here goes straight Home).
+        .onChange(of: authService.isAuthenticated) { _, signedIn in
+            guard signedIn, step == .signIn else { return }
+            if samplesAfterSignIn { startSamples() } else { go(to: .selfie) }
+        }
     }
 
     /// Granted (fully or limited) → Find yourself, then the scan. Denied → Home
@@ -73,7 +86,14 @@ struct OnboardingView: View {
 
     private var trySamplesAction: (() -> Void)? {
         guard SampleLibrary.isAvailable else { return nil }
-        return { startSamples() }
+        return {
+            if authService.isAuthenticated {
+                startSamples()
+            } else {
+                samplesAfterSignIn = true
+                go(to: .signIn)
+            }
+        }
     }
 
     private func startSamples() {

@@ -745,7 +745,7 @@ class PhotoScanService: ObservableObject {
         var matched: [UUID] = []
         /// Items StyleMate wasn't sure about, held for "tap to add".
         var held = 0
-        /// New items past the free tier's limit, kept locked for Premium (`LockedItemsStore`).
+        /// New items past the free tier's limit, kept locked for Premium (`WardrobeViewModel.lockedItems`).
         var locked = 0
     }
 
@@ -789,11 +789,11 @@ class PhotoScanService: ObservableObject {
                 continue
             }
             // Already found and waiting for Premium: don't lock the same garment twice.
-            if gated, !LockedItemsStore.shared.wardrobeItems(forUser: userId).isEmpty,
+            if gated, !wardrobeViewModel.lockedItems.isEmpty,
                DuplicateDetector.shared.findBestMatch(
                    category: cat, product: prod, colors: seg.colors, pattern: pat, material: seg.material,
                    fit: seg.fit, neckline: seg.neckline, sleeveLength: seg.sleeveLength, brand: seg.brand,
-                   existingItems: LockedItemsStore.shared.wardrobeItems, featurePrint: seg.featurePrint) != nil {
+                   existingItems: wardrobeViewModel.lockedItems, featurePrint: seg.featurePrint) != nil {
                 continue
             }
 
@@ -847,8 +847,8 @@ class PhotoScanService: ObservableObject {
             }
             // Free tier full: the piece is kept (locked) for Premium instead of shown.
             if gated, PremiumGate.freeSlots(in: wardrobeViewModel) == 0 {
-                LockedItemsStore.shared.lock(wardrobeItem, embedding: seg.featurePrint, quality: seg.quality,
-                                             truncated: seg.truncated, forUser: userId)
+                PremiumGate.lock(wardrobeItem, embedding: seg.featurePrint, quality: seg.quality,
+                                 truncated: seg.truncated, in: wardrobeViewModel)
                 outcome.locked += 1
                 print("[StyleMate] Auto-scan: locked \(prod) for Premium (free tier full)")
                 continue
@@ -1169,6 +1169,7 @@ class PhotoScanService: ObservableObject {
                 return
             }
             SampleLibrary.recordSampleItems(outcome.added, forUser: userId)
+            wardrobeViewModel.markSamples(outcome.added)   // synced: other devices don't count them either
             photosScanned += 1
             photosExamined += 1
         }

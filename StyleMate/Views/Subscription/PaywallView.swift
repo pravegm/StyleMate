@@ -16,7 +16,6 @@ struct PaywallView: View {
 
     @EnvironmentObject private var wardrobe: WardrobeViewModel
     @ObservedObject private var store = PremiumStore.shared
-    @ObservedObject private var locked = LockedItemsStore.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.purchase) private var purchase
     @Environment(\.duoLayout) private var duo
@@ -50,7 +49,7 @@ struct PaywallView: View {
         .overlay(alignment: .topTrailing) { closeButton }
         .animation(DS.Motion.smooth, value: store.isPremium)
         .task { await store.loadProducts() }
-        .onAppear { if lockedAtOpen == nil { lockedAtOpen = locked.count } }
+        .onAppear { if lockedAtOpen == nil { lockedAtOpen = wardrobe.lockedItems.count } }
         .alert("Purchase didn't go through", isPresented: Binding(
             get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
         )) {
@@ -165,7 +164,7 @@ struct PaywallView: View {
     private var heroHeader: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
             // Phone / cover: one row of four, so the plans come into view sooner; wide: 3 x 2.
-            PaywallCollage(owned: ownedPreview, locked: lockedPreview, lockedCount: locked.count,
+            PaywallCollage(owned: ownedPreview, locked: lockedPreview, lockedCount: wardrobe.lockedItems.count,
                            columnCount: duo.isWideLayout ? 3 : 4, maxTiles: duo.isWideLayout ? 6 : 4)
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                 Text("StyleMate Premium")
@@ -189,23 +188,23 @@ struct PaywallView: View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                 benefit("infinity", "Unlimited wardrobe", "Every piece the scan finds goes straight into your closet.")
                 benefit("sparkles", "Outfits from everything you own", "Today's looks draw on your whole closet, not just the first \(WardrobeAllowance.freeItemLimit) pieces.")
-                benefit("lock.shield.fill", "Still private, still on your iPhone", "No account, no ads, no tracking. Your photos never leave the phone.")
+                benefit("lock.shield.fill", "Still private, still on your iPhone", "No ads, no tracking, no password. Your photos never leave the phone.")
             }
             .padding(.top, DS.Spacing.xs)
     }
 
     private var ownedPreview: [WardrobeItem] {
-        let samples = PremiumGate.sampleIDs(userId)
+        let samples = wardrobe.sampleIDs
         let own = wardrobe.items.filter { !samples.contains($0.id) }
         return Array((own.isEmpty ? wardrobe.items : own).suffix(6).reversed())
     }
 
-    private var lockedPreview: [WardrobeItem] { Array(locked.wardrobeItems.prefix(3)) }
+    private var lockedPreview: [WardrobeItem] { Array(wardrobe.lockedItems.prefix(3)) }
 
     private var headline: String {
         switch reason {
-        case .lockedItems where locked.count > 0:
-            return "\(locked.count) more piece\(locked.count == 1 ? " is" : "s are") waiting for your closet"
+        case .lockedItems where wardrobe.lockedItems.count > 0:
+            return "\(wardrobe.lockedItems.count) more piece\(wardrobe.lockedItems.count == 1 ? " is" : "s are") waiting for your closet"
         case .batchOverflow(let n):
             return "\(n) piece\(n == 1 ? " is" : "s are") saved and waiting"
         default:
@@ -216,7 +215,7 @@ struct PaywallView: View {
     private var subheadline: String {
         let limit = WardrobeAllowance.freeItemLimit
         switch reason {
-        case .lockedItems where locked.count > 0:
+        case .lockedItems where wardrobe.lockedItems.count > 0:
             return "StyleMate found them in your photos after your first \(limit) free pieces. Premium adds them all now, and everything it finds from here on."
         case .batchOverflow:
             return "Your first \(limit) pieces are free. Premium adds the rest to your closet straight away."
@@ -484,7 +483,7 @@ struct PaywallView: View {
     }
 
     private var successDetail: String {
-        if let n = unlocked ?? lockedAtOpen.map({ max(0, $0 - locked.count) }), n > 0 {
+        if let n = unlocked ?? lockedAtOpen.map({ max(0, $0 - wardrobe.lockedItems.count) }), n > 0 {
             return "\(n) piece\(n == 1 ? " was" : "s were") added to your closet. Everything StyleMate finds from now on goes straight in."
         }
         return "Your wardrobe is now unlimited. Everything StyleMate finds goes straight into your closet."
@@ -497,14 +496,17 @@ struct PaywallView: View {
         Haptics.medium()
         isPurchasing = true
         defer { isPurchasing = false }
-        let before = locked.count
+        let before = wardrobe.lockedItems.count
         do {
-            let result = try await purchase(product)
+            // The purchase belongs to the signed-in StyleMate account (`appAccountToken`).
+            var options: Set<Product.PurchaseOption> = []
+            if let token = store.accountToken { options.insert(.appAccountToken(token)) }
+            let result = try await purchase(product, options: options)
             switch await store.handle(result) {
             case .purchased:
                 Haptics.success()
                 PremiumGate.reconcile(wardrobe)
-                unlocked = max(0, before - locked.count)
+                unlocked = max(0, before - wardrobe.lockedItems.count)
             case .pending, .cancelled:
                 break
             case .failed(let message):
@@ -518,11 +520,11 @@ struct PaywallView: View {
     private func restore() async {
         isRestoring = true
         defer { isRestoring = false }
-        let before = locked.count
+        let before = wardrobe.lockedItems.count
         let message = await store.restore()
         if store.isPremium {
             PremiumGate.reconcile(wardrobe)
-            unlocked = max(0, before - locked.count)
+            unlocked = max(0, before - wardrobe.lockedItems.count)
         } else if !message.isEmpty {
             restoreMessage = message
         }

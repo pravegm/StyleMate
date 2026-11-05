@@ -78,7 +78,7 @@ That is 164 characters.
 > • Face recognition, clothing detection and outfit ideas all run on your iPhone
 > • Your photos, your selfie and your face data are never sent to us or to any AI service
 > • Your wardrobe syncs only to your own private iCloud, so we can't see it
-> • No ads. No tracking. No account to create.
+> • No ads. No tracking. Sign in with Apple: no password, and your email stays private.
 > • Delete everything at any time from Profile
 >
 > StyleMate works best with photos that show your outfit. Scans run while the app is open; you can pause and resume anytime.
@@ -94,7 +94,7 @@ That is 164 characters.
 
 Sentence-level dependencies:
 
-- "No account to create" assumes the login wall is removed (LAUNCH-READINESS.md blocker 4).
+- Sign in with Apple is required (founder decision, 5 Nov 2026): the subscription and the 50 free pieces belong to the account. See "Why an account is required" below.
 - "Five outfit ideas … mood" matches `feat/outfit-engine`. Re-check it when that branch merges.
 
 ## What's New (1.0)
@@ -106,7 +106,7 @@ Sentence-level dependencies:
 - **Primary category:** Lifestyle. **Secondary:** Photo & Video.
 - **Age rating:** no user-generated content sharing, no web views, no mature content, so expect the lowest rating. Answer the questionnaire honestly about camera and photo use.
 - **Privacy policy URL** and **Support URL** are required. See LAUNCH-READINESS.md §6.
-- **App Privacy label:** "Data Not Collected". This holds only when the conditions in LAUNCH-READINESS.md §7 are met. Subscriptions don't change it: Apple processes the purchases and the app checks the subscription on the device with StoreKit, so StyleMate collects no "Purchases" data.
+- **App Privacy label:** "Data Not Collected". This holds only when the conditions in LAUNCH-READINESS.md §7 are met. Subscriptions don't change it: Apple processes the purchases and the app checks the subscription on the device with StoreKit, so StyleMate collects no "Purchases" data. Sign in with Apple doesn't either: the Apple user ID and the name stay on the device (Keychain / UserDefaults); a number derived from the ID names the wardrobe's space in the user's own iCloud and is attached to their purchases at Apple. Nothing is sent to the developer.
 - **Terms of Use (EULA):** the app uses Apple's standard EULA. In App Store Connect › App Information, leave **License Agreement** on the standard one. The description above links it, as guideline 3.1.2 requires for subscription apps.
 
 ## Subscriptions (StyleMate Premium)
@@ -134,17 +134,31 @@ Paste into each subscription's **Review Information › Review Notes**, and into
 **App Review Information › Notes** (adapted):
 
 > StyleMate is free for the first 50 wardrobe items; StyleMate Premium (auto-renewable,
-> monthly or yearly) removes the limit. Every other feature is free. No sign-in is needed.
+> monthly or yearly) removes the limit. Every other feature is free.
 >
-> To reach the paywall quickly: on the welcome screen tap "Try with sample photos" to see a
-> wardrobe, then open Profile › StyleMate Premium › "See Premium plans". The paywall also opens
+> Sign in with your own Apple ID (Sign in with Apple is the only sign-in; StyleMate asks for the
+> name only, never the email). To reach the paywall quickly: on the welcome screen tap "Try with
+> sample photos", sign in, and a full sample wardrobe is built on the device in a minute or two.
+> Then open Profile › StyleMate Premium › "See Premium plans". The paywall also opens
 > from Wardrobe › + › Choose from Gallery once the closet holds 50 of your own items, and from the
 > "N more pieces found — Unlock with Premium" card on Home when the photo scan has found more than
 > 50. (Sample-photo items don't count towards the 50.)
 >
 > After purchase, items found past the limit are added to the wardrobe immediately. Restore
 > Purchases is on the paywall and in Profile. Subscription status is checked on the device with
-> StoreKit 2; the app has no server and no account.
+> StoreKit 2; the app has no server. Account deletion: Profile › Account › Delete Account.
+
+### Why an account is required (App Review Information › Notes)
+
+> StyleMate requires Sign in with Apple because the account carries features that work across the
+> person's devices: (1) the StyleMate Premium subscription belongs to the account (purchases carry
+> its appAccountToken), (2) the 50 free wardrobe pieces are counted per account across all their
+> iPhones, and (3) the wardrobe syncs to the account's own private space in the user's iCloud.
+> There is no StyleMate server; the account is Apple's private ID. Only the name is requested.
+> The reviewer can sign in with any Apple ID; "Try with sample photos" gives a full wardrobe
+> without using personal photos. Account deletion is in Profile › Account › Delete Account. It deletes
+> the wardrobe, outfit history, face data and the account's iCloud data, and explains how to stop
+> using Apple sign-in for StyleMate in Settings.
 
 **Review screenshot**: the paywall, from the `e2e-screens` CI artifact (`…-paywall.png`; the
 `-dark` one too if you want a second). It's the real app on a simulator with StoreKit Test prices,

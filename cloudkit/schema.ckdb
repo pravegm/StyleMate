@@ -37,6 +37,10 @@ DEFINE SCHEMA
         thumbnailPath      STRING,
         imageAsset         ASSET,
         croppedImageAsset  ASSET,
+        createdAt          TIMESTAMP,
+        tier               STRING,
+        isSample           INT64,
+        isLocked           INT64,
         GRANT WRITE TO "_creator",
         GRANT CREATE TO "_icloud",
         GRANT READ TO "_world"

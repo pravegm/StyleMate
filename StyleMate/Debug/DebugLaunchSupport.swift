@@ -15,6 +15,10 @@ import CoreData
 ///                            swipe hint as done for the demo user.
 /// - `-uiTestSeedWardrobe`    fill an empty wardrobe with ~26 realistic items whose images are
 ///                            transparent PNG cutouts drawn on the fly.
+/// - `-uiTestFakeAppleSignIn` the sign-in screen also shows "Continue as test user", which signs in a
+///                            fixed fake Apple ID (the CI simulator can't do real Sign in with Apple).
+///
+/// The demo user is a fake signed-in account (no Apple credential check, nothing in the Keychain).
 ///
 /// Called from `AuthService.init()` (the first object the app creates), so it runs before any
 /// view model reads state.
@@ -27,9 +31,17 @@ enum DebugLaunchSupport {
         static let seedWardrobe = "-uiTestSeedWardrobe"
         /// `-uiTestSeedWardrobeCount 50`: seed exactly this many items (the catalog repeats).
         static let seedCount = "-uiTestSeedWardrobeCount"
-        /// `-uiTestSeedLocked 23`: also seed this many pieces waiting for Premium (LockedItemsStore).
+        /// `-uiTestSeedLocked 23`: also seed this many pieces waiting for Premium (WardrobeViewModel.lockedItems).
         static let seedLocked = "-uiTestSeedLocked"
+        static let fakeAppleSignIn = "-uiTestFakeAppleSignIn"
     }
+
+    /// The fake Apple user ids (any string works: Apple's are opaque).
+    static let demoAppleUserID = "uitest.apple.demo"
+    static let fakeSignInAppleUserID = "uitest.apple.first-run"
+
+    /// "Continue as test user" on the sign-in screen.
+    static var fakeSignInEnabled: Bool { arguments.contains(Argument.fakeAppleSignIn) }
 
     /// The integer after `flag` in the launch arguments (`-flag 50`), if any.
     static func intArgument(_ flag: String) -> Int? {
@@ -47,7 +59,7 @@ enum DebugLaunchSupport {
 
     /// Applies every requested hook. Returns the demo user to sign in, or nil when
     /// `-uiTestDemoUser` was not passed (normal launch: nothing happens at all).
-    static func applyIfNeeded() -> User? {
+    static func applyIfNeeded() -> (user: User, account: Account)? {
         // Idempotent: reset + seed run once per process even if several AuthServices are created.
         if didApply { return appliedUser }
         didApply = true
@@ -56,16 +68,16 @@ enum DebugLaunchSupport {
     }
 
     private static var didApply = false
-    private static var appliedUser: User?
+    private static var appliedUser: (user: User, account: Account)?
 
-    private static func apply() -> User? {
+    private static func apply() -> (user: User, account: Account)? {
         let args = arguments
         if args.contains(Argument.resetState) { resetState() }
         guard args.contains(Argument.demoUser) else { return nil }
 
         let user = User(
             id: demoUserID,
-            email: "demo@stylemate.test",
+            email: nil,
             name: "Alex Demo",
             preferredStyles: [.everyday, .business, .date, .sports, .party, .formal],
             notificationsEnabled: false,
@@ -80,7 +92,9 @@ enum DebugLaunchSupport {
         if args.contains(Argument.skipOnboarding) { markOnboardingComplete(userId: user.id) }
         if args.contains(Argument.seedWardrobe) { seedWardrobeIfEmpty(userId: user.id) }
         print("[UITest] Demo user ready (reset=\(args.contains(Argument.resetState)), seed=\(args.contains(Argument.seedWardrobe)))")
-        return user
+        let account = Account(appleUserID: demoAppleUserID, profileID: user.id, isTestAccount: true)
+        UserDefaults.standard.set(user.id, forKey: AuthService.profileKey(for: account.uuid))
+        return (user, account)
     }
 
     // MARK: - Reset
@@ -89,6 +103,7 @@ enum DebugLaunchSupport {
         if let domain = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: domain)
         }
+        KeychainAccountStore().clear()   // signed out
         let fm = FileManager.default
         try? fm.removeItem(at: WardrobeImageFileHelper.folderURL)
         if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
@@ -138,19 +153,25 @@ enum DebugLaunchSupport {
         for i in 0..<max(0, count) {
             if let item = seedItem(catalog[i % catalog.count]) { items.append(item) }
         }
+        // Free-tier pieces, oldest first (so the account's rule keeps exactly these unlocked).
+        let base = Date().addingTimeInterval(-86_400)
+        for (i, item) in items.enumerated() {
+            vm.setMeta(ItemMeta(createdAt: base.addingTimeInterval(Double(i)), tier: .free), for: item.id)
+        }
         vm.items = items   // didSet persists under the user's wardrobe key
         print("[UITest] Seeded \(items.count) wardrobe items")
 
-        // Pieces the scan found past the free tier, waiting for Premium.
+        // Pieces the scan found past the free tier, waiting for Premium (newer than the closet's).
         if let lockedCount = intArgument(Argument.seedLocked), lockedCount > 0 {
+            var locked: [WardrobeItem] = []
             for i in 0..<lockedCount {
                 // Start mid-catalog so the waiting pieces differ from the first closet tiles.
-                if let item = seedItem(catalog[(i + 7) % catalog.count]) {
-                    LockedItemsStore.shared.lock(item, forUser: userId)
-                }
+                guard let item = seedItem(catalog[(i + 7) % catalog.count]) else { continue }
+                vm.setMeta(ItemMeta(createdAt: base.addingTimeInterval(Double(10_000 + i)), tier: .free), for: item.id)
+                locked.append(item)
             }
-            LockedItemsStore.flushWrites()
-            print("[UITest] Seeded \(LockedItemsStore.shared.count) locked items")
+            vm.lockedItems = locked
+            print("[UITest] Seeded \(locked.count) locked items")
         }
     }
 

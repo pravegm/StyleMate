@@ -13,7 +13,6 @@ struct ProfileView: View {
     @ObservedObject private var morningLook = MorningLookScheduler.shared
     @State private var showRemoveSamplesAlert = false
     @State private var showEmptyConfirmation = false
-    @State private var showDeleteProfileAlert = false
     @State private var showStyleSheet = false
     @State private var showRetakeSelfie = false
     @State private var retookSelfie = false
@@ -112,7 +111,7 @@ struct ProfileView: View {
                                 .font(DS.Font.title2)
                                 .foregroundColor(DS.Colors.textPrimary)
 
-                            Text("On this iPhone · no account needed")
+                            Text("Signed in with Apple")
                                 .font(DS.Font.caption1)
                                 .foregroundColor(DS.Colors.textTertiary)
 
@@ -430,19 +429,8 @@ struct ProfileView: View {
                         .font(DS.Font.caption2)
                 }
 
-                Section {
-                    Button(role: .destructive) {
-                        showDeleteProfileAlert = true
-                    } label: {
-                        HStack(spacing: DS.Spacing.xs) {
-                            Image(systemName: "person.crop.circle.badge.xmark")
-                            Text("Delete Profile & All Data")
-                        }
-                        .font(DS.Font.body)
-                        .foregroundColor(DS.Colors.error)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                }
+                // Views/Account: Signed in with Apple, Sign Out, Delete Account (5.1.1(v)).
+                AccountProfileSection(onDeleteAccount: deleteProfile)
             }
             .tint(DS.Colors.accent)
             .navigationTitle("Profile")
@@ -479,7 +467,7 @@ struct ProfileView: View {
                         WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
                     }
                     wardrobeViewModel.items.removeAll()
-                    LockedItemsStore.shared.removeAll()   // pieces waiting for Premium go too
+                    wardrobeViewModel.removeAllLocked()   // pieces waiting for Premium go too
                 }
             } message: {
                 Text("This will remove all items from your wardrobe and cannot be undone.")
@@ -524,21 +512,13 @@ struct ProfileView: View {
                     FaceReferenceBuilderView(userId: userId, isPresented: $showReferenceBuilder)
                 }
             }
-            .alert("Delete Everything?", isPresented: $showDeleteProfileAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete Everything", role: .destructive) {
-                    deleteProfile()
-                }
-            } message: {
-                Text("This permanently deletes your wardrobe, saved outfits, selfie and face data from this iPhone and from your iCloud backup. StyleMate starts fresh. This cannot be undone.")
-            }
         }
     }
 
     // MARK: - Delete Profile
 
-    /// "Delete Profile & All Data": everything StyleMate stored, on the phone and
-    /// in the user's iCloud, then a brand-new local profile (back to onboarding).
+    /// "Delete Account": everything StyleMate stored for the account, on the phone and in the
+    /// account's iCloud zone, then the account itself is forgotten (signed out, back to Welcome).
     private func deleteProfile() {
         guard let userId = authService.user?.id else { return }
 
@@ -576,9 +556,9 @@ struct ProfileView: View {
             UserDefaults.standard.removeObject(forKey: key)
         }
 
-        // 4. A fresh local profile → onboarding again.
+        // 4. Forget the account on this phone: signed out, back to Welcome.
         onboardingManager.reset(forUser: userId)
-        authService.resetLocalProfile()
+        authService.deleteAccount()
 
         print("[StyleMate] Profile deleted for user: \(userId)")
     }

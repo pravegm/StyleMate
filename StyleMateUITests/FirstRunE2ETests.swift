@@ -1,14 +1,16 @@
 import XCTest
 
-/// First launch, no account: the onboarding flow and the "Try with sample photos" path,
-/// on a true fresh install (`-uiTestResetState` without the demo user, so AuthService creates
-/// the local profile itself). Every screen is snapped for the `e2e-screens` artifact.
+/// First launch: the onboarding flow with Sign in with Apple, and the "Try with sample photos" path,
+/// on a true fresh install (`-uiTestResetState` without the demo user: signed out). The CI simulator
+/// can't do real Sign in with Apple, so `-uiTestFakeAppleSignIn` (DEBUG only) adds "Continue as test
+/// user" under the real button. Every screen is snapped for the `e2e-screens` artifact.
 class FirstRunE2ETests: E2ETestCase {
 
     @MainActor
     private func launchFresh() {
         let app = XCUIApplication()
-        app.launchArguments = ["-uiTestResetState", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["-uiTestResetState", "-uiTestFakeAppleSignIn",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
             + darkModeArguments
         addUIInterruptionMonitor(withDescription: "System permission alerts") { alert in
             for label in ["Allow While Using App", "Allow Full Access", "Allow", "OK"] {
@@ -21,6 +23,19 @@ class FirstRunE2ETests: E2ETestCase {
         app.launch()
     }
 
+    /// The sign-in screen: the real Apple button is there; sign in with the DEBUG test account.
+    @MainActor
+    private func signInWithTestAccount(file: StaticString = #filePath, line: UInt = #line) {
+        let fake = app.buttons["signIn.debugFake"]
+        XCTAssertTrue(fake.waitForExistence(timeout: 15), "The sign-in screen didn't appear", file: file, line: line)
+        XCTAssertTrue(anyElement(NSPredicate(format: "identifier == 'signIn.apple' OR label CONTAINS[c] 'Apple'")).exists,
+                      "No Sign in with Apple button", file: file, line: line)
+        XCTAssertTrue(anyElement(NSPredicate(format: "label == 'Terms of Use'")).exists, "No Terms of Use link", file: file, line: line)
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "entrance")], timeout: 1.0)
+        snap("sign-in")
+        fake.tap()
+    }
+
     /// 1. Welcome → "Try with sample photos" → live sample scan → Home with labelled sample
     ///    clothes → remove them in one tap.
     @MainActor
@@ -28,13 +43,12 @@ class FirstRunE2ETests: E2ETestCase {
         launchFresh()
         let trySamples = button(id: "onboarding.trySamples", label: "Try with sample photos")
         XCTAssertTrue(trySamples.waitForExistence(timeout: 30), "Welcome screen has no 'Try with sample photos'")
-        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Sign in'")).firstMatch.exists,
-                       "A sign-in button is still shown on first launch")
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "entrance")], timeout: 1.5)
         snap("welcome")
         XCTAssertTrue(anyElement(NSPredicate(format: "label == 'Privacy Policy'")).exists, "No privacy policy link on welcome")
 
         trySamples.tap()
+        signInWithTestAccount()   // no guest mode: samples run in the signed-in account
         let counter = anyElement(NSPredicate(format: "identifier == 'onboarding.scanCounter' OR label CONTAINS 'found'"))
         XCTAssertTrue(counter.waitForExistence(timeout: 15), "The sample scan screen didn't appear")
         snap("sample-scan-started")
@@ -73,15 +87,17 @@ class FirstRunE2ETests: E2ETestCase {
         }
     }
 
-    /// 2. Welcome → Get Started → selfie (skipped: no camera in the simulator) → photos
-    ///    (pre-granted by CI) → Find yourself → scanning → Home. Four screens, no sign-in.
+    /// 2. Welcome → Get Started → Sign in with Apple (test account) → selfie (skipped: no camera in
+    ///    the simulator) → photos (pre-granted by CI) → Find yourself → scanning → Home.
     @MainActor
-    func test06_OnboardingToHomeWithoutAccount() throws {
+    func test06_OnboardingSignInToHome() throws {
         launchFresh()
         let getStarted = button(id: "onboarding.getStarted", label: "Get Started")
         XCTAssertTrue(getStarted.waitForExistence(timeout: 30), "No Get Started on the welcome screen")
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "entrance")], timeout: 1.5)
+        snap("welcome")
         getStarted.tap()
+        signInWithTestAccount()
 
         let tabs = app.tabBars.firstMatch
         var seen = Set<String>()
@@ -120,11 +136,30 @@ class FirstRunE2ETests: E2ETestCase {
                        "A coach-mark tour started after onboarding")
 
         openTab("Profile")
-        XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS 'no account needed'")).waitForExistence(timeout: 10),
-                      "Profile doesn't show the local profile")
-        XCTAssertFalse(app.buttons["Sign Out"].exists, "Profile still offers Sign Out")
+        XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS 'Signed in with Apple'")).waitForExistence(timeout: 10),
+                      "Profile doesn't show the account")
         snap("profile")
-        app.swipeUp()
-        snap("profile-scrolled")
+        // The Account section: Sign Out and Delete Account (App Review 5.1.1(v)).
+        let signOut = app.buttons.matching(NSPredicate(format: "identifier == 'profile.account.signOut' OR label == 'Sign Out'")).firstMatch
+        XCTAssertTrue(scrollUntilHittable(signOut, maxSwipes: 12), "No Sign Out in Profile")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier == 'profile.account.delete' OR label == 'Delete Account'")).firstMatch.exists,
+                      "No Delete Account in Profile")
+        snap("profile-account")
+
+        // Delete Account explains what goes and the Settings steps, and can be cancelled.
+        app.buttons.matching(NSPredicate(format: "identifier == 'profile.account.delete' OR label == 'Delete Account'")).firstMatch.tap()
+        let steps = anyElement(NSPredicate(format: "identifier == 'deleteAccount.settingsSteps' OR label CONTAINS 'Stop Using'"))
+        XCTAssertTrue(steps.waitForExistence(timeout: 10), "Delete Account doesn't explain the Settings steps")
+        snap("delete-account")
+        app.buttons.matching(NSPredicate(format: "identifier == 'deleteAccount.cancel' OR label == 'Keep my account'")).firstMatch.tap()
+
+        // Sign out: back to the welcome screen; the closet stays for the next sign-in.
+        XCTAssertTrue(signOut.waitForExistence(timeout: 10))
+        signOut.tap()
+        let confirm = app.buttons.matching(NSPredicate(format: "label == 'Sign Out'")).allElementsBoundByIndex.last
+        confirm?.tap()
+        XCTAssertTrue(button(id: "onboarding.getStarted", label: "Get Started").waitForExistence(timeout: 15),
+                      "Signing out didn't return to the welcome screen")
+        snap("signed-out")
     }
 }

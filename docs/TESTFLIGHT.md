@@ -9,14 +9,17 @@ three one-time things, then every new build is one button press.
 1. Go to https://developer.apple.com/account/resources/identifiers/list and sign in.
 2. Press the blue **+**, choose **App IDs**, then **Continue**. Choose **App**, then **Continue**.
 3. **Description**: `StyleMate`. **Bundle ID**: choose *Explicit* and type `com.stylemates.StyleMate`.
-4. Under **Capabilities**, tick **iCloud** (choose "Include CloudKit support"). There's no login any
-   more, so Sign In with Apple isn't needed.
+4. Under **Capabilities**, tick **iCloud** (choose "Include CloudKit support") **and Sign In with
+   Apple** (leave it as a primary App ID). Sign in with Apple is how people get into StyleMate: their
+   closet, outfits, free pieces and Premium belong to their account. Without this tick the
+   TestFlight workflow stops with "Sign in with Apple entitlement missing".
 5. Press **Continue**, then **Register**.
 6. Open the new ID again. Next to iCloud, press **Edit** (or **Configure**), press **+** to add a
    container named `iCloud.com.stylemates.StyleMate`, tick it, and press **Save**.
 
 If it says the bundle ID is already taken, it was registered earlier under your account. That's
-fine: just make sure those two capabilities are ticked.
+fine: just make sure iCloud and Sign In with Apple are both ticked. If the ID already exists without
+Sign In with Apple, open it, tick it, press **Save** and confirm; nothing else changes.
 
 ### 2. Create the app in App Store Connect
 1. Go to https://appstoreconnect.apple.com, then **Apps**, the **+** button, and **New App**.
@@ -57,6 +60,11 @@ TestFlight builds use Apple's *Production* iCloud environment, which needs the a
    Types**, and check that **WardrobeItem** is listed. Press **Deploy Schema Changes…** and confirm
    the deployment to **Production**.
 6. Open StyleMate again. Backup starts on the next launch, including everything added before.
+
+**Run steps 4 and 5 again whenever the data layout changes.** The account build (Sign in with Apple)
+adds four fields to each wardrobe record (`createdAt`, `tier`, `isSample`, `isLocked`, so the 50 free
+pieces and the waiting ones are the same on every iPhone). Until the updated layout is deployed to
+Production, TestFlight builds keep working but don't back up.
 
 ### 6. Set up StyleMate Premium (subscriptions, about 30 minutes, once)
 The app is free for the first 50 wardrobe pieces (sample clothes don't count); StyleMate Premium
@@ -114,6 +122,9 @@ everything else works.
   up to six times, then it stops by itself (Apple has changed this rule before). So within a week
   you can see a renewal and the end: when Premium ends, Profile says "Premium ended", new pieces
   past 50 wait again, and every piece you already have stays in the closet.
+- Premium belongs to the StyleMate account you're signed in with (the purchase carries it). The
+  50 free pieces are per account too: two iPhones on the same account share them. If both add pieces
+  offline past 50, the next sync keeps the 50 oldest and says how many moved to Premium.
 - What to try: get the closet to 50 pieces (your own photos; sample clothes don't count) and let
   the scan keep going. Home shows "N more pieces found — Unlock with Premium". Tap it, pick
   Annual, **Start free trial**: the waiting pieces appear in the closet at once. Profile › StyleMate

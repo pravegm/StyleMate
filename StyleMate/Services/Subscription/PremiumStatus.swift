@@ -52,8 +52,26 @@ struct PremiumStatus: Codable, Equatable {
     var expiresAt: Date? = nil
     var willAutoRenew = false
     var isTrial = false
+    /// This Apple Account has an active subscription, but it was bought for another StyleMate account
+    /// (its `appAccountToken`), so it doesn't unlock this one.
+    var heldByOtherAccount = false
 
     static let none = PremiumStatus()
+
+    /// Whether a transaction counts for `account` (founder decision, documented in README):
+    /// - its `appAccountToken` is this account's UUID: yes (every purchase made in the app sets it);
+    /// - no token: yes (offer codes, purchases on the App Store page, and builds before accounts
+    ///   can't carry one; the person signed in on this Apple Account is the best owner we know);
+    /// - Family Sharing: yes (the family organiser's token is not ours, but sharing is the point);
+    /// - another account's token: no (one App Store subscription doesn't unlock several StyleMate
+    ///   accounts on a shared iPhone).
+    /// With no account given (signed out; tests), every transaction counts.
+    static func belongs(token: UUID?, familyShared: Bool, to account: UUID?) -> Bool {
+        guard let account else { return true }
+        if familyShared { return true }
+        guard let token else { return true }
+        return token == account
+    }
 
     /// Unlimited wardrobe right now.
     func isPremium(at now: Date = Date()) -> Bool {
@@ -76,6 +94,8 @@ struct PremiumStatus: Codable, Equatable {
         var revocationDate: Date?
         var isUpgraded = false
         var isTrial = false
+        var appAccountToken: UUID? = nil
+        var isFamilyShared = false
     }
 
     /// The group's renewal status (`Product.SubscriptionInfo.status(for:)`), when StoreKit could
@@ -88,19 +108,28 @@ struct PremiumStatus: Codable, Equatable {
         var gracePeriodExpirationDate: Date?
         var willAutoRenew: Bool
         var isTrial = false
+        var appAccountToken: UUID? = nil
+        var isFamilyShared = false
     }
 
     /// Combines the signed entitlements with the renewal status. A valid signed entitlement always
     /// wins (it is what StoreKit has cached on the device, so it works offline); the renewal status
     /// adds grace period / billing retry / auto-renew details.
-    static func resolve(entitlements: [Entitlement], renewal: Renewal?, now: Date = Date()) -> PremiumStatus {
-        let valid = entitlements
+    static func resolve(entitlements: [Entitlement], renewal: Renewal?, account: UUID? = nil,
+                        now: Date = Date()) -> PremiumStatus {
+        let current = entitlements
             .filter { PremiumProducts.isPremiumProduct($0.productID) && $0.revocationDate == nil && !$0.isUpgraded }
             .filter { ($0.expirationDate ?? .distantFuture) > now }
+        let valid = current
+            .filter { belongs(token: $0.appAccountToken, familyShared: $0.isFamilyShared, to: account) }
             .sorted { ($0.expirationDate ?? .distantFuture) > ($1.expirationDate ?? .distantFuture) }
             .first
+        let renewal = renewal.flatMap {
+            belongs(token: $0.appAccountToken, familyShared: $0.isFamilyShared, to: account) ? $0 : nil
+        }
 
         var status = PremiumStatus()
+        if valid == nil, !current.isEmpty { status.heldByOtherAccount = true }
         if let r = renewal, PremiumProducts.isPremiumProduct(r.productID) {
             status.productID = r.productID
             status.willAutoRenew = r.willAutoRenew
@@ -143,13 +172,18 @@ struct PremiumStatus: Codable, Equatable {
 
     static let cacheKey = "premium.status.v1"
 
-    static func cached(in defaults: UserDefaults = .standard) -> PremiumStatus {
-        guard let data = defaults.data(forKey: cacheKey),
+    /// One cache per account (a shared iPhone never shows one account's Premium to another).
+    static func cacheKey(for account: UUID?) -> String {
+        account.map { "\(cacheKey).\($0.uuidString)" } ?? cacheKey
+    }
+
+    static func cached(in defaults: UserDefaults = .standard, account: UUID? = nil) -> PremiumStatus {
+        guard let data = defaults.data(forKey: cacheKey(for: account)),
               let s = try? JSONDecoder().decode(PremiumStatus.self, from: data) else { return .none }
         return s
     }
 
-    func save(to defaults: UserDefaults = .standard) {
-        if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: Self.cacheKey) }
+    func save(to defaults: UserDefaults = .standard, account: UUID? = nil) {
+        if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: Self.cacheKey(for: account)) }
     }
 }

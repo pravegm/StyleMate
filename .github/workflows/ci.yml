@@ -486,6 +486,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee release-build.log | grep -E "error:|warning: .*StyleMate/|\*\* BUILD" || true
           grep -q "\*\* BUILD SUCCEEDED \*\*" release-build.log
+      - name: No test hooks in the Release binary
+        # The DEBUG UI-test hooks (seeded wardrobe, the fake Sign in with Apple account) must not ship.
+        run: |
+          BIN=$(find "$RUNNER_TEMP/dd-release/Build/Products" -path "*Release-iphoneos/StyleMate.app/StyleMate" -type f | head -1)
+          [ -n "$BIN" ] || { echo "::error::Release binary not found"; exit 1; }
+          if strings "$BIN" | grep -E "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestDemoUser|Continue as test user"; then
+            echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1
+          fi
+          echo "No test hooks in $BIN"
       - name: Upload log
         if: always()
         uses: actions/upload-artifact@v4

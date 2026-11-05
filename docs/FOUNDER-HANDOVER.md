@@ -6,10 +6,11 @@ Plain-language summary of the unsupervised rebuild (4–5 Nov 2026). Technical d
 
 ## What the app does now
 
-Everything runs **on the iPhone**. No API keys, no servers, and no login. The only thing that
-leaves the phone is the user's own iCloud backup.
+Everything runs **on the iPhone**. No API keys and no servers. People sign in with Apple (your
+decision, 5 Nov): it's the only way in, and StyleMate gets a private ID and the first name, never
+the email. The only thing that leaves the phone is the user's own iCloud backup.
 
-1. **First run (about 1 minute to something useful)**: welcome, a 3-frame selfie, photo access,
+1. **First run (about 1 minute to something useful)**: welcome, Sign in with Apple, a 3-frame selfie, photo access,
    then "Find yourself": the app groups the faces in your library and asks "Is this you?". You tap
    your face once.
 2. **Digital wardrobe, built automatically**: the scan looks for photos of *you* (face matching:
@@ -40,7 +41,8 @@ leaves the phone is the user's own iCloud backup.
 8. **Try with sample photos**: 6 bundled sample photos let anyone (including Apple's reviewer)
    see a full wardrobe without their own photos. Samples are removed with one tap.
 9. **StyleMate Premium (how it makes money)**: everything is free for the first 50 pieces in the
-   wardrobe (sample clothes don't count). Premium, monthly or yearly through Apple, makes it
+   wardrobe, per account across all their iPhones (sample clothes don't count; two phones can't
+   make it 100). Premium belongs to the account too: the purchase is tied to it. Premium, monthly or yearly through Apple, makes it
    unlimited. When the closet is full, the photo scan keeps finding pieces and keeps them waiting:
    Home says "23 more pieces found — Unlock with Premium", and subscribing puts them all in the
    closet at once. Adding by camera or gallery at 50 opens the plans instead. Nobody ever loses a
@@ -49,6 +51,12 @@ leaves the phone is the user's own iCloud backup.
    1-week free trial); the app shows whatever Apple returns. There is no StyleMate server, and
    Apple handles all payments. *Status: built and tested with Apple's StoreKit Test on the
    simulator; real (free, sandbox) purchases need the App Store Connect setup below first.*
+10. **Your account**: Profile › Account has Sign Out (the closet stays on the phone for next time)
+   and Delete Account. Delete Account removes the wardrobe, calendar, face data and the account's
+   iCloud backup. Apple also wants the sign-in "token" revoked, which needs a small server we
+   don't have. The delete screen shows people how to stop it in Settings instead. Whether to add
+   that server is your call (`docs/LAUNCH-READINESS.md`, top). Testers who used a build without
+   sign-in keep their closet: the first account to sign in on that phone takes it over.
 
 How it was checked: every change runs through GitHub Actions on a Mac. Each push runs the full unit-test
 suite, including real-model extraction on 13 real photos, face matching, outfit engine,
@@ -59,13 +67,16 @@ screen on an iPhone Duo simulator, flat, half-open and closed.
 ## Getting it on your phones
 
 Follow `docs/TESTFLIGHT.md` (about 15 minutes, once). In short:
-1. Register the bundle ID `com.stylemates.StyleMate` with iCloud, and create the App Store
-   Connect record.
+1. Register the bundle ID `com.stylemates.StyleMate` with **iCloud and Sign In with Apple**, and
+   create the App Store Connect record. If the ID already exists, open it and tick Sign In with
+   Apple; without it the TestFlight build stops.
 2. Add the 4 repository secrets you already use for the Duo games.
 3. Turn on GitHub Pages (publishes the privacy policy).
 4. Press **Run workflow** on the TestFlight action. Install from TestFlight on the iPhone 17 Pro
    and the Duo.
-5. For Premium: accept the **Paid Apps agreement** (with bank and tax details) and create the
+5. Run the iCloud schema step again (`docs/TESTFLIGHT.md` §5): this build adds four fields that
+   keep the free pieces the same on every phone. Until then TestFlight builds work but don't back up.
+6. For Premium: accept the **Paid Apps agreement** (with bank and tax details) and create the
    subscription group with its two plans, exactly as in `docs/TESTFLIGHT.md` §6 (about 30
    minutes). Buying in TestFlight is free.
 

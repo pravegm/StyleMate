@@ -179,7 +179,7 @@ struct OnboardingWelcomeView: View {
             HStack(alignment: .top, spacing: DS.Spacing.xs) {
                 Image(systemName: "lock.shield.fill")
                     .foregroundStyle(DS.Colors.accent)
-                Text("No account. Your photos and face are analysed only on this iPhone. Your closet syncs only to your own iCloud. Nothing is sent to us.")
+                Text("Sign in with Apple, no password. Your photos and face are analysed only on this iPhone, and your closet syncs only to your own iCloud. Nothing is sent to us.")
                     .font(DS.Font.caption1)
                     .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

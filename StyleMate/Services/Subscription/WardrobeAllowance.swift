@@ -9,7 +9,7 @@ import Foundation
 /// - A manual batch that would cross the limit adds what fits; the rest wait locked and the
 ///   paywall is offered for them.
 /// - The background scan keeps finding items past the limit and stores them locked
-///   (`LockedItemsStore`). Subscribing unlocks them all; making room (removing items) unlocks
+///   (`WardrobeViewModel.lockedItems`, synced). Subscribing unlocks them all; making room (removing items) unlocks
 ///   the oldest locked ones into the free slots.
 enum WardrobeAllowance {
     static let freeItemLimit = 50

@@ -49,13 +49,32 @@ enum Category: String, CaseIterable, Identifiable, Hashable {
 // Threading: `items` is published UI state — mutate it on the main thread. The cloud and
 // migration entry points hop to the main actor themselves.
 class WardrobeViewModel: ObservableObject {
+    /// The closet: every unlocked item (what the closet, outfits and studio renders use).
     @Published var items: [WardrobeItem] = [] {
         didSet {
             if !suspendSaving {
+                assignMissingMeta()
                 save(forUser: currentUserEmail)
             }
         }
     }
+    /// Pieces past the account's 50 free ones, waiting for Premium. Synced like every item (CloudKit
+    /// `isLocked`), so every device agrees; never shown in the closet or used by outfits.
+    @Published var lockedItems: [WardrobeItem] = [] {
+        didSet {
+            if !suspendSaving {
+                assignMissingMeta()
+                save(forUser: currentUserEmail)
+            }
+        }
+    }
+    /// Free-tier bookkeeping per item (created, tier, sample), synced with the item.
+    private(set) var meta: [UUID: ItemMeta] = [:]
+    /// Shown once after a sync locked pieces this phone was showing ("3 pieces moved to Premium...").
+    @Published var allowanceNotice: String?
+    /// What a newly added item counts as. Kept in step with the entitlement by `PremiumStore`.
+    nonisolated(unsafe) static var premiumForNewItems = false
+
     private(set) var currentUserEmail: String = ""
     private var suspendSaving = false
 
@@ -67,10 +86,84 @@ class WardrobeViewModel: ObservableObject {
     }
 
 
+    static func lockedKey(for userId: String) -> String { "locked" + storageKey(for: userId) }
+    static func metaKey(for userId: String) -> String { "itemMeta_" + storageKey(for: userId) }
+
     func load(forUser email: String) {
         currentUserEmail = email
         ledger = SyncLedger.load(userKey: WardrobeViewModel.storageKey(for: email))
-        items = WardrobeViewModel.loadItems(forUser: email)
+        let loaded = WardrobeViewModel.loadItems(forUser: email)
+        let savedMeta = WardrobeViewModel.loadMeta(forUser: email)
+        var meta = savedMeta ?? [:]
+        if savedMeta == nil {
+            // First launch with the account-level free tier: everything already here is kept for good.
+            for item in loaded { meta[item.id] = .legacy }
+        }
+        var locked = WardrobeViewModel.loadLocked(forUser: email)
+        for imported in LegacyLockedImport.take(forUser: email) where !locked.contains(where: { $0.item.id == imported.item.id }) {
+            locked.append(imported)
+        }
+        for entry in locked where meta[entry.item.id] == nil { meta[entry.item.id] = entry.meta }
+        suspendSaving = true
+        self.meta = meta
+        items = loaded
+        lockedItems = locked.map { $0.item }
+        suspendSaving = false
+        assignMissingMeta()
+        save(forUser: email)
+    }
+
+    private static func loadMeta(forUser email: String) -> [UUID: ItemMeta]? {
+        guard let data = UserDefaults.standard.data(forKey: metaKey(for: email)),
+              let decoded = try? JSONDecoder().decode([String: ItemMeta].self, from: data) else { return nil }
+        var out: [UUID: ItemMeta] = [:]
+        for (k, v) in decoded { if let id = UUID(uuidString: k) { out[id] = v } }
+        return out
+    }
+
+    static func loadLocked(forUser email: String) -> [(item: WardrobeItem, meta: ItemMeta)] {
+        guard let data = UserDefaults.standard.data(forKey: lockedKey(for: email)),
+              let decoded = try? JSONDecoder().decode([WardrobeItemCodable].self, from: data) else { return [] }
+        return decoded.compactMap { $0.toWardrobeItem() }.map { (item: $0, meta: ItemMeta.new(premium: false)) }
+    }
+
+    /// New items get their bookkeeping the moment they arrive (tier from the current entitlement).
+    private func assignMissingMeta() {
+        let samples = SampleLibrary.sampleItemIDs(forUser: currentUserEmail)
+        let now = Date()
+        for item in items where meta[item.id] == nil {
+            meta[item.id] = .new(premium: Self.premiumForNewItems, at: now, sample: samples.contains(item.id))
+        }
+        for item in lockedItems where meta[item.id] == nil {
+            meta[item.id] = .new(premium: false, at: now)
+        }
+    }
+
+    func metaFor(_ id: UUID) -> ItemMeta { meta[id] ?? .legacy }
+
+    /// Sets an item's bookkeeping (seeded test data; samples).
+    func setMeta(_ m: ItemMeta, for id: UUID) {
+        meta[id] = m
+        save(forUser: currentUserEmail)
+    }
+
+    /// Sample-photo items: never counted, never locked, labelled on every device.
+    func markSamples(_ ids: [UUID]) {
+        for id in ids {
+            var m = metaFor(id)
+            guard !m.isSample else { continue }
+            m.isSample = true
+            meta[id] = m
+            if let item = items.first(where: { $0.id == id }) { syncItemToCloud(item) }
+        }
+        save(forUser: currentUserEmail)
+    }
+
+    /// Ids of sample items (this phone's list plus what other devices marked).
+    var sampleIDs: Set<UUID> {
+        var ids = SampleLibrary.sampleItemIDs(forUser: currentUserEmail)
+        for (id, m) in meta where m.isSample { ids.insert(id) }
+        return ids
     }
 
     /// Decodes a user's stored wardrobe (empty when there is none).
@@ -91,6 +184,15 @@ class WardrobeViewModel: ObservableObject {
         if let data = try? JSONEncoder().encode(codableItems) {
             UserDefaults.standard.set(data, forKey: key)
         }
+        if let data = try? JSONEncoder().encode(lockedItems.map { WardrobeItemCodable(from: $0) }) {
+            UserDefaults.standard.set(data, forKey: WardrobeViewModel.lockedKey(for: email))
+        }
+        let live = Set(items.map(\.id)).union(lockedItems.map(\.id))
+        var stored: [String: ItemMeta] = [:]
+        for (id, m) in meta where live.contains(id) { stored[id.uuidString] = m }
+        if let data = try? JSONEncoder().encode(stored) {
+            UserDefaults.standard.set(data, forKey: WardrobeViewModel.metaKey(for: email))
+        }
     }
 
     func clear() {
@@ -98,9 +200,93 @@ class WardrobeViewModel: ObservableObject {
         flushTask = nil
         suspendSaving = true
         items = []
+        lockedItems = []
+        meta = [:]
+        allowanceNotice = nil
         suspendSaving = false
         currentUserEmail = ""
         ledger = SyncLedger()
+    }
+
+    // MARK: - Account-level free tier (AccountAllowance)
+
+    /// Keeps a new piece for Premium (past the account's 50 free ones). Synced, so every device sees it.
+    func addLocked(_ item: WardrobeItem) {
+        guard !lockedItems.contains(where: { $0.id == item.id }), !items.contains(where: { $0.id == item.id }) else { return }
+        meta[item.id] = .new(premium: false)
+        lockedItems.append(item)
+        syncItemToCloud(item)
+    }
+
+    /// Applies the account's rule (`AccountAllowance.reconcile`): unlocks what fits, or everything
+    /// with Premium; locks free-tier pieces past the limit (only possible after another device's
+    /// additions synced); promotes free pieces while Premium. Returns how many pieces were locked.
+    @MainActor
+    @discardableResult
+    func reconcileAllowance(isPremium: Bool, afterSync: Bool = false) -> Int {
+        guard !currentUserEmail.isEmpty else { return 0 }
+        let samples = sampleIDs
+        func entry(_ item: WardrobeItem, locked: Bool) -> AccountAllowance.Entry {
+            var m = metaFor(item.id)
+            if samples.contains(item.id) { m.isSample = true }
+            return AccountAllowance.Entry(id: item.id, meta: m, isLocked: locked)
+        }
+        let entries = items.map { entry($0, locked: false) } + lockedItems.map { entry($0, locked: true) }
+        let plan = AccountAllowance.reconcile(entries, isPremium: isPremium)
+        guard !plan.isEmpty else { return 0 }
+
+        var changed = Set<UUID>()
+        for id in plan.promote {
+            var m = metaFor(id)
+            m.tier = .premium
+            meta[id] = m
+            changed.insert(id)
+        }
+        let moveToLocked = items.filter { plan.lock.contains($0.id) }
+        let moveToCloset = lockedItems.filter { plan.unlock.contains($0.id) }
+            .sorted { AccountAllowance.precedes(entry($0, locked: true), entry($1, locked: true)) }
+        suspendSaving = true
+        if !moveToLocked.isEmpty {
+            items.removeAll { plan.lock.contains($0.id) }
+            lockedItems.append(contentsOf: moveToLocked)
+        }
+        if !moveToCloset.isEmpty {
+            lockedItems.removeAll { plan.unlock.contains($0.id) }
+            items.append(contentsOf: moveToCloset)
+        }
+        suspendSaving = false
+        save(forUser: currentUserEmail)
+        changed.formUnion(plan.lock)
+        changed.formUnion(plan.unlock)
+        for item in items + lockedItems where changed.contains(item.id) { syncItemToCloud(item) }
+        if afterSync, !moveToLocked.isEmpty {
+            allowanceNotice = AccountAllowance.movedNotice(moveToLocked.count)
+        }
+        dlog("[Premium] Allowance: \(plan.unlock.count) unlocked, \(plan.lock.count) locked, \(plan.promote.count) promoted")
+        return moveToLocked.count
+    }
+
+    /// "Empty My Wardrobe": the waiting pieces go too (files, embeddings, iCloud).
+    func removeAllLocked() {
+        let doomed = lockedItems
+        for item in doomed {
+            deleteItemFromCloud(item)
+            WardrobeViewModel.deleteFiles(of: item)
+        }
+        ItemEmbeddingStore.shared.remove(doomed.map(\.id))
+        lockedItems = []
+    }
+
+    /// An account took over this phone's old profile, whose wardrobe lived in the shared legacy zone:
+    /// send all of it to the account's own zone (a full pull from scratch follows).
+    func queueFullReupload() {
+        guard !currentUserEmail.isEmpty else { return }
+        WardrobeViewModel.onMain { [weak self] in
+            guard let self else { return }
+            for item in self.items + self.lockedItems { self.ledger.markPending(item.id) }
+            self.ledger.token = nil
+            self.saveLedger()
+        }
     }
 
     // MARK: - iCloud Sync
@@ -156,7 +342,7 @@ class WardrobeViewModel: ObservableObject {
         guard !currentUserEmail.isEmpty else { return }
         WardrobeViewModel.onMain { [weak self] in
             guard let self else { return }
-            for item in self.items { self.ledger.markPending(item.id) }
+            for item in self.items + self.lockedItems { self.ledger.markPending(item.id) }
             self.saveLedger()
             Task { @MainActor [weak self] in await self?.flushPendingChanges() }
         }
@@ -164,7 +350,8 @@ class WardrobeViewModel: ObservableObject {
 
     /// Coalesces bursts (a scan adds items one by one) into one batched upload.
     private func scheduleFlush(after seconds: Double = 2) {
-        guard flushTask == nil else { return }
+        // The unit-test host is unsigned: CloudKit would trap.
+        guard flushTask == nil, !AppRuntime.isUnitTestHost else { return }
         flushTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             guard let self, !Task.isCancelled else { return }
@@ -198,9 +385,10 @@ class WardrobeViewModel: ObservableObject {
 
         let snapshot = ledger.pending
         guard !snapshot.isEmpty else { return }
-        var byID: [UUID: WardrobeItem] = [:]
-        for item in items { byID[item.id] = item }
-        var toUpload: [WardrobeItem] = []
+        var byID: [UUID: CloudKitService.CloudItem] = [:]
+        for item in items { byID[item.id] = .init(item: item, meta: metaFor(item.id), isLocked: false) }
+        for item in lockedItems { byID[item.id] = .init(item: item, meta: metaFor(item.id), isLocked: true) }
+        var toUpload: [CloudKitService.CloudItem] = []
         for key in snapshot.keys {
             if let id = UUID(uuidString: key), let item = byID[id] {
                 toUpload.append(item)
@@ -222,13 +410,30 @@ class WardrobeViewModel: ObservableObject {
         await syncWithCloud()
     }
 
-    /// Set by "Delete Everything" until iCloud confirms the zone is gone. Device-wide.
+    /// Set by "Delete Everything" (builds before accounts: the shared legacy zone) until iCloud
+    /// confirms the zone is gone. Device-wide.
     static let pendingZoneWipeKey = "cloudPendingZoneWipe"
+    /// Account zones whose deletion (Delete account) isn't confirmed yet. Device-wide.
+    static let pendingZoneWipesKey = "cloudPendingZoneWipes"
 
-    /// A pull may only run once a requested iCloud wipe is confirmed — for ANY profile on the
-    /// phone (pulls restore the whole zone, whatever profile id uploaded it).
-    static func mustWipeZoneBeforePull(ledger: SyncLedger, defaults: UserDefaults = .standard) -> Bool {
-        ledger.pendingZoneWipe || defaults.bool(forKey: pendingZoneWipeKey)
+    static func pendingZoneWipes(_ defaults: UserDefaults = .standard) -> Set<String> {
+        Set(defaults.stringArray(forKey: pendingZoneWipesKey) ?? [])
+    }
+
+    static func setZoneWipe(_ zone: String, pending: Bool, defaults: UserDefaults = .standard) {
+        var all = pendingZoneWipes(defaults)
+        if pending { all.insert(zone) } else { all.remove(zone) }
+        defaults.set(Array(all).sorted(), forKey: pendingZoneWipesKey)
+    }
+
+    /// A pull of `zone` may only run once a requested deletion of it is confirmed. Without a zone,
+    /// the legacy (pre-account) rule: any pending legacy wipe blocks.
+    static func mustWipeZoneBeforePull(ledger: SyncLedger, zone: String? = nil,
+                                       defaults: UserDefaults = .standard) -> Bool {
+        if ledger.pendingZoneWipe { return true }
+        guard let zone else { return defaults.bool(forKey: pendingZoneWipeKey) }
+        if zone == CloudKitService.zoneName, defaults.bool(forKey: pendingZoneWipeKey) { return true }
+        return pendingZoneWipes(defaults).contains(zone)
     }
 
     @MainActor
@@ -239,9 +444,16 @@ class WardrobeViewModel: ObservableObject {
         let user = currentUserEmail
         let cloud = CloudKitService.shared
 
-        if WardrobeViewModel.mustWipeZoneBeforePull(ledger: ledger) {
-            guard await cloud.deleteAllData(), currentUserEmail == user else { return }
+        let zone = cloud.currentZoneName
+        // A Delete Everything from a build before accounts: delete the legacy zone (best effort).
+        if UserDefaults.standard.bool(forKey: WardrobeViewModel.pendingZoneWipeKey), zone != CloudKitService.zoneName,
+           await cloud.deleteAllData(zoneName: CloudKitService.zoneName) {
             UserDefaults.standard.removeObject(forKey: WardrobeViewModel.pendingZoneWipeKey)
+        }
+        if WardrobeViewModel.mustWipeZoneBeforePull(ledger: ledger, zone: zone) {
+            guard await cloud.deleteAllData(zoneName: zone), currentUserEmail == user else { return }
+            WardrobeViewModel.setZoneWipe(zone, pending: false)
+            if zone == CloudKitService.zoneName { UserDefaults.standard.removeObject(forKey: WardrobeViewModel.pendingZoneWipeKey) }
             ledger.pendingZoneWipe = false
             ledger.token = nil
             saveLedger()
@@ -259,7 +471,7 @@ class WardrobeViewModel: ObservableObject {
             // items are kept and queued so the backup is rebuilt.
             guard currentUserEmail == user else { return }
             ledger.token = nil
-            for item in items where !ledger.isPending(item.id) { ledger.markPending(item.id) }
+            for item in items + lockedItems where !ledger.isPending(item.id) { ledger.markPending(item.id) }
             saveLedger()
             await flushPendingChanges()
 
@@ -269,9 +481,32 @@ class WardrobeViewModel: ObservableObject {
             // reached iCloud, so differing copies keep the phone's version (and re-send it).
             let reconciledKey = "cloudReconciled_\(WardrobeViewModel.storageKey(for: user))"
             let firstReconcile = changes.isFullFetch && !UserDefaults.standard.bool(forKey: reconciledKey)
-            let outcome = CloudMerge.apply(changes, to: items, ledger: ledger, preferLocal: firstReconcile,
+            // Closet and locked pieces merge as one set. The lock and the free-tier bookkeeping of
+            // every record the merge accepted (no pending local change, not deleted here) follow
+            // the cloud; then the account's rule runs (below).
+            var lockedIDs = Set(lockedItems.map(\.id))
+            let localIDs = Set(items.map(\.id)).union(lockedIDs)
+            let outcome = CloudMerge.apply(changes, to: items + lockedItems, ledger: ledger, preferLocal: firstReconcile,
                                            fileExists: { WardrobeImageFileHelper.imageExists(at: $0) })
-            if outcome.changed { items = outcome.items }   // one write
+            var extrasChanged = false
+            for (id, extra) in changes.extras where !ledger.isTombstoned(id) && !ledger.isPending(id) {
+                if firstReconcile, localIDs.contains(id) { continue }   // the phone's copy wins
+                if let m = extra.meta, meta[id] != m { meta[id] = m; extrasChanged = true }
+                if meta[id] == nil { meta[id] = .legacy; extrasChanged = true }   // uploaded by an older build
+                if extra.isLocked != lockedIDs.contains(id) {
+                    if extra.isLocked { lockedIDs.insert(id) } else { lockedIDs.remove(id) }
+                    extrasChanged = true
+                }
+                if extra.meta?.isSample == true { SampleLibrary.recordSampleItems([id], forUser: user) }
+            }
+            if outcome.changed || extrasChanged {   // one write per collection
+                suspendSaving = true
+                items = outcome.items.filter { !lockedIDs.contains($0.id) }
+                lockedItems = outcome.items.filter { lockedIDs.contains($0.id) }
+                suspendSaving = false
+                assignMissingMeta()
+                save(forUser: user)
+            }
             for id in outcome.uploadLocal { ledger.markPending(id) }
             if !outcome.removed.isEmpty {
                 let doomed = outcome.removed
@@ -286,13 +521,16 @@ class WardrobeViewModel: ObservableObject {
                 // Heal: items only on this phone (e.g. an upload that failed in an older
                 // build) are uploaded rather than ever being treated as deleted.
                 let cloudIDs = Set(changes.modified.map(\.id))
-                for item in items where !cloudIDs.contains(item.id) && !ledger.isPending(item.id) {
+                for item in items + lockedItems where !cloudIDs.contains(item.id) && !ledger.isPending(item.id) {
                     ledger.markPending(item.id)
                 }
             }
             ledger.token = changes.newToken
             saveLedger()
             UserDefaults.standard.set(true, forKey: reconciledKey)
+            // The account's 50 free pieces, now that this phone sees every device's items.
+            let lockedBySync = reconcileAllowance(isPremium: PremiumStore.shared.isPremium, afterSync: true)
+            if lockedBySync > 0 { dlog("[Premium] Sync locked \(lockedBySync) pieces another device added") }
             if !ledger.pending.isEmpty { await flushPendingChanges() }
             guard currentUserEmail == user else { return }
             await hydrateMissingImages(priority: outcome.needAssets, user: user)
@@ -304,7 +542,7 @@ class WardrobeViewModel: ObservableObject {
     /// for items that have images but none.
     @MainActor
     private func hydrateMissingImages(priority: [WardrobeItem], user: String) async {
-        let snapshot = items.map { (id: $0.id, image: $0.imagePath, cropped: $0.croppedImagePath, thumb: $0.thumbnailPath) }
+        let snapshot = (items + lockedItems).map { (id: $0.id, image: $0.imagePath, cropped: $0.croppedImagePath, thumb: $0.thumbnailPath) }
         let priorityIDs = Set(priority.map(\.id))
         // Existence checks off the main thread (one stat per item).
         let (missingImage, missingThumb) = await Task.detached(priority: .utility) { () -> ([UUID], [UUID]) in
@@ -333,13 +571,13 @@ class WardrobeViewModel: ObservableObject {
             let ordered = toDownload.sorted { priorityIDs.contains($0) && !priorityIDs.contains($1) }
             let wanted = Set(ordered.prefix(200))
             hydrationAttempted.formUnion(wanted)
-            let toFetch = items.filter { wanted.contains($0.id) && !$0.imagePath.isEmpty }
+            let toFetch = (items + lockedItems).filter { wanted.contains($0.id) && !$0.imagePath.isEmpty }
             updates = await CloudKitService.shared.fetchAssets(for: toFetch)
         }
         if !toThumb.isEmpty {
             let wanted = Set(toThumb)
             hydrationAttempted.formUnion(wanted)
-            let sources = items.filter { wanted.contains($0.id) }.map { (id: $0.id, src: $0.croppedImagePath ?? $0.imagePath) }
+            let sources = (items + lockedItems).filter { wanted.contains($0.id) }.map { (id: $0.id, src: $0.croppedImagePath ?? $0.imagePath) }
             let thumbs = await Task.detached(priority: .utility) { () -> [UUID: String] in
                 var out: [UUID: String] = [:]
                 for s in sources {
@@ -350,18 +588,21 @@ class WardrobeViewModel: ObservableObject {
             for (id, t) in thumbs { updates[id, default: CloudKitService.FetchedFiles()].thumbnailPath = t }
         }
         guard currentUserEmail == user, !updates.isEmpty else { return }
-        var copy = items
-        for (i, item) in copy.enumerated() {
-            guard let f = updates[item.id] else { continue }
-            copy[i] = item.withImages(imagePath: f.imagePath ?? item.imagePath,
-                                      croppedImagePath: f.croppedImagePath ?? item.croppedImagePath,
-                                      thumbnailPath: f.thumbnailPath ?? item.thumbnailPath)
+        func updated(_ list: [WardrobeItem]) -> [WardrobeItem] {
+            list.map { item in
+                guard let f = updates[item.id] else { return item }
+                return item.withImages(imagePath: f.imagePath ?? item.imagePath,
+                                       croppedImagePath: f.croppedImagePath ?? item.croppedImagePath,
+                                       thumbnailPath: f.thumbnailPath ?? item.thumbnailPath)
+            }
         }
-        items = copy
+        let waiting = updated(lockedItems)
+        if lockedItems.contains(where: { updates[$0.id] != nil }) { lockedItems = waiting }
+        items = updated(items)
         dlog("[Sync] Restored images for \(updates.count) items")
     }
 
-    private static func deleteFiles(of item: WardrobeItem) {
+    static func deleteFiles(of item: WardrobeItem) {
         WardrobeImageFileHelper.deleteImage(at: item.imagePath)
         if item.croppedImagePath != item.imagePath {
             WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
@@ -382,10 +623,15 @@ class WardrobeViewModel: ObservableObject {
     func deleteAllLocalData(forUser userId: String, includingCloud: Bool = true) {
         guard !userId.isEmpty else { return }
         let key = WardrobeViewModel.storageKey(for: userId)
-        let userItems = currentUserEmail == userId ? items : WardrobeViewModel.loadItems(forUser: userId)
+        let userItems = currentUserEmail == userId
+            ? items + lockedItems
+            : WardrobeViewModel.loadItems(forUser: userId) + WardrobeViewModel.loadLocked(forUser: userId).map { $0.item }
+        let zone = includingCloud ? CloudKitService.shared.currentZoneName : ""
 
         if currentUserEmail == userId { clear() }
         UserDefaults.standard.removeObject(forKey: key)
+        UserDefaults.standard.removeObject(forKey: WardrobeViewModel.lockedKey(for: userId))
+        UserDefaults.standard.removeObject(forKey: WardrobeViewModel.metaKey(for: userId))
         for legacy in ["wardrobe_\(userId)", "wardrobeData_\(userId)"] {
             UserDefaults.standard.removeObject(forKey: legacy)
         }
@@ -400,8 +646,9 @@ class WardrobeViewModel: ObservableObject {
         ItemEmbeddingStore.shared.remove(userItems.map(\.id))
         StudioQueue.shared.cancel()
         StudioStore.shared.remove(userItems.map(\.id))
-        // Pieces waiting for Premium (local only, never in iCloud): their files, embeddings, list.
-        LockedItemsStore.shared.forget(forUser: userId)
+        // An old build's local list of waiting pieces (their files go with the wardrobe's below).
+        let oldLocked = LegacyLockedImport.take(forUser: userId).map { $0.item }
+        ItemEmbeddingStore.shared.remove(oldLocked.map(\.id))
 
         // Is anyone else's wardrobe on this phone? If not, wipe the shared folders whole
         // (catches orphaned files too); otherwise delete only this user's files.
@@ -410,7 +657,7 @@ class WardrobeViewModel: ObservableObject {
         }
         let fm = FileManager.default
         if otherWardrobes {
-            for item in userItems { WardrobeViewModel.deleteFiles(of: item) }
+            for item in userItems + oldLocked { WardrobeViewModel.deleteFiles(of: item) }
         } else {
             try? fm.removeItem(at: WardrobeImageFileHelper.folderURL)
             try? fm.removeItem(at: LocalStore.documents.appendingPathComponent(WardrobeImageFileHelper.folderName))
@@ -431,12 +678,17 @@ class WardrobeViewModel: ObservableObject {
         SyncLedger.remove(userKey: key)
         UserDefaults.standard.removeObject(forKey: "cloudReconciled_\(key)")
         if includingCloud {
-            // Device-wide, not per profile: "Delete Everything" starts a NEW profile id, and
-            // pulls aren't filtered by profile, so the new profile must not pull the old
-            // wardrobe back before the zone deletion is confirmed.
-            UserDefaults.standard.set(true, forKey: WardrobeViewModel.pendingZoneWipeKey)
+            // The account's zone, remembered device-wide until iCloud confirms it's gone, so nothing
+            // pulls the wardrobe back first. An account that adopted this phone's old profile also
+            // deletes the legacy zone that profile backed up to.
+            WardrobeViewModel.setZoneWipe(zone, pending: true)
+            let alsoLegacy = AuthService.profileAdoptedLegacy(userId)
+            if alsoLegacy { UserDefaults.standard.set(true, forKey: WardrobeViewModel.pendingZoneWipeKey) }
             Task { @MainActor in
-                if await CloudKitService.shared.deleteAllData() {
+                if await CloudKitService.shared.deleteAllData(zoneName: zone) {
+                    WardrobeViewModel.setZoneWipe(zone, pending: false)
+                }
+                if alsoLegacy, await CloudKitService.shared.deleteAllData(zoneName: CloudKitService.zoneName) {
                     UserDefaults.standard.removeObject(forKey: WardrobeViewModel.pendingZoneWipeKey)
                 }
             }

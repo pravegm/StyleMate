@@ -26,7 +26,12 @@ final class PremiumStore: ObservableObject {
         case failed(String)
     }
 
-    @Published private(set) var status: PremiumStatus
+    @Published private(set) var status: PremiumStatus {
+        didSet { WardrobeViewModel.premiumForNewItems = status.isPremium() }
+    }
+    /// The signed-in account's UUID: every purchase carries it as `appAccountToken`, and only
+    /// transactions that belong to it count (`PremiumStatus.belongs`).
+    @Published private(set) var accountToken: UUID?
     /// Annual first (`PremiumProducts.all` order).
     @Published private(set) var products: [Product] = []
     @Published private(set) var loadState: LoadState = .idle
@@ -42,7 +47,16 @@ final class PremiumStore: ObservableObject {
     private var refreshAgain = false
 
     private init() {
-        status = PremiumStatus.cached()
+        status = PremiumStatus.none
+    }
+
+    /// The signed-in account changed (nil = signed out): its cached status at once, then StoreKit's.
+    func setAccount(_ account: UUID?) {
+        guard account != accountToken || status == PremiumStatus.none else { return }
+        accountToken = account
+        status = account.map { PremiumStatus.cached(account: $0) } ?? PremiumStatus.none
+        isPendingApproval = false
+        Task { await refresh() }
     }
 
     // MARK: Launch
@@ -116,7 +130,8 @@ final class PremiumStore: ObservableObject {
             guard case .verified(let t) = result, PremiumProducts.isPremiumProduct(t.productID) else { continue }
             entitlements.append(PremiumStatus.Entitlement(
                 productID: t.productID, expirationDate: t.expirationDate, revocationDate: t.revocationDate,
-                isUpgraded: t.isUpgraded, isTrial: t.offer?.type == .introductory))
+                isUpgraded: t.isUpgraded, isTrial: t.offer?.type == .introductory,
+                appAccountToken: t.appAccountToken, isFamilyShared: t.ownershipType == .familyShared))
             groupID = groupID ?? t.subscriptionGroupID
         }
         groupID = groupID ?? products.first?.subscription?.subscriptionGroupID
@@ -124,13 +139,18 @@ final class PremiumStore: ObservableObject {
         if let groupID, let statuses = try? await Product.SubscriptionInfo.status(for: groupID) {
             renewal = Self.bestRenewal(statuses)
         }
-        let resolved = PremiumStatus.resolve(entitlements: entitlements, renewal: renewal)
+        guard let account = accountToken else {
+            if status != PremiumStatus.none { status = PremiumStatus.none }
+            return
+        }
+        let resolved = PremiumStatus.resolve(entitlements: entitlements, renewal: renewal, account: account)
+        guard accountToken == account else { return }   // signed out / switched meanwhile
         if resolved.isPremium() { isPendingApproval = false }
         if resolved != status {
             dlog("[Premium] \(status.state.rawValue) -> \(resolved.state.rawValue) (\(resolved.productID ?? "-"))")
             status = resolved
         }
-        resolved.save()
+        resolved.save(account: account)
     }
 
     /// The most useful status of the group (a family member's or an older one may be listed too).
@@ -161,7 +181,8 @@ final class PremiumStore: ObservableObject {
                 state: state, productID: t.productID, expirationDate: t.expirationDate,
                 gracePeriodExpirationDate: info?.gracePeriodExpirationDate,
                 willAutoRenew: info?.willAutoRenew ?? false,
-                isTrial: t.offer?.type == .introductory)
+                isTrial: t.offer?.type == .introductory,
+                appAccountToken: t.appAccountToken, isFamilyShared: t.ownershipType == .familyShared)
             if best.map({ rank(state) > rank($0.state) }) ?? true { best = renewal }
         }
         return best
@@ -180,11 +201,13 @@ final class PremiumStore: ObservableObject {
             await refresh()
             // StoreKit can take a moment to list a brand-new entitlement.
             if !isPremium, transaction.revocationDate == nil,
-               (transaction.expirationDate ?? .distantFuture) > Date() {
+               (transaction.expirationDate ?? .distantFuture) > Date(),
+               PremiumStatus.belongs(token: transaction.appAccountToken,
+                                     familyShared: transaction.ownershipType == .familyShared, to: accountToken) {
                 status = PremiumStatus(state: .active, productID: transaction.productID,
                                        expiresAt: transaction.expirationDate, willAutoRenew: true,
                                        isTrial: transaction.offer?.type == .introductory)
-                status.save()
+                status.save(account: accountToken)
             }
             if let annual = product(PremiumProducts.annual) {
                 isTrialEligible = await annual.subscription?.isEligibleForIntroOffer ?? false

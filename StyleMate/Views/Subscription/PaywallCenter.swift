@@ -61,7 +61,6 @@ private struct PremiumSupport: ViewModifier {
             }
             .task(id: userId) {
                 guard !userId.isEmpty else { return }
-                LockedItemsStore.shared.load(forUser: userId)
                 if wardrobe.currentUserEmail == userId { PremiumGate.reconcile(wardrobe) }
             }
             // Subscribed (here, on another device, Ask to Buy approved): unlock everything now.

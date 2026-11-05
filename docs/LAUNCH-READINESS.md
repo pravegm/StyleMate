@@ -7,6 +7,37 @@ Status legend: **BLOCKER** (rejection or legal exposure), **HIGH** (likely rejec
 first reviews), **MED**, **LOW**. "Owner" is whoever holds the file. This doc only
 reports problems; it does not change those files.
 
+## Update 2026-11-05: Sign in with Apple is the only way in (founder decision)
+
+The founder reversed blocker 4's recommendation: **Sign in with Apple is required**, because the
+subscription and the 50 free wardrobe pieces belong to the account on every device (`feat/account`).
+No Google, no email/password, no guest mode. Why App Review should accept it (5.1.1(v)): the account
+carries real account-based features, namely the subscription (bought with the account's
+`appAccountToken`), the account-level free allowance, and the wardrobe synced across the person's
+devices. The review notes in `docs/APP-STORE-LISTING.md` say so.
+
+- **Scopes:** the full name only (it greets the person). No email is requested or stored.
+- **Revoked sign-in:** checked at launch and on every foreground (`getCredentialState`, plus
+  `credentialRevokedNotification`). Revoked or not found signs out.
+- **Account deletion (5.1.1(v)), in the app:** Profile › Account › Delete Account. It removes the
+  wardrobe, the waiting pieces, the outfit calendar, the selfie and face data, scan state, the
+  account's CloudKit zone (retried until iCloud confirms), and the account on the phone.
+- **Not done: Apple token revocation.** Apple asks apps to revoke the Sign in with Apple token on
+  deletion (`POST https://appleid.apple.com/auth/revoke`). That call needs the app's SIWA private key
+  and a client secret signed with it, so it has to run on a server. StyleMate has none, and the key
+  must never ship in the app. Instead, the delete screen tells the person how to do it themselves:
+  Settings › your name › Sign-In & Security › Sign in with Apple › StyleMate › Stop Using. It also
+  says that deleting doesn't cancel Premium.
+  - **Founder decision:** host a tiny revocation endpoint. It would be one serverless function, for
+    example Cloudflare Workers or AWS Lambda. It receives the authorization code from the app at
+    deletion, exchanges it for a refresh token, and calls `/auth/revoke`. The function holds the key
+    from developer.apple.com › Keys (Sign in with Apple). That is a server and a third-party host,
+    which the on-device rule currently excludes, so it's the founder's call. Without it, the app
+    relies on in-app deletion plus the Settings instructions. Apple's guidance asks for revocation,
+    so a reviewer could object; if that happens, the endpoint above is the fix.
+- **Founder action:** tick **Sign in with Apple** on the App ID again (docs/TESTFLIGHT.md step 1).
+  `testflight.yml` now fails the export check if the entitlement is missing from the signed app.
+
 ## Status update: re-audited on `main` @ 5f27503 (2026-11-04, evening)
 
 **Done on `main` since this audit was first written:**

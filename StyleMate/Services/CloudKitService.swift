@@ -38,15 +38,42 @@ final class CloudKitService: ObservableObject {
     private let container = CKContainer.default()
     private var privateDB: CKDatabase { container.privateCloudDatabase }
     nonisolated static let recordType = "WardrobeItem"
+    /// The zone builds without sign-in used (one per iCloud account). Each StyleMate account now has
+    /// its own zone (`Account.cloudZoneName`), so two Apple IDs signing in on one iCloud never mix
+    /// wardrobes. The legacy zone is no longer read; an account that adopted the phone's old profile
+    /// re-uploads that wardrobe to its own zone, and deleting that account deletes the legacy zone too.
     nonisolated static let zoneName = "WardrobeZone"
-    private let zoneID = CKRecordZone.ID(zoneName: CloudKitService.zoneName)
+    private var zoneID = CKRecordZone.ID(zoneName: CloudKitService.zoneName)
+    /// The signed-in account's zone name.
+    var currentZoneName: String { zoneID.zoneName }
+
+    /// Points sync at an account's zone (call before its first sync).
+    func configure(zoneName: String) {
+        guard zoneName != zoneID.zoneName else { return }
+        zoneID = CKRecordZone.ID(zoneName: zoneName)
+        zoneReady = false
+        dlog("[CloudKit] Using the account's zone")
+    }
+
+    /// One item as stored in iCloud: the garment, its free-tier bookkeeping and its lock.
+    struct CloudItem {
+        var item: WardrobeItem
+        var meta: ItemMeta
+        var isLocked: Bool
+    }
+
+    /// The free-tier fields of a pulled record (nil meta: uploaded by a build without them).
+    struct CloudExtra: Equatable {
+        var meta: ItemMeta?
+        var isLocked: Bool
+    }
 
     /// Metadata fields fetched on a pull. Assets are deliberately absent: they are fetched
     /// per item, only when the local files are missing.
     nonisolated static let metadataKeys: [CKRecord.FieldKey] = [
         "userID", "category", "product", "colors", "brand", "pattern", "imagePath",
         "croppedImagePath", "thumbnailPath", "material", "fit", "neckline", "sleeveLength",
-        "garmentLength", "details"
+        "garmentLength", "details", "createdAt", "tier", "isSample", "isLocked"
     ]
     nonisolated static let assetKeys: [CKRecord.FieldKey] = ["imageAsset", "croppedImageAsset"]
 
@@ -98,7 +125,8 @@ final class CloudKitService: ObservableObject {
 
     // MARK: - Records
 
-    private func makeRecord(for item: WardrobeItem, userID: String) -> CKRecord {
+    private func makeRecord(for cloudItem: CloudItem, userID: String) -> CKRecord {
+        let item = cloudItem.item
         let recordID = CKRecord.ID(recordName: item.id.uuidString, zoneID: zoneID)
         let record = CKRecord(recordType: Self.recordType, recordID: recordID)
         record["userID"] = userID
@@ -116,6 +144,10 @@ final class CloudKitService: ObservableObject {
         record["garmentLength"] = item.garmentLength?.rawValue
         record["details"] = item.details
         record["thumbnailPath"] = item.thumbnailPath
+        record["createdAt"] = cloudItem.meta.createdAt
+        record["tier"] = cloudItem.meta.tier.rawValue
+        record["isSample"] = cloudItem.meta.isSample ? 1 : 0
+        record["isLocked"] = cloudItem.isLocked ? 1 : 0
         if let imageURL = existingImageURL(item.imagePath) {
             record["imageAsset"] = CKAsset(fileURL: imageURL)
         }
@@ -136,18 +168,18 @@ final class CloudKitService: ObservableObject {
 
     /// Uploads one item. True only when CloudKit confirmed the save.
     @discardableResult
-    func uploadItem(_ item: WardrobeItem, userID: String) async -> Bool {
-        await uploadBatch([item], userID: userID).contains(item.id)
+    func uploadItem(_ item: CloudItem, userID: String) async -> Bool {
+        await uploadBatch([item], userID: userID).contains(item.item.id)
     }
 
     /// Uploads items in small batches; returns the ids CloudKit confirmed. Per-record
     /// failures are simply not in the result (they stay pending and are retried).
-    func uploadBatch(_ items: [WardrobeItem], userID: String) async -> Set<UUID> {
+    func uploadBatch(_ items: [CloudItem], userID: String) async -> Set<UUID> {
         guard !cloudUnavailable, !items.isEmpty else { return [] }
         await setupZone()
         guard !cloudUnavailable else { return [] }
         var confirmed: Set<UUID> = []
-        var queue: [[WardrobeItem]] = stride(from: 0, to: items.count, by: 20).map {
+        var queue: [[CloudItem]] = stride(from: 0, to: items.count, by: 20).map {
             Array(items[$0..<min($0 + 20, items.count)])
         }
         while !queue.isEmpty {
@@ -183,7 +215,7 @@ final class CloudKitService: ObservableObject {
 
     /// Full backup of the given items ("Back up now" in Profile). Returns confirmed ids.
     @discardableResult
-    func uploadAll(items: [WardrobeItem], userID: String) async -> Set<UUID> {
+    func uploadAll(items: [CloudItem], userID: String) async -> Set<UUID> {
         guard !cloudUnavailable else { return [] }
         syncStatus = .syncing
         let confirmed = await uploadBatch(items, userID: userID)
@@ -242,16 +274,17 @@ final class CloudKitService: ObservableObject {
     /// it (or there was nothing to delete). On failure `WardrobeViewModel` keeps a
     /// `pendingZoneWipe` flag and retries; no pull happens while it is set.
     @discardableResult
-    func deleteAllData() async -> Bool {
+    func deleteAllData(zoneName: String? = nil) async -> Bool {
         guard !cloudUnavailable else { return false }
         dlog("[CloudKit] Deleting all data")
+        let target = zoneName.map { CKRecordZone.ID(zoneName: $0) } ?? zoneID
         do {
-            try await privateDB.deleteRecordZone(withID: zoneID)
-            zoneReady = false
+            try await privateDB.deleteRecordZone(withID: target)
+            if target == zoneID { zoneReady = false }
             dlog("[CloudKit] Zone deleted")
             return true
         } catch let ck as CKError where ck.code == .zoneNotFound || ck.code == .userDeletedZone {
-            zoneReady = false
+            if target == zoneID { zoneReady = false }
             return true
         } catch {
             latchIfPermanent(error, context: "Delete all data")
@@ -265,6 +298,8 @@ final class CloudKitService: ObservableObject {
     /// image files may not exist on this phone yet); `deleted` are server-side deletions.
     struct CloudChanges {
         var modified: [WardrobeItem] = []
+        /// The free-tier fields of each modified record.
+        var extras: [UUID: CloudExtra] = [:]
         var deleted: Set<UUID> = []
         var newToken: CKServerChangeToken?
         /// True when this was a full pull (no token): `modified` is then every record.
@@ -315,6 +350,7 @@ final class CloudKitService: ObservableObject {
                         // tagged it — see `restoredItem(from:)`.
                         if let item = Self.restoredItem(from: mod.record) {
                             result.modified.append(item)
+                            result.extras[item.id] = Self.extra(from: mod.record)
                         }
                     case .failure(let error):
                         throw error   // don't advance past a record we couldn't read
@@ -445,6 +481,16 @@ final class CloudKitService: ObservableObject {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             if syncStatus != .syncing { syncStatus = .idle }
         }
+    }
+
+    /// The free-tier fields of a record. Pure.
+    nonisolated static func extra(from record: CKRecord) -> CloudExtra {
+        var meta: ItemMeta?
+        if let created = record["createdAt"] as? Date,
+           let tier = (record["tier"] as? String).flatMap(ItemMeta.Tier.init(rawValue:)) {
+            meta = ItemMeta(createdAt: created, tier: tier, isSample: (record["isSample"] as? Int64 ?? 0) != 0)
+        }
+        return CloudExtra(meta: meta, isLocked: (record["isLocked"] as? Int64 ?? 0) != 0)
     }
 
     /// A metadata-only item from a record. Pure: no disk access. `thumbnailPath` is only a

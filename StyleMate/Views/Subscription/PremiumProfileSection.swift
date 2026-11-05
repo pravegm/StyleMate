@@ -7,7 +7,6 @@ import StoreKit
 struct PremiumProfileSection: View {
     @EnvironmentObject private var wardrobe: WardrobeViewModel
     @ObservedObject private var store = PremiumStore.shared
-    @ObservedObject private var locked = LockedItemsStore.shared
     @State private var showManage = false
     @State private var isRestoring = false
     @State private var restoreMessage: String?
@@ -59,9 +58,9 @@ struct PremiumProfileSection: View {
             } else {
                 Button {
                     Haptics.light()
-                    PaywallCenter.shared.present(locked.count > 0 ? .lockedItems : .profile)
+                    PaywallCenter.shared.present(wardrobe.lockedItems.count > 0 ? .lockedItems : .profile)
                 } label: {
-                    Label(locked.count > 0 ? "Unlock \(locked.count) waiting piece\(locked.count == 1 ? "" : "s")"
+                    Label(wardrobe.lockedItems.count > 0 ? "Unlock \(wardrobe.lockedItems.count) waiting piece\(wardrobe.lockedItems.count == 1 ? "" : "s")"
                                            : "See Premium plans",
                           systemImage: "sparkles")
                 }
@@ -115,9 +114,10 @@ struct PremiumProfileSection: View {
         default:
             let used = min(counted, WardrobeAllowance.freeItemLimit)
             var line = "\(used) of \(WardrobeAllowance.freeItemLimit) free pieces used"
-            if locked.count > 0 { line += " · \(locked.count) waiting" }
+            if wardrobe.lockedItems.count > 0 { line += " · \(wardrobe.lockedItems.count) waiting" }
             if s.state == .expired { line += " · Premium ended" }
             if s.state == .revoked { line += " · Premium was refunded" }
+            if s.heldByOtherAccount { line += ". This Apple Account's subscription belongs to another StyleMate account." }
             return line
         }
     }

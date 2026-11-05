@@ -169,6 +169,31 @@ final class DuoScreensTests: E2ETestCase {
         openTab("Profile")
         _ = anyElement(NSPredicate(format: "identifier == 'profile.premium.status'")).waitForExistence(timeout: 10)
         shoot("23-profile-premium")
+
+        // Profile's Account section (Sign Out, Delete Account).
+        let signOut = app.buttons.matching(NSPredicate(format:
+            "identifier == 'profile.account.signOut' OR label == 'Sign Out'")).firstMatch
+        if scrollUntilHittable(signOut, maxSwipes: 12) { shoot("24-profile-account") }
+        else { XCTFail("No Sign Out in Profile") }
+    }
+
+    // MARK: - Sign in with Apple (signed out, fresh install)
+
+    @MainActor
+    func test03_DuoSignIn() throws {
+        guard bridgeURL != nil else { throw XCTSkip("DUO_BRIDGE_URL not set: not on the Duo CI") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestResetState", "-uiTestFakeAppleSignIn", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        self.app = app
+        app.launch()
+        dismissSpringboardAlertIfPresent()
+        let getStarted = button(id: "onboarding.getStarted", label: "Get Started")
+        guard getStarted.waitForExistence(timeout: 60) else { XCTFail("No welcome screen"); return }
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "entrance")], timeout: 1.5)
+        getStarted.tap()
+        guard app.buttons["signIn.debugFake"].waitForExistence(timeout: 20) else { XCTFail("No sign-in screen"); return }
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "entrance")], timeout: 1.0)
+        shoot("25-sign-in")
     }
 
     // No seated (tabletop) pass: the Duo simulator shows the inner display sideways and simctl can't rotate it,

@@ -13,7 +13,7 @@ struct StyleMateApp: App {
     init() {
         // Created here (not lazily) so the background scan, which iOS may launch
         // without any UI, works on the same objects the UI shows. AuthService
-        // creates (or restores) the local on-device profile: there is no login.
+        // restores the signed-in account (Sign in with Apple) from the Keychain.
         let auth = AuthService()
         let wardrobe = WardrobeViewModel()
         _authService = StateObject(wrappedValue: auth)
@@ -22,8 +22,14 @@ struct StyleMateApp: App {
         BackgroundScanCoordinator.shared.configure(auth: auth, wardrobe: wardrobe)
         // Morning outfit notification: refresh task + the tap router (a tap can cold-launch the app).
         if !AppRuntime.isUnitTestHost { MorningLookScheduler.shared.configure(auth: auth, wardrobe: wardrobe) }
-        // StyleMate Premium (StoreKit 2): Transaction.updates listener + entitlement refresh.
+        // StyleMate Premium (StoreKit 2): Transaction.updates listener + entitlement refresh, for the
+        // signed-in account (set here too, so a background scan launched with no UI knows it), and
+        // the account's own CloudKit zone.
+        PremiumStore.shared.setAccount(auth.account?.uuid)
         PremiumStore.shared.start()
+        if let account = auth.account, !AppRuntime.isUnitTestHost {
+            CloudKitService.shared.configure(zoneName: account.cloudZoneName)
+        }
     }
 
     var body: some Scene {
@@ -74,7 +80,8 @@ struct RootView: View {
     var body: some View {
         ZStack {
             Group {
-                if !onboardingManager.hasCompletedOnboarding {
+                // Signed out (Sign in with Apple is the only way in) or not onboarded yet.
+                if !authService.isAuthenticated || !onboardingManager.hasCompletedOnboarding {
                     OnboardingView()
                 } else {
                     MainTabView(showAddSheet: $showSourcePicker)
@@ -82,6 +89,7 @@ struct RootView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.4), value: onboardingManager.hasCompletedOnboarding)
+            .animation(.easeInOut(duration: 0.4), value: authService.isAuthenticated)
         }
         .sheet(isPresented: $showSourcePicker) {
             AddSourceSheet(
@@ -180,14 +188,17 @@ struct RootView: View {
             )
         }
         .onChange(of: authService.user?.id) { newID in
-            // The local profile changed (Delete Profile & All Data starts a fresh one).
-            guard let id = newID, id != lastUserKey else { return }
+            // Signed in, signed out, or another account (Delete account signs out).
+            guard let id = newID else { deactivateProfile(); return }
+            guard id != lastUserKey else { return }
             activateProfile(id)
         }
         .onAppear {
             hasPhotoAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan
             if let id = authService.user?.id { activateProfile(id) }
         }
+        // Apple may have revoked the sign-in (Settings › Sign in with Apple › Stop Using).
+        .task { await authService.verifyCredential() }
         // Studio renders: whenever items arrive (scan, manual add, restore),
         // turn their cutouts into lifelike catalog images in the background.
         .task(id: wardrobeVM.items.count) {
@@ -198,6 +209,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { newPhase in
             switch newPhase {
             case .active:
+                Task { await authService.verifyCredential() }
                 if authService.isAuthenticated, !wardrobeVM.currentUserEmail.isEmpty, !AppRuntime.isUnitTestHost {
                     Task {
                         let isAvailable = await CloudKitService.shared.checkAccountStatus()
@@ -261,9 +273,14 @@ struct RootView: View {
         }
     }
 
-    /// Loads everything that hangs off the local profile id.
+    /// Loads everything that hangs off the signed-in account's profile id.
     private func activateProfile(_ id: String) {
         lastUserKey = id
+        // The account's own CloudKit zone and its own subscription, before anything syncs.
+        if let account = authService.account {
+            if !AppRuntime.isUnitTestHost { CloudKitService.shared.configure(zoneName: account.cloudZoneName) }
+            PremiumStore.shared.setAccount(account.uuid)
+        }
         outfitsVM.setUser(id)   // the outfit calendar is scoped per profile (Core Data v2)
         wardrobeVM.load(forUser: id)
         onboardingManager.check(forUser: id)
@@ -271,6 +288,15 @@ struct RootView: View {
         WearLogSuggestions.shared.load(forUser: id)
         wardrobeVM.migrateBackgroundRemoval()
         wardrobeVM.migrateThumbnails()
+        // First sign-in on a phone with an earlier on-device profile: its wardrobe was backed up to
+        // the shared legacy zone; send it to the account's zone once.
+        if let account = authService.account {
+            let key = AuthService.adoptedLegacyKey(for: account.uuid)
+            if UserDefaults.standard.bool(forKey: key) {
+                wardrobeVM.queueFullReupload()
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
 
         // The unit-test host runs unsigned (no iCloud entitlement): CKContainer would trap.
         guard !AppRuntime.isUnitTestHost else { return }
@@ -281,6 +307,22 @@ struct RootView: View {
                 await wardrobeVM.restoreFromCloud()
             }
         }
+    }
+}
+
+extension RootView {
+    /// Signed out: stop everything for the account and forget it in memory (its data stays on the
+    /// phone for the next sign-in).
+    fileprivate func deactivateProfile() {
+        guard !lastUserKey.isEmpty else { return }
+        PhotoScanService.shared.resetForProfileChange()
+        StudioQueue.shared.cancel()
+        PaywallCenter.shared.dismiss()
+        wardrobeVM.clear()
+        outfitsVM.setUser("")
+        onboardingManager.hasCompletedOnboarding = false
+        PremiumStore.shared.setAccount(nil)
+        lastUserKey = ""
     }
 }
 

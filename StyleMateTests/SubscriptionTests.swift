@@ -52,81 +52,124 @@ struct SubscriptionTests {
         #expect(WardrobeAllowance.split(adding: -2, counted: 10, isPremium: false) == .init(add: 0, lock: 0))
     }
 
-    // MARK: Locked store
+    // MARK: Account-level reconcile (AccountAllowance)
 
-    @MainActor
-    private static func store() -> LockedItemsStore {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("LockedTests-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return LockedItemsStore(directory: dir)
+    private static func entry(_ n: Int, tier: ItemMeta.Tier = .free, locked: Bool = false,
+                              sample: Bool = false, at seconds: Double? = nil) -> AccountAllowance.Entry {
+        let id = UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", n))!
+        return AccountAllowance.Entry(
+            id: id, meta: ItemMeta(createdAt: Date(timeIntervalSince1970: seconds ?? Double(n)), tier: tier, isSample: sample),
+            isLocked: locked)
     }
 
-    @MainActor
-    @Test func lockedItemsPersistAcrossLaunches() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("LockedTests-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let first = LockedItemsStore(directory: dir)
-        let made = Self.items(3)
-        for i in made { first.lock(i, forUser: "user-a") }
-        first.lock(made[0], forUser: "user-a")        // the same piece twice is stored once
-        #expect(first.count == 3)
-        LockedItemsStore.flushWrites()
-
-        let relaunched = LockedItemsStore(directory: dir)
-        relaunched.load(forUser: "user-a")
-        #expect(relaunched.items.map(\.id) == made.map(\.id.uuidString))   // oldest first
-        #expect(relaunched.wardrobeItems.map(\.product) == ["T-Shirts", "T-Shirts", "T-Shirts"])
-        // Per profile.
-        relaunched.load(forUser: "user-b")
-        #expect(relaunched.count == 0)
+    @Test func subscribingUnlocksEveryLockedItemAndKeepsThemAfterALapse() {
+        let closet = (0..<50).map { Self.entry($0) }
+        let waiting = (50..<73).map { Self.entry($0, locked: true) }
+        let plan = AccountAllowance.reconcile(closet + waiting, isPremium: true)
+        #expect(plan.unlock == Set(waiting.map(\.id)))
+        #expect(plan.lock.isEmpty)
+        #expect(plan.promote.count == 73)   // every free piece becomes Premium's
+        let after = AccountAllowance.applying(plan, to: closet + waiting)
+        // Premium lapses: nothing is locked again.
+        #expect(AccountAllowance.reconcile(after, isPremium: false).isEmpty)
     }
 
-    @MainActor
-    @Test func subscribingUnlocksEveryLockedItem() {
-        let s = Self.store()
-        let waiting = Self.items(23)
-        for i in waiting { s.lock(i, forUser: "u") }
-        let closet = Self.items(50)
-        let moved = s.takeUnlockable(wardrobe: closet, isPremium: true, sampleIDs: [])
-        #expect(moved.map(\.id) == waiting.map(\.id))
-        #expect(s.count == 0)
+    @Test func freeTierLocksPiecesPastFiftyAndUnlocksWhenThereIsRoom() {
+        let closet = (0..<50).map { Self.entry($0) }
+        let waiting = (50..<55).map { Self.entry($0, locked: true) }
+        #expect(AccountAllowance.reconcile(closet + waiting, isPremium: false).isEmpty)   // full and settled
+        // The user removed two pieces: the two oldest waiting ones take the slots.
+        let plan = AccountAllowance.reconcile(Array(closet.dropFirst(2)) + waiting, isPremium: false)
+        #expect(plan.unlock == Set(waiting.prefix(2).map(\.id)))
+        #expect(plan.lock.isEmpty)
     }
 
-    @MainActor
-    @Test func freeTierStaysLockedUntilThereIsRoom() {
-        let s = Self.store()
-        for i in Self.items(5) { s.lock(i, forUser: "u") }
-        // Full: nothing moves.
-        #expect(s.takeUnlockable(wardrobe: Self.items(50), isPremium: false, sampleIDs: []).isEmpty)
-        #expect(s.count == 5)
-        // The user removed two pieces: the two oldest locked ones take the free slots.
-        let oldest = s.items.prefix(2).map(\.id)
-        let moved = s.takeUnlockable(wardrobe: Self.items(48), isPremium: false, sampleIDs: [])
-        #expect(moved.map(\.id.uuidString) == Array(oldest))
-        #expect(s.count == 3)
-        // Sample clothes don't take a slot.
-        let closet = Self.items(50)
-        let moved2 = s.takeUnlockable(wardrobe: closet, isPremium: false, sampleIDs: Set(closet.prefix(1).map(\.id)))
-        #expect(moved2.count == 1)
-    }
-
-    @MainActor
-    @Test func lapseKeepsEverythingAndOnlyLocksNewAdditions() {
-        // 120 items added while Premium; then it lapses.
-        let counted = 120
-        let lapsed = PremiumStatus(state: .expired, productID: PremiumProducts.annual,
-                                   expiresAt: Date(timeIntervalSinceNow: -60))
+    @Test func samplesAndGrandfatheredPiecesFollowTheirOwnRules() {
+        // 30 pieces from before the free tier, 25 free ones, 6 samples.
+        let old = (0..<30).map { Self.entry($0, tier: .grandfathered) }
+        let free = (30..<55).map { Self.entry($0) }
+        let samples = (55..<61).map { Self.entry($0, locked: $0 == 60, sample: true) }
+        let plan = AccountAllowance.reconcile(old + free + samples, isPremium: false)
+        // 50 - 30 kept = 20 free slots: the 5 newest free pieces lock; samples never lock (one unlocks).
+        #expect(plan.lock == Set(free.suffix(5).map(\.id)))
+        #expect(plan.unlock == [samples.last!.id])
+        // A lapse with 120 Premium pieces locks nothing, and every new piece waits.
+        let premium = (0..<120).map { Self.entry($0, tier: .premium) }
+        #expect(AccountAllowance.reconcile(premium, isPremium: false).isEmpty)
+        #expect(WardrobeAllowance.split(adding: 6, counted: 120, isPremium: false) == .init(add: 0, lock: 6))
+        let lapsed = PremiumStatus(state: .expired, productID: PremiumProducts.annual, expiresAt: Date(timeIntervalSinceNow: -60))
         #expect(!lapsed.isPremium())
-        // Nothing the user has is touched (the gate has no removal path; slots never go negative)…
-        #expect(WardrobeAllowance.freeSlots(counted: counted, isPremium: false) == 0)
-        #expect(WardrobeAllowance.unlockable(locked: 0, counted: counted, isPremium: false) == 0)
-        // …and every new piece waits.
-        #expect(WardrobeAllowance.split(adding: 6, counted: counted, isPremium: false) == .init(add: 0, lock: 6))
-        let s = Self.store()
-        for i in Self.items(6) { s.lock(i, forUser: "u") }
-        #expect(s.takeUnlockable(wardrobe: Self.items(counted), isPremium: false, sampleIDs: []).isEmpty)
-        // Resubscribing brings them in.
-        #expect(s.takeUnlockable(wardrobe: Self.items(counted), isPremium: true, sampleIDs: []).count == 6)
+    }
+
+    /// Two iPhones on the free tier each added pieces offline. Whatever order their records arrive
+    /// in, both reach the same split: the 50 oldest stay, the rest lock.
+    @Test func reconcileIsDeterministicAcrossDevicesAndMergeOrders() {
+        let shared = (0..<40).map { Self.entry($0, at: Double($0)) }
+        // Device A added 8 (they were unlocked there), device B added 7 (unlocked there too).
+        let deviceA = (100..<108).map { Self.entry($0, at: 1_000 + Double($0)) }
+        let deviceB = (200..<207).map { Self.entry($0, at: 1_050 + Double($0)) }
+        let ab = shared + deviceA + deviceB
+        let ba = (deviceB + shared + deviceA).reversed()
+        var rng = SystemRandomNumberGenerator()
+        let shuffled = ab.shuffled(using: &rng)
+        let plans = [ab, Array(ba), shuffled].map { AccountAllowance.reconcile($0, isPremium: false) }
+        #expect(plans[0] == plans[1] && plans[1] == plans[2])
+        // 55 free pieces, 50 slots: the 5 newest (all from device B) lock.
+        let newest = (deviceA + deviceB).sorted(by: AccountAllowance.precedes).suffix(5)
+        #expect(plans[0].lock == Set(newest.map(\.id)))
+        // Settled: running it again changes nothing, on either device.
+        let after = AccountAllowance.applying(plans[0], to: ab)
+        #expect(AccountAllowance.reconcile(after, isPremium: false).isEmpty)
+        #expect(AccountAllowance.reconcile(Array(after.reversed()), isPremium: false).isEmpty)
+        // Equal timestamps: the id breaks the tie the same way everywhere.
+        let tied = [Self.entry(7, at: 5), Self.entry(3, at: 5)]
+        #expect(AccountAllowance.reconcile(tied, isPremium: false, limit: 1).lock == [tied[0].id])
+        #expect(AccountAllowance.movedNotice(3) == "3 pieces moved to Premium because your other iPhone added items.")
+    }
+
+    @MainActor
+    @Test func lockedPiecesAndTheirBookkeepingPersistPerProfile() throws {
+        let user = "test-locked-\(UUID().uuidString)"
+        defer {
+            for key in [WardrobeViewModel.storageKey(for: user), WardrobeViewModel.lockedKey(for: user),
+                        WardrobeViewModel.metaKey(for: user)] { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        let vm = WardrobeViewModel()
+        vm.load(forUser: user)
+        vm.items = Self.items(3)
+        let waiting = Self.items(2)
+        for item in waiting { vm.addLocked(item) }
+        vm.addLocked(waiting[0])   // the same piece twice is stored once
+        #expect(vm.lockedItems.count == 2)
+        #expect(vm.metaFor(waiting[0].id).tier == .free)
+
+        let relaunched = WardrobeViewModel()
+        relaunched.load(forUser: user)
+        #expect(relaunched.items.count == 3)
+        #expect(relaunched.lockedItems.map(\.id) == waiting.map(\.id))
+        #expect(relaunched.metaFor(vm.items[0].id) == vm.metaFor(vm.items[0].id))
+        // Room in the free tier: they unlock on their own.
+        #expect(relaunched.reconcileAllowance(isPremium: false) == 0)
+        #expect(relaunched.lockedItems.isEmpty && relaunched.items.count == 5)
+    }
+
+    @MainActor
+    @Test func itemsFromBeforeTheFreeTierAreGrandfathered() {
+        let user = "test-legacy-\(UUID().uuidString)"
+        defer {
+            for key in [WardrobeViewModel.storageKey(for: user), WardrobeViewModel.lockedKey(for: user),
+                        WardrobeViewModel.metaKey(for: user)] { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        // An older build's wardrobe of 70: no bookkeeping saved yet.
+        let old = Self.items(70)
+        let data = try? JSONEncoder().encode(old.map { WardrobeItemCodable(from: $0) })
+        UserDefaults.standard.set(data, forKey: WardrobeViewModel.storageKey(for: user))
+        let vm = WardrobeViewModel()
+        vm.load(forUser: user)
+        #expect(vm.items.count == 70)
+        #expect(vm.metaFor(old[0].id).tier == .grandfathered)
+        #expect(vm.reconcileAllowance(isPremium: false) == 0)   // nothing the user had is hidden
+        #expect(vm.items.count == 70)
     }
 
     // MARK: Entitlement

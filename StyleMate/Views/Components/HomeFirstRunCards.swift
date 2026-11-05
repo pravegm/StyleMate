@@ -19,7 +19,6 @@ struct HomeFirstRunCards: View {
     @EnvironmentObject private var auth: AuthService
     @ObservedObject private var scan = PhotoScanService.shared
     @ObservedObject private var held = UncertainItemsStore.shared
-    @ObservedObject private var locked = LockedItemsStore.shared
     @ObservedObject private var wearLog = WearLogSuggestions.shared
     @ObservedObject private var morning = MorningLookScheduler.shared
     @ObservedObject private var router = NotificationRouter.shared
@@ -106,7 +105,7 @@ struct HomeFirstRunCards: View {
     }
 
     private var hasAnyCard: Bool {
-        sampleCount > 0 || !held.items.isEmpty || locked.count > 0 || wearLog.next(loggedDays: loggedDays) != nil
+        sampleCount > 0 || !held.items.isEmpty || !wardrobe.lockedItems.isEmpty || wardrobe.allowanceNotice != nil || wearLog.next(loggedDays: loggedDays) != nil
             || (hasLoggedOutfit && morning.shouldOffer)
             || showSampleOffer
     }
