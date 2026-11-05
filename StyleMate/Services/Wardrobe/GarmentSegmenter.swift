@@ -120,7 +120,10 @@ enum GarmentSegmenter {
         }
     }
 
-    static func segment(_ map: GarmentMap) -> [GarmentInstance] {
+    /// Mean colour (0...1 RGB) of grid pixels, from the crop the map was made on.
+    typealias ColourOf = ([Int]) -> (Float, Float, Float)?
+
+    static func segment(_ map: GarmentMap, colour: ColourOf? = nil) -> [GarmentInstance] {
         let n = WardrobeML.gridCount
         let labels = map.classes
         guard labels.count == n else { return [] }
@@ -155,6 +158,27 @@ enum GarmentSegmenter {
             }
             for (cls, pixels) in groups where !pixels.isEmpty {
                 pending.append((kind(forClass: cls), cls, pixels))
+            }
+        }
+
+        // A long coat whose hem GarmentNet reads as a "dress" (or vest / gilet, the commonest
+        // misreads on the fixtures) is one garment: a one-piece directly below an outer layer
+        // or top in the same colour joins it. A dress under a coat is normally another colour.
+        if let colour {
+            func close(_ a: [Int], _ b: [Int]) -> Bool {
+                guard let ca = colour(a), let cb = colour(b) else { return false }
+                let la = ColorNamer.lab(ca.0, ca.1, ca.2), lb = ColorNamer.lab(cb.0, cb.1, cb.2)
+                let d = sqrt(pow(la.0 - lb.0, 2) + pow(la.1 - lb.1, 2) + pow(la.2 - lb.2, 2))
+                return d < 12
+            }
+            let w = WardrobeML.gridW
+            func meanY(_ px: [Int]) -> Int { px.reduce(0) { $0 + $1 / w } / max(1, px.count) }
+            while let d = pending.firstIndex(where: { $0.kind == .onePiece }),
+                  let u = pending.firstIndex(where: { [.outerLayer, .innerTop].contains($0.kind)
+                      && meanY($0.pixels) < meanY(pending[d].pixels) && close($0.pixels, pending[d].pixels) }) {
+                let keepUpper = pending[u]
+                pending[u] = (keepUpper.kind, keepUpper.cls, keepUpper.pixels + pending[d].pixels)
+                pending.remove(at: d)
             }
         }
 

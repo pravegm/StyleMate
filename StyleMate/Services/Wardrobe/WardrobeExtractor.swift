@@ -176,7 +176,22 @@ enum WardrobeExtractor {
             }
         }
         let tf = Date()
-        let instances = GarmentSegmenter.segment(map)
+        let cw = crop.image.width, ch = crop.image.height
+        let colour: GarmentSegmenter.ColourOf = { idx in
+            guard !idx.isEmpty else { return nil }
+            var r: Float = 0, g: Float = 0, b: Float = 0, n: Float = 0
+            let step = max(1, idx.count / 4000)
+            var k = 0
+            while k < idx.count {
+                let i = idx[k]
+                let x = min(cw - 1, (i % w) * cw / w), y = min(ch - 1, (i / w) * ch / h)
+                let o = (y * cw + x) * 4
+                r += Float(pixels[o]); g += Float(pixels[o + 1]); b += Float(pixels[o + 2]); n += 1
+                k += step
+            }
+            return n > 0 ? (r / n / 255, g / n / 255, b / n / 255) : nil
+        }
+        let instances = GarmentSegmenter.segment(map, colour: colour)
         WardrobeML.shared.record("fuse", Date().timeIntervalSince(tf))
         return Segmentation(instances: instances, pixels: pixels, labels: map.classes, map: map)
     }

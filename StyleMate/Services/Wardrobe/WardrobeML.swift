@@ -98,6 +98,12 @@ final class WardrobeML {
         for (i, c) in map.classes.enumerated() {
             labels[i] = c == GarmentMap.body && map.part(4, i) < 0.8 ? 0 : GarmentMap.parserRegion(c)
         }
+        // A person or mannequin is a sizeable area; a few confident "body" cells on a plain
+        // product (GarmentNet sees no garment in a flat colour swatch) are not one.
+        let bodyCount = labels.reduce(0) { $0 + ($1 == 16 ? 1 : 0) }
+        if bodyCount * 50 < labels.count {
+            for i in 0..<labels.count where labels[i] == 16 { labels[i] = 0 }
+        }
         return (labels, [Float](repeating: 1, count: labels.count))
     }
 
