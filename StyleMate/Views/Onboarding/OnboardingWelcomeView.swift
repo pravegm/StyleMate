@@ -2,6 +2,8 @@ import SwiftUI
 
 struct OnboardingWelcomeView: View {
     let onAdvance: () -> Void
+    /// "Try with sample photos": builds a sample closet from bundled CC0 photos.
+    var onTrySamples: (() -> Void)? = nil
 
     @State private var glowVisible = false
     @State private var centerCardVisible = false
@@ -43,11 +45,31 @@ struct OnboardingWelcomeView: View {
             featurePills
                 .padding(.top, DS.Spacing.md)
 
+            privacyNote
+                .padding(.top, DS.Spacing.lg)
+                .padding(.horizontal, DS.Spacing.xl)
+                .opacity(buttonVisible ? 1 : 0)
+                .animation(.easeOut(duration: 0.4), value: buttonVisible)
+
             Spacer(minLength: DS.Spacing.md)
 
-            ctaButton
-                .padding(.horizontal, DS.Spacing.lg)
-                .padding(.bottom, DS.Spacing.lg)
+            VStack(spacing: DS.Spacing.sm) {
+                ctaButton
+                if let onTrySamples {
+                    Button {
+                        Haptics.light()
+                        onTrySamples()
+                    } label: {
+                        Text("Try with sample photos")
+                    }
+                    .buttonStyle(DSTertiaryButton())
+                    .accessibilityIdentifier("onboarding.trySamples")
+                    .opacity(buttonVisible ? 1 : 0)
+                    .animation(.easeOut(duration: 0.4).delay(0.1), value: buttonVisible)
+                }
+            }
+            .padding(.horizontal, DS.Spacing.lg)
+            .padding(.bottom, DS.Spacing.lg)
         }
         .background(
             // A radial gradient gives the same soft glow as a blurred circle but
@@ -101,7 +123,7 @@ struct OnboardingWelcomeView: View {
 
     private var textContent: some View {
         VStack(spacing: DS.Spacing.sm) {
-            Text("Never wonder what to wear")
+            Text("Your camera roll already knows your wardrobe")
                 .font(DS.Font.title1)
                 .foregroundColor(DS.Colors.textPrimary)
                 .multilineTextAlignment(.center)
@@ -111,7 +133,7 @@ struct OnboardingWelcomeView: View {
                 .opacity(titleVisible ? 1 : 0)
                 .animation(.spring(response: 0.55, dampingFraction: 0.8), value: titleVisible)
 
-            Text("Outfit ideas from the clothes you already own, worked out privately on your phone")
+            Text("StyleMate finds the clothes you wear in your photos, builds your closet, and styles you every morning.")
                 .font(DS.Font.callout)
                 .foregroundColor(DS.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -150,6 +172,25 @@ struct OnboardingWelcomeView: View {
         .animation(.spring(response: 0.45, dampingFraction: 0.75), value: visible)
     }
 
+    // MARK: - Privacy
+
+    private var privacyNote: some View {
+        VStack(spacing: DS.Spacing.xs) {
+            HStack(alignment: .top, spacing: DS.Spacing.xs) {
+                Image(systemName: "lock.shield.fill")
+                    .foregroundStyle(DS.Colors.accent)
+                Text("No account. Your photos and face are analysed only on this iPhone. Your closet syncs only to your own iCloud. Nothing is sent to us.")
+                    .font(DS.Font.caption1)
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Link("Privacy Policy", destination: LegalLinks.privacyPolicy)
+                .font(DS.Font.caption1.weight(.semibold))
+                .foregroundStyle(DS.Colors.accent)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
     // MARK: - CTA Button
 
     private var ctaButton: some View {
@@ -163,6 +204,7 @@ struct OnboardingWelcomeView: View {
             }
         }
         .buttonStyle(DSPrimaryButton())
+        .accessibilityIdentifier("onboarding.getStarted")
         .offset(y: buttonVisible ? 0 : 20)
         .opacity(buttonVisible ? 1 : 0)
         .animation(.spring(response: 0.55, dampingFraction: 0.8), value: buttonVisible)

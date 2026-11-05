@@ -8,7 +8,9 @@ import CoreData
 ///
 /// - `-uiTestResetState`      wipe UserDefaults, wardrobe image files, scan checkpoints and the
 ///                            Core Data outfit log, so every test starts from a clean install.
-/// - `-uiTestDemoUser`        sign in a local demo user (no Apple / Google round trip).
+///                            On its own (no demo user) it's a true first launch: a fresh local
+///                            profile and the onboarding flow.
+/// - `-uiTestDemoUser`        use a fixed local demo profile instead of the device's own.
 /// - `-uiTestSkipOnboarding`  mark onboarding, the initial scan, the coach-mark tours and the
 ///                            swipe hint as done for the demo user.
 /// - `-uiTestSeedWardrobe`    fill an empty wardrobe with ~26 realistic items whose images are
@@ -79,8 +81,12 @@ enum DebugLaunchSupport {
         let fm = FileManager.default
         try? fm.removeItem(at: WardrobeImageFileHelper.folderURL)
         if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            try? fm.removeItem(at: support.appendingPathComponent("ScanProgress"))
+            // Scan checkpoints + held "not sure" items, item embeddings.
+            for dir in ["ScanProgress", "WardrobeEmbeddings"] {
+                try? fm.removeItem(at: support.appendingPathComponent(dir))
+            }
         }
+        try? fm.removeItem(at: MorningLookStore.folder)
 
         let context = PersistenceController.shared.container.viewContext
         for entity in ["OutfitItem", "DatedOutfit"] {
