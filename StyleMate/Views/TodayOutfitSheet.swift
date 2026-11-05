@@ -33,7 +33,8 @@ struct TodayOutfitSheet: View {
     @State private var noticeDismissWork: DispatchWorkItem? = nil
     @State private var gapDismissed = false
     // Try-on: "On you | Pieces" (remembered), the full-screen viewer.
-    @AppStorage("tryOn.mode") private var tryOnModeRaw = TryOnMode.onYou.rawValue
+    // Pieces by default; On you is a Beta opt-in (lead decision, Nov 2026).
+    @AppStorage("tryOn.mode") private var tryOnModeRaw = TryOnMode.pieces.rawValue
     @State private var fullScreenTryOn: TryOnFullScreenItem? = nil
     @ObservedObject private var tryOnQueue = TryOnQueue.shared
 
@@ -74,7 +75,7 @@ struct TodayOutfitSheet: View {
     }
 
     private var tryOnMode: Binding<TryOnMode> {
-        Binding(get: { TryOnMode(rawValue: tryOnModeRaw) ?? .onYou }, set: { tryOnModeRaw = $0.rawValue })
+        Binding(get: { TryOnMode(rawValue: tryOnModeRaw) ?? .pieces }, set: { tryOnModeRaw = $0.rawValue })
     }
 
     /// The look can be shown on a body (try-on on, and it has clothes to wear).
@@ -85,7 +86,8 @@ struct TodayOutfitSheet: View {
 
     /// Renders the next looks in the background (cool, not Low Power; see `TryOnQueue`).
     private func prerenderTryOns() {
-        guard TryOnAvailability.isAvailable else { return }
+        // Only for someone who opted into the Beta (On you selected).
+        guard TryOnAvailability.isAvailable, tryOnMode.wrappedValue == .onYou else { return }
         let looks = homeVM.outfitBatch.map(\.items)
         let start = min(homeVM.batchIndex, max(0, looks.count - 1))
         TryOnQueue.shared.prerender(Array(looks.dropFirst(start).prefix(3)))
@@ -140,6 +142,7 @@ struct TodayOutfitSheet: View {
         }
         .sheet(isPresented: $showDatePicker) { datePickerSheet }
         .sheet(isPresented: $showAddPiece) { addPieceSheet }
+        .onChange(of: tryOnModeRaw) { _ in prerenderTryOns() }
         .onChange(of: homeVM.batchIndex) { _ in
             // Keeps and the selection belong to one look.
             lockedItemIDs.removeAll()
@@ -252,11 +255,11 @@ struct TodayOutfitSheet: View {
     /// board never straddles the fold.
     private func wideLayout(_ look: Outfit, size: CGSize) -> some View {
         let gutter = DS.Spacing.lg
-        let onBody = tryOnActive(look)
+        let onBody = tryOnActive(look) && tryOnMode.wrappedValue == .onYou
         return FoldAwareSplit(gutter: gutter, leadingFraction: 0.5) {
             // With try-on: the look on you on one pane, the pieces on the other (nothing on the crease).
             Group {
-                if onBody { onBodyCard(look) } else { boardCard(look, inlineControls: false) }
+                if onBody { onBodyCard(look) } else { boardCard(look, inlineControls: false, wideToggle: tryOnActive(look)) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } trailing: {
@@ -323,6 +326,10 @@ struct TodayOutfitSheet: View {
     /// The look on the user's body (try-on), with the same card chrome and drag-to-decide as the board.
     private func onBodyCard(_ look: Outfit) -> some View {
         OutfitOnBodyView(items: look.items, priority: .user) { img in fullScreenTryOn = TryOnFullScreenItem(image: img) }
+            .padding(.top, 52)
+            .overlay(alignment: .top) {
+                TryOnModeToggle(mode: tryOnMode).padding(.top, DS.Spacing.xs)
+            }
             .studioIsland()
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
             .dsCardShadow(cornerRadius: DS.Radius.hero)
@@ -332,10 +339,11 @@ struct TodayOutfitSheet: View {
             .gesture(decideGesture)
     }
 
-    private func boardCard(_ look: Outfit, inlineControls: Bool, forcePieces: Bool = false) -> some View {
+    private func boardCard(_ look: Outfit, inlineControls: Bool, forcePieces: Bool = false, wideToggle: Bool = false) -> some View {
         let progress = min(abs(dragX) / threshold, 1)
         let tint = dragX >= 0 ? DS.Colors.accent : DS.Colors.textSecondary
-        let showToggle = !forcePieces && inlineControls && tryOnActive(look)
+        // Wide layout (Duo inner display) in Pieces: the toggle sits on the board to switch the pane to On you.
+        let showToggle = !forcePieces && (inlineControls || wideToggle) && tryOnActive(look)
         // "On you" when ready: the image replaces the board only once it exists; until then the board
         // stays interactive with a status chip ("Dressing you…").
         let wantsOnYou = showToggle && tryOnMode.wrappedValue == .onYou

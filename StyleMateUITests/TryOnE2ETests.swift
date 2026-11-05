@@ -39,6 +39,8 @@ class TryOnE2ETests: E2ETestCase {
         XCTAssertTrue(toggle.waitForExistence(timeout: 30), "The deck has no On you | Pieces toggle")
         let onYou = app.buttons["tryon.toggle.onYou"], pieces = app.buttons["tryon.toggle.pieces"]
         XCTAssertTrue(onYou.exists && pieces.exists)
+        // Pieces is the default; On you is the Beta opt-in.
+        snap("deck-default-pieces")
         onYou.tap()
         snap("deck-on-you-rendering")
 

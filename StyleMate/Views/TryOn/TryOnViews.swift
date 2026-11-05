@@ -5,15 +5,16 @@ import SwiftUI
 
 enum TryOnMode: String { case onYou, pieces }
 
-/// The segmented capsule over the outfit card.
+/// The segmented capsule over the outfit card. "On you" carries a Beta tag (lead decision, Nov 2026:
+/// Pieces is the default until try-on quality is premium).
 struct TryOnModeToggle: View {
     @Binding var mode: TryOnMode
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 2) {
-            segment(.onYou, "On you", "person.fill")
             segment(.pieces, "Pieces", "square.grid.2x2")
+            segment(.onYou, "On you", "person.fill", beta: true)
         }
         .padding(3)
         .dsGlassCapsule()
@@ -21,13 +22,25 @@ struct TryOnModeToggle: View {
         .accessibilityIdentifier("tryon.toggle")
     }
 
-    private func segment(_ m: TryOnMode, _ title: String, _ icon: String) -> some View {
+    private func segment(_ m: TryOnMode, _ title: String, _ icon: String, beta: Bool = false) -> some View {
         let on = mode == m
         return Button {
             Haptics.selection()
             withAnimation(DSMotionEnv.resolve(DS.Motion.snappy, reduceMotion: reduceMotion)) { mode = m }
         } label: {
-            Label(title, systemImage: icon)
+            HStack(spacing: 5) {
+                Label(title, systemImage: icon)
+                if beta {
+                    Text("BETA")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.4)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .foregroundStyle(on ? DS.Colors.accent : DS.Colors.onAccent)
+                        .background(on ? DS.Colors.onAccent : DS.Colors.accent, in: Capsule())
+                        .accessibilityHidden(true)
+                }
+            }
                 .font(DS.Font.footnote.weight(.semibold))
                 .foregroundStyle(on ? DS.Colors.onAccent : DS.Colors.textPrimary)
                 .padding(.horizontal, 12)
@@ -37,6 +50,7 @@ struct TryOnModeToggle: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityLabel(beta ? "\(title), beta" : title)
         .accessibilityIdentifier(m == .onYou ? "tryon.toggle.onYou" : "tryon.toggle.pieces")
     }
 }

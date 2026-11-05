@@ -3,13 +3,35 @@
 The outfit deck ("What should I wear today?") can show each look **on the user's own body**, not just
 as pieces. Everything runs on the iPhone; no photo, face or wardrobe data leaves it.
 
+## Status: Beta (lead decision, 5 Nov 2026)
+
+"On you" ships as a **Beta opt-in**: the deck opens on **Pieces**; the toggle's "On you" segment carries
+a Beta tag, and the choice is remembered. Home's "Today's look" shows pieces only (the on-body thumbnail,
+`TryOnLookThumbnail`, comes back when quality is premium). Nothing renders in the background until the
+user has selected On you. `TryOnAvailability` stays the one switch. Quality work continues on
+`feat/tryon-quality`.
+
+### Known limits (what a Beta user can see)
+
+- A thin **hard seam** along a garment's edge where the relit garment meets the diffusion-repainted fill.
+- **Ghosts of the old garment** just outside the parser's coarse outline (e.g. a coat's outline beside
+  the hips), which the fill doesn't cover.
+- **Leftover sleeves under sleeveless pieces**: an old cap or short sleeve beside a sleeveless dress can
+  be repainted as a dark sleeve-like shape.
+- **Crossed legs** merge into one wide trouser block (legs are mapped per joint chain, not separated).
+- **CI arms come from the parser estimate**, not Vision: the simulator has no Vision body pose, so CI
+  sheets show arms assumed by the sides; on a device Vision supplies the joints (to be checked there).
+- Plus: garments are mapped, not draped; shoes are recoloured, not reshaped; bags, hats and jewelry are
+  not drawn on the body.
+
 ## What the user sees
 
-- Each option in the deck has an **On you | Pieces** toggle (remembered; On you by default). Pieces show
-  instantly; the try-on renders in the background with a shimmer and fades in. Swapping a piece changes
+- Each option in the deck has a **Pieces | On you (Beta)** toggle (remembered; Pieces by default). In On
+  you the pieces stay interactive with a status chip ("Dressing you…") until the try-on is ready, then it
+  fades in. Swapping a piece changes
   the look's cache key, so that look renders again.
 - Tap the try-on for a full-screen view (pinch / double-tap to zoom).
-- Home's "Today's look" card shows the look on you beside the pieces once it's ready.
+- (After Beta) Home's "Today's look" card shows the look on you beside the pieces once it's ready.
 - On the Duo's inner display the deck shows **on you | pieces side by side** (`FoldAwareSplit`, nothing
   on the crease).
 - The body is the user's best full-length, front-facing, standing photo among the photos the scan
