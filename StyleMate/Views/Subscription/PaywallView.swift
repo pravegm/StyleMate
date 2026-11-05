@@ -68,8 +68,9 @@ struct PaywallView: View {
     private var compactLayout: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.Spacing.lg) {
-                hero
+                heroHeader
                 plans
+                benefits
                 legal
             }
             .padding(.horizontal, DS.Spacing.screenH)
@@ -149,7 +150,15 @@ struct PaywallView: View {
 
     // MARK: Hero (the user's own closet)
 
+    /// Wide: the closet, the pitch and the benefits on one half.
     private var hero: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            heroHeader
+            benefits
+        }
+    }
+
+    private var heroHeader: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
             // Phone / cover: one row of four, so the plans come into view sooner; wide: 3 x 2.
             PaywallCollage(owned: ownedPreview, locked: lockedPreview, lockedCount: locked.count,
@@ -169,13 +178,16 @@ struct PaywallView: View {
                     .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+        }
+    }
+
+    private var benefits: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                 benefit("infinity", "Unlimited wardrobe", "Every piece the scan finds goes straight into your closet.")
                 benefit("sparkles", "Outfits from everything you own", "Today's looks draw on your whole closet, not just the first \(WardrobeAllowance.freeItemLimit) pieces.")
                 benefit("lock.shield.fill", "Still private, still on your iPhone", "No account, no ads, no tracking. Your photos never leave the phone.")
             }
             .padding(.top, DS.Spacing.xs)
-        }
     }
 
     private var ownedPreview: [WardrobeItem] {
@@ -560,16 +572,18 @@ struct PaywallCollage: View {
         } else {
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(tiles) { tile in
-                    ZStack {
+                    // The lock sits in the tile's top corner, clear of the "+23 waiting" pill below.
+                    ZStack(alignment: .topTrailing) {
                         AsyncItemTile(path: tile.item.gridImagePath, height: nil, cornerRadius: 16, inset: 8)
                             .blur(radius: tile.isLocked ? 5 : 0)
                             .opacity(tile.isLocked ? 0.75 : 1)
                         if tile.isLocked {
                             Image(systemName: "lock.fill")
-                                .font(.system(size: 15, weight: .bold))
+                                .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(DS.Colors.onAccent)
-                                .frame(width: 32, height: 32)
+                                .frame(width: 24, height: 24)
                                 .background(DS.Colors.accent, in: Circle())
+                                .padding(6)
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
