@@ -85,7 +85,7 @@ struct TryOnTests {
 
     @Test func bodyPhotoScoring() throws {
         var lines: [String] = []
-        let names = bodies + ["street_back_view", "jeans_white_shirt_halfbody", "flannel_shirt_group"]
+        let names = Self.bodies + ["street_back_view", "jeans_white_shirt_halfbody", "flannel_shirt_group"]
         var visionWorks = false
         for n in names {
             let img = try Self.photo(n)
