@@ -74,6 +74,9 @@ enum StudioPipeline {
         /// mean lightness difference and mean a/b distance in CIELAB.
         var colourDriftL: Float = 0
         var colourDriftAB: Float = 0
+        /// The render's top zero-shot product in the planned product's group.
+        var bestProduct: String = ""
+        var bestProductScore: Float = 0
         /// Why it can't be used (nil = acceptable).
         let rejection: String?
 
@@ -81,7 +84,8 @@ enum StudioPipeline {
             ["score": score, "similarity": similarity, "body": body, "product": product, "plain": plain,
              "qcMargin": qcMargin, "touchesFrame": touchesFrame, "coverage": coverage,
              "secondObject": secondObject, "whitePanel": whitePanel, "colourDriftL": colourDriftL,
-             "colourDriftAB": colourDriftAB, "rejection": rejection ?? ""]
+             "colourDriftAB": colourDriftAB, "bestProduct": bestProduct, "bestProductScore": bestProductScore,
+             "rejection": rejection ?? ""]
         }
     }
 
@@ -203,9 +207,15 @@ enum StudioPipeline {
         // Does it read as the right kind of product (and, for plain items, as
         // plain)? Zero-shot against the bundled vocabulary.
         var product: Float = 0, plain: Float = 0, qcMargin: Float = -1
+        var bestProduct = "", bestProductScore: Float = 0
         if let plan, let vocab = WardrobeML.shared.vocabulary {
             for group in ["upper_inner", "upper_outer", "lower", "onepiece", "footwear", "bag", "headwear", "eyewear", "neckwear", "jewelry"] {
-                if let s = vocab.scores(in: group, for: e)[plan.productLabel] { product = s; break }
+                let scores = vocab.scores(in: group, for: e)
+                if let s = scores[plan.productLabel] {
+                    product = s
+                    if let top = scores.max(by: { $0.value < $1.value }) { bestProduct = top.key; bestProductScore = top.value }
+                    break
+                }
             }
             score += 0.25 * product
             if plan.isSolid, let solid = vocab.scores(in: "pattern", for: e)["Solid"] { plain = solid; score += 0.15 * solid }
@@ -234,7 +244,8 @@ enum StudioPipeline {
         return Candidate(image: framed, score: score, similarity: sim, body: body, product: product, plain: plain,
                          qcMargin: qcMargin, touchesFrame: cut.touchesFrame, coverage: cut.coverage,
                          secondObject: cut.secondObject, whitePanel: whitePanel,
-                         colourDriftL: driftL, colourDriftAB: driftAB, rejection: rejection)
+                         colourDriftL: driftL, colourDriftAB: driftAB, bestProduct: bestProduct,
+                         bestProductScore: bestProductScore, rejection: rejection)
     }
 
     /// The product, without its white background: Vision's foreground instance
@@ -326,11 +337,11 @@ enum StudioPipeline {
         var border: [[Int]] = [[], [], []]
         for x in stride(from: 0, to: w, by: 4) { for i in [x, (h - 1) * w + x] { for c in 0..<3 { border[c].append(Int(px[i * 4 + c])) } } }
         for y in stride(from: 0, to: h, by: 4) { for i in [y * w, y * w + w - 1] { for c in 0..<3 { border[c].append(Int(px[i * 4 + c])) } } }
-        let bg = border.map { $0.sorted()[$0.count / 2] }
-        let white = bg.allSatisfy { $0 > 232 }
+        let key = border.map { $0.sorted()[$0.count / 2] }
+        let white = key.allSatisfy { $0 > 232 }
         func isBG(_ i: Int) -> Bool {
             if white { return px[i * 4] > 232 && px[i * 4 + 1] > 232 && px[i * 4 + 2] > 232 }
-            return abs(Int(px[i * 4]) - bg[0]) < 22 && abs(Int(px[i * 4 + 1]) - bg[1]) < 22 && abs(Int(px[i * 4 + 2]) - bg[2]) < 22
+            return abs(Int(px[i * 4]) - key[0]) < 22 && abs(Int(px[i * 4 + 1]) - key[1]) < 22 && abs(Int(px[i * 4 + 2]) - key[2]) < 22
         }
         var bg = [Bool](repeating: false, count: w * h)
         var stack: [Int] = []

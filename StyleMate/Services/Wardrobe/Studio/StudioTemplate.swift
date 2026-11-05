@@ -200,8 +200,8 @@ enum StudioTemplate {
                     Part(fill: .opening, points: [(0.14, 0.71), (0.30, 0.69), (0.42, 0.655), (0.42, 0.67), (0.30, 0.715), (0.15, 0.735)]),
                     Part(fill: .band, points: arc(0.56, 0.285, 0.025, 0.012, from: 0, to: 360, steps: 12))]
         case .wideBrim:
+            // No dark crown opening: below the crown it read as a black band (lab, Nov 2026).
             return [f(arc(0.50, 0.64, 0.44, 0.12, from: 0, to: 360, steps: 40)),
-                    Part(fill: .opening, points: arc(0.50, 0.635, 0.22, 0.05, from: 0, to: 360)),
                     f([(0.30, 0.64), (0.31, 0.40), (0.34, 0.31), (0.42, 0.27), (0.50, 0.30), (0.58, 0.27), (0.66, 0.31),
                        (0.69, 0.40), (0.70, 0.64)]),
                     Part(fill: .band, points: [(0.30, 0.55), (0.70, 0.55), (0.70, 0.63), (0.30, 0.63)])]
