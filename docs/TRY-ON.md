@@ -73,8 +73,12 @@ pipeline from CC0 photos, now `StyleMateTests/Fixtures/tryon/items`):
   legs under a dress look real.
 - **Weaker** when the photo shows a long, wide coat: the composite must invent a lot (background beside
   the hips, legs); the gate's filled-share limit sends many of those to the pieces without the
-  diffusion pass, and the diffusion pass is soft at 512 px over a full body. The body-photo score
-  prefers front-facing, arms-by-the-sides photos; it should also prefer fitted clothes (open item).
+  diffusion pass, and the diffusion pass is soft at 512 px over a full body. Crossed legs merge the
+  trousers into one wide block. The body-photo choice therefore prefers front-facing, arms-by-the-sides
+  photos **in fitted clothes** (`clothingBulk`: clothing outside a close body envelope, weighted 0.6).
+- **Poor** on a leaning / arm-raised pose (the street-cap fixture): garments stay rectangular and the
+  raised arm's sleeve floats. The gate catches part of this (visibility, invented share), not all; such
+  photos score lower as bodies (a wrist above the shoulders costs 0.25 of the 0-1 body score).
 - Garment geometry is template-like: a flat-lay's sleeves are rotated onto the arms, not draped; arms
   crossing the body, sitting, side views and strong perspective aren't handled (the body score rejects
   side and back views and needs head-to-ankle joints).
