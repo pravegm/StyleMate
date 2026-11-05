@@ -111,7 +111,7 @@ struct TryOnTests {
             let t0 = CFAbsoluteTimeGetCurrent()
             let analysed = TryOnBodyAnalyzer.analyze(try Self.photo(b))
             guard case .success(let body) = analysed else { Issue.record("\(b): body analysis failed \(analysed)"); continue }
-            Self.report("\(b): body analysis \(String(format: "%.1f", CFAbsoluteTimeGetCurrent() - t0))s, pose from \(body.pose.source), \(body.width)x\(body.height)")
+            Self.report("\(b): body analysis \(String(format: "%.1f", CFAbsoluteTimeGetCurrent() - t0))s, pose from \(body.pose.source), \(body.width)x\(body.height), clothing bulk \(String(format: "%.3f", TryOnBodyLibrary.clothingBulk(body)))")
             var images: [CGImage] = []
             for (name, keys) in Self.outfits {
                 let garments = try keys.map(Self.garment)
