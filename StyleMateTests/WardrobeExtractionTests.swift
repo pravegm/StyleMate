@@ -1,6 +1,8 @@
 import Foundation
 import Testing
 import UIKit
+import Vision
+import CoreML
 @testable import StyleMate
 
 /// End-to-end, on-device wardrobe extraction on real (CC0) street photos.
@@ -119,6 +121,44 @@ struct WardrobeExtractionTests {
         let items = try FixtureExtraction.run("street_coat_boots.jpg").items
         let products = items.map { $0.attributes.product }
         #expect(!products.contains("Ties") && !products.contains("Bowties"), "got \(products)")
+    }
+
+    /// Which Apple Vision person / body requests run where the tests run (the
+    /// simulator has no Neural Engine). Written to the report as vision-probe.json.
+    @Test func visionProbe() throws {
+        let cg = try #require(load("street_coat_scarf.jpg").cgImage)
+        var rows: [String: String] = [:]
+        func run(_ name: String, _ make: () -> VNRequest) {
+            for cpu in [false, true] {
+                let r = make()
+                if cpu, let d = MLAllComputeDevices().first(where: { if case .cpu = $0 { return true }; return false }) {
+                    r.setComputeDevice(d, for: .main)
+                }
+                let t0 = Date()
+                do {
+                    try VNImageRequestHandler(cgImage: cg, options: [:]).perform([r])
+                    var detail = "\(r.results?.count ?? -1) results"
+                    if let px = r.results?.first as? VNPixelBufferObservation {
+                        detail += " \(CVPixelBufferGetWidth(px.pixelBuffer))x\(CVPixelBufferGetHeight(px.pixelBuffer))"
+                    }
+                    if let inst = r.results?.first as? VNInstanceMaskObservation { detail += " instances=\(inst.allInstances.count)" }
+                    rows[name + (cpu ? "/cpu" : "")] = "ok \(detail) \(String(format: "%.2f", Date().timeIntervalSince(t0)))s"
+                } catch {
+                    rows[name + (cpu ? "/cpu" : "")] = "FAIL \(error.localizedDescription)"
+                }
+            }
+        }
+        run("personSegmentation.accurate") { let r = VNGeneratePersonSegmentationRequest(); r.qualityLevel = .accurate; return r }
+        run("personSegmentation.balanced") { let r = VNGeneratePersonSegmentationRequest(); r.qualityLevel = .balanced; return r }
+        run("personInstanceMask") { VNGeneratePersonInstanceMaskRequest() }
+        run("foregroundInstanceMask") { VNGenerateForegroundInstanceMaskRequest() }
+        run("humanRectangles") { let r = VNDetectHumanRectanglesRequest(); r.upperBodyOnly = false; return r }
+        run("bodyPose") { VNDetectHumanBodyPoseRequest() }
+        run("handPose") { let r = VNDetectHumanHandPoseRequest(); r.maximumHandCount = 4; return r }
+        run("faceRectangles") { VNDetectFaceRectanglesRequest() }
+        run("faceLandmarks") { VNDetectFaceLandmarksRequest() }
+        let json = try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys])
+        try json.write(to: Self.reportDir.deletingLastPathComponent().appendingPathComponent("vision-probe.json"))
     }
 
     @Test func colourNamerBasics() {

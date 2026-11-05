@@ -39,6 +39,7 @@ enum WardrobeExtractor {
         func log(_ s: String) { print("[Wardrobe] \(s)"); trace?(s) }
         guard isAvailable, let source = flatten(image) else { return [] }
         let t0 = Date()
+        _ = WardrobeML.shared.takeTiming()
 
         // 1. Person crop.
         guard let crop = personCrop(source) else {
@@ -69,11 +70,15 @@ enum WardrobeExtractor {
             context.occluded = inst.kind == .innerTop && (truncated || hasOuter)
             context.parts = inst.partShares
             context.allowTie = inst.labelerClass == 17
+            let tc = Date()
             guard let cut = autoreleasepool(invoking: {
                       GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: inst, photoInGrid: use.crop.photoInGrid)
-                  }),
-                  let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context),
+                  }) else { continue }
+            WardrobeML.shared.record("cutout", Date().timeIntervalSince(tc))
+            let tk = Date()
+            guard let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context),
                   !blockedProducts.contains(attrs.product) else { continue }
+            WardrobeML.shared.record("classify", Date().timeIntervalSince(tk))
             // Too few source-photo pixels to make a decent wardrobe image
             // (sunglasses 40 px wide in a group shot): skip — a closer photo will catch it.
             let photoSide = cut.sourceSide / Float(use.crop.scale)
@@ -115,6 +120,7 @@ enum WardrobeExtractor {
                               box: photoBox(inst, crop: use.crop, photo: source)))
         }
         items = dedupeWithinPhoto(items)
+        log("timing: " + WardrobeML.shared.takeTiming())
         log("extracted \(items.count) items in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s: " +
             items.map { "\($0.attributes.product)(\(String(format: "%.2f", $0.quality)))" }.joined(separator: ", "))
         return items
@@ -166,7 +172,10 @@ enum WardrobeExtractor {
                 for x in 0..<w where x < x0 || x >= x1 || y < y0 || y >= y1 { labels[y * w + x] = 0 }
             }
         }
-        return Segmentation(instances: GarmentSegmenter.segment(parser: labels, labelerLogits: logits), pixels: pixels, labels: labels)
+        let tf = Date()
+        let instances = GarmentSegmenter.segment(parser: labels, labelerLogits: logits)
+        WardrobeML.shared.record("fuse", Date().timeIntervalSince(tf))
+        return Segmentation(instances: instances, pixels: pixels, labels: labels)
     }
 
     /// Renders `r0` (photo pixels, grown to the grid's 2:3 aspect) as a crop.

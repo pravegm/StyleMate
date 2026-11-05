@@ -72,6 +72,8 @@ final class WardrobeML {
         loadIfNeeded()
         guard let model = parser,
               let out = predict(model, image: image, width: Self.gridW, height: Self.gridH, output: "probs") else { return nil }
+        let td = Date()
+        defer { record("decode", Date().timeIntervalSince(td)) }
         let c = out.shape[1].intValue
         var labels = [UInt8](repeating: 0, count: Self.gridCount)
         var conf = [Float](repeating: 0, count: Self.gridCount)
@@ -88,6 +90,8 @@ final class WardrobeML {
         loadIfNeeded()
         guard let model = labeler,
               let out = predict(model, image: image, width: 512, height: 512, output: "logits") else { return nil }
+        let td = Date()
+        defer { record("decode", Date().timeIntervalSince(td)) }
         let c = out.shape[1].intValue
         var logits = [Float](repeating: 0, count: c * Self.gridCount)
         Self.forEachChannel(out, channels: c) { ch, idx, v in logits[ch * Self.gridCount + idx] = v }
@@ -109,7 +113,30 @@ final class WardrobeML {
         return n > 0 ? v.map { $0 / n } : v
     }
 
+    // MARK: - Timing (CI reports seconds per model per photo)
+
+    private let timingLock = NSLock()
+    private var timing: [String: (seconds: Double, count: Int)] = [:]
+
+    /// Adds `seconds` to a named stage ("parse", "label", "embed", "cutout"...).
+    func record(_ stage: String, _ seconds: Double) {
+        timingLock.lock(); defer { timingLock.unlock() }
+        let t = timing[stage] ?? (0, 0)
+        timing[stage] = (t.seconds + seconds, t.count + 1)
+    }
+
+    /// The stages recorded since the last call, as "parse 3x 4.1s, ...", and resets them.
+    func takeTiming() -> String {
+        timingLock.lock(); defer { timingLock.unlock() }
+        let s = timing.sorted { $0.value.seconds > $1.value.seconds }
+            .map { "\($0.key) \($0.value.count)x \(String(format: "%.1f", $0.value.seconds))s" }.joined(separator: ", ")
+        timing = [:]
+        return s
+    }
+
     private func predict(_ model: MLModel, image: CGImage, width: Int, height: Int, output: String) -> MLMultiArray? {
+        let t0 = Date()
+        defer { record(output, Date().timeIntervalSince(t0)) }
         do {
             let value = try MLFeatureValue(cgImage: image, pixelsWide: width, pixelsHigh: height,
                                            pixelFormatType: kCVPixelFormatType_32BGRA, options: nil)
