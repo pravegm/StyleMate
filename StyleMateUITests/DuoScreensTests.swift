@@ -78,6 +78,13 @@ final class DuoScreensTests: E2ETestCase {
         // Profile -> About -> Diagnostics (live hinge readings on every display) and Acknowledgements.
         if openProfileRow("profile.diagnostics", "Diagnostics", expect: "diagnostics.benchmark") {
             shoot("08-diagnostics")
+            // The hinge check card (only shown with a hinge): live angle / pose / fold on each display.
+            let record = app.buttons["diagnostics.hinge.flat"]
+            if scrollUntilHittable(record, maxSwipes: 8) {
+                shoot("08b-diagnostics-hinge")
+            } else {
+                XCTFail("No hinge check on the Duo")
+            }
             leaveProfileRow()
         }
         if openProfileRow("profile.acknowledgements", "Acknowledgements", expect: "acknowledgements.privacyPolicy") {

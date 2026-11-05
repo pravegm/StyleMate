@@ -3,12 +3,16 @@ import SwiftUI
 /// Profile → About → Acknowledgements: app version, privacy policy, and every bundled licence /
 /// attribution text (`Acknowledgement.all()`, from `StyleMate/Resources/Acknowledgements/`).
 ///
-/// Phone: a list that pushes each text. Wide layout (iPhone Duo inner display): the list and the selected
-/// text side by side, split at the crease when half-open (`FoldAwareSplit`), so no text runs across the fold.
+/// Phone, and wherever the screen itself is narrower than 700 pt (on the Duo's inner display Profile has
+/// one half): a list that pushes each text. Wider: the list and the selected text side by side, split at
+/// the crease when half-open (`FoldAwareSplit`), so no text runs across the fold.
 struct AcknowledgementsView: View {
     @Environment(\.duoLayout) private var duo
     @State private var entries: [Acknowledgement] = Acknowledgement.all()
     @State private var selectedID: String?
+    /// This screen's own width: on the Duo, Profile (and so this screen) gets only one half of the
+    /// inner display, which is too narrow to split again (Duo run 42010826450, 09-acknowledgements).
+    @State private var width: CGFloat = 0
 
     private var appVersion: String {
         let info = Bundle.main.infoDictionary
@@ -19,12 +23,13 @@ struct AcknowledgementsView: View {
 
     var body: some View {
         Group {
-            if duo.isWideLayout {
+            if duo.isWideLayout && width >= DuoLayoutState.wideMinWidth {
                 wide
             } else {
                 compact
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .navigationTitle("Acknowledgements")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("acknowledgements.root")
