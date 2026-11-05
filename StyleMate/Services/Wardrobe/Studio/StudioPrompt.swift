@@ -60,7 +60,7 @@ struct StudioPlan {
         case .outerLayer: return baseNegative + ", shirt underneath, white t-shirt, inner layer, sherpa lining, white collar, patch"
         case .innerTop: return baseNegative + ", jacket, layered, second shirt, collar tag"
         case .onePiece: return baseNegative + ", jacket, belt, second garment"
-        case .footwear: return baseNegative + (productShot ? ", pair, two shoes, socks, feet, legs, box, brand logo, swoosh" : ", single shoe, socks, feet, box")
+        case .footwear: return baseNegative + (productShot ? ", pair, two shoes, socks, feet, legs, box" : ", single shoe, socks, feet, box")
         case .headwear: return baseNegative + (productShot ? ", head, hair, mannequin head, brand logo, emblem" : "")
         case .lower: return baseNegative + (productShot ? ", legs, feet, shoes, top, shirt, back view, back pockets" : "")
         default: return baseNegative

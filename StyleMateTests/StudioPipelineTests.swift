@@ -157,9 +157,14 @@ struct StudioPipelineTests {
         try #require(WardrobeExtractor.isAvailable, "needs the bundled FashionEncoder")
         let black = try #require(StudioPipeline.isolateProduct(Self.square(r: 20, g: 20, b: 24))).image
         let emb = try #require(FashionClassifier.onWhite(black, side: 224).flatMap { WardrobeML.shared.embed($0) })
-        let plan = StudioPlan.make(product: "Sneakers", category: .footwear, colors: ["Black"], pattern: .solid, material: "Knit",
+        let made = StudioPlan.make(product: "Sneakers", category: .footwear, colors: ["Black"], pattern: .solid, material: "Knit",
                                    sleeve: nil, neckline: nil, details: nil, kind: .footwear, truncated: false, cutout: black)
-        #expect(plan.productShot && plan.template != nil)
+        #expect(made.productShot && made.template != nil && made.templateShape == .sneaker)
+        // Without the template core: the test "renders" are squares smaller than the sneaker
+        // silhouette, so the core would keep white background inside it (a white panel).
+        let plan = StudioPlan(mode: made.mode, prompt: made.prompt, negativePrompt: made.negativePrompt, candidates: 1,
+                              productLabel: made.productLabel, isSolid: true, template: made.template,
+                              templateStrength: made.templateStrength, productShot: true)
         // A mid-grey "shoe" for a black one.
         let c = try #require(StudioPipeline.evaluate(Self.square(r: 150, g: 150, b: 150), reference: ColorStats(black),
                                                      embedding: emb, plan: plan, minSimilarity: 0))
