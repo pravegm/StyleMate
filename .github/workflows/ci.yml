@@ -15,7 +15,8 @@ name: CI
 #   - main and pull requests: everything.
 #   - feature-branch push: unit tests + Release compile. Add `[ui]` (or `[full]`) to the commit message
 #     for the UI tests and screenshots, `[tests: StyleMateTests/TryOnTests, ...]` to run only those
-#     unit tests, `[skip ci]` for no run at all. Docs-only pushes don't run (and don't cancel a run).
+#     unit tests, `[studio]` (or `[full]`) for the studio coverage renders (3 Macs, ~45 min),
+#     `[skip ci]` for no run at all. Docs-only pushes don't run (and don't cancel a run).
 #   - Run workflow (dispatch): the `unit_tests` and `ui_tests` inputs do the same.
 # The `models` job only takes a Mac when a model cache is actually missing.
 
@@ -55,6 +56,7 @@ jobs:
     outputs:
       build_models: ${{ steps.models.outputs.build }}
       ui: ${{ steps.tier.outputs.ui }}
+      studio: ${{ steps.tier.outputs.studio }}
       unit_tests: ${{ steps.tier.outputs.unit_tests }}
     steps:
       - uses: actions/checkout@v4
@@ -67,19 +69,22 @@ jobs:
           UI_INPUT: ${{ inputs.ui_tests }}
           TESTS_INPUT: ${{ inputs.unit_tests }}
         run: |
-          ui=false; tests=""
+          ui=false; studio=false; tests=""
           if [ "$REF" = "refs/heads/main" ] || [ "$EVENT" = "pull_request" ]; then
-            ui=true
+            ui=true; studio=true
           elif [ "$EVENT" = "workflow_dispatch" ]; then
             [ "$UI_INPUT" = "true" ] && ui=true
+            [ "$UI_INPUT" = "true" ] && studio=true
             tests="$TESTS_INPUT"
           else
             case "$MSG" in *"[ui]"*|*"[full]"*) ui=true;; esac
+            case "$MSG" in *"[studio]"*|*"[full]"*) studio=true;; esac
             tests=$(printf '%s' "$MSG" | sed -n 's/.*\[tests:\([^]]*\)\].*/\1/p' | head -1)
           fi
           # Test identifiers only (StyleMateTests/Suite/test), so nothing else reaches xcodebuild.
           tests=$(printf '%s' "$tests" | tr -cd 'A-Za-z0-9_/,.' )
           echo "ui=$ui" >> "$GITHUB_OUTPUT"
+          echo "studio=$studio" >> "$GITHUB_OUTPUT"
           echo "unit_tests=$tests" >> "$GITHUB_OUTPUT"
           echo "UI tests: $ui | unit tests: ${tests:-all}"
       - name: Are the model caches there?
@@ -302,8 +307,8 @@ jobs:
   # simulator runs the diffusion UNet on its CPU (~2–4 min per candidate), so the manifest is split
   # over three runners; each uploads `studio-coverage-<shard>` (renders + coverage_shard<n>.json).
   studio:
-    needs: models
-    if: github.event_name != 'schedule'
+    needs: [plan, models]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.models.result != 'failure' && github.event_name != 'schedule' && needs.plan.outputs.studio == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 150
     strategy:
