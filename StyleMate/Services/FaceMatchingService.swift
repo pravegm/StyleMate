@@ -110,13 +110,17 @@ class FaceMatchingService {
         let confidence: Confidence
         let matchedFaceBox: CGRect?    // normalized, bottom-left — for person isolation
         let faceCount: Int
+        /// The matched face's gallery score: the mean of its `galleryConsensus` best gallery
+        /// similarities (the single one while the gallery has fewer entries). Decides `.high`.
         let similarity: Float?
-        /// Best similarity of any OTHER face in the photo. Used to detect the
+        /// Best score of any OTHER face in the photo (same measure). Used to detect the
         /// "two people score close together" case where the pick is uncertain.
         var runnerUpSimilarity: Float? = nil
         /// The matched face's embedding — used to grow the gallery from confident
         /// scan matches and from faces the user confirms in review.
         var matchedEmbedding: [Float]? = nil
+        /// The matched face's single best gallery similarity. Decides `.borderline` (review).
+        var bestSingleSimilarity: Float? = nil
 
         /// True when the photo should enter the pipeline at all (high or borderline).
         var isMatch: Bool { confidence == .high || confidence == .borderline }
@@ -548,6 +552,7 @@ class FaceMatchingService {
 
         var bestBox: CGRect?
         var bestSimilarity: Float = -.infinity
+        var bestSingle: Float = -.infinity
         var secondSimilarity: Float = -.infinity
         var bestRefIndex = -1
         var bestEmbedding: [Float]?
@@ -563,12 +568,13 @@ class FaceMatchingService {
                 continue
             }
 
-            let (similarity, refIdx) = Self.bestMatch(of: embedding, in: refs)
+            let (similarity, single, refIdx) = Self.bestMatch(of: embedding, in: refs)
             allScores.append(similarity)
 
             if similarity > bestSimilarity {
                 secondSimilarity = bestSimilarity
                 bestSimilarity = similarity
+                bestSingle = single
                 bestBox = face.normalizedBox(imageWidth: imgW, imageHeight: imgH)
                 bestRefIndex = refIdx
                 bestEmbedding = embedding
@@ -577,16 +583,20 @@ class FaceMatchingService {
             }
         }
 
+        // Auto-add needs the gallery's consensus (two entries agree); review needs one entry.
+        // With a big gallery a single-entry max admits strangers far more often: on LFW with a
+        // 10-photo gallery, TAR at FAR 1e-5 was 87% for the max and 99% for the top-2 mean
+        // (docs/MODEL-LICENSING.md §8).
         let confidence: Confidence
         if bestSimilarity >= Self.highConfidenceThreshold {
             confidence = .high
-        } else if bestSimilarity >= Self.borderlineThreshold {
+        } else if bestSingle >= Self.borderlineThreshold {
             confidence = .borderline
         } else {
             confidence = .none
         }
 
-        dlog("[FaceMatch] \(confidence) best=\(String(format: "%.3f", bestSimilarity)) galleryIdx=\(bestRefIndex) all=[\(allScores.map { String(format: "%.3f", $0) }.joined(separator: ", "))] faces=\(faces.count) gallery=\(refs.count)")
+        dlog("[FaceMatch] \(confidence) best=\(String(format: "%.3f", bestSimilarity)) single=\(String(format: "%.3f", bestSingle)) galleryIdx=\(bestRefIndex) all=[\(allScores.map { String(format: "%.3f", $0) }.joined(separator: ", "))] faces=\(faces.count) gallery=\(refs.count)")
 
         return MatchResult(
             confidence: confidence,
@@ -594,21 +604,31 @@ class FaceMatchingService {
             faceCount: faces.count,
             similarity: bestSimilarity.isFinite ? bestSimilarity : nil,
             runnerUpSimilarity: secondSimilarity.isFinite ? secondSimilarity : nil,
-            matchedEmbedding: bestEmbedding
+            matchedEmbedding: bestEmbedding,
+            bestSingleSimilarity: bestSingle.isFinite ? bestSingle : nil
         )
     }
 
-    /// Best cosine similarity AND which gallery slot produced it. The index lets
-    /// us spot a polluted reference: if the same slot keeps winning matches for
-    /// different people, that slot is probably not the user.
-    private static func bestMatch(of embedding: [Float], in refs: [[Float]]) -> (sim: Float, index: Int) {
-        var best: Float = -.infinity
+    /// A face's gallery score (`sim`: the mean of its `galleryConsensus` best similarities, or
+    /// fewer while the gallery is smaller), its single best similarity, and which gallery slot
+    /// produced that. The index lets us spot a polluted reference: if the same slot keeps winning
+    /// matches for different people, that slot is probably not the user.
+    static func bestMatch(of embedding: [Float], in refs: [[Float]]) -> (sim: Float, single: Float, index: Int) {
+        let k = max(1, profile.galleryConsensus)
+        var top = [Float](repeating: -.infinity, count: k)   // descending
         var idx = -1
         for (i, ref) in refs.enumerated() {
             let s = dot(ref, embedding)
-            if s > best { best = s; idx = i }
+            if s > top[0] { idx = i }
+            if s > top[k - 1] {
+                var j = k - 1
+                while j > 0 && top[j - 1] < s { top[j] = top[j - 1]; j -= 1 }
+                top[j] = s
+            }
         }
-        return (best, idx)
+        let used = top.filter { $0.isFinite }
+        guard !used.isEmpty else { return (-.infinity, -.infinity, -1) }
+        return (used.reduce(0, +) / Float(used.count), used[0], idx)
     }
 
     private static func dot(_ a: [Float], _ b: [Float]) -> Float {

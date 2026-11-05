@@ -1,7 +1,10 @@
-# StyleMate model licensing (launch review, 2026-11-04)
+# StyleMate model licensing (launch review, 2026-11-04; face models replaced 2026-11-05)
 
-StyleMate is a paid App Store app that bundles five on-device ML models. Three of them, and
-the training data of a fourth, are licensed for **non-commercial research only**. That is
+StyleMate is a paid App Store app that bundles five on-device ML models. On 2026-11-04 three
+of them, and the training data of a fourth, were licensed for **non-commercial research only**.
+**Update 2026-11-05:** the two face models (rows 1–2) are replaced by YuNet (MIT) and SFace
+(Apache-2.0); SCRFD and AdaFace are no longer built or bundled (§2.6, §2.7, §8). The garment
+parsers (rows 3–4) are still non-commercial. That is
 the biggest single launch blocker. It is a legal risk, not a review risk: App Review will not
 spot it, but the licence holders can file a takedown and claim damages after launch.
 
@@ -13,17 +16,17 @@ spot it, but the licence holders can file a takedown and claim damages after lau
 
 | # | Model (bundle name) | Role | Size in app | Weights licence | Paid iOS app may ship it? |
 |---|---|---|---|---|---|
-| 1 | InsightFace **SCRFD-10G**, `det_10g.onnx` from `buffalo_l` (`SCRFD10G.mlpackage`) | Face detection + 5 landmarks | 8 MB | InsightFace model policy: non-commercial research only | **No**, unless InsightFace grants a commercial licence |
-| 2 | **AdaFace IR-101 on WebFace12M** (`MobileFaceNet.mlpackage`) | Face embedding (identity) | 125 MB | Code is MIT. The checkpoint has no stated licence, and its training set (WebFace260M family) is research-only | **No** (no commercial path is known) |
+| 1 | **YuNet 2023mar** (OpenCV Zoo), `face_detection_yunet_2023mar.onnx` (`FaceDetectYuNet.mlpackage`, fp32). *Replaced InsightFace SCRFD-10G on 2026-11-05.* | Face detection + 5 landmarks | 0.3 MB | MIT (§2.6) | **Yes**, with attribution (§3 caveat applies) |
+| 2 | **SFace 2021dec** (OpenCV Zoo), `face_recognition_sface_2021dec.onnx` (`FaceEmbedSFace.mlpackage`, fp16). *Replaced AdaFace IR-101 (WebFace12M) on 2026-11-05.* | Face embedding (identity) | 18 MB | Apache-2.0 (§2.7) | **Yes**, with attribution + modification notice (§3 caveat applies) |
 | 3 | **FASHN human parser**, `fashn-ai/fashn-human-parser`, SegFormer-B4 (`GarmentParser.mlpackage`) | Clothing vs. body parsing | 62 MB | NVIDIA Source Code License for SegFormer (non-commercial) | **No** |
 | 4 | **`sayeed99/segformer-b3-fashion`**, SegFormer-B3 on Fashionpedia (`GarmentLabeler.mlpackage`) | Garment type per pixel | 46 MB | "other", which links to the NVIDIA SegFormer licence | **No** |
 | 5 | **Marqo-FashionSigLIP** (`FashionEncoder.mlpackage` + `FashionVocabulary.json`) | Zero-shot attributes, duplicate matching | 176 MB + 1 MB | Apache-2.0 | **Yes**, with attribution |
 
-Sizes come from CI run 41829764408 (`du -sh`).
+Sizes come from CI run 41829764408 (`du -sh`); face rows from run 42008624154 (the app's `.mlmodelc`: 328 KB and 18 MB, down from 8 MB + 125 MB).
 
 ## 2. Each model, in detail
 
-### 2.1 InsightFace SCRFD-10G (from `buffalo_l`)
+### 2.1 InsightFace SCRFD-10G (from `buffalo_l`) — no longer shipped (2026-11-05)
 
 - **Licence text:** README of https://github.com/deepinsight/insightface, "License" section:
   - "The code of InsightFace is released under the MIT License. There is no limitation for both academic and commercial usage."
@@ -37,7 +40,7 @@ Sizes come from CI run 41829764408 (`du -sh`).
 - **Verdict: cannot ship without a signed licence.**
 - **Opportunity:** `buffalo_l` contains both SCRFD-10G (`det_10g.onnx`) and the ArcFace R50 embedder (`w600k_r50.onnx`). One `buffalo_l` licence would therefore cover the detector and an embedder. The repo still has `scripts/convert_r50.py` for that R50 embedder (input is RGB; see CLAUDE.md).
 
-### 2.2 AdaFace IR-101 (WebFace12M)
+### 2.2 AdaFace IR-101 (WebFace12M) — no longer shipped (2026-11-05)
 
 - **Code:** MIT (https://github.com/mk-minchul/AdaFace).
   - The README gives **no licence for the pretrained checkpoints**. They are Google Drive links in a table.
@@ -76,6 +79,47 @@ Sizes come from CI run 41829764408 (`du -sh`).
 - **Verdict: can ship.** Obligations:
   - Include the Apache-2.0 licence text and any NOTICE in an in-app Acknowledgements screen (Profile → About).
   - State that the model was converted and quantized (Apache §4(b): modified files carry a notice).
+
+### 2.6 YuNet 2023mar (ships since 2026-11-05)
+
+- **Source:** https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet, file
+  `face_detection_yunet_2023mar.onnx`, pinned to opencv_zoo commit
+  `48b10fa505aeb51fbd127fc60a5c660040e823b7` (the file last changed in `f12e127`, "update yunet to v2",
+  2023-06-06). SHA-256 `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4`.
+  The model comes from https://github.com/ShiqiYu/libfacedetection.train (BSD-3 code).
+- **Licence text (read 2026-11-05):** the directory README says "All files in this directory are
+  licensed under MIT License"; its LICENSE is MIT, "Copyright (c) 2020 Shiqi Yu".
+- **Training data:** WIDER FACE (§3).
+- **Conversion:** `scripts/convert_face_models.py` (ONNX → onnx2torch → Core ML ML program, **fp32**,
+  weights unchanged). Parity, checked on every build: onnx2torch vs onnxruntime and Core ML vs
+  onnxruntime on random input and on 4 fixture photos; every output cos > 0.9999 and the decoded
+  faces identical (CI run 42008624154: worst cos 1.000000).
+- **Obligation:** keep the copyright and MIT notice: `StyleMate/Resources/Acknowledgements/ACK-12-yunet.md`.
+
+### 2.7 SFace 2021dec (ships since 2026-11-05)
+
+- **Source:** https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface, file
+  `face_recognition_sface_2021dec.onnx`, same pinned commit. SHA-256
+  `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79`. Original code:
+  https://github.com/zhongyy/SFace (the repo states no licence; the ONNX was contributed to OpenCV
+  Zoo by the author's side, "ONNX file conversions … thanks to Chengrui Wang").
+- **Licence text (read 2026-11-05):** "All files in this directory are licensed under Apache 2.0
+  License" (README), LICENSE = Apache-2.0 full text. No NOTICE file.
+- **Training data:** not stated by OpenCV. The SFace paper trains on CASIA-WebFace, VGGFace2 and
+  MS-Celeb-1M (§3 caveat).
+- **Conversion:** same script, **fp16** weights; Core ML vs onnxruntime cos ≥ 0.99989 on random input
+  and 7 real fixture faces (CI run 42008624154).
+- **Obligations (Apache-2.0 §4):** licence text + notice of modification ("converted to Core ML,
+  16-bit weights"): `StyleMate/Resources/Acknowledgements/ACK-13-sface.md`.
+
+### 2.8 Alternatives evaluated for the embedder (2026-11-05)
+
+| Candidate | Weights licence, as read at the source | LFW accuracy in our pipeline (§8) | Verdict |
+|---|---|---|---|
+| **SFace** (OpenCV Zoo) | Apache-2.0, explicit for the model files | see §8 | **Chosen** |
+| **dlib `dlib_face_recognition_resnet_model_v1`** | "I've released them into the public domain" / CC0-1.0 (https://github.com/davisking/dlib-models). Trained on ~3M faces, "about half … from VGG and face scrub" plus web scrapes | see §8 | Cleanest licence, but needs dlib's own 5-point landmarker + 150 px chip alignment and a C++ or ported runtime |
+| **FaceNet Inception-ResNet-v1, VGGFace2** (`facenet-pytorch`, port of davidsandberg/facenet) | Repo MIT; the weights have **no stated licence**; VGGFace2's own licence could not be confirmed (sources disagree: CC BY-SA 4.0 vs non-commercial; the official page no longer shows terms) | see §8 | Not an "explicit commercial-OK" licence: not eligible |
+| InsightFace `w600k_r50` (buffalo_l) | Non-commercial unless licensed (§2.1) | see §8 | Only with a signed licence (§7) |
 
 ## 3. A caveat that applies to every "permissive" face model
 

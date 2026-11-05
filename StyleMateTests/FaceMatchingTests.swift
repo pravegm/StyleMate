@@ -291,11 +291,20 @@ struct FaceMatchingTests {
                 }
             }
         }
+        // The six street_* photos are one Wikimedia series ("Street Style of 2018 2019 in Tehran")
+        // and may show the same woman (sunglasses, caps): their cross pairs have no reliable label,
+        // so they are reported apart and kept out of the impostor set.
+        func series(_ p: String) -> Bool { p.hasPrefix("street_") }
         var impostor: [(Float, String)] = []
         for a in 0..<faces.count {
             for b in (a + 1)..<faces.count {
                 let s = FaceMath.dot(faces[a].embedding, faces[b].embedding)
-                impostor.append((s, "\(faces[a].photo)#\(faces[a].index)~\(faces[b].photo)#\(faces[b].index)"))
+                let pair = "\(faces[a].photo)#\(faces[a].index)~\(faces[b].photo)#\(faces[b].index)"
+                if series(faces[a].photo) && series(faces[b].photo) && faces[a].photo != faces[b].photo {
+                    report("bench series-pair (identity unknown) \(pair): sim=\(String(format: "%.4f", s))")
+                    continue
+                }
+                impostor.append((s, pair))
             }
         }
         impostor.sort { $0.0 > $1.0 }

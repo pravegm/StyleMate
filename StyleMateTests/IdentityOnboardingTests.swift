@@ -18,7 +18,8 @@ private struct SplitMix64: RandomNumberGenerator {
     }
 }
 
-/// 512-d synthetic face embeddings. A face of an identity is `normalize(center + noise · u)` with
+/// 512-d synthetic face embeddings (the clustering is dimension-agnostic; the real embedder is
+/// 128-d SFace). A face of an identity is `normalize(center + noise · u)` with
 /// u a random unit vector, so two faces of one identity score about 1/(1+noise²) — noise 0.8 ≈
 /// 0.61 (similar shots), noise 1.0 ≈ 0.5 (different pose/light) — and different identities ≈ 0.
 private struct Synth {
@@ -251,7 +252,9 @@ private func labelsOf(_ c: FaceCluster, in lib: Library) -> Set<String> { Set(c.
         var s = Synth(seed: 11)
         var lib = Library()
         let user = s.unit()
-        let otherLook = s.at(similarity: 0.46, to: user)   // below the link bar, above the also-you bar
+        // Below the link bar, above the also-you bar (whatever the active face model's bars are).
+        let gap = (FaceClustering.linkThreshold + FaceClustering.alsoYouClusterThreshold) / 2
+        let otherLook = s.at(similarity: gap, to: user)
         let stranger = s.unit()
         for _ in 0..<25 { lib.add(s.face(of: user, noise: 0.8), label: "main") }
         for _ in 0..<12 { lib.add(s.face(of: otherLook, noise: 0.5), label: "other") }

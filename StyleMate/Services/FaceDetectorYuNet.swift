@@ -27,10 +27,22 @@ final class YuNetDetector: FaceDetecting {
 
     private var profile: FaceModelProfile { .active }
 
+    /// Library photos at least this big also get the small-face tile pass.
+    static let tileMinSide = 1100
+
     func detect(in cgImage: CGImage, scoreThreshold: Float?, padRetry: Bool) -> [DetectedFace] {
         let threshold = scoreThreshold ?? profile.detectorThreshold
         let faces = detectCore(in: cgImage, fit: inputSize, threshold: threshold)
-        if !faces.isEmpty || !padRetry { return faces }
+        if !padRetry {
+            // Library / scan photo. A 1600 px photo letterboxed to 640 shrinks a 48 px face to
+            // 19 px, at the edge of YuNet's range: look again at four overlapping 60% tiles, each
+            // at the full input (faces ~2.5x bigger). On LFW faces pasted into 1600 px frames this
+            // took misses from 5.6% to 0% and TAR at FAR 1e-5 from 79% to 94%
+            // (docs/MODEL-LICENSING.md §8). Faces found twice are merged by NMS.
+            guard max(cgImage.width, cgImage.height) >= Self.tileMinSide else { return faces }
+            return mergeWithTiles(faces, in: cgImage, threshold: threshold)
+        }
+        if !faces.isEmpty { return faces }
         // A frame-filling face (selfie frame, tight face crop) is over YuNet's ~300 px range at
         // 640: place the image in a smaller square of the input (the rest stays black, which is
         // the same as padding it) and look again.
@@ -39,6 +51,38 @@ final class YuNetDetector: FaceDetecting {
             if !retry.isEmpty { return retry }
         }
         return []
+    }
+
+    private func mergeWithTiles(_ full: [DetectedFace], in cgImage: CGImage, threshold: Float) -> [DetectedFace] {
+        let w = cgImage.width, h = cgImage.height
+        let tw = w * 3 / 5, th = h * 3 / 5
+        var extra: [DetectedFace] = []
+        for (ox, oy) in [(0, 0), (w - tw, 0), (0, h - th), (w - tw, h - th)] {
+            let tileRect = CGRect(x: ox, y: oy, width: tw, height: th)
+            guard let tile = cgImage.cropping(to: tileRect) else { continue }
+            let dx = Float(ox), dy = Float(oy)
+            // Inner tile edges (not the photo's own edges): a face cut there is a partial view; the
+            // overlapping tile or the full pass sees it whole.
+            let inner = tileRect.insetBy(dx: 2, dy: 2)
+            for f in detectCore(in: tile, fit: inputSize, threshold: threshold) {
+                let box = f.boxPixels.offsetBy(dx: CGFloat(ox), dy: CGFloat(oy))
+                let cutLeft = box.minX < inner.minX && tileRect.minX > 0
+                let cutTop = box.minY < inner.minY && tileRect.minY > 0
+                let cutRight = box.maxX > inner.maxX && tileRect.maxX < CGFloat(w)
+                let cutBottom = box.maxY > inner.maxY && tileRect.maxY < CGFloat(h)
+                if cutLeft || cutTop || cutRight || cutBottom { continue }
+                extra.append(DetectedFace(boxPixels: box,
+                                          keypoints: f.keypoints.map { SIMD2<Float>($0.x + dx, $0.y + dy) },
+                                          score: f.score))
+            }
+        }
+        // One face seen by the full pass and a tile is merged by NMS, keeping the higher score:
+        // usually the tile's, whose landmarks come from 2.5x the pixels (keeping the full pass's
+        // instead cost 10 points of TAR on small faces). A face must never count twice: it would
+        // be its own "runner-up" in a group photo. Cut faces are already gone (above).
+        let all = full + extra
+        let keep = FaceDetectorSupport.nms(boxes: all.map(\.boxPixels), scores: all.map(\.score), iou: 0.3)
+        return keep.map { all[$0] }
     }
 
     /// Letterboxes `cgImage` into the top-left `fit` x `fit` of the 640 input and decodes.

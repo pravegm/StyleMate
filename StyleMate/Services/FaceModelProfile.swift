@@ -42,6 +42,12 @@ struct FaceModelProfile {
     let flipAverage: Bool
 
     // MARK: Matching (FaceMatchingService)
+    /// A face's gallery score is the mean of its this-many best gallery similarities (fewer while
+    /// the gallery is smaller). 1 = plain max. The max over a big gallery admits strangers more
+    /// often the more entries it holds; a consensus of two does not (docs/MODEL-LICENSING.md §8).
+    /// `.high` / `multiPerson` / `autoLearn` / the margin use this score; `borderline` uses the
+    /// single best similarity, so a face that matches only one stored view still reaches review.
+    let galleryConsensus: Int
     /// Auto-add a solo photo.
     let highConfidence: Float
     /// Send to "Is this you?" review.
@@ -105,6 +111,7 @@ extension FaceModelProfile {
         inputMean: 0, inputScale: 1,          // SFace normalizes inside the graph: (x - 127.5) / 128
         embeddingDimension: 128,
         flipAverage: true,
+        galleryConsensus: 2,
         highConfidence: 0.55, borderline: 0.30, multiPerson: 0.58, ambiguityMargin: 0.08,
         autoLearn: 0.62, autoLearnSelfie: 0.50, autoLearnMargin: 0.15,
         galleryDuplicate: 0.95, learnedDuplicate: 0.90,
@@ -128,6 +135,7 @@ extension FaceModelProfile {
         inputMean: 127.5, inputScale: 1 / 127.5,
         embeddingDimension: 512,
         flipAverage: true,
+        galleryConsensus: 2,
         highConfidence: 0.55, borderline: 0.30, multiPerson: 0.58, ambiguityMargin: 0.08,
         autoLearn: 0.62, autoLearnSelfie: 0.50, autoLearnMargin: 0.15,
         galleryDuplicate: 0.95, learnedDuplicate: 0.90,
