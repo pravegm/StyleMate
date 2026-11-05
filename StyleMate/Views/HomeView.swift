@@ -82,6 +82,8 @@ struct HomeView: View {
                         .frame(minHeight: 44)
                 }
             }
+
+            HomeFirstRunCards(homeVM: homeVM)   // samples, held items, "Wore this?", morning-look ask
         }
     }
 

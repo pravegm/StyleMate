@@ -287,7 +287,7 @@ struct OutfitCardView: View {
     /// Where a logged outfit came from: the stylist, the person's photos (auto-log),
     /// or the manual composer.
     static func badge(for source: String) -> (title: String, icon: String, tinted: Bool) {
-        if source == "photo" { return ("From your photos", "photo", true) }
+        if source == WearLogSuggestions.source { return ("From your photos", "photo", true) }
         if MyOutfitsViewModel.Source.isStyled(source) { return ("Styled for you", "wand.and.stars", true) }
         return ("Manual", "hand.draw", false)
     }

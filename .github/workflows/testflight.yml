@@ -165,7 +165,6 @@ jobs:
           codesign -dvv "$APP" 2>&1 | grep -E "Authority|TeamIdentifier" || true
           codesign -d --entitlements :- "$APP" > ent.plist 2>/dev/null || true
           cat ent.plist
-          grep -q "com.apple.developer.applesignin" ent.plist || { echo "::error::Sign in with Apple entitlement missing"; exit 1; }
           grep -q "CloudKit" ent.plist || { echo "::error::CloudKit entitlement missing"; exit 1; }
           ls -la "$RUNNER_TEMP"/local/*.ipa
 

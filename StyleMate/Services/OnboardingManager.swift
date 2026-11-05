@@ -15,10 +15,10 @@ class OnboardingManager: ObservableObject {
 
     func complete(forUser userId: String) {
         UserDefaults.standard.set(true, forKey: key(for: userId))
-        // Re-arm the feature tours so the post-onboarding tour reliably shows after
-        // (re-)onboarding, even if a flag lingered from an earlier run.
-        UserDefaults.standard.set(false, forKey: "tour_home_\(userId)")
-        UserDefaults.standard.set(false, forKey: "tour_generation_\(userId)")
+        // No coach-mark tour after onboarding: the first minutes belong to the
+        // closet filling up. The tour stays one tap away (Profile → Replay app
+        // tour); the short outfit-sheet tour still runs the first time it opens.
+        UserDefaults.standard.set(true, forKey: "tour_home_\(userId)")
         withAnimation(.easeInOut(duration: 0.3)) {
             hasCompletedOnboarding = true
         }
@@ -30,4 +30,9 @@ class OnboardingManager: ObservableObject {
         hasCompletedOnboarding = false
         print("[StyleMate] Onboarding reset for \(userId)")
     }
+}
+
+/// Public legal pages (GitHub Pages, from docs/ in the repo).
+enum LegalLinks {
+    static let privacyPolicy = URL(string: "https://pravegm.github.io/StyleMate/privacy.html")!
 }

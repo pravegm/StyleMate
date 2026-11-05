@@ -30,6 +30,11 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showOutfitsCalendar)) { _ in
             selectedTab = 2
         }
+        // A tapped morning notification opens Today's Outfit from Home: bring Home
+        // to the front first (HomeFirstRunCards presents it a beat later).
+        .onReceive(NotificationRouter.shared.$pendingMorningLook) { day in
+            if day != nil, selectedTab != 0 { selectedTab = 0 }
+        }
         // The outfit sheet's "add shoes" tip opens the add-clothes sheet.
         .onReceive(NotificationCenter.default.publisher(for: .showAddClothes)) { _ in
             selectedTab = 1

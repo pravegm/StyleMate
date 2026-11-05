@@ -9,7 +9,8 @@ three one-time things, then every new build is one button press.
 1. Go to https://developer.apple.com/account/resources/identifiers/list and sign in.
 2. Press the blue **+**, choose **App IDs**, then **Continue**. Choose **App**, then **Continue**.
 3. **Description**: `StyleMate`. **Bundle ID**: choose *Explicit* and type `com.stylemates.StyleMate`.
-4. Under **Capabilities**, tick **iCloud** (choose "Include CloudKit support") and **Sign In with Apple**.
+4. Under **Capabilities**, tick **iCloud** (choose "Include CloudKit support"). There's no login any
+   more, so Sign In with Apple isn't needed.
 5. Press **Continue**, then **Register**.
 6. Open the new ID again. Next to iCloud, press **Edit** (or **Configure**), press **+** to add a
    container named `iCloud.com.stylemates.StyleMate`, tick it, and press **Save**.
@@ -33,6 +34,18 @@ four times. Use the same values you entered for Squish, Brim and the other Duo g
 | `ASC_ISSUER_ID` | The Issuer ID shown above the keys list in App Store Connect › Users and Access › Integrations |
 | `ASC_PRIVATE_KEY` | The whole text of the `.p8` file, including the BEGIN/END lines |
 | `APPLE_TEAM_ID` | Your 10-character Team ID (developer.apple.com › Account › Membership details) |
+
+### 4. Publish the privacy policy (one click)
+On https://github.com/pravegm/StyleMate/settings/pages, under **Build and deployment**, choose
+**Deploy from a branch**, branch `main`, folder `/docs`, then **Save**. After a minute the policy is
+live at https://pravegm.github.io/StyleMate/privacy.html, the link the app already uses. App Store
+Connect asks for the same link.
+
+### 5. iCloud backup in TestFlight (after the first build)
+TestFlight builds use the *Production* iCloud environment. After the first build has run once, go
+to https://icloud.developer.apple.com, choose the `iCloud.com.stylemates.StyleMate` container, open
+**Schema**, and press **Deploy Schema Changes…** to Production. Until then the app still works
+fully, but the wardrobe isn't backed up to iCloud.
 
 ## Making a build (every time)
 1. Open https://github.com/pravegm/StyleMate/actions/workflows/testflight.yml.
