@@ -248,11 +248,13 @@ final class StudioQueue: ObservableObject {
                                    embedding: embeddingStore.embedding(for: item.id), fit: item.fit)
         let embedding: [Float]? = embeddingStore.embedding(for: item.id)
         let seed = Self.seed(for: item.id)
+        let perf = PerfLog.begin(.studioRender)
         let outcome: StudioPipeline.Outcome = await Task.detached(priority: .utility) {
             let emb = embedding ?? cutout.cgImage.flatMap { FashionClassifier.onWhite($0, side: 224) }.flatMap { WardrobeML.shared.embed($0) }
             guard let emb else { return StudioPipeline.Outcome.failed }
             return StudioPipeline.studioOutcome(cutout: cutout, embedding: emb, plan: plan, seedBase: seed)
         }.value
+        perf.end(outcome: PerfLog.Outcome(outcome))
 
         switch outcome {
         case .failed:

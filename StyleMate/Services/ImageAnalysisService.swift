@@ -44,9 +44,11 @@ class ImageAnalysisService {
     /// the background scan does it itself, only for items it actually keeps.
     func analyzeAndSegment(image: UIImage, userGender: String? = nil, retryCount: Int = 0,
                            describe: Bool = false) async -> [SegmentedItem] {
+        let perf = PerfLog.begin(.photoExtraction)
         let items = await Task.detached(priority: .utility) {
             WardrobeExtractor.extract(from: image)
         }.value
+        perf.end(count: items.count)
         var out: [SegmentedItem] = []
         for item in items {
             let a = item.attributes
