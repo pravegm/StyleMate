@@ -254,7 +254,11 @@ final class TryOnBodyLibrary: ObservableObject {
         // Arms by the sides score higher than arms across the body (they hide the garment).
         let armsOut = [pose.wL, pose.wR].filter { w in w.x < pose.sL.x + torso * 0.1 || w.x > pose.sR.x - torso * 0.1 }.count
         let conf = min(1, pose.minConfidence / 0.6)
-        return 0.35 * sizeScore + 0.25 * Float(min(1, frontal / 0.7)) + 0.2 * conf + 0.2 * Float(armsOut) / 2
+        // A hand raised above the shoulders (a wave, a hand on a hat) leaves its sleeve floating.
+        let top = min(pose.sL.y, pose.sR.y)
+        let raised: Float = (pose.wL.y < top || pose.wR.y < top) ? 0.25 : 0
+        let base = 0.35 * sizeScore + 0.25 * Float(min(1, frontal / 0.7)) + 0.2 * conf
+        return base + 0.2 * Float(armsOut) / 2 - raised
     }
 
     /// Share of the person that is clothing outside a close body envelope (torso band + limb capsules):
