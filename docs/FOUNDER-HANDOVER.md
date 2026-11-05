@@ -118,13 +118,14 @@ iPhone Duo screenshots: Duo 41966483488.
 
 ## Still open (being worked on, or next)
 
-- Studio renders: shoes (one shoe from the side), hats and every pair of trousers now render as
+- Studio renders: sneakers, boots, heels and sandals (one shoe from the side), wide-brim hats, beanies and every pair of trousers now render as
   catalogue photos too, from product templates; 13 of 13 test items were accepted in CI (Nov 2026),
   and light-grey coats in sun are now named light grey (Silver). Still weak: the render follows the
   item's name and colour, so a misnamed item gets the wrong style (oxfords named "Loafers" became a
   maroon tassel loafer; a cream sun hat measured Gray/Brown became a taupe fedora). Shoe and hat renders
-  with an invented brand mark, and pairs, are now rejected (the cutout stays), so more shoes and caps
-  may keep their cutout. Heels and sandals have templates but no test photo yet.
+  with an invented brand mark, and pairs, are now rejected (the cutout stays). Loafers, oxfords,
+  flats, boat shoes and caps keep their cleaned-up cutout: their renders drew a pair or invented a
+  crest too often to trust. Heels and sandals have templates but no test photo yet.
 - Scan speed: on the cloud test Mac each photo takes about 2 minutes (it looks again at the head,
   hands and feet to find small accessories). The iPhone's Neural Engine should be several times
   faster, but this has not been measured on a real phone yet.

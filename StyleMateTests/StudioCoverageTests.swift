@@ -65,7 +65,7 @@ struct StudioCoverageTests {
             let plan = StudioPlan(mode: full.mode, prompt: full.prompt, negativePrompt: full.negativePrompt,
                                   candidates: 2, productLabel: full.productLabel, isSolid: full.isSolid,
                                   template: full.template, templateStrength: full.templateStrength,
-                                  productShot: full.productShot)
+                                  productShot: full.productShot, templateShape: full.templateShape)
             try? cutout.pngData()?.write(to: out.appendingPathComponent("\(stem)_cutout.png"))
             if let t = plan.template { try? UIImage(cgImage: t).pngData()?.write(to: out.appendingPathComponent("\(stem)_template.png")) }
             // A stable seed per fixture (FNV-1a of the name), like the app's per-item UUID seed.

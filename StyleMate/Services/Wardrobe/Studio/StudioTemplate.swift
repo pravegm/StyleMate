@@ -73,12 +73,18 @@ enum StudioTemplate {
             if p.contains("boot") { return .boot }
             if p.contains("heel") || p.contains("pump") || p.contains("wedge") { return .heel }
             if p.contains("sandal") || p.contains("slide") || p.contains("flip") { return .sandal }
+            // Low shoes (loafers, oxfords, flats, mules, boat shoes) keep refining their cutout:
+            // from the `.loafer` template the model drew a PAIR in 4 of 6 CI candidates (one shoe
+            // behind the other), which neither zero-shot nor the silhouette can reliably tell
+            // from one shoe. A clean cutout beats a wrong render.
             if ["loafer", "oxford", "formal", "flat", "mule", "clog", "slipper", "espadrille", "moccasin", "boat"].contains(where: { p.contains($0) }) {
-                return .loafer
+                return nil
             }
             return .sneaker   // sneakers, platform shoes, trainers, anything else laced
         case .headwear:
-            if p.contains("cap") || p.contains("visor") { return .cap }
+            // Caps keep refining their cutout: from the `.cap` template every CI candidate grew an
+            // invented front crest (6 of 6), so the logo gate would reject them all anyway.
+            if p.contains("cap") || p.contains("visor") { return nil }
             if p.contains("beanie") || p.contains("beret") { return .beanie }
             if p.contains("bucket") { return .bucket }
             if p.contains("fedora") || p.contains("sun hat") || p.contains("panama") || p.contains("cowboy") { return .wideBrim }

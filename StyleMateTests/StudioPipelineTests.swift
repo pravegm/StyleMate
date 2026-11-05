@@ -66,9 +66,8 @@ struct StudioPipelineTests {
         let cases: [(String, GarmentKind, StyleMate.Category, StudioTemplate.Shape)] = [
             ("Sneakers", .footwear, .footwear, .sneaker), ("Boots", .footwear, .footwear, .boot),
             ("Chelsea Boots", .footwear, .footwear, .chelsea), ("Ankle Boots", .footwear, .footwear, .chelsea),
-            ("Loafers", .footwear, .footwear, .loafer), ("Oxford Shoes", .footwear, .footwear, .loafer),
             ("Heels", .footwear, .footwear, .heel), ("Sandals", .footwear, .footwear, .sandal),
-            ("Baseball Caps", .headwear, .accessories, .cap), ("Sun Hats", .headwear, .accessories, .wideBrim),
+            ("Sun Hats", .headwear, .accessories, .wideBrim),
             ("Fedoras", .headwear, .accessories, .wideBrim), ("Beanies", .headwear, .accessories, .beanie),
             ("Bucket Hats", .headwear, .accessories, .bucket),
             ("Chinos", .lower, .bottoms, .trousers), ("Jeans", .lower, .bottoms, .trousers),
@@ -92,7 +91,10 @@ struct StudioPipelineTests {
         #expect(shoe.negativePrompt.hasPrefix("pair, two shoes") && !shoe.negativePrompt.contains("single shoe"))
         #expect(shoe.templateStrength == 0.70)
         // No product pose for these: refined from the cutout, as before.
-        for (product, kind) in [("Turbans", GarmentKind.headwear), ("Shorts", .lower), ("Skirts", .lower), ("Dhoti", .lower)] {
+        // Low shoes drew pairs and caps grew invented crests from their templates (CI, Nov 2026).
+        for (product, kind) in [("Turbans", GarmentKind.headwear), ("Shorts", .lower), ("Skirts", .lower), ("Dhoti", .lower),
+                                ("Loafers", .footwear), ("Oxford Shoes", .footwear), ("Flats", .footwear),
+                                ("Baseball Caps", .headwear), ("Visors", .headwear)] {
             #expect(StudioTemplate.shape(product: product, kind: kind, sleeve: nil) == nil, "\(product)")
             let plan = StudioPlan.make(product: product, category: .bottoms, colors: ["Blue"], pattern: .solid, material: nil,
                                        sleeve: nil, neckline: nil, details: nil, kind: kind, truncated: false, cutout: cut)

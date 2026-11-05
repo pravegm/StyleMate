@@ -11,7 +11,7 @@ import Foundation
 ///   flat-lay silhouette filled with the garment's own fabric (`StudioTemplate`)
 ///   when one fits, else text-to-image from the measured description. Several
 ///   candidates; the one that looks most like the real garment wins.
-/// - **Trousers, shoes, hats** are generated from a product template too
+/// - **Trousers, shoes, hats** (not low shoes or caps, see `StudioTemplate.shape`) are generated from a product template too
 ///   (front view full length; one shoe from the side, toe left; a hat in
 ///   three-quarter view — `StudioTemplate`). Refining the worn cutout at
 ///   0.45–0.5 mostly reproduced it: bent knees, a coat hem across the hips, a
@@ -119,21 +119,21 @@ struct StudioPlan {
         let label = "\(category.rawValue)|\(product)", solid = pattern == .solid
         let layered: Set<GarmentKind> = [.innerTop, .outerLayer, .onePiece]
         // Template-guided: start from a product silhouette in the item's own fabric.
-        var template: CGImage?, strength: Float = 0.65, templateShape: StudioTemplate.Shape?, lowShoe = false
-        if useTemplates, let cutout, layered.contains(kind) || truncated || productShotKinds.contains(kind),
-           var shape = StudioTemplate.shape(product: product, kind: kind, sleeve: sleeve, fit: itemFit) {
-            // A boot template for a low shoe drew a tall suede boot for boat shoes named "Boots"
-            // (CI, Nov 2026): the encoder judges the cutout's height itself.
-            if kind == .footwear, shape == .boot || shape == .chelsea, let e = embedding, isLowShoe(e) {
-                shape = .loafer; lowShoe = true
-            }
+        var template: CGImage?, strength: Float = 0.65, templateShape: StudioTemplate.Shape?
+        // A boot template for a low shoe drew a tall suede boot for boat shoes named "Boots"
+        // (CI, Nov 2026): the encoder judges the cutout's height itself, and a low shoe is
+        // refined from its cutout like every low shoe (see `StudioTemplate.shape`).
+        let lowShoeNamedBoot = kind == .footwear && !truncated && product.lowercased().contains("boot")
+            && (embedding.map(isLowShoe) ?? false)
+        if useTemplates, let cutout, layered.contains(kind) || truncated || productShotKinds.contains(kind), !lowShoeNamedBoot,
+           let shape = StudioTemplate.shape(product: product, kind: kind, sleeve: sleeve, fit: itemFit) {
             template = StudioTemplate.render(cutout: cutout, shape: shape, solid: solid)
             strength = StudioTemplate.strength(shape)
             templateShape = shape
         }
         if layered.contains(kind) || truncated || template != nil {
             let productShot = template != nil && productShotKinds.contains(kind)
-            let name = kind == .footwear && template != nil ? (lowShoe ? "shoe" : singleShoe(product)) : product
+            let name = kind == .footwear && template != nil ? singleShoe(product) : product
             var desc = describe(product: name, colors: colors, pattern: pattern, material: material,
                                 sleeve: sleeve, neckline: neckline, details: details)
             // Shoes and caps grew invented brand marks (a swoosh, a crest): ask for a plain one.
