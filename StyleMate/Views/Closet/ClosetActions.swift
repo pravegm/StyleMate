@@ -59,9 +59,9 @@ struct ReplacementCutout {
             autoreleasepool { ImageDownsampler.downsample(image: photo) }
         }.value
         await ExtractionGate.shared.acquire()
-        let cutout = await cutout(from: photo, category: category, product: product)
+        let found = await Self.cutout(from: photo, category: category, product: product)
         await ExtractionGate.shared.release()
-        guard let made = cutout else { return nil }
+        guard let made = found else { return nil }
         let (image, pick) = made
         let result: (String, String?)? = await Task.detached(priority: .userInitiated) {
             guard let path = WardrobeImageFileHelper.saveImageAsPNG(image) else { return nil }

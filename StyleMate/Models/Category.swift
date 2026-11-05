@@ -120,15 +120,15 @@ class WardrobeViewModel: ObservableObject {
         guard !email.isEmpty else { return }
         let key = WardrobeViewModel.storageKey(for: email)
         let snapshot = items, kept = unreadableEntries
-        Self.saveLock.lock()
-        Self.lastTicket += 1
-        let ticket = Self.lastTicket
-        Self.saveTickets[key] = ticket
-        Self.saveLock.unlock()
-        Self.saveQueue.async {
-            Self.saveLock.lock()
-            let newest = Self.saveTickets[key] == ticket
-            Self.saveLock.unlock()
+        WardrobeViewModel.saveLock.lock()
+        WardrobeViewModel.lastTicket += 1
+        let ticket = WardrobeViewModel.lastTicket
+        WardrobeViewModel.saveTickets[key] = ticket
+        WardrobeViewModel.saveLock.unlock()
+        WardrobeViewModel.saveQueue.async {
+            WardrobeViewModel.saveLock.lock()
+            let newest = WardrobeViewModel.saveTickets[key] == ticket
+            WardrobeViewModel.saveLock.unlock()
             guard newest else { return }
             if let data = WardrobeStorage.encode(snapshot, keeping: kept) {
                 UserDefaults.standard.set(data, forKey: key)

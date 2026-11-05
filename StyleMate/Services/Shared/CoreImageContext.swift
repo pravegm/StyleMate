@@ -43,10 +43,16 @@ enum AppActivity {
     private static let observers: [NSObjectProtocol] = {
         let center = NotificationCenter.default
         let tokens = [
-            center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { _ in set(true) },
-            center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: nil) { _ in set(false) },
+            center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { _ in
+                AppActivity.set(true)
+            },
+            center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: nil) { _ in
+                AppActivity.set(false)
+            },
         ]
-        DispatchQueue.main.async { set(UIApplication.shared.applicationState == .active) }
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { AppActivity.set(UIApplication.shared.applicationState == .active) }
+        }
         return tokens
     }()
 
