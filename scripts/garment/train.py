@@ -162,6 +162,7 @@ def main():
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--eval_every", type=int, default=1000)
     ap.add_argument("--resume", help="a previous stage's *_last.pt: continue its schedule")
+    ap.add_argument("--init", help="start from these weights (a finished head) with a fresh schedule")
     ap.add_argument("--stages", type=int, default=1, help="(read by the workflow)")
     a = ap.parse_args()
     import math
@@ -176,6 +177,9 @@ def main():
     model = GarmentHead(in_ch, mid=a.mid)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=1e-4)
     done_s, step, best, history = 0.0, 0, -1.0, []
+    if a.init and not a.resume:
+        model.load_state_dict(torch.load(a.init, map_location="cpu", weights_only=False)["state_dict"])
+        print(f"initialised from {a.init}", flush=True)
     if a.resume:
         ck = torch.load(a.resume, map_location="cpu", weights_only=False)
         model.load_state_dict(ck["state_dict"]); opt.load_state_dict(ck["opt"])

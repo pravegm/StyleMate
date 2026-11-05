@@ -24,7 +24,11 @@ on:
   push:
     branches: ['**']
     # Docs-only pushes, and pushes that only retune garment-model training (garment-model.yml), need no app build.
-    paths-ignore: ['docs/**', '**/*.md', 'scripts/garment/train_config.json']
+    # (only the garment files that feed the app's model — model.json, export.py, head.py, backbone.py —
+    # are part of the wardrobe cache key; the rest is training code that runs in garment-model.yml).
+    paths-ignore: ['docs/**', '**/*.md', 'scripts/garment/train_config.json', 'scripts/garment/train.py',
+                   'scripts/garment/train_args.py', 'scripts/garment/extract.py', 'scripts/garment/fashionpedia.py',
+                   '.github/workflows/garment-model.yml']
   pull_request:
     paths-ignore: ['docs/**', '**/*.md']
   workflow_dispatch:

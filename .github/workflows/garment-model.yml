@@ -11,7 +11,9 @@ name: Garment model
 # models job converts it to Core ML (scripts/convert_wardrobe_models.py) from the run pinned
 # in scripts/garment/model.json and keeps the result in the wardrobe-models cache.
 #
-# Runs on a push whose commit message contains [garment-train] (everything) or [garment-head]
+# Runs on a push whose commit message contains [garment-train] (everything), [garment-more] (extract
+# MORE training images with the PCA of train_config.json's pca_run, skipping the first `skip` shuffled
+# images, then train on them plus chunks_run's chunks, starting from init_run's head) or [garment-head]
 # (train only, reusing the chunk artifacts of the run named in scripts/garment/train_config.json),
 # or by hand once this file is on main. Training settings: scripts/garment/train_config.json.
 
@@ -63,6 +65,7 @@ jobs:
 
   extract:
     needs: pca
+    if: always() && (needs.pca.result == 'success' || contains(github.event.head_commit.message, '[garment-more]'))
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
@@ -77,9 +80,22 @@ jobs:
         run: |
           pip install -q torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
           pip install -q $PIP_PKGS
+      - name: Mode
+        run: |
+          C="${{ matrix.chunk }}"
+          if [ "${{ needs.pca.result }}" = success ]; then
+            echo "PCA_RUN=${{ github.run_id }}" >> "$GITHUB_ENV"; echo "SKIP=0" >> "$GITHUB_ENV"
+          else
+            # [garment-more]: only new Fashionpedia training chunks; val and COCO come from chunks_run.
+            echo "PCA_RUN=$(python3 scripts/garment/train_args.py pca_run)" >> "$GITHUB_ENV"
+            echo "SKIP=$(python3 scripts/garment/train_args.py skip)" >> "$GITHUB_ENV"
+            if [ "$C" = val ] || [ "${C#coco}" != "$C" ]; then echo "NOTHING=1" >> "$GITHUB_ENV"; fi
+          fi
       - uses: actions/download-artifact@v4
-        with: { name: garment-pca }
+        if: env.NOTHING != '1'
+        with: { name: garment-pca, run-id: '${{ env.PCA_RUN }}', github-token: '${{ github.token }}' }
       - name: Download the data
+        if: env.NOTHING != '1'
         run: |
           sudo mkdir -p /mnt/fp /mnt/out && sudo chown $USER /mnt/fp /mnt/out
           case "${{ matrix.chunk }}" in
@@ -98,6 +114,7 @@ jobs:
           esac
           df -h /mnt
       - name: Extract
+        if: env.NOTHING != '1'
         run: |
           C="${{ matrix.chunk }}"
           if [ "$C" = val ]; then
@@ -108,11 +125,12 @@ jobs:
               --prefix train2017/ --chunk ${C#coco} --chunks 2 --max $COCO_IMAGES --pca pca.npz --out /mnt/out/coco_${C#coco}
           else
             python -I scripts/garment/extract.py extract --ann /mnt/fp/ann.json --zip /mnt/fp/img.zip --prefix train/ \
-              --chunk ${{ matrix.chunk }} --chunks $CHUNKS --max $MAX_IMAGES --closeups 0.5 --pca pca.npz \
+              --chunk ${{ matrix.chunk }} --chunks $CHUNKS --skip $SKIP --max $MAX_IMAGES --closeups 0.5 --pca pca.npz \
               --out /mnt/out/train_${{ matrix.chunk }}
           fi
           du -sh /mnt/out/*
       - uses: actions/upload-artifact@v4
+        if: env.NOTHING != '1'
         with:
           name: garment-chunk-${{ matrix.chunk }}
           path: /mnt/out
@@ -140,9 +158,19 @@ jobs:
           if [ "${{ needs.extract.result }}" = success ]; then echo "run=${{ github.run_id }}" >> "$GITHUB_OUTPUT"
           else echo "run=$(python3 scripts/garment/train_args.py chunks_run)" >> "$GITHUB_OUTPUT"; fi
           echo "stages=$(python3 scripts/garment/train_args.py stages)" >> "$GITHUB_OUTPUT"
-          sudo mkdir -p /mnt/chunks && sudo chown $USER /mnt/chunks
+          # The earlier extraction's chunks too ([garment-more]: this run's new chunks + chunks_run's).
+          if [ "${{ needs.extract.result }}" = success ] && [ "$(python3 scripts/garment/train_args.py pca_run)" != 0 ] \
+             && ${{ contains(github.event.head_commit.message, '[garment-more]') }}; then
+            echo "extra=$(python3 scripts/garment/train_args.py chunks_run)" >> "$GITHUB_OUTPUT"
+          else
+            echo "extra=$(python3 scripts/garment/train_args.py extra_chunks_run)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "init=$(python3 scripts/garment/train_args.py init_run)" >> "$GITHUB_OUTPUT"
+          P=$(python3 scripts/garment/train_args.py pca_run); [ "$P" = 0 ] && P=$(grep -o 'run=[0-9]*' "$GITHUB_OUTPUT" | head -1 | cut -d= -f2)
+          echo "pca=$P" >> "$GITHUB_OUTPUT"
+          sudo mkdir -p /mnt/chunks /mnt/chunks2 /mnt/init && sudo chown $USER /mnt/chunks /mnt/chunks2 /mnt/init
       - uses: actions/download-artifact@v4
-        with: { name: garment-pca, run-id: '${{ steps.src.outputs.run }}', github-token: '${{ github.token }}' }
+        with: { name: garment-pca, run-id: '${{ steps.src.outputs.pca }}', github-token: '${{ github.token }}' }
       - name: Download chunks
         uses: actions/download-artifact@v4
         with:
@@ -151,13 +179,31 @@ jobs:
           merge-multiple: true
           run-id: ${{ steps.src.outputs.run }}
           github-token: ${{ github.token }}
+      - name: Download the earlier chunks
+        if: steps.src.outputs.extra != '0'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: garment-chunk-*
+          path: /mnt/chunks2
+          merge-multiple: true
+          run-id: ${{ steps.src.outputs.extra }}
+          github-token: ${{ github.token }}
+      - name: Starting weights
+        if: steps.src.outputs.init != '0'
+        uses: actions/download-artifact@v4
+        with:
+          name: garment-head
+          path: /mnt/init
+          run-id: ${{ steps.src.outputs.init }}
+          github-token: ${{ github.token }}
       - name: Train (stage 1)
         run: |
+          INIT=""; [ -f /mnt/init/garment_head.pt ] && INIT="--init /mnt/init/garment_head.pt"
           du -sh /mnt/chunks; ls /mnt/chunks
           mkdir -p out
           ARGS=$(python3 scripts/garment/train_args.py)
           echo "train args: $ARGS"
-          python -I scripts/garment/train.py --train '/mnt/chunks/train_*' '/mnt/chunks/coco_*' --val '/mnt/chunks/val_*' --pca pca.npz --out out/garment_head.pt $ARGS 
+          python -I scripts/garment/train.py --train '/mnt/chunks/train_*' '/mnt/chunks/coco_*' '/mnt/chunks2/train_*' '/mnt/chunks2/coco_*' --val '/mnt/chunks/val_*' '/mnt/chunks2/val_*' --pca pca.npz --out out/garment_head.pt $ARGS $INIT
           cp pca.npz out/ && echo "${{ steps.src.outputs.run }}" > out/chunks_run.txt
           sha256sum out/garment_head.pt | tee out/garment_head.sha256
       - uses: actions/upload-artifact@v4
@@ -193,9 +239,19 @@ jobs:
           if [ "${{ needs.extract.result }}" = success ]; then echo "run=${{ github.run_id }}" >> "$GITHUB_OUTPUT"
           else echo "run=$(python3 scripts/garment/train_args.py chunks_run)" >> "$GITHUB_OUTPUT"; fi
           echo "stages=$(python3 scripts/garment/train_args.py stages)" >> "$GITHUB_OUTPUT"
-          sudo mkdir -p /mnt/chunks && sudo chown $USER /mnt/chunks
+          # The earlier extraction's chunks too ([garment-more]: this run's new chunks + chunks_run's).
+          if [ "${{ needs.extract.result }}" = success ] && [ "$(python3 scripts/garment/train_args.py pca_run)" != 0 ] \
+             && ${{ contains(github.event.head_commit.message, '[garment-more]') }}; then
+            echo "extra=$(python3 scripts/garment/train_args.py chunks_run)" >> "$GITHUB_OUTPUT"
+          else
+            echo "extra=$(python3 scripts/garment/train_args.py extra_chunks_run)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "init=$(python3 scripts/garment/train_args.py init_run)" >> "$GITHUB_OUTPUT"
+          P=$(python3 scripts/garment/train_args.py pca_run); [ "$P" = 0 ] && P=$(grep -o 'run=[0-9]*' "$GITHUB_OUTPUT" | head -1 | cut -d= -f2)
+          echo "pca=$P" >> "$GITHUB_OUTPUT"
+          sudo mkdir -p /mnt/chunks /mnt/chunks2 /mnt/init && sudo chown $USER /mnt/chunks /mnt/chunks2 /mnt/init
       - uses: actions/download-artifact@v4
-        with: { name: garment-pca, run-id: '${{ steps.src.outputs.run }}', github-token: '${{ github.token }}' }
+        with: { name: garment-pca, run-id: '${{ steps.src.outputs.pca }}', github-token: '${{ github.token }}' }
       - name: Download chunks
         uses: actions/download-artifact@v4
         with:
@@ -203,6 +259,15 @@ jobs:
           path: /mnt/chunks
           merge-multiple: true
           run-id: ${{ steps.src.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Download the earlier chunks
+        if: steps.src.outputs.extra != '0'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: garment-chunk-*
+          path: /mnt/chunks2
+          merge-multiple: true
+          run-id: ${{ steps.src.outputs.extra }}
           github-token: ${{ github.token }}
       - name: Stage 1 result
         uses: actions/download-artifact@v4
@@ -215,7 +280,7 @@ jobs:
           mkdir -p out
           ARGS=$(python3 scripts/garment/train_args.py)
           echo "train args: $ARGS"
-          python -I scripts/garment/train.py --train '/mnt/chunks/train_*' '/mnt/chunks/coco_*' --val '/mnt/chunks/val_*' --pca pca.npz --out out/garment_head.pt $ARGS --resume out/garment_head_last.pt
+          python -I scripts/garment/train.py --train '/mnt/chunks/train_*' '/mnt/chunks/coco_*' '/mnt/chunks2/train_*' '/mnt/chunks2/coco_*' --val '/mnt/chunks/val_*' '/mnt/chunks2/val_*' --pca pca.npz --out out/garment_head.pt $ARGS --resume out/garment_head_last.pt
           cp pca.npz out/ && echo "${{ steps.src.outputs.run }}" > out/chunks_run.txt
           sha256sum out/garment_head.pt | tee out/garment_head.sha256
       - uses: actions/upload-artifact@v4

@@ -9,8 +9,8 @@ c = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tra
 t = c["train"]
 if len(sys.argv) > 1 and sys.argv[1] == "stages":
     print(t.get("stages", 1))
-elif len(sys.argv) > 1 and sys.argv[1] == "chunks_run":
-    print(c["chunks_run"])
+elif len(sys.argv) > 1 and sys.argv[1] in ("chunks_run", "extra_chunks_run", "init_run", "skip", "pca_run"):
+    print(c.get(sys.argv[1], 0))
 else:
     args = [f"--{k} {v}" for k, v in t.items()]
     args.append(f"--budget_hours {t['hours'] * t.get('stages', 1)}")

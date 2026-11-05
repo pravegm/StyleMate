@@ -29,7 +29,7 @@ import backbone as bb          # noqa: E402
 import fashionpedia as fp      # noqa: E402
 
 
-def image_ids(ann, chunk, chunks, max_images, seed=0, dataset="fashionpedia"):
+def image_ids(ann, chunk, chunks, max_images, seed=0, dataset="fashionpedia", skip=0):
     if dataset == "coco":
         images, by = fp.coco_person_images(ann)
         ids = sorted(by)
@@ -37,6 +37,7 @@ def image_ids(ann, chunk, chunks, max_images, seed=0, dataset="fashionpedia"):
         images, by = fp.load_annotations(ann)
         ids = sorted(i for i in by if any(a["category_id"] in fp.GARMENTS for a in by[i]))
     random.Random(seed).shuffle(ids)
+    ids = ids[skip:]                      # --skip: the images an earlier extraction already used
     if max_images:
         ids = ids[:max_images]
     return images, by, ids[chunk::chunks]
@@ -104,7 +105,7 @@ def project(outs, pca):
 
 def extract(a):
     torch.set_num_threads(os.cpu_count() or 4)
-    images, by, ids = image_ids(a.ann, a.chunk, a.chunks, a.max, dataset=a.dataset)
+    images, by, ids = image_ids(a.ann, a.chunk, a.chunks, a.max, dataset=a.dataset, skip=a.skip)
     print(f"chunk {a.chunk}/{a.chunks}: {len(ids)} images", flush=True)
     z = zipfile.ZipFile(a.zip)
     pca = dict(np.load(a.pca))
@@ -172,6 +173,7 @@ if __name__ == "__main__":
     ap.add_argument("--chunk", type=int, default=0)
     ap.add_argument("--chunks", type=int, default=1)
     ap.add_argument("--max", type=int, default=0)
+    ap.add_argument("--skip", type=int, default=0, help="skip this many (shuffled) images first")
     ap.add_argument("--closeups", type=float, default=0.5)
     ap.add_argument("--pca")
     ap.add_argument("--dataset", choices=["fashionpedia", "coco"], default="fashionpedia")
