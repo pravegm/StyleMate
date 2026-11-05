@@ -21,7 +21,7 @@ enum TryOnGate {
     static var minVisible: Float = 0.30
     static var maxChromaShift: Float = 12
     static var maxLightShift: Float = 30
-    static var maxFilledShare: Float = 0.12
+    static var maxFilledShare: Float = 0.09
     static var maxFilledShareHarmonized: Float = 0.35
 
     struct Piece: Codable {

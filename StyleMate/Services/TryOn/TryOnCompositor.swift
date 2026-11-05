@@ -359,8 +359,16 @@ enum TryOnCompositor {
                         let i = y * fine.w + x
                         let w = fine.wt[i]
                         guard w < 1 else { continue }
-                        let j = min(coarse.h - 1, y / 2) * coarse.w + min(coarse.w - 1, x / 2)
-                        for k in 0..<3 { fine.c[i * 3 + k] = fine.c[i * 3 + k] * w + coarse.c[j * 3 + k] * (1 - w) }
+                        // Bilinear from the coarser level (nearest left 2^n-pixel blocks, CI sheets Nov 2026).
+                        let fx = max(0, min(Float(coarse.w - 1), (Float(x) - 0.5) / 2))
+                        let fy = max(0, min(Float(coarse.h - 1), (Float(y) - 0.5) / 2))
+                        let x0 = Int(fx), y0 = Int(fy), x1 = min(coarse.w - 1, x0 + 1), y1 = min(coarse.h - 1, y0 + 1)
+                        let tx = fx - Float(x0), ty = fy - Float(y0)
+                        for k in 0..<3 {
+                            let a = coarse.c[(y0 * coarse.w + x0) * 3 + k] * (1 - tx) + coarse.c[(y0 * coarse.w + x1) * 3 + k] * tx
+                            let b = coarse.c[(y1 * coarse.w + x0) * 3 + k] * (1 - tx) + coarse.c[(y1 * coarse.w + x1) * 3 + k] * tx
+                            fine.c[i * 3 + k] = fine.c[i * 3 + k] * w + (a * (1 - ty) + b * ty) * (1 - w)
+                        }
                         fine.wt[i] = 1
                     }
                 }
