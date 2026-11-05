@@ -26,7 +26,7 @@ struct AddItemFlowView: View {
     /// The picked photos downsampled to ≤ 2048 px (a 24–48 MP photo is 96–190 MB decoded;
     /// extraction never needs more). Everything downstream uses these, not `images`.
     @State private var workingImages: [UIImage] = []
-    /// True while a "which one is you?" pick is being isolated (Vision + AdaFace, off-main).
+    /// True while a "which one is you?" pick is being isolated (Vision + face embedder, off-main).
     @State private var isPicking = false
 
     var body: some View {
@@ -106,7 +106,7 @@ struct AddItemFlowView: View {
         }
     }
 
-    /// Person isolation (Vision instance mask) and learning the picked face (AdaFace) run
+    /// Person isolation (Vision instance mask) and learning the picked face (face embedder) run
     /// off the main thread; taps while one is in flight are ignored.
     private func pick(_ person: DetectedPerson?, in ambiguous: Ambiguous) {
         guard !isPicking, ambiguousQueue.first?.id == ambiguous.id else { return }

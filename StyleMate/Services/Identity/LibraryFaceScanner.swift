@@ -4,7 +4,7 @@ import Photos
 /// One face found in the library during "Find yourself".
 struct ScannedFace {
     let assetId: String
-    /// L2-normalized AdaFace embedding (from the ~640 px thumbnail).
+    /// L2-normalized face embedding (from the ~640 px thumbnail).
     let embedding: [Float]
     /// 0…1 (size, detector score, pose); see `FaceQuality.libraryScore`.
     let quality: Float
@@ -18,7 +18,7 @@ struct ScannedFace {
     let fromSelfieAlbum: Bool
 }
 
-/// Face detection + embedding for one image, through the same SCRFD + AdaFace path as the scan.
+/// Face detection + embedding for one image, through the same detector + embedder as the scan.
 /// Call on IdentityWorker.
 enum FaceSampleExtractor {
     static let maxFacesPerPhoto = 6
@@ -49,7 +49,7 @@ enum FaceSampleExtractor {
     /// from its own keypoints in the full image, so we get all of them, not just the one that
     /// best matches the gallery, without a second detector pass per face.
     static func faces(in image: CGImage) -> [Extracted] {
-        let detected = SCRFDDetector.shared.detect(in: image, padRetry: false)   // library photo: no padded retry
+        let detected = FaceDetector.shared.detect(in: image, padRetry: false)   // library photo: no padded retry
         guard !detected.isEmpty else { return [] }
         let size = CGSize(width: image.width, height: image.height)
         let usable = detected
@@ -64,7 +64,7 @@ enum FaceSampleExtractor {
         for r in FaceMatchingService.shared.embed(faces: Array(usable), in: image) {
             let face = r.face
             // Overlapping detections of one face: keep one copy.
-            if out.contains(where: { FaceMath.dot($0.embedding, r.embedding) > 0.85 }) { continue }
+            if out.contains(where: { FaceMath.dot($0.embedding, r.embedding) > FaceModelProfile.active.sameFaceInPhoto }) { continue }
             let shortSide = Float(min(face.boxPixels.width, face.boxPixels.height))
             out.append(Extracted(
                 box: normalizedBox(face.boxPixels, in: size),
@@ -91,7 +91,7 @@ enum FaceSampleExtractor {
               let r = FaceMatchingService.shared.embedFaces(in: crop, padRetry: false)
                 .max(by: { FaceMath.dot($0.embedding, expected) < FaceMath.dot($1.embedding, expected) })
         else { return nil }
-        return FaceMath.dot(r.embedding, expected) >= 0.45 ? r.embedding : nil
+        return FaceMath.dot(r.embedding, expected) >= FaceModelProfile.active.refineAgreement ? r.embedding : nil
     }
 
     /// A square of `factor` × the face's longer side, centred on it, clamped to the image.

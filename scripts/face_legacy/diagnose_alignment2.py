@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# RESEARCH ONLY: not used by any build, never ship its output (see scripts/face_legacy/README.md).
 """
 How much 5-point error does AdaFace tolerate? Decides whether we can salvage
 Apple Vision's landmarks (if it tolerates a few px) or must bundle InsightFace's

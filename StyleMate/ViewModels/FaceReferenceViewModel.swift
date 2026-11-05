@@ -14,7 +14,7 @@ struct FaceCandidate: Identifiable {
 }
 
 /// Drives "Find yourself": an on-device pass over the most recent library photos that finds
-/// every face (SCRFD on ~640 px thumbnails, AdaFace embeddings), groups faces of the same person,
+/// every face (YuNet on ~640 px thumbnails, SFace embeddings), groups faces of the same person,
 /// ranks the groups against the selfie, and asks "Is this you?" about the best one — then
 /// "Also you?" about faces that match what was confirmed. Confirmed faces are re-embedded at the
 /// scan's ~1600 px resolution and added to the reference gallery. Nothing leaves the phone.
@@ -56,7 +56,7 @@ final class FaceReferenceViewModel: ObservableObject {
     static let gridLimit = 48
     static let alsoYouLimit = 36
     /// A face this close to the selfie shows up in the live "found you" strip.
-    static let likelyYouThreshold: Float = 0.35
+    static let likelyYouThreshold: Float = FaceModelProfile.active.likelyYou
     /// Stop early once the selfie has clearly found plenty of you.
     static let earlyStopMinPhotos = 400
     static let earlyStopStrongFaces = 60

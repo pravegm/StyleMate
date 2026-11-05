@@ -2,13 +2,13 @@ import CoreGraphics
 import Foundation
 import simd
 
-/// Face quality signals from the SCRFD detection: box size, detector score and head pose
+/// Face quality signals from the face detection: box size, detector score and head pose
 /// estimated from the 5 landmarks (img-left eye, img-right eye, nose, img-left mouth, img-right mouth).
 /// Pure functions, unit-tested.
 enum FaceQuality {
     // Library faces (measured on the ~640 px thumbnails used for the "Find yourself" pass).
     static let minLibraryFacePixels: Float = 24
-    static let minLibraryDetectorScore: Float = 0.6
+    static let minLibraryDetectorScore: Float = FaceModelProfile.active.minLibraryDetectorScore
     /// Past ~40° of yaw the 5-point alignment degrades and embeddings stop being reliable.
     static let maxLibraryYaw: Float = 0.9
 
@@ -128,20 +128,20 @@ struct SelfieFrameMeasurements: Equatable {
     var eyeLuma: Float?
     var cheekLuma: Float?
     var yaw: Float
-    /// AdaFace similarity to the accepted front frame (turn frames only).
+    /// Face-embedding similarity to the accepted front frame (turn frames only).
     var similarityToFront: Float?
 }
 
 /// Decides whether a captured frame is a good identity reference.
 enum SelfieFrameAssessor {
     static let minWidthFraction: Float = 0.22
-    static let minDetectorScore: Float = 0.65
+    static let minDetectorScore: Float = FaceModelProfile.active.minSelfieDetectorScore
     static let darkLuma: Float = 55
     static let brightLuma: Float = 225
     static let maxFrontYaw: Float = 0.45
     static let maxTurnYaw: Float = 1.0
     /// Same session, same light, slight turn: the user's own frames score far above this.
-    static let minSimilarityToFront: Float = 0.30
+    static let minSimilarityToFront: Float = FaceModelProfile.active.selfieTurnMinSimilarity
 
     static func issue(for m: SelfieFrameMeasurements, step: SelfieStep) -> SelfieIssue? {
         if m.faceCount == 0 { return .noFace }

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# RESEARCH ONLY: not used by any build, never ship its output (see scripts/face_legacy/README.md).
 """
 Tests the SELFIE path: a tight crop (face fills frame) goes through pad -> SCRFD
 detect -> map kps back -> warpAligned. Does that embedding match the same face

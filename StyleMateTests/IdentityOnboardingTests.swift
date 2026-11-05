@@ -449,7 +449,7 @@ private func labelsOf(_ c: FaceCluster, in lib: Library) -> Set<String> { Set(c.
 
 // MARK: - Real models
 
-/// "Find yourself" with the real SCRFD + AdaFace models on the CC0 fixtures. These are part of
+/// "Find yourself" with the real face models (YuNet + SFace) on the CC0 fixtures. These are part of
 /// the serialized FaceMatchingTests suite because both drive the shared FaceMatchingService.
 extension FaceMatchingTests {
     private func findYouFixture(_ name: String) throws -> UIImage {
@@ -526,7 +526,7 @@ extension FaceMatchingTests {
     @Test func selfieFrameCheckMeasuresARealFace() throws {
         let photo = try findYouFixture("street_coat_cap.jpg")
         let cg = try #require(photo.cgImage)
-        let face = try #require(SCRFDDetector.shared.detect(in: cg).max { $0.boxPixels.width < $1.boxPixels.width })
+        let face = try #require(FaceDetector.shared.detect(in: cg).max { $0.boxPixels.width < $1.boxPixels.width })
         // A selfie-like crop: the face fills about half the frame.
         let rect = FaceSampleExtractor.paddedSquare(around: face.boxPixels,
                                                     imageSize: CGSize(width: cg.width, height: cg.height), factor: 2.0)

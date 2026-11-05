@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# RESEARCH ONLY: not used by any build, never ship its output (see scripts/face_legacy/README.md).
 """
 End-to-end verification of the Core ML SCRFD detector + a hand-written decoder
 (the exact logic I'll port to Swift). If this reproduces InsightFace-level

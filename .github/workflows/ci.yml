@@ -33,10 +33,8 @@ jobs:
         id: cache
         uses: actions/cache@v4
         with:
-          path: |
-            MobileFaceNet.mlpackage
-            SCRFD10G.mlpackage
-          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          path: StyleMate/FaceModels
+          key: face-models-v2-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_face_models.py') }}
       - name: Build face models
         if: steps.cache.outputs.cache-hit != 'true'
         run: bash scripts/build_face_models.sh
@@ -51,9 +49,9 @@ jobs:
         run: bash scripts/build_wardrobe_models.sh
       - name: Check the models
         run: |
-          du -sh MobileFaceNet.mlpackage SCRFD10G.mlpackage StyleMate/ML/*
-          test -f MobileFaceNet.mlpackage/Manifest.json
-          test -f SCRFD10G.mlpackage/Manifest.json
+          du -sh StyleMate/FaceModels/* StyleMate/ML/*
+          test -f StyleMate/FaceModels/FaceDetectYuNet.mlpackage/Manifest.json
+          test -f StyleMate/FaceModels/FaceEmbedSFace.mlpackage/Manifest.json
           test -f StyleMate/ML/GarmentParser.mlpackage/Manifest.json
           test -f StyleMate/ML/GarmentLabeler.mlpackage/Manifest.json
           test -f StyleMate/ML/FashionEncoder.mlpackage/Manifest.json
@@ -90,10 +88,8 @@ jobs:
       - name: Restore face models
         uses: actions/cache/restore@v4
         with:
-          path: |
-            MobileFaceNet.mlpackage
-            SCRFD10G.mlpackage
-          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          path: StyleMate/FaceModels
+          key: face-models-v2-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_face_models.py') }}
           fail-on-cache-miss: true
       - name: Restore wardrobe models
         uses: actions/cache/restore@v4
@@ -160,6 +156,13 @@ jobs:
           du -sh "$APP" "$APP/StudioModels.bundle"
           diff -rq StyleMate/ML/Studio/StudioModels.bundle "$APP/StudioModels.bundle"
 
+      - name: Check the face models in the app (licence gate)
+        # Only commercially usable face weights may ship (docs/MODEL-LICENSING.md): YuNet (MIT) + SFace
+        # (Apache-2.0). The InsightFace / AdaFace models are non-commercial and must never be in the app.
+        run: |
+          APP=$(find "$RUNNER_TEMP/dd/Build/Products" -maxdepth 2 -name StyleMate.app -type d | head -1)
+          bash scripts/check_face_models.sh "$APP"
+
       - name: Unit tests
         run: |
           set -o pipefail
@@ -219,10 +222,8 @@ jobs:
       - name: Restore face models
         uses: actions/cache/restore@v4
         with:
-          path: |
-            MobileFaceNet.mlpackage
-            SCRFD10G.mlpackage
-          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          path: StyleMate/FaceModels
+          key: face-models-v2-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_face_models.py') }}
           fail-on-cache-miss: true
       - name: Restore wardrobe models
         uses: actions/cache/restore@v4
@@ -360,10 +361,8 @@ jobs:
       - name: Restore face models
         uses: actions/cache/restore@v4
         with:
-          path: |
-            MobileFaceNet.mlpackage
-            SCRFD10G.mlpackage
-          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          path: StyleMate/FaceModels
+          key: face-models-v2-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_face_models.py') }}
           fail-on-cache-miss: true
       - name: Restore wardrobe models
         uses: actions/cache/restore@v4
@@ -395,6 +394,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee release-build.log | grep -E "error:|warning: .*StyleMate/|\*\* BUILD" || true
           grep -q "\*\* BUILD SUCCEEDED \*\*" release-build.log
+      - name: Check the face models in the Release app (licence gate)
+        run: |
+          APP=$(find "$RUNNER_TEMP/dd-release/Build/Products" -maxdepth 2 -name StyleMate.app -type d | head -1)
+          bash scripts/check_face_models.sh "$APP"
       - name: Upload log
         if: always()
         uses: actions/upload-artifact@v4
@@ -417,10 +420,8 @@ jobs:
       - name: Restore face models
         uses: actions/cache/restore@v4
         with:
-          path: |
-            MobileFaceNet.mlpackage
-            SCRFD10G.mlpackage
-          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          path: StyleMate/FaceModels
+          key: face-models-v2-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_face_models.py') }}
           fail-on-cache-miss: true
       - name: Restore wardrobe models
         uses: actions/cache/restore@v4
