@@ -38,7 +38,7 @@ enum TryOnRenderer {
             let tile = tileRect(body)
             if let input = tileImage(comp.image, tile: tile), let s64 = tileStrength(strength, body: body, tile: tile),
                let out = await TryOnHarmonizer.shared.harmonize(image: input, strength: s64, prompt: prompt(garments),
-                                                                negativePrompt: negativePrompt, steps: steps,
+                                                                negativePrompt: negativePrompt(garments), steps: steps,
                                                                 guidance: guidance, seed: seed),
                let pasted = paste(out, into: comp, body: body, tile: tile, strength: strength) {
                 final = pasted
@@ -64,8 +64,25 @@ enum TryOnRenderer {
 
     static func prompt(_ garments: [TryOnGarmentSpec]) -> String {
         let worn = garments.filter { $0.role.isWorn }.map { ClosetText.displayProduct($0.product).lowercased() }
-        return "photo of a person wearing " + worn.joined(separator: ", ") +
+        var extra: [String] = []
+        // Say what is bare, or the model repaints an old sleeve / legging where the new piece has none.
+        let uppers = garments.filter { [.top, .onePiece, .outer].contains($0.role) }
+        if !uppers.isEmpty, uppers.allSatisfy({ $0.sleeve == .sleeveless || $0.product.lowercased().contains("tank") }) {
+            extra.append("bare arms, bare shoulders")
+        }
+        if !garments.contains(where: { $0.role == .bottom }), garments.contains(where: { $0.role == .onePiece }) {
+            extra.append("bare legs")
+        }
+        return "photo of a person wearing " + worn.joined(separator: ", ") + (extra.isEmpty ? "" : ", " + extra.joined(separator: ", ")) +
             ", natural skin, realistic fabric, natural light, high quality photo"
+    }
+
+    static func negativePrompt(_ garments: [TryOnGarmentSpec]) -> String {
+        var n = negativePrompt
+        let uppers = garments.filter { [.top, .onePiece, .outer].contains($0.role) }
+        if !uppers.isEmpty, uppers.allSatisfy({ $0.sleeve == .sleeveless }) { n += ", sleeves, jacket, cardigan" }
+        if !garments.contains(where: { $0.role == .bottom }) { n += ", leggings, tights, trousers" }
+        return n
     }
 
     // MARK: - Strength map (photo resolution), tile, paste
@@ -157,12 +174,15 @@ enum TryOnRenderer {
             lowC.append(TryOnPlane(width: W, height: H, v: (0..<n).map { Float(c.image.px[$0 * 4 + ch]) }).blurred(sigma: sigma))
         }
         let wgt = TryOnPlane(width: W, height: H, v: strength.v.map { $0 > 0.02 ? 1 : 0 }).blurred(sigma: sigma)
+        let softCover = TryOnPlane(width: W, height: H, v: c.cover).blurred(sigma: max(1, sigma * 0.5))
         for i in 0..<n {
             let w = min(1, wgt.v[i] * 1.2)
             guard w > 0.001, !c.protected[i], R.px[i * 4 + 3] > 0 else { continue }
-            let garment = c.cover[i] > 0.4
             // Garments take only the diffusion's light (a luminance ratio), never its colour: the item's
-            // own colour and texture stay exactly the composite's.
+            // own colour and texture stay exactly the composite's. The garment weight is the soft (blurred)
+            // coverage, so garment and repainted fill cross-fade instead of meeting at a hard seam.
+            let gw = min(1, max(0, (softCover.v[i] - 0.15) / 0.7))
+            let garment = gw > 0
             var ratio: Float = 1
             if garment {
                 let yr = 0.299 * lowR[0].v[i] + 0.587 * lowR[1].v[i] + 0.114 * lowR[2].v[i] + 4
@@ -171,7 +191,7 @@ enum TryOnRenderer {
             }
             for ch in 0..<3 {
                 let comp = Float(c.image.px[i * 4 + ch])
-                let v: Float = garment ? comp * ratio : Float(R.px[i * 4 + ch])
+                let v: Float = comp * ratio * gw + Float(R.px[i * 4 + ch]) * (1 - gw)
                 final.px[i * 4 + ch] = UInt8(min(255, max(0, comp * (1 - w) + v * w)))
             }
         }
