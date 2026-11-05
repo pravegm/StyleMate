@@ -220,9 +220,7 @@ enum StudioTemplate {
     /// `solid`: a plain garment — sample only fabric of its main colour (an open
     /// coat's cutout also holds a scarf end or the dark strip between its
     /// halves, which the model would otherwise paint on as a print).
-    /// `backdrop`: the canvas grey (1 = white). Light products (a white sneaker,
-    /// white jeans) go on light grey, so the render's product can be told from
-    /// its background (on white, keying ate a white shoe's toe and laces).
+    /// `backdrop`: the canvas grey (1 = white, what every render uses).
     static func render(cutout: CGImage, shape: Shape, solid: Bool = false, side: Int = 512, backdrop: CGFloat = 1) -> CGImage? {
         if let parts = parts(shape) {
             return renderProduct(cutout: cutout, shape: shape, parts: parts, solid: solid, side: side, backdrop: backdrop)
@@ -433,6 +431,40 @@ enum StudioTemplate {
         ctx.addPath(outside); ctx.fillPath()
         ctx.restoreGState()
         return ctx.makeImage()
+    }
+
+    /// Where a product shot's template puts the product, eroded by `inset`
+    /// pixels: a side×side mask (row 0 = top). The simulator's white key may not
+    /// flood into it (it ate a white sneaker's toe and laces), so it must be a
+    /// safe core well inside where the model draws the item.
+    static func core(_ shape: Shape, side: Int, inset: Int = 14) -> [Bool]? {
+        guard let parts = parts(shape), side > 2 * inset else { return nil }
+        let s = CGFloat(side)
+        var px = [UInt8](repeating: 0, count: side * side)
+        guard let ctx = CGContext(data: &px, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)
+        else { return nil }
+        ctx.setFillColor(gray: 1, alpha: 1)
+        for part in parts {
+            let p = CGMutablePath()
+            p.addLines(between: part.points.map { CGPoint(x: $0.0 * s, y: s - $0.1 * s) })
+            p.closeSubpath()
+            ctx.addPath(p)
+        }
+        ctx.fillPath()
+        var mask = px.map { $0 > 127 }
+        // Erode: a pixel stays only if everything within `inset` (a square) is inside.
+        for _ in 0..<inset {
+            var next = mask
+            for y in 0..<side {
+                for x in 0..<side where mask[y * side + x] {
+                    if x == 0 || y == 0 || x == side - 1 || y == side - 1 || !mask[y * side + x - 1] || !mask[y * side + x + 1]
+                        || !mask[(y - 1) * side + x] || !mask[(y + 1) * side + x] { next[y * side + x] = false }
+                }
+            }
+            mask = next
+        }
+        return mask
     }
 
     /// The patch mirror-tiled over the canvas (no seams).

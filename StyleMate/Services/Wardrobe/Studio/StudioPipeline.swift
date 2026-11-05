@@ -190,7 +190,9 @@ enum StudioPipeline {
     /// hard check), or nil when nothing is separable from the background.
     static func evaluate(_ render: CGImage, reference: ColorStats?, embedding: [Float], plan: StudioPlan? = nil,
                          minSimilarity: Float = 0) -> Candidate? {
-        guard let cut = isolateProduct(render, keepPairs: plan.map(isPaired) ?? true) else { return nil }
+        let core = plan.flatMap { p in p.productShot ? p.templateShape.flatMap { StudioTemplate.core($0, side: render.width) } : nil }
+        guard let cut = isolateProduct(render, keepPairs: plan.map(isPaired) ?? true,
+                                       core: render.width == render.height ? core : nil) else { return nil }
         var image = cut.image
         var driftL: Float = 0, driftAB: Float = 0
         if let ref = reference, let own = ColorStats(cut.image) {
@@ -251,11 +253,13 @@ enum StudioPipeline {
     /// The product, without its white background: Vision's foreground instance
     /// mask on device (every instance, so a second object is measured, then the
     /// largest kept), or white-keying where Vision isn't available (simulator).
-    static func isolateProduct(_ render: CGImage, keepPairs: Bool = true)
+    /// `core`: where a product shot's template put the product (w×h, row 0 = top);
+    /// the white key never floods into it.
+    static func isolateProduct(_ render: CGImage, keepPairs: Bool = true, core: [Bool]? = nil)
         -> (image: CGImage, touchesFrame: Bool, coverage: Float, secondObject: Float)? {
         let w = render.width, h = render.height
         guard var px = GarmentCutout.rgbaPixels(render) else { return nil }
-        var alpha = visionMask(render) ?? whiteKeyMask(px, w: w, h: h)
+        var alpha = visionMask(render) ?? whiteKeyMask(px, w: w, h: h, core: core?.count == w * h ? core : nil)
         let second = keepLargestComponent(&alpha, w: w, h: h, keepPairs: keepPairs)
         var any = false, touches = false, opaque = 0
         for y in 0..<h {
@@ -333,13 +337,14 @@ enum StudioPipeline {
 
     /// Background = pixels connected to the image border that are near-white,
     /// or, on a grey backdrop (light products), close to the border's own grey.
-    static func whiteKeyMask(_ px: [UInt8], w: Int, h: Int) -> [UInt8] {
+    static func whiteKeyMask(_ px: [UInt8], w: Int, h: Int, core: [Bool]? = nil) -> [UInt8] {
         var border: [[Int]] = [[], [], []]
         for x in stride(from: 0, to: w, by: 4) { for i in [x, (h - 1) * w + x] { for c in 0..<3 { border[c].append(Int(px[i * 4 + c])) } } }
         for y in stride(from: 0, to: h, by: 4) { for i in [y * w, y * w + w - 1] { for c in 0..<3 { border[c].append(Int(px[i * 4 + c])) } } }
         let key = border.map { $0.sorted()[$0.count / 2] }
         let white = key.allSatisfy { $0 > 232 }
         func isBG(_ i: Int) -> Bool {
+            if let core, core[i] { return false }
             if white { return px[i * 4] > 232 && px[i * 4 + 1] > 232 && px[i * 4 + 2] > 232 }
             return abs(Int(px[i * 4]) - key[0]) < 22 && abs(Int(px[i * 4 + 1]) - key[1]) < 22 && abs(Int(px[i * 4 + 2]) - key[2]) < 22
         }

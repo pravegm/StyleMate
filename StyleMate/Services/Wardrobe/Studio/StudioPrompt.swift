@@ -36,6 +36,8 @@ struct StudioPlan {
     var templateStrength: Float = 0.65
     /// Drawn from a shoe / hat / trousers product template (gated on colour drift too).
     var productShot: Bool = false
+    /// The template's shape (product shots: where the product is expected).
+    var templateShape: StudioTemplate.Shape? = nil
 
     static let steps = 20
     static let guidance: Float = 7
@@ -88,10 +90,6 @@ struct StudioPlan {
     /// Kinds drawn from a product template when one fits (instead of refined
     /// from the worn cutout, which mostly reproduced the street photo).
     static let productShotKinds: Set<GarmentKind> = [.lower, .footwear, .headwear]
-    /// Products lighter than this (mean CIELAB L of the cutout) are drawn on
-    /// `lightBackdrop` grey and asked for a light grey background.
-    static let lightProductL: Float = 72
-    static let lightBackdrop: CGFloat = 0.80
 
     static func make(product: String, category: Category, colors: [String], pattern: Pattern,
                      material: String?, sleeve: SleeveLength?, neckline: Neckline?, details: String?,
@@ -109,12 +107,12 @@ struct StudioPlan {
         let label = "\(category.rawValue)|\(product)", solid = pattern == .solid
         let layered: Set<GarmentKind> = [.innerTop, .outerLayer, .onePiece]
         // Template-guided: start from a product silhouette in the item's own fabric.
-        var template: CGImage?, strength: Float = 0.65, lightProduct = false
+        var template: CGImage?, strength: Float = 0.65, templateShape: StudioTemplate.Shape?
         if useTemplates, let cutout, layered.contains(kind) || truncated || productShotKinds.contains(kind),
            let shape = StudioTemplate.shape(product: product, kind: kind, sleeve: sleeve, fit: itemFit) {
-            if productShotKinds.contains(kind) { lightProduct = (ColorStats(cutout)?.mean.0 ?? 50) > lightProductL }
-            template = StudioTemplate.render(cutout: cutout, shape: shape, solid: solid, backdrop: lightProduct ? lightBackdrop : 1)
+            template = StudioTemplate.render(cutout: cutout, shape: shape, solid: solid)
             strength = StudioTemplate.strength(shape)
+            templateShape = shape
         }
         if layered.contains(kind) || truncated || template != nil {
             let productShot = template != nil && productShotKinds.contains(kind)
@@ -135,10 +133,10 @@ struct StudioPlan {
             }
             return StudioPlan(
                 mode: .generate,
-                prompt: fit(prompt + ", centered, \(lightProduct && template != nil ? "plain light grey background" : "plain white background"), studio lighting"),
+                prompt: fit(prompt + ", centered, plain white background, studio lighting"),
                 negativePrompt: negative(for: kind, productShot: productShot),
                 candidates: 3, productLabel: label, isSolid: solid, template: template, templateStrength: strength,
-                productShot: productShot)
+                productShot: productShot, templateShape: template == nil ? nil : templateShape)
         }
         let desc = describe(product: product, colors: colors, pattern: pattern, material: material,
                             sleeve: sleeve, neckline: neckline, details: details)
