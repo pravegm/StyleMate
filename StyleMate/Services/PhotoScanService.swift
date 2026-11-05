@@ -297,10 +297,11 @@ class PhotoScanService: ObservableObject {
     }
 
     /// Changes the cached progress; written by the next `flushProgress()`.
+    /// Mutates the cached copy in place: a local copy would duplicate the whole scanned-id set
+    /// on every photo (O(n²) over a scan). Only a checkpoint still being written shares storage.
     private func updateProgress(forUser userId: String, _ change: (inout ScanProgress) -> Void) {
-        var progress = loadProgress(forUser: userId)
-        change(&progress)
-        progressCache[userId] = progress
+        if progressCache[userId] == nil { _ = loadProgress(forUser: userId) }
+        change(&progressCache[userId, default: .fresh()])
         dirtyProgressUsers.insert(userId)
     }
 
@@ -419,10 +420,15 @@ class PhotoScanService: ObservableObject {
             photosExamined = 0
         }
 
-        print("[StyleMate] Auto-scan starting for user: \(userId)\(quiet ? " (automatic)" : "")")
+        dlog("[StyleMate] Auto-scan starting for user: \(userId)\(quiet ? " (automatic)" : "")")
 
         currentPhase = "Loading face reference..."
-        let hasFaceRef = FaceMatchingService.shared.loadSelfieReference(forUser: userId)
+        // Off the main actor: after a face-model change this rebuilds the gallery from the
+        // selfie (several Core ML passes), which froze the UI.
+        let hasFaceRef = await Task.detached(priority: .userInitiated) {
+            FaceMatchingService.shared.loadSelfieReference(forUser: userId)
+        }.value
+        guard isCurrent(generation) else { return }
         guard hasFaceRef else {
             print("[StyleMate] Auto-scan: No selfie reference loaded -- scan requires a selfie for accurate results")
             isRunning = false
@@ -491,7 +497,7 @@ class PhotoScanService: ObservableObject {
         var eta = ScanETA()
         updateTimeRemaining(eta, unitsLeft: units.count)
 
-        let assetsByID = Dictionary(library.assets.map { ($0.localIdentifier, $0) }, uniquingKeysWith: { a, _ in a })
+        let assetsByID = library.byID
 
         // First run: the best ~40 outfit photos of the last 90 days go first.
         var firstLookCount = 0
@@ -504,15 +510,28 @@ class PhotoScanService: ObservableObject {
             currentPhase = "Scanning your photos..."
         }
 
+        // A sliding window: the next 48 units are cached ahead, and units already scanned are
+        // released (as `FaceReferenceViewModel` does) — before, every window stayed cached
+        // until the run ended, so a long scan held thousands of 640 px thumbnails.
         let cacheWindow = 48
-        var cachedUpTo = 0
+        var cachedFrom = 0, cachedUpTo = 0
+        func assets(_ range: Range<Int>) -> [PHAsset] {
+            units[range].flatMap { $0 }.compactMap { assetsByID[$0.id] }
+        }
         func cacheThumbnails(from index: Int) {
-            guard index >= cachedUpTo, index < units.count else { return }
             let upper = min(units.count, index + cacheWindow)
-            let assets = units[index..<upper].flatMap { $0 }.compactMap { assetsByID[$0.id] }
-            thumbnailManager.startCachingImages(for: assets, targetSize: Self.thumbnailSize,
-                                                contentMode: .aspectFit, options: Self.thumbnailOptions)
-            cachedUpTo = upper
+            if upper > cachedUpTo {
+                let start = max(index, cachedUpTo)
+                thumbnailManager.startCachingImages(for: assets(start..<upper), targetSize: Self.thumbnailSize,
+                                                    contentMode: .aspectFit, options: Self.thumbnailOptions)
+                cachedUpTo = upper
+            }
+            let finished = min(index, cachedUpTo)
+            if finished > cachedFrom {
+                thumbnailManager.stopCachingImages(for: assets(cachedFrom..<finished), targetSize: Self.thumbnailSize,
+                                                   contentMode: .aspectFit, options: Self.thumbnailOptions)
+                cachedFrom = finished
+            }
         }
         cacheThumbnails(from: 0)
 
@@ -539,8 +558,13 @@ class PhotoScanService: ObservableObject {
                 nextToPrepare += 1
             }
 
-            await consume(prepared, userId: userId, userGender: userGender, wardrobeViewModel: wardrobeViewModel)
+            let renderFailed = await consume(prepared, userId: userId, userGender: userGender,
+                                             wardrobeViewModel: wardrobeViewModel)
             guard isCurrent(generation) else { queue.forEach { $0.cancel() }; return }
+            // A cutout render came back empty (e.g. GPU work refused in the background): the
+            // photo is retried on a later scan instead of being marked done with nothing found.
+            let doneIDs = renderFailed ? [] : prepared.doneIDs
+            let failedIDs = renderFailed ? prepared.memberIDs : prepared.failedIDs
             consumed += 1
             photosExamined += prepared.memberIDs.count
             if firstLookCount > 0, consumed == firstLookCount {
@@ -549,11 +573,11 @@ class PhotoScanService: ObservableObject {
             }
 
             updateProgress(forUser: userId) { p in
-                p.markDone(prepared.doneIDs)
-                for id in prepared.failedIDs {
-                    if p.recordLoadFailure(id) { print("[StyleMate] Auto-scan: giving up on \(id) after repeated load failures") }
+                p.markDone(doneIDs)
+                for id in failedIDs {
+                    if p.recordLoadFailure(id) { dlog("[StyleMate] Auto-scan: giving up on \(id) after repeated load failures") }
                 }
-                p.recordPhotosDone(prepared.doneIDs.count)
+                p.recordPhotosDone(doneIDs.count)
             }
             scannedCount = min(totalPhotosToScan, scannedCount + prepared.memberIDs.count)
             throttleUIUpdate(scanned: scannedCount, total: totalPhotosToScan)
@@ -676,15 +700,20 @@ class PhotoScanService: ObservableObject {
                 continue
             }
             await identityGate.acquire()
+            let failuresBefore = CoreImageContext.failures
             let identity: ScanIdentity = await Task.detached(priority: .utility) {
                 autoreleasepool {
                     FaceMatchingService.shared.resolveIdentityForScan(in: cg, fullImage: full, userId: userId)
                 }
             }.value
+            let renderFailed = CoreImageContext.failures != failuresBefore
             await identityGate.release()
 
             switch identity {
             case .skip:
+                // Couldn't isolate the user because the render failed (not because it isn't
+                // them): retry this frame later.
+                if renderFailed { loadFailed.append(id) }
                 continue
             case .analyze(let image):
                 result.outcome = .analyze(image)
@@ -705,23 +734,21 @@ class PhotoScanService: ObservableObject {
         return result
     }
 
+    /// Returns true when a cutout render failed on this photo (it should be retried).
     private func consume(_ prepared: PreparedUnit, userId: String, userGender: String?,
-                         wardrobeViewModel: WardrobeViewModel) async {
+                         wardrobeViewModel: WardrobeViewModel) async -> Bool {
         switch prepared.outcome {
         case .skip:
-            break
+            return false
         case .review(let review):
-            updateProgress(forUser: userId) { p in
-                var pending = p.pendingReviews ?? []
-                if !pending.contains(where: { $0.assetId == review.assetId }) {
-                    pending.append(review)
-                    p.pendingReviews = pending
-                }
-            }
+            updateProgress(forUser: userId) { $0.queueReview(review) }
             pendingReviewCount = loadProgress(forUser: userId).pendingReviews?.count ?? 0
+            return false
         case .analyze(let image):
+            let failuresBefore = CoreImageContext.failures
             let outcome = await extractItems(from: image, userId: userId, userGender: userGender,
                                              wardrobeViewModel: wardrobeViewModel)
+            let renderFailed = CoreImageContext.failures != failuresBefore
             if !outcome.added.isEmpty {
                 updateProgress(forUser: userId) { p in outcome.added.forEach { p.recordAdded($0) } }
             }
@@ -732,6 +759,7 @@ class PhotoScanService: ObservableObject {
                                                    itemIDs: outcome.added + outcome.matched,
                                                    wardrobe: wardrobeViewModel.items, userId: userId)
             }
+            return renderFailed
         }
     }
 
@@ -1039,7 +1067,7 @@ class PhotoScanService: ObservableObject {
         fresh.coverageStart = old.coverageStart
         fresh.totalItemsFound = old.totalItemsFound
         saveProgress(fresh, forUser: userId)
-        print("[StyleMate] Scan progress reset for user \(userId)")
+        dlog("[StyleMate] Scan progress reset for user \(userId)")
     }
 
     /// Deletes the user's scan progress entirely (profile deletion).
@@ -1133,7 +1161,9 @@ class PhotoScanService: ObservableObject {
             manager.requestImage(for: asset, targetSize: CGSize(width: 320, height: 320),
                                  contentMode: .aspectFit, options: options) { image, _ in
                 guard gate.claim() else { return }
-                continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true).cgImage })
+                Self.offMain {
+                    continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true).cgImage })
+                }
             }
         }
     }
@@ -1191,6 +1221,8 @@ class PhotoScanService: ObservableObject {
     private struct FetchedLibrary: @unchecked Sendable {
         let assets: [PHAsset]
         let infos: [ScanAssetInfo]
+        /// Built with the fetch, off the main actor (it covers the whole range).
+        let byID: [String: PHAsset]
     }
 
     private nonisolated static func fetchOptions(start: Date?, end: Date?) -> PHFetchOptions {
@@ -1227,7 +1259,8 @@ class PhotoScanService: ObservableObject {
                           isScreenshot: a.mediaSubtypes.contains(.photoScreenshot),
                           burstIdentifier: a.burstIdentifier)
         }
-        return FetchedLibrary(assets: assets, infos: infos)
+        let byID = Dictionary(assets.map { ($0.localIdentifier, $0) }, uniquingKeysWith: { a, _ in a })
+        return FetchedLibrary(assets: assets, infos: infos, byID: byID)
     }
 
     private static let thumbnailOptions: PHImageRequestOptions = {
@@ -1255,8 +1288,11 @@ class PhotoScanService: ObservableObject {
                             contentMode: .aspectFit, options: options
                         ) { image, _ in
                             guard gate.claim() else { return }
-                            let normalized = image.flatMap { Self.bakeOrientation($0, pixelScale: true) }   // 1x: no 3x screen-scale copies
-                            continuation.resume(returning: (index, normalized))
+                            // Async results arrive on the main thread: redraw elsewhere.
+                            Self.offMain {
+                                let normalized = image.flatMap { Self.bakeOrientation($0, pixelScale: true) }   // 1x: no 3x screen-scale copies
+                                continuation.resume(returning: (index, normalized))
+                            }
                         }
                     }
                 }
@@ -1302,14 +1338,17 @@ class PhotoScanService: ObservableObject {
             let requestID = manager.requestImage(for: asset, targetSize: target,
                                                  contentMode: .aspectFit, options: options) { image, info in
                 if (info?[PHImageResultIsDegradedKey] as? Bool) == true { return }
-                let baked: UIImage? = autoreleasepool { image.map { Self.bakeOrientation($0, pixelScale: true) } }
-                if gate.claim() { continuation.resume(returning: baked) }
+                // Off the main thread: a rotated 2048 px photo is a full redraw.
+                Self.offMain {
+                    let baked: UIImage? = autoreleasepool { image.map { Self.bakeOrientation($0, pixelScale: true) } }
+                    if gate.claim() { continuation.resume(returning: baked) }
+                }
             }
             Task {
                 try? await Task.sleep(nanoseconds: 45_000_000_000)
                 if gate.claim() {
                     manager.cancelImageRequest(requestID)
-                    print("[StyleMate] Auto-scan: full image timed out (iCloud download?) for \(asset.localIdentifier)")
+                    dlog("[StyleMate] Auto-scan: full image timed out (iCloud download?) for \(asset.localIdentifier)")
                     continuation.resume(returning: nil)
                 }
             }
@@ -1329,6 +1368,12 @@ class PhotoScanService: ObservableObject {
     }
 
     // MARK: - Orientation Normalization
+
+    /// PHImageManager delivers asynchronous results on the main thread; the orientation
+    /// redraw runs on a utility queue instead (it ran on main, a frame drop per rotated photo).
+    private nonisolated static func offMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread { DispatchQueue.global(qos: .utility).async(execute: work) } else { work() }
+    }
 
     /// Renders any UIImage into a new bitmap with .up orientation,
     /// baking EXIF rotation/mirroring into the actual pixel data so

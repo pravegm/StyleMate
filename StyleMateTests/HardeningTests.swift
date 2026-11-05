@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UIKit
 @testable import StyleMate
 
 /// The Nov 2026 hardening pass: wardrobe storage that can't lose pieces, the one product
@@ -70,6 +71,7 @@ struct HardeningTests {
         let user = "hardening-\(UUID().uuidString)"
         let key = WardrobeViewModel.storageKey(for: user)
         defer {
+            WardrobeViewModel.flushSaves()
             UserDefaults.standard.removeObject(forKey: key)
             UserDefaults.standard.removeObject(forKey: WardrobeViewModel.unreadableBackupKey(for: user))
             SyncLedger.remove(userKey: key)
@@ -85,6 +87,7 @@ struct HardeningTests {
 
         vm.items.append(WardrobeItem(category: .bottoms, product: "Jeans", colors: ["Blue"], brand: "",
                                      pattern: .solid, imagePath: "jeans.png"))
+        WardrobeViewModel.flushSaves()
         let after = WardrobeStorage.decode(try #require(UserDefaults.standard.data(forKey: key)))
         #expect(after.items.count == 2)
         #expect(after.unreadable.count == 2)
@@ -101,6 +104,7 @@ struct HardeningTests {
         let key = WardrobeViewModel.storageKey(for: user)
         let backup = WardrobeViewModel.unreadableBackupKey(for: user)
         defer {
+            WardrobeViewModel.flushSaves()
             UserDefaults.standard.removeObject(forKey: key)
             UserDefaults.standard.removeObject(forKey: backup)
             SyncLedger.remove(userKey: key)
@@ -234,5 +238,123 @@ struct HardeningTests {
         #expect(ClosetText.words("Scarves") == ["scarf"])
         #expect(ClosetText.words("scarf") == ["scarf"])
         #expect(ClosetText.words("Hair Accessories") == ["hair", "accessory"])
+    }
+
+    // MARK: - Smaller fixes
+
+    private static func shirt(_ n: Int) -> WardrobeItem {
+        WardrobeItem(category: .tops, product: "Shirts", colors: ["Blue"], brand: "", pattern: .solid,
+                     imagePath: "hardening_\(n).png")
+    }
+
+    /// E8: saves are off the main thread and coalesced, but the newest state always lands.
+    @Test func wardrobeSavesLandNewestLast() throws {
+        let user = "hardening-\(UUID().uuidString)"
+        let key = WardrobeViewModel.storageKey(for: user)
+        defer {
+            WardrobeViewModel.flushSaves()
+            UserDefaults.standard.removeObject(forKey: key)
+            SyncLedger.remove(userKey: key)
+        }
+        let vm = WardrobeViewModel()
+        vm.load(forUser: user)
+        for i in 0..<60 { vm.items.append(Self.shirt(i)) }
+        // Reading flushes the queue first.
+        #expect(WardrobeViewModel.loadItems(forUser: user).map(\.id) == vm.items.map(\.id))
+        vm.items.removeAll()
+        WardrobeViewModel.flushSaves()
+        let stored = try #require(UserDefaults.standard.data(forKey: key))
+        #expect(WardrobeStorage.decode(stored).items.isEmpty)
+    }
+
+    /// E6: the "Is this you?" queue keeps the 200 most likely, once per photo.
+    @Test func reviewQueueKeepsTheMostLikely() {
+        var p = ScanProgress.fresh()
+        func review(_ i: Int) -> PendingFaceReview {
+            PendingFaceReview(assetId: "asset-\(i)", similarity: Float(i) / 1000, embedding: [],
+                              faceBox: [0, 0, 1, 1], faceCount: 1)
+        }
+        for i in 0..<250 { p.queueReview(review(i)) }
+        #expect(p.pendingReviews?.count == ScanProgress.maxPendingReviews)
+        #expect((p.pendingReviews ?? []).map(\.similarity).min() == Float(50) / 1000)
+        p.queueReview(review(249))
+        #expect(p.pendingReviews?.count == ScanProgress.maxPendingReviews)
+        p.queueReview(review(10))   // weaker than everything kept: it goes straight away
+        #expect(!(p.pendingReviews ?? []).contains { $0.assetId == "asset-10" })
+    }
+
+    /// R2: `.locationUnknown` retries back off and stop.
+    @Test func locationRetryBacksOffThenStops() {
+        #expect((1...5).compactMap { LocationService.retryDelay(attempt: $0) } == [1, 2, 4, 8, 16])
+        #expect(LocationService.retryDelay(attempt: 6) == nil)
+        #expect(LocationService.retryDelay(attempt: 0) == nil)
+    }
+
+    /// E14: a hero set yesterday is dropped; today's stays.
+    @MainActor
+    @Test func yesterdaysLookIsDropped() {
+        let vm = HomeViewModel()
+        vm.heroOutfit = Outfit(items: [Self.shirt(0)], explanation: "x")
+        let today = Calendar.current.startOfDay(for: Date()).timeIntervalSinceReferenceDate
+        vm.dropStaleHero(today: today)
+        #expect(vm.heroOutfit != nil)
+        vm.dropStaleHero(today: today + 86_400)
+        #expect(vm.heroOutfit == nil)
+    }
+
+    /// E9: the embedding file can be read in the background before anyone asks.
+    @Test func embeddingStorePreloads() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("EmbedPreload-\(UUID().uuidString)")
+        let id = UUID()
+        let first = ItemEmbeddingStore(directory: dir)
+        first.set([0.25, 0.5], quality: 0.8, for: id)
+        first.flush()
+        let second = ItemEmbeddingStore(directory: dir)
+        #expect(!second.isLoaded)
+        second.preload()
+        second.flush()   // waits for the io queue, where the preload ran
+        #expect(second.isLoaded)
+        #expect(second.embedding(for: id) == [0.25, 0.5])
+    }
+
+    /// E12: queued writes land in order, and forgetting the profile isn't undone by one.
+    @MainActor
+    @Test func uncertainItemsWritesLandInOrder() throws {
+        let store = UncertainItemsStore.shared
+        let user = "hardening-\(UUID().uuidString)"
+        for i in 0..<30 {
+            store.hold(Self.shirt(i), embedding: nil, quality: 0.5, doubt: .lowQuality, forUser: user)
+        }
+        UncertainItemsStore.flushWrites()
+        let data = try Data(contentsOf: UncertainItemsStore.fileURL(forUser: user))
+        #expect(try JSONDecoder().decode([UncertainItemsStore.HeldItem].self, from: data).count == 30)
+        store.forget(forUser: user)
+        UncertainItemsStore.flushWrites()
+        #expect(!FileManager.default.fileExists(atPath: UncertainItemsStore.fileURL(forUser: user).path))
+    }
+
+    /// P1-6: a full-size, rotated photo comes back as an upright cutout of at most 1024 px.
+    @Test func replacementPhotoIsUprightAndSmall() async throws {
+        // 4000 x 3000 sensor pixels shown rotated: a 3000 x 4000 portrait photo.
+        let w = 4000, h = 3000
+        let ctx = try #require(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                         space: CGColorSpaceCreateDeviceRGB(),
+                                         bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        ctx.setFillColor(UIColor.gray.cgColor)
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        let photo = UIImage(cgImage: try #require(ctx.makeImage()), scale: 1, orientation: .right)
+        #expect(photo.size == CGSize(width: 3000, height: 4000))
+
+        let made = try #require(await ReplacementCutout.make(from: photo, category: .accessories, product: "Scarves"))
+        defer { made.discard() }
+        let saved = try #require(WardrobeImageFileHelper.loadImage(at: made.imagePath)?.cgImage)
+        #expect(max(saved.width, saved.height) <= 1024)
+        guard made.featurePrint == nil else { return }   // a garment was found: framed by the extractor
+        // The whole photo (or its lifted subject) is framed: its visible content is portrait.
+        let px = try #require(GarmentCutout.rgbaPixels(saved))
+        let midRow = saved.height / 2, midCol = saved.width / 2
+        let wide = (0..<saved.width).filter { px[(midRow * saved.width + $0) * 4 + 3] > 20 }.count
+        let tall = (0..<saved.height).filter { px[($0 * saved.width + midCol) * 4 + 3] > 20 }.count
+        #expect(tall > wide, "content \(wide) x \(tall): orientation lost")
     }
 }

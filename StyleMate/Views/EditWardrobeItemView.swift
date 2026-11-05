@@ -169,8 +169,9 @@ struct EditWardrobeItemView: View {
             .onChange(of: replaceGallerySelection) { items in
                 guard let first = items.first else { return }
                 Task {
+                    // Decoded straight to ≤ 2048 px, upright, off the main thread (never the full 48 MP bitmap).
                     if let data = try? await first.loadTransferable(type: Data.self),
-                       let img = UIImage(data: data) {
+                       let img = await Task.detached(priority: .userInitiated, operation: { ImageDownsampler.downsample(data: data) }).value {
                         processReplacementPhoto(img)
                     }
                     replaceGallerySelection = []

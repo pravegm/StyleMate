@@ -472,13 +472,12 @@ struct ProfileView: View {
             .alert("Are you sure you want to empty your wardrobe?", isPresented: $showEmptyConfirmation) {
                 Button("Cancel", role: .cancel) {}
                 Button("Empty", role: .destructive) {
-                    for item in wardrobeViewModel.items {
-                        wardrobeViewModel.deleteItemFromCloud(item)
-                        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-                        WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
-                        WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
-                    }
-                    wardrobeViewModel.items.removeAll()
+                    // The scan and studio renders stop first, so nothing lands right after.
+                    if PhotoScanService.shared.isWorking { PhotoScanService.shared.cancelScan() }
+                    StudioQueue.shared.cancel()
+                    // Same cleanup as deleting pieces: files, studio originals and records,
+                    // embeddings, iCloud.
+                    ClosetActions.remove(wardrobeViewModel.items, from: wardrobeViewModel)
                     LockedItemsStore.shared.removeAll()   // pieces waiting for Premium go too
                 }
             } message: {
@@ -580,7 +579,7 @@ struct ProfileView: View {
         onboardingManager.reset(forUser: userId)
         authService.resetLocalProfile()
 
-        print("[StyleMate] Profile deleted for user: \(userId)")
+        dlog("[StyleMate] Profile deleted for user: \(userId)")
     }
 
     // MARK: - Stat Badge

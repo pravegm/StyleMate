@@ -87,6 +87,7 @@ class WardrobeViewModel: ObservableObject {
         if !stored.unreadable.isEmpty {
             dlog("[Wardrobe] Kept \(stored.unreadable.count) stored items this build can't read")
         }
+        ItemEmbeddingStore.shared.preload()
     }
 
     /// Decodes a user's stored wardrobe (empty when there is none).
@@ -95,6 +96,7 @@ class WardrobeViewModel: ObservableObject {
     }
 
     static func loadStored(forUser email: String) -> WardrobeStorage.Decoded {
+        flushSaves()   // a save still queued would make this read stale
         guard let data = UserDefaults.standard.data(forKey: storageKey(for: email)) else {
             return WardrobeStorage.Decoded(items: [], unreadable: [], isArray: true)
         }
@@ -106,13 +108,36 @@ class WardrobeViewModel: ObservableObject {
         return decoded
     }
 
+    // Saves are encoded and written off the main thread, in order, on one serial queue (the
+    // whole wardrobe was re-encoded on main on every change). A burst of changes — a scan
+    // adding pieces one by one — writes only the newest snapshot: older queued ones skip.
+    private static let saveQueue = DispatchQueue(label: "com.stylemates.StyleMate.wardrobeSave", qos: .utility)
+    private static let saveLock = NSLock()
+    private static var saveTickets: [String: Int] = [:]   // newest ticket per storage key (saveLock)
+    private static var lastTicket = 0
+
     func save(forUser email: String) {
         guard !email.isEmpty else { return }
         let key = WardrobeViewModel.storageKey(for: email)
-        if let data = WardrobeStorage.encode(items, keeping: unreadableEntries) {
-            UserDefaults.standard.set(data, forKey: key)
+        let snapshot = items, kept = unreadableEntries
+        Self.saveLock.lock()
+        Self.lastTicket += 1
+        let ticket = Self.lastTicket
+        Self.saveTickets[key] = ticket
+        Self.saveLock.unlock()
+        Self.saveQueue.async {
+            Self.saveLock.lock()
+            let newest = Self.saveTickets[key] == ticket
+            Self.saveLock.unlock()
+            guard newest else { return }
+            if let data = WardrobeStorage.encode(snapshot, keeping: kept) {
+                UserDefaults.standard.set(data, forKey: key)
+            }
         }
     }
+
+    /// Waits until every queued save is written. Never call it on the save queue.
+    static func flushSaves() { saveQueue.sync {} }
 
     func clear() {
         flushTask?.cancel()
@@ -407,6 +432,7 @@ class WardrobeViewModel: ObservableObject {
         let userItems = currentUserEmail == userId ? items : WardrobeViewModel.loadItems(forUser: userId)
 
         if currentUserEmail == userId { clear() }
+        WardrobeViewModel.flushSaves()   // or a queued save would write the wardrobe back
         UserDefaults.standard.removeObject(forKey: key)
         UserDefaults.standard.removeObject(forKey: WardrobeViewModel.unreadableBackupKey(for: userId))
         for legacy in ["wardrobe_\(userId)", "wardrobeData_\(userId)"] {
