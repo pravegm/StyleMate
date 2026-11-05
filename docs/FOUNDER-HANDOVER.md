@@ -35,7 +35,9 @@ leaves the phone is the user's own iCloud backup.
    fold (closet | item, outfit board | pieces, calendar | day). Nothing sits across the crease.
    Half-open in book pose, the split follows the hinge. On the closed cover screen it's the normal
    iPhone layout. Your place is kept when you fold and unfold.
-7. **Try with sample photos**: 6 bundled sample photos let anyone (including Apple's reviewer)
+7. **Dark mode**: every screen follows the phone's light/dark setting. Clothes sit on a soft light
+   "studio" card even in dark mode, so black garments stay visible.
+8. **Try with sample photos**: 6 bundled sample photos let anyone (including Apple's reviewer)
    see a full wardrobe without their own photos. Samples are removed with one tap.
 
 How it was checked: every change runs through GitHub Actions on a Mac. Each push runs the full unit-test
@@ -87,8 +89,8 @@ On 13 real street photos with 56 hand-labelled garments, run on every push:
 | Wrong garments added | 0 | about 1 in 50 |
 
 The test fails if any of these drops by more than 3 points, so quality can't quietly slip.
-Last fully green run of everything on `main`: CI 41960213088 (commit 4ef8d47); iPhone Duo
-screenshots: Duo 41952107270.
+Last fully green run of everything on `main` (light and dark): CI 41966469571 (commit 8db91ff);
+iPhone Duo screenshots: Duo 41966483488.
 
 ## Still open (being worked on, or next)
 
@@ -101,6 +103,8 @@ screenshots: Duo 41952107270.
 - After a restore to a new iPhone, items keep the picture they showed (studio photo or cutout), but
   the "From your photo" original stays on the old phone. The new phone may also redraw some studio
   photos once in the background. Harmless, but it wastes battery; fix by syncing the original too.
+- On the Duo's closed cover screen, the outfit picker shows a black dot top right. That's the
+  cover camera, which the system draws when a full-screen card is open; nothing is hidden behind it.
 - Real-device checks the simulator can't do: scan speed on a 10,000-photo library, render time on
   the Neural Engine, Duo hinge accuracy and the seated pose, the morning notification and
   background refresh.
