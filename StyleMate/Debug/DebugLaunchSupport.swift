@@ -29,6 +29,9 @@ enum DebugLaunchSupport {
         static let seedCount = "-uiTestSeedWardrobeCount"
         /// `-uiTestSeedLocked 23`: also seed this many pieces waiting for Premium (LockedItemsStore).
         static let seedLocked = "-uiTestSeedLocked"
+        /// `-uiTestSeedTaste`: a learned taste profile (the seeded closet's colour pairings worn
+        /// often), so the deck shows its "Picked because…" line.
+        static let seedTaste = "-uiTestSeedTaste"
     }
 
     /// The integer after `flag` in the launch arguments (`-flag 50`), if any.
@@ -79,6 +82,7 @@ enum DebugLaunchSupport {
 
         if args.contains(Argument.skipOnboarding) { markOnboardingComplete(userId: user.id) }
         if args.contains(Argument.seedWardrobe) { seedWardrobeIfEmpty(userId: user.id) }
+        if args.contains(Argument.seedTaste) { seedTaste(userId: user.id) }
         print("[UITest] Demo user ready (reset=\(args.contains(Argument.resetState)), seed=\(args.contains(Argument.seedWardrobe)))")
         return user
     }
@@ -152,6 +156,23 @@ enum DebugLaunchSupport {
             LockedItemsStore.flushWrites()
             print("[UITest] Seeded \(LockedItemsStore.shared.count) locked items")
         }
+    }
+
+    // MARK: - Taste seed
+
+    /// As if the user had worn the seeded closet's everyday pairings a few times each.
+    private static func seedTaste(userId: String) {
+        var profile = TasteProfile(updated: Date())
+        let pairs: [(String, String)] = [
+            ("denim", "white"), ("beige", "white"), ("black", "white"), ("denim", "navy"), ("beige", "navy"),
+            ("black", "gray"), ("denim", "light blue"), ("black", "cream"), ("beige", "light blue"),
+            ("black", "denim"), ("gray", "white"), ("denim", "gray"), ("cream", "denim"), ("black", "black"),
+            ("beige", "black"), ("navy", "white"), ("navy", "olive"), ("beige", "olive"), ("denim", "olive"),
+        ]
+        for (a, b) in pairs { profile.pairs[TasteProfile.pairKey(a, b)] = 4 }
+        profile.events = 12
+        TasteStore.shared.store(profile, forUser: userId)
+        print("[UITest] Seeded a taste profile (\(profile.pairs.count) pairings)")
     }
 
     private static func seedItem(_ spec: SeedGarment) -> WardrobeItem? {

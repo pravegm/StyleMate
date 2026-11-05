@@ -171,6 +171,34 @@ final class DuoScreensTests: E2ETestCase {
         shoot("23-profile-premium")
     }
 
+    // MARK: - Taste learning + Wardrobe insights
+
+    /// The deck with its "Picked because…" line (a seeded taste profile, DEBUG `-uiTestSeedTaste`) and
+    /// Profile → Wardrobe insights (cover: one column; inner: two columns split on the crease when half-open).
+    @MainActor
+    func test03_DuoTasteAndInsights() throws {
+        guard bridgeURL != nil else { throw XCTSkip("DUO_BRIDGE_URL not set: not on the Duo CI") }
+        app = makeApp()
+        app.launchArguments.append("-uiTestSeedTaste")
+        app.launch()
+        dismissSpringboardAlertIfPresent()
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 60) || tabButton("Home").exists, "No main tab UI")
+
+        if openOutfitDeck() {
+            let reason = anyElement(NSPredicate(format:
+                "identifier == 'outfit.tasteReason' OR label CONTAINS 'Picked because'"))
+            if !reason.waitForExistence(timeout: 5) { note("taste-reason-missing", visibleButtonLabels()) }
+            shoot("30-deck-taste")
+            finishDeck()
+        }
+
+        openTab("Profile")
+        if openProfileRow("profile.insights", "Wardrobe insights", expect: "insights.summary") {
+            shoot("31-insights")
+            leaveProfileRow()
+        }
+    }
+
     // No seated (tabletop) pass: the Duo simulator shows the inner display sideways and simctl can't rotate it,
     // and without UIRequiresFullScreen (which StyleMate must not set) iOS refuses programmatic rotation:
     // "The current windowing mode does not allow for programmatic changes to interface orientation" (Duo run

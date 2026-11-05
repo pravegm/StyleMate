@@ -92,7 +92,19 @@ struct HomeView: View {
         if showsTodayLook {
             entrance(todaysOutfitHero.coachAnchor(CoachAnchor.todayOutfit), delay: 0.1)
                 .padding(.top, DS.Spacing.lg)
+        } else if let status = almostReadyStatus {
+            // Not enough for a whole outfit yet: say what's missing instead of an empty card.
+            entrance(AlmostReadyCard(status: status), delay: 0.1)
+                .padding(.top, DS.Spacing.lg)
         }
+    }
+
+    /// What the closet still needs for a whole outfit (nil when ready, or empty: that has its own card).
+    private var almostReadyStatus: OutfitReadiness.Status? {
+        let items = wardrobeViewModel.items
+        guard !items.isEmpty else { return nil }
+        let status = OutfitReadiness.status(of: items)
+        return status.isReady ? nil : status
     }
 
     private var styleMeBlock: some View {
@@ -434,6 +446,7 @@ struct HomeView: View {
             outfitsVM.addOutfit(date: Calendar.current.startOfDay(for: Date()), items: items,
                                 source: MyOutfitsViewModel.Source.stylist)
         }
+        homeVM.noteWore(items, user: authService.user)   // taste learning
     }
 
     /// Re-picks today's look when the wardrobe loses one of its pieces or the

@@ -274,6 +274,9 @@ struct TodayOutfitSheet: View {
                     .contentTransition(.opacity)
                     .animation(.easeInOut(duration: 0.3), value: look.explanation)
             }
+
+            // What the user's own choices taught the stylist, when that shaped this look.
+            if let why = look.tasteNote { TasteReasonLine(text: why) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, DS.Spacing.md)
@@ -689,6 +692,7 @@ struct TodayOutfitSheet: View {
         withAnimation(DS.Motion.snappy) {
             if lockedItemIDs.contains(item.id) { lockedItemIDs.remove(item.id) } else { lockedItemIDs.insert(item.id) }
         }
+        homeVM.noteKeep(item, kept: lockedItemIDs.contains(item.id))   // taste learning
     }
 
     /// Swaps one piece; the selection follows the new piece so repeated taps
@@ -768,6 +772,9 @@ struct TodayOutfitSheet: View {
                 .zIndex(10)
                 .accessibilityIdentifier("outfit.toast")
         }
+
+        // After a skip: optional "Not my style / Not today" (taste learning).
+        SkipReasonPrompt(homeVM: homeVM, alignTrailing: duo.isWideLayout)
     }
 
     // MARK: - End of batch

@@ -212,9 +212,10 @@ final class MorningLookScheduler: ObservableObject {
         let log = MyOutfitsViewModel()
         log.setUser(user.id)
         let lastWorn = log.lastWornDates()
-        let context = StylingContext(weather: weather, occasion: user.preferredStyles.first ?? .everyday, mood: nil,
+        var context = StylingContext(weather: weather, occasion: user.preferredStyles.first ?? .everyday, mood: nil,
                                      hints: StyleHints(), user: user, lastWorn: lastWorn, now: date,
                                      useFahrenheit: MorningForecast.prefersFahrenheit)
+        context.taste = TasteStore.shared.profile(forUser: user.id, now: date)
         let seed = UInt64(bitPattern: Int64(MorningLookStore.dayKey(date)))
         let engine = OutfitEngine()
         let result = await Task.detached(priority: .utility) {
