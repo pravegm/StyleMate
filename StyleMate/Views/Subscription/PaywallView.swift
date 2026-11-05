@@ -61,7 +61,6 @@ struct PaywallView: View {
         } message: {
             Text(restoreMessage ?? "")
         }
-        .accessibilityIdentifier("paywall.root")
     }
 
     // MARK: Layouts
@@ -111,7 +110,7 @@ struct PaywallView: View {
                 .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, DS.Spacing.lg)
-            .padding(.top, DS.Spacing.xxl)
+            .padding(.top, DS.Spacing.xxxl)   // clear of the close button above the plans
             .padding(.bottom, DS.Spacing.xl)
         }
         .scrollIndicators(.hidden)
@@ -152,7 +151,9 @@ struct PaywallView: View {
 
     private var hero: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
-            PaywallCollage(owned: ownedPreview, locked: lockedPreview, lockedCount: locked.count)
+            // Phone / cover: one row of four, so the plans come into view sooner; wide: 3 x 2.
+            PaywallCollage(owned: ownedPreview, locked: lockedPreview, lockedCount: locked.count,
+                           columnCount: duo.isWideLayout ? 3 : 4, maxTiles: duo.isWideLayout ? 6 : 4)
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                 Text("StyleMate Premium")
                     .font(DS.Font.footnote.weight(.semibold))
@@ -425,7 +426,6 @@ struct PaywallView: View {
         .padding(.bottom, DS.Spacing.lg)
         .frame(maxWidth: 560)
         .frame(maxWidth: .infinity)
-        .accessibilityIdentifier("paywall.success")
     }
 
     private var successDetail: String {
@@ -544,7 +544,10 @@ struct PaywallCollage: View {
     let locked: [WardrobeItem]
     let lockedCount: Int
 
-    private let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+    var columnCount = 3
+    var maxTiles = 6
+
+    private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 8), count: columnCount) }
 
     var body: some View {
         if owned.isEmpty && locked.isEmpty {
@@ -597,10 +600,10 @@ struct PaywallCollage: View {
         var id: String { (isLocked ? "l" : "o") + item.id.uuidString }
     }
 
-    /// Up to 6 tiles: the locked ones (at most 3) last, so the grid ends on what's waiting.
+    /// Up to `maxTiles` tiles: the locked ones (at most half) last, so the grid ends on what's waiting.
     private var tiles: [Tile] {
-        let lockedTiles = locked.prefix(3).map { Tile(item: $0, isLocked: true) }
-        let ownedTiles = owned.prefix(6 - lockedTiles.count).map { Tile(item: $0, isLocked: false) }
+        let lockedTiles = locked.prefix(maxTiles / 2).map { Tile(item: $0, isLocked: true) }
+        let ownedTiles = owned.prefix(maxTiles - lockedTiles.count).map { Tile(item: $0, isLocked: false) }
         return ownedTiles + lockedTiles
     }
 }

@@ -51,6 +51,13 @@ class SubscriptionE2ETests: E2ETestCase {
             "identifier == 'premium.lockedCard' OR label CONTAINS 'more pieces found'")).firstMatch
     }
 
+    /// The paywall's purchase button ("Start free trial" / "Subscribe").
+    @MainActor
+    private func subscribeButton() -> XCUIElement {
+        app.buttons.matching(NSPredicate(format:
+            "identifier == 'paywall.subscribe' OR label == 'Start free trial' OR label == 'Subscribe'")).firstMatch
+    }
+
     @MainActor
     private func closetCount(_ n: Int) -> XCUIElement {
         anyElement(NSPredicate(format: "label BEGINSWITH %@", "\(n) items"))
@@ -97,12 +104,12 @@ class SubscriptionE2ETests: E2ETestCase {
         snap("paywall-legal")
 
         if annual.isHittable { annual.tap() }
-        let subscribe = app.buttons["paywall.subscribe"]
+        let subscribe = subscribeButton()
         XCTAssertTrue(subscribe.waitForExistence(timeout: 5), "No subscribe button")
         XCTAssertTrue(subscribe.label.contains("Start free trial"), "Annual CTA should start the free trial: \(subscribe.label)")
         subscribe.tap()
 
-        let success = anyElement(NSPredicate(format: "identifier == 'paywall.success' OR identifier == 'paywall.done'"))
+        let success = anyElement(NSPredicate(format: "identifier == 'paywall.done' OR label == 'Welcome to Premium'"))
         let errorAlert = app.alerts["Purchase didn't go through"]
         let outcome = waitForAny([success, errorAlert], timeout: 60)
         if outcome == 1 { note("purchase-error", errorAlert.debugDescription) }
@@ -112,7 +119,7 @@ class SubscriptionE2ETests: E2ETestCase {
                       "Success doesn't say the \(Self.lockedCount) pieces were added: \(detail.label)")
         snap("paywall-success")
 
-        app.buttons["paywall.done"].tap()
+        app.buttons.matching(NSPredicate(format: "identifier == 'paywall.done' OR label == 'Done'")).firstMatch.tap()
         let total = Self.freeLimit + Self.lockedCount
         XCTAssertTrue(closetCount(total).waitForExistence(timeout: 20), "The \(Self.lockedCount) pieces didn't unlock into the closet")
         XCTAssertTrue(waitToDisappear(lockedCard(), timeout: 10), "The locked card is still shown after subscribing")
@@ -142,14 +149,14 @@ class SubscriptionE2ETests: E2ETestCase {
         XCTAssertTrue(gallery.waitForExistence(timeout: 10), "Add sheet didn't open")
         gallery.tap()
 
-        let paywall = anyElement(NSPredicate(format: "identifier == 'paywall.root' OR identifier == 'paywall.subscribe'"))
+        let paywall = anyElement(NSPredicate(format: "identifier == 'paywall.subscribe' OR label == 'Start free trial' OR label == 'Subscribe'"))
         XCTAssertTrue(paywall.waitForExistence(timeout: 15), "Gallery at the free limit didn't open the paywall")
         XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS 'Keep every piece'")).exists, "Paywall headline missing")
         _ = waitForAny([app.buttons["paywall.plan.annual"], app.buttons["paywall.retry"]], timeout: 30)
         snap("paywall-at-limit")
 
-        app.buttons["paywall.close"].tap()
-        XCTAssertTrue(waitToDisappear(app.buttons["paywall.subscribe"], timeout: 10), "Paywall didn't close")
+        app.buttons.matching(NSPredicate(format: "identifier == 'paywall.close' OR label == 'Close'")).firstMatch.tap()
+        XCTAssertTrue(waitToDisappear(subscribeButton(), timeout: 10), "Paywall didn't close")
         XCTAssertTrue(closetCount(Self.freeLimit).exists, "Closet changed after closing the paywall")
 
         openTab("Profile")
