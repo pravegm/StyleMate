@@ -1,0 +1,101 @@
+name: CloudKit schema
+
+# Imports cloudkit/schema.ckdb into the DEVELOPMENT environment of iCloud.com.stylemates.StyleMate.
+#
+# Why: TestFlight / App Store builds use the PRODUCTION CloudKit environment, whose schema can't be
+# created by the app — it is deployed from Development in the CloudKit console. Development normally
+# learns the schema when a dev-signed build writes records, which needs a Mac; this workflow does it
+# from CI instead. After a green run, press "Deploy Schema Changes…" in the CloudKit console
+# (icloud.developer.apple.com) to copy it to Production.
+#
+# schema.ckdb must match what StyleMate/Services/CloudKitService.swift writes (makeRecord,
+# metadataKeys, assetKeys). Fields can be added later but never removed once deployed.
+#
+# Secrets: CK_MANAGEMENT_TOKEN (CloudKit console > Settings > Tokens > management token),
+#          APPLE_TEAM_ID (already used by the TestFlight workflow).
+
+on:
+  workflow_dispatch:
+    inputs:
+      import:
+        description: "Import into Development (off = validate only)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: cloudkit-schema
+  cancel-in-progress: false
+
+jobs:
+  schema:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    env:
+      CK_MANAGEMENT_TOKEN: ${{ secrets.CK_MANAGEMENT_TOKEN }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      CONTAINER_ID: iCloud.com.stylemates.StyleMate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the secrets
+        run: |
+          missing=""
+          [ -n "$CK_MANAGEMENT_TOKEN" ] || missing="$missing CK_MANAGEMENT_TOKEN"
+          [ -n "$APPLE_TEAM_ID" ] || missing="$missing APPLE_TEAM_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+          xcrun cktool --version || true
+
+      - name: Save the management token
+        # cktool keeps tokens in the keychain by default; a CI keychain may be locked, so fall back to a
+        # file store. The token is passed as an argument (never echoed), else on stdin.
+        run: |
+          xcrun cktool save-token --help || true
+          save() { xcrun cktool save-token --type management "$@"; }
+          if save --method file "$CK_MANAGEMENT_TOKEN" >/dev/null 2>&1; then echo "saved (file, argument)"
+          elif printf '%s\n' "$CK_MANAGEMENT_TOKEN" | save --method file >/dev/null 2>&1; then echo "saved (file, stdin)"
+          elif save "$CK_MANAGEMENT_TOKEN" >/dev/null 2>&1; then echo "saved (keychain, argument)"
+          elif printf '%s\n' "$CK_MANAGEMENT_TOKEN" | save >/dev/null 2>&1; then echo "saved (keychain, stdin)"
+          else
+            echo "::error::cktool could not save the management token (see 'save-token --help' above)."
+            exit 1
+          fi
+
+      - name: Validate the schema
+        run: |
+          xcrun cktool validate-schema \
+            --team-id "$APPLE_TEAM_ID" --container-id "$CONTAINER_ID" \
+            --environment development --file cloudkit/schema.ckdb
+
+      - name: Import into Development
+        if: ${{ inputs.import }}
+        run: |
+          xcrun cktool import-schema \
+            --team-id "$APPLE_TEAM_ID" --container-id "$CONTAINER_ID" \
+            --environment development --file cloudkit/schema.ckdb
+          echo "Imported. Next: CloudKit console > $CONTAINER_ID > Deploy Schema Changes… to Production." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Export what Development now has
+        if: always()
+        run: |
+          xcrun cktool export-schema \
+            --team-id "$APPLE_TEAM_ID" --container-id "$CONTAINER_ID" \
+            --environment development --output-file development-schema.ckdb || true
+          [ -f development-schema.ckdb ] && cat development-schema.ckdb || true
+
+      - name: Upload exported schema
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudkit-schema
+          path: development-schema.ckdb
+          if-no-files-found: ignore

@@ -135,6 +135,16 @@ struct ReliabilityTests {
         #expect(out.items.allSatisfy { $0.product == "Jeans" && $0.category == .bottoms })
     }
 
+    @Test func schemaAndAccountErrorsStopSyncForTheSession_networkErrorsDont() {
+        // A Production container without the deployed schema rejects writes
+        // (serverRejectedRequest / invalidArguments): latch, don't retry in a loop.
+        #expect(CloudKitService.isPermanent(CKError(.serverRejectedRequest)))
+        #expect(CloudKitService.isPermanent(CKError(.invalidArguments)))
+        #expect(CloudKitService.isPermanent(CKError(.notAuthenticated)))
+        #expect(!CloudKitService.isPermanent(CKError(.networkUnavailable)))
+        #expect(!CloudKitService.isPermanent(CKError(.requestRateLimited)))
+    }
+
     @Test func otherRecordTypesAreNotRestored() {
         let r = CKRecord(recordType: "SomethingElse",
                          recordID: CKRecord.ID(recordName: UUID().uuidString,
