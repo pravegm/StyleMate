@@ -1,4 +1,5 @@
 import XCTest
+import StoreKitTest
 
 /// iPhone Duo screenshots, driven by `.github/workflows/duo.yml` on the iPhone Duo simulator (iOS 27.1).
 ///
@@ -74,6 +75,51 @@ final class DuoScreensTests: E2ETestCase {
         openTab("Profile")
         _ = waitForAny([text("Profile"), app.navigationBars.firstMatch], timeout: 10)
         shoot("07-profile")
+    }
+
+    // MARK: - StyleMate Premium (paywall on every display)
+
+    /// 50 pieces (the free tier's limit) + 23 waiting: Home's locked card, the paywall (cover: one column;
+    /// inner: closet | plans split on the crease), then the annual plan bought in StoreKit Test.
+    @MainActor
+    func test02_DuoPaywall() throws {
+        guard bridgeURL != nil else { throw XCTSkip("DUO_BRIDGE_URL not set: not on the Duo CI") }
+        let session = try SKTestSession(contentsOf: SubscriptionE2ETests.storeKitConfigURL)
+        session.resetToDefaultState()
+        session.disableDialogs = true
+        session.clearTransactions()
+        session.storefront = "GBR"
+        defer { session.clearTransactions() }
+
+        app = makeApp()
+        app.launchArguments += ["-uiTestSeedWardrobeCount", "50", "-uiTestSeedLocked", "23"]
+        app.launch()
+        dismissSpringboardAlertIfPresent()
+        let card = app.buttons.matching(NSPredicate(format:
+            "identifier == 'premium.lockedCard' OR label CONTAINS 'more pieces found'")).firstMatch
+        guard card.waitForExistence(timeout: 60) else { XCTFail("No locked-pieces card on Home"); return }
+        shoot("08-home-locked")
+
+        card.tap()
+        let annual = app.buttons["paywall.plan.annual"]
+        XCTAssertNotNil(waitForAny([annual, app.buttons["paywall.retry"]], timeout: 45), "Paywall didn't open")
+        shoot("09-paywall")
+
+        if annual.exists {
+            if annual.isHittable { annual.tap() }
+            let subscribe = app.buttons["paywall.subscribe"]
+            if subscribe.waitForExistence(timeout: 5) { subscribe.tap() }
+            let done = app.buttons["paywall.done"]
+            if done.waitForExistence(timeout: 60) {
+                shoot("10-paywall-success")
+                done.tap()
+            } else {
+                XCTFail("The annual purchase didn't complete")
+            }
+        }
+        openTab("Profile")
+        _ = anyElement(NSPredicate(format: "identifier == 'profile.premium.status'")).waitForExistence(timeout: 10)
+        shoot("11-profile-premium")
     }
 
     // No seated (tabletop) pass: the Duo simulator shows the inner display sideways and simctl can't rotate it,

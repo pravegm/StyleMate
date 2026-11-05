@@ -135,6 +135,8 @@ struct ProfileView: View {
                     }
                     .listSectionSpacing(.compact)
 
+                    PremiumProfileSection()   // Views/Subscription: plan, renewal, Manage, Restore
+
                     Section {
                         // Fields are seeded once (see .onAppear below) and saved on a
                         // debounce. Do NOT write authService.user per keystroke or
@@ -472,6 +474,7 @@ struct ProfileView: View {
                         WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
                     }
                     wardrobeViewModel.items.removeAll()
+                    LockedItemsStore.shared.removeAll()   // pieces waiting for Premium go too
                 }
             } message: {
                 Text("This will remove all items from your wardrobe and cannot be undone.")

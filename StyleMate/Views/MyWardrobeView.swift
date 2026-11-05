@@ -214,6 +214,7 @@ struct MyWardrobeView: View {
                 Section {
                     VStack(alignment: .leading, spacing: DS.Spacing.lg) {
                         ClosetScanStatus()
+                        LockedItemsCard()   // "23 more pieces found — unlock with Premium"
                         if filter.isActive {
                             resultLine(count: visible.count, total: all.count)
                         }
