@@ -443,13 +443,13 @@ struct WeekStrip: View {
             VStack(spacing: 4) {
                 Text(day.formatted(.dateTime.weekday(.narrow)))
                     .font(DS.Font.caption2)
-                    .foregroundStyle(selected ? Color.white.opacity(0.85) : DS.Colors.textSecondary)
+                    .foregroundStyle(selected ? DS.Colors.onAccent.opacity(0.85) : DS.Colors.textSecondary)
                 Text("\(calendar.component(.day, from: day))")
                     .font(DS.Font.headline)
                     .monospacedDigit()
-                    .foregroundStyle(selected ? Color.white : (today ? DS.Colors.accent : DS.Colors.textPrimary))
+                    .foregroundStyle(selected ? DS.Colors.onAccent : (today ? DS.Colors.accent : DS.Colors.textPrimary))
                 Circle()
-                    .fill(logged ? (selected ? Color.white : DS.Colors.accent) : Color.clear)
+                    .fill(logged ? (selected ? DS.Colors.onAccent : DS.Colors.accent) : Color.clear)
                     .frame(width: 5, height: 5)
             }
             .frame(maxWidth: .infinity)
@@ -612,7 +612,7 @@ struct AddOutfitSheet: View {
                 if showSavedOverlay {
                     Label("Saved", systemImage: "checkmark.circle.fill")
                         .font(DS.Font.title3)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(DS.Colors.onAccent)
                         .padding(.vertical, DS.Spacing.md)
                         .padding(.horizontal, DS.Spacing.xl)
                         .background(DS.Colors.success, in: Capsule())
@@ -864,7 +864,7 @@ struct CalendarGridView: View {
                 Text("\(calendar.component(.day, from: date))")
                     .font(DS.Font.subheadline)
                     .monospacedDigit()
-                    .foregroundStyle(isSelected ? Color.white : (isToday ? DS.Colors.accent : DS.Colors.textPrimary))
+                    .foregroundStyle(isSelected ? DS.Colors.onAccent : (isToday ? DS.Colors.accent : DS.Colors.textPrimary))
                     .frame(width: dayCircle, height: dayCircle)
                     .background(
                         isSelected

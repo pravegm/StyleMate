@@ -6,6 +6,7 @@ struct ProfileView: View {
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var onboardingManager: OnboardingManager
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var tutorialManager: TutorialManager
     @EnvironmentObject private var outfitsVM: MyOutfitsViewModel
     @ObservedObject private var cloudKitService = CloudKitService.shared
@@ -93,16 +94,16 @@ struct ProfileView: View {
                                         )
                                     )
                                     .frame(width: 76, height: 76)
-                                    .shadow(color: DS.Colors.accent.opacity(0.30), radius: 10, x: 0, y: 5)
+                                    .shadow(color: DS.Colors.accent.opacity(colorScheme == .dark ? 0 : 0.30), radius: 10, x: 0, y: 5)
 
                                 if initials.isEmpty {
                                     Image(systemName: "person.fill")
                                         .font(.system(size: 30, weight: .semibold))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(DS.Colors.onAccent)
                                 } else {
                                     Text(initials)
                                         .font(.system(size: 28, weight: .bold, design: .rounded))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(DS.Colors.onAccent)
                                 }
                             }
                             .coachAnchor(CoachAnchor.profileHeader)

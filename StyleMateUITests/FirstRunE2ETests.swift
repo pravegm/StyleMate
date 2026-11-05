@@ -3,12 +3,13 @@ import XCTest
 /// First launch, no account: the onboarding flow and the "Try with sample photos" path,
 /// on a true fresh install (`-uiTestResetState` without the demo user, so AuthService creates
 /// the local profile itself). Every screen is snapped for the `e2e-screens` artifact.
-final class FirstRunE2ETests: E2ETestCase {
+class FirstRunE2ETests: E2ETestCase {
 
     @MainActor
     private func launchFresh() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestResetState", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            + darkModeArguments
         addUIInterruptionMonitor(withDescription: "System permission alerts") { alert in
             for label in ["Allow While Using App", "Allow Full Access", "Allow", "OK"] {
                 let button = alert.buttons[label]
@@ -63,7 +64,9 @@ final class FirstRunE2ETests: E2ETestCase {
         openTab("Home")
         if remove.waitForExistence(timeout: 5) {
             remove.tap()
-            XCTAssertTrue(waitToDisappear(remove, timeout: 10), "Sample clothes weren't removed")
+            // Removal waits for the still-running sample import to stop, which can take a
+            // while on a busy CI runner.
+            XCTAssertTrue(waitToDisappear(remove, timeout: 30), "Sample clothes weren't removed")
             snap("home-samples-removed")
         } else {
             note("samples", "No sample items were extracted on this run (models missing?)")
@@ -94,8 +97,15 @@ final class FirstRunE2ETests: E2ETestCase {
         while Date() < deadline, !tabs.exists {
             dismissSpringboardAlertIfPresent()
             for step in steps where step.element.exists && step.element.isHittable {
+                // The flow can advance on its own between the check and the tap (the selfie
+                // step moves on by itself without a camera), and an element tap whose query
+                // no longer matches fails the test. Capture the frame now, tap that point.
+                let frame = step.element.frame
                 snapOnce(step.key)
-                step.element.tap()
+                if !frame.isEmpty {
+                    app.coordinate(withNormalizedOffset: .zero)
+                        .withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+                }
                 break
             }
             if anyElement(NSPredicate(format: "identifier == 'onboarding.scanCounter'")).exists { snapOnce("scanning") }

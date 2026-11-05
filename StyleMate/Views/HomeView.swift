@@ -167,10 +167,12 @@ struct HomeView: View {
                 outfitSheet
                     .presentationDetents([.large])
                     .presentationDragIndicator(.hidden)
+                    .presentationBackground(DS.Colors.backgroundPrimary)
             }
             .sheet(isPresented: outfitSheetBinding(wide: true)) {
                 outfitSheet
                     .presentationSizing(.page)
+                    .presentationBackground(DS.Colors.backgroundPrimary)
             }
             .alert("Outfit Suggestion", isPresented: $homeVM.showOutfitErrorAlert) {
                 if homeVM.outfitError == .networkError {
@@ -374,7 +376,7 @@ struct HomeView: View {
                 OutfitBoard(items: items, isThumbnail: true, padding: DS.Spacing.sm)
                     .frame(height: heroBoardHeight)
                     .frame(maxWidth: .infinity)
-                    .background(StudioSurface())
+                    .studioIsland()
                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
             }
             .buttonStyle(DSTapBounce())

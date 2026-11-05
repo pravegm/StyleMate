@@ -112,7 +112,7 @@ struct ScanRangePickerView: View {
                 HStack(alignment: .top, spacing: DS.Spacing.sm) {
                     Image(systemName: "photo.stack.fill")
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundColor(selected ? .white : DS.Colors.accent)
+                        .foregroundColor(selected ? DS.Colors.onAccent : DS.Colors.accent)
                         .frame(width: 44, height: 44)
                         .background(selected ? DS.Colors.accent : DS.Colors.accent.opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -124,7 +124,7 @@ struct ScanRangePickerView: View {
                                 .foregroundColor(DS.Colors.textPrimary)
                             Text("Best results")
                                 .font(DS.Font.caption2)
-                                .foregroundColor(.white)
+                                .foregroundColor(DS.Colors.onAccent)
                                 .padding(.horizontal, DS.Spacing.xs)
                                 .padding(.vertical, 2)
                                 .background(DS.Colors.accent, in: Capsule())

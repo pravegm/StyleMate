@@ -248,7 +248,7 @@ struct WearLogPromptCard: View {
                     Spacer(minLength: 0)
                     Button("Log it", action: onLog)
                         .font(DS.Font.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(DS.Colors.onAccent)
                         .padding(.horizontal, DS.Spacing.md)
                         .frame(height: 36)
                         .background(DS.Colors.accent, in: Capsule())
@@ -352,7 +352,7 @@ struct UncertainItemsSheet: View {
             VStack(spacing: DS.Spacing.xs) {
                 Button("Add") { Haptics.success(); withAnimation { held.add(entry, to: wardrobe) } }
                     .font(DS.Font.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DS.Colors.onAccent)
                     .padding(.horizontal, DS.Spacing.md)
                     .frame(height: 32)
                     .background(DS.Colors.accent, in: Capsule())

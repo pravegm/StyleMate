@@ -321,7 +321,7 @@ struct CoachMarkOverlay: View {
                 Button { Haptics.medium(); tutorial.next() } label: {
                     Text(step.cta)
                         .font(DS.Font.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(DS.Colors.onAccent)
                         .padding(.horizontal, DS.Spacing.md)
                         .padding(.vertical, 8)
                         .background(DS.Colors.accent, in: Capsule(style: .continuous))

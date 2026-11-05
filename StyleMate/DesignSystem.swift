@@ -45,15 +45,25 @@ enum DS {
             light: UIColor.white,                                              // #FFFFFF
             dark:  UIColor(red: 0.114, green: 0.114, blue: 0.125, alpha: 1)    // #1D1D20
         )
-        // Studio backdrop behind item cutouts (ItemCutoutTile): a soft warm-grey
-        // sweep like a product-photo cyclorama, so cutouts never sit on flat white.
+        // Studio backdrop behind item cutouts (ItemCutoutTile, outfit boards): a
+        // soft warm-grey sweep like a product-photo cyclorama. In dark mode it stays
+        // a LIGHT card, dimmed so it doesn't glare: black garments vanish on a dark
+        // backdrop, and product shots read as intentional prints in a dark UI.
+        // Content drawn on it is forced to the light appearance (`studioIsland()`).
         static let studioTop = dyn(
             light: UIColor(red: 0.965, green: 0.961, blue: 0.953, alpha: 1),   // #F6F5F3
-            dark:  UIColor(red: 0.165, green: 0.165, blue: 0.176, alpha: 1)
+            dark:  UIColor(red: 0.835, green: 0.820, blue: 0.796, alpha: 1)    // #D5D1CB
         )
         static let studioBottom = dyn(
             light: UIColor(red: 0.925, green: 0.918, blue: 0.906, alpha: 1),   // #ECEAE7
-            dark:  UIColor(red: 0.125, green: 0.125, blue: 0.133, alpha: 1)
+            dark:  UIColor(red: 0.769, green: 0.753, blue: 0.729, alpha: 1)    // #C4C0BA
+        )
+
+        /// Text / glyphs on an accent fill. White on the deep light-mode teal; a deep
+        /// teal-black on the bright dark-mode mint (white on mint is ~1.9:1).
+        static let onAccent = dyn(
+            light: UIColor.white,
+            dark:  UIColor(red: 0.016, green: 0.129, blue: 0.110, alpha: 1)    // #04211C
         )
 
         // Text. Each token also has an Increase Contrast variant (like the
@@ -271,11 +281,14 @@ extension View {
 
 struct DSPrimaryButton: ButtonStyle {
     var isDisabled = false
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        // Dark mode: no coloured glow under the button (it reads as a halo on black).
+        let glow = colorScheme == .dark || isDisabled ? 0 : 0.28
+        return configuration.label
             .font(DS.Font.headline)
-            .foregroundStyle(.white)
+            .foregroundStyle(DS.Colors.onAccent)
             .lineLimit(1)
             .minimumScaleFactor(0.85)
             .padding(.horizontal, 20)
@@ -286,7 +299,7 @@ struct DSPrimaryButton: ButtonStyle {
                            : AnyShapeStyle(DS.Colors.accent),
                 in: RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous)
             )
-            .shadow(color: DS.Colors.accent.opacity(isDisabled ? 0 : 0.28),
+            .shadow(color: DS.Colors.accent.opacity(glow),
                     radius: configuration.isPressed ? 4 : 10, x: 0, y: configuration.isPressed ? 2 : 5)
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
             .brightness(configuration.isPressed ? -0.04 : 0)

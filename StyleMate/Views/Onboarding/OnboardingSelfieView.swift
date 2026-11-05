@@ -368,7 +368,7 @@ struct OnboardingSelfieView: View {
                         } label: {
                             Text("Use these photos")
                                 .font(DS.Font.headline)
-                                .foregroundColor(.white)
+                                .foregroundColor(DS.Colors.onAccent)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, DS.Spacing.sm)
                                 .background(DS.Colors.accent)
