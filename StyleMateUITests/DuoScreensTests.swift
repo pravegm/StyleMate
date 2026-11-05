@@ -74,6 +74,44 @@ final class DuoScreensTests: E2ETestCase {
         openTab("Profile")
         _ = waitForAny([text("Profile"), app.navigationBars.firstMatch], timeout: 10)
         shoot("07-profile")
+
+        // Profile -> About -> Diagnostics (live hinge readings on every display) and Acknowledgements.
+        if openProfileRow("profile.diagnostics", "Diagnostics", expect: "diagnostics.benchmark") {
+            shoot("08-diagnostics")
+            leaveProfileRow()
+        }
+        if openProfileRow("profile.acknowledgements", "Acknowledgements", expect: "acknowledgements.privacyPolicy") {
+            shoot("09-acknowledgements")
+            leaveProfileRow()
+        }
+    }
+
+    /// Scrolls Profile to a row and opens it; true once `expect` (an identifier on the new screen) shows.
+    @MainActor
+    private func openProfileRow(_ id: String, _ label: String, expect: String) -> Bool {
+        let row = anyElement(NSPredicate(format: "identifier == %@ OR label == %@", id, label))
+        guard scrollUntilHittable(row, maxSwipes: 12) else { XCTFail("No '\(label)' row in Profile"); return false }
+        row.tap()
+        guard app.descendants(matching: .any)[expect].waitForExistence(timeout: 15) else {
+            snap("\(label)-missing")
+            XCTFail("\(label) didn't open")
+            return false
+        }
+        return true
+    }
+
+    /// Back to Profile from a pushed screen (the back button may live in the Duo's trailing rail).
+    @MainActor
+    private func leaveProfileRow() {
+        let back = app.buttons.matching(NSPredicate(format:
+            "identifier == 'BackButton' OR label == 'Back' OR label == 'Profile'")).firstMatch
+        if back.waitForExistence(timeout: 5), back.isHittable {
+            back.tap()
+        } else {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+        }
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "pop")], timeout: 1.0)
     }
 
     // No seated (tabletop) pass: the Duo simulator shows the inner display sideways and simctl can't rotate it,
