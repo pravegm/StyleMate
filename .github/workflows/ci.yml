@@ -84,6 +84,16 @@ jobs:
           echo "ui=$ui" >> "$GITHUB_OUTPUT"
           echo "unit_tests=$tests" >> "$GITHUB_OUTPUT"
           echo "UI tests: $ui | unit tests: ${tests:-all}"
+      - name: Pinned garment head
+        id: gpin
+        run: echo "sha=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json"))["sha256"])')" >> "$GITHUB_OUTPUT"
+      # Touch the cached garment head (~4 MB) on every run so it is never evicted: it is the only
+      # copy once the training run's artifact expires.
+      - name: Keep the garment head cached
+        uses: actions/cache/restore@v4
+        with:
+          path: scripts/garment/.artifacts
+          key: garment-head-${{ steps.gpin.outputs.sha }}
       - name: Are the model caches there?
         id: models
         env:
@@ -140,8 +150,18 @@ jobs:
         run: |
           echo "run=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json"))["run_id"])')" >> "$GITHUB_OUTPUT"
           echo "artifact=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json")).get("artifact", "garment-head"))')" >> "$GITHUB_OUTPUT"
-      - name: Download the garment head
+          echo "sha=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json"))["sha256"])')" >> "$GITHUB_OUTPUT"
+      # The head is kept in the Actions cache by its sha256 (the plan job touches it on every run, so
+      # it is never evicted); the training run's artifact (90 days) is only the first source.
+      - name: Restore the garment head
+        id: hcache
         if: steps.wcache.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: scripts/garment/.artifacts
+          key: garment-head-${{ steps.gpin.outputs.sha }}
+      - name: Download the garment head
+        if: steps.wcache.outputs.cache-hit != 'true' && steps.hcache.outputs.cache-hit != 'true'
         uses: actions/download-artifact@v4
         with:
           name: ${{ steps.gpin.outputs.artifact }}

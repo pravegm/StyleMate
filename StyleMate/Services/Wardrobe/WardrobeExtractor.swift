@@ -259,46 +259,59 @@ enum WardrobeExtractor {
         return (crop, nil)
     }
 
+    /// One reused request on one serial queue: Vision loads the segmentation model per
+    /// request object (a fresh request per photo reloaded it every time), and a request
+    /// is not thread-safe.
+    private static let matteQueue = DispatchQueue(label: "StyleMate.wardrobe.matte", qos: .userInitiated)
+    nonisolated(unsafe) private static var matteRequest: VNGeneratePersonSegmentationRequest?
     /// Set when a matte request ever hangs; later photos skip the matte.
     nonisolated(unsafe) private static var matteDisabled = false
+    nonisolated(unsafe) private static var matteWarm = false
 
     /// Vision's person segmentation (balanced quality) as 8-bit coverage, or nil.
     private static func personMatte(_ image: CGImage) -> (w: Int, h: Int, v: [UInt8])? {
-        let request = VNGeneratePersonSegmentationRequest()
-        request.qualityLevel = .balanced
-        request.outputPixelFormat = kCVPixelFormatType_OneComponent8
-        #if targetEnvironment(simulator)
-        // The simulator has no Neural Engine and emulates the GPU path very slowly
-        // (measured: 94 s for one accurate matte vs 4 s on the CPU).
-        request.usesCPUOnly = true
-        #endif
         guard !matteDisabled else { return nil }
         // The matte comes back at ~384x512 anyway: hand Vision a <= 768 px image.
         let s = min(1, 768 / CGFloat(max(image.width, image.height)))
         let small = s < 1 ? (resized(image, w: Int(CGFloat(image.width) * s), h: Int(CGFloat(image.height) * s)) ?? image) : image
-        // A watchdog: a Vision request that never returns must not stall a scan.
+        // A watchdog: a Vision request that never returns must not stall a scan (the first
+        // call loads the model, so it gets longer).
         let done = DispatchSemaphore(value: 0)
-        var ok = false
-        DispatchQueue.global(qos: .userInitiated).async {
-            ok = (try? VNImageRequestHandler(cgImage: small, options: [:]).perform([request])) != nil
-            done.signal()
+        var result: (w: Int, h: Int, v: [UInt8])?
+        matteQueue.async {
+            defer { done.signal() }
+            let request: VNGeneratePersonSegmentationRequest
+            if let r = matteRequest { request = r } else {
+                request = VNGeneratePersonSegmentationRequest()
+                request.qualityLevel = .balanced
+                request.outputPixelFormat = kCVPixelFormatType_OneComponent8
+                #if targetEnvironment(simulator)
+                // The simulator has no Neural Engine and emulates the GPU path very slowly
+                // (measured: 94 s for one accurate matte vs 4 s on the CPU).
+                request.usesCPUOnly = true
+                #endif
+                matteRequest = request
+            }
+            guard (try? VNImageRequestHandler(cgImage: small, options: [:]).perform([request])) != nil,
+                  let buffer = request.results?.first?.pixelBuffer else { return }
+            CVPixelBufferLockBaseAddress(buffer, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+            let mw = CVPixelBufferGetWidth(buffer), mh = CVPixelBufferGetHeight(buffer)
+            let stride = CVPixelBufferGetBytesPerRow(buffer)
+            guard mw > 0, mh > 0, let base = CVPixelBufferGetBaseAddress(buffer) else { return }
+            let p = base.assumingMemoryBound(to: UInt8.self)
+            var v = [UInt8](repeating: 0, count: mw * mh)
+            var any = false
+            for y in 0..<mh { for x in 0..<mw { let b = p[y * stride + x]; v[y * mw + x] = b; if b > 128 { any = true } } }
+            if any { result = (mw, mh, v) }
         }
-        guard done.wait(timeout: .now() + 20) == .success else {
+        guard done.wait(timeout: .now() + (matteWarm ? 15 : 120)) == .success else {
             matteDisabled = true
             print("[Wardrobe] person matte timed out; continuing without it")
             return nil
         }
-        guard ok, let buffer = request.results?.first?.pixelBuffer else { return nil }
-        CVPixelBufferLockBaseAddress(buffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-        let mw = CVPixelBufferGetWidth(buffer), mh = CVPixelBufferGetHeight(buffer)
-        let stride = CVPixelBufferGetBytesPerRow(buffer)
-        guard mw > 0, mh > 0, let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
-        let p = base.assumingMemoryBound(to: UInt8.self)
-        var v = [UInt8](repeating: 0, count: mw * mh)
-        var any = false
-        for y in 0..<mh { for x in 0..<mw { let b = p[y * stride + x]; v[y * mw + x] = b; if b > 128 { any = true } } }
-        return any ? (mw, mh, v) : nil
+        matteWarm = true
+        return result
     }
 
     // MARK: - Close-ups for small items
