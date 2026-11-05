@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# RESEARCH ONLY: not used by any build, never ship its output (see scripts/face_legacy/README.md).
 """
 Does the app's own warpAligned (similarity transform via normal equations +
 inverse bilinear sampling) produce the SAME aligned crop as InsightFace's

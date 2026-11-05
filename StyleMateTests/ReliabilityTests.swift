@@ -386,8 +386,8 @@ extension FaceMatchingTests {
 
     /// A unit vector at cosine `c` from `base` (deterministic per seed).
     private func near(_ base: [Float], cosine c: Float, seed: Int) -> [Float] {
-        // SplitMix64: independent pseudo-random directions per seed (512-d, so two of them
-        // are nearly orthogonal and the generated views aren't near-duplicates).
+        // SplitMix64: independent pseudo-random directions per seed (128-d or 512-d, so two of
+        // them are nearly orthogonal and the generated views aren't near-duplicates).
         var state = UInt64(truncatingIfNeeded: seed) &* 0x9E3779B97F4A7C15 &+ 1
         func next() -> Float {
             state &+= 0x9E3779B97F4A7C15
@@ -406,6 +406,15 @@ extension FaceMatchingTests {
         return zip(base, r).map { c * $0 + s * $1 }
     }
 
+    /// Selfie anchors built from one front frame: upright + mirror, or one when the embedder is
+    /// flip-averaged (mirror-invariant).
+    private var selfieAnchorCount: Int { FaceModelProfile.active.flipAverage ? 1 : 2 }
+
+    /// A "new view of the user": clears both learning bars (gallery and selfie) with room to spare.
+    private var learnableCosine: Float {
+        min(0.9, max(FaceMatchingService.autoLearnSelfieThreshold, FaceMatchingService.autoLearnThreshold) + 0.1)
+    }
+
     @Test func learningIsGatedOnTheSelfieAndCapped() throws {
         let svc = FaceMatchingService.shared
         let user = Self.reliabilityUser
@@ -421,16 +430,18 @@ extension FaceMatchingTests {
 
         // New views of the user are learned, but never more than the selfie/confirmed share.
         var learned = 0
-        for seed in 1...5 where svc.learnFromScan(near(anchor, cosine: 0.75, seed: seed), similarity: 0.8, userId: user) {
+        let c = learnableCosine
+        for seed in 1...5 where svc.learnFromScan(near(anchor, cosine: c, seed: seed), similarity: c, userId: user) {
             learned += 1
         }
         #expect(learned >= 1)
         let summary = svc.gallerySummary()
-        #expect(summary.selfie == 2)
+        #expect(summary.selfie == selfieAnchorCount)
         #expect(summary.learned <= summary.selfie + summary.confirmed)
 
         // An ambiguous group-photo pick (small margin) is not learned.
-        #expect(!svc.learnFromScan(near(anchor, cosine: 0.75, seed: 99), similarity: 0.8, margin: 0.05, userId: user))
+        #expect(!svc.learnFromScan(near(anchor, cosine: c, seed: 99), similarity: c,
+                                   margin: FaceMatchingService.autoLearnMargin / 3, userId: user))
         svc.clearReference(forUser: user)
     }
 
@@ -441,7 +452,8 @@ extension FaceMatchingTests {
         try relUseAsSelfie(selfie)
         let cg = try #require(selfie.cgImage)
         let anchor = try #require(svc.evaluateFaceForReference(in: cg)?.embedding)
-        let views = (0..<8).map { near(anchor, cosine: 0.7, seed: 200 + $0) }
+        let c = learnableCosine
+        let views = (0..<8).map { near(anchor, cosine: c, seed: 200 + $0) }
 
         await withTaskGroup(of: Void.self) { group in
             for i in 0..<16 {
@@ -449,7 +461,7 @@ extension FaceMatchingTests {
                     switch i % 4 {
                     case 0: _ = svc.findUserInPhoto(cg)
                     case 1: _ = svc.addReferenceEmbeddings([views[i % views.count]], forUser: user)
-                    case 2: _ = svc.learnFromScan(views[(i + 3) % views.count], similarity: 0.8, userId: user)
+                    case 2: _ = svc.learnFromScan(views[(i + 3) % views.count], similarity: c, userId: user)
                     default:
                         _ = svc.referenceCount
                         _ = svc.loadReference(forUser: user)
@@ -459,9 +471,12 @@ extension FaceMatchingTests {
             }
         }
         #expect(svc.loadReference(forUser: user))
-        #expect(svc.gallerySummary().selfie == 2)
+        #expect(svc.gallerySummary().selfie == selfieAnchorCount)
         let match = svc.findUserInPhoto(cg)
-        #expect((match.similarity ?? 0) > 0.9)
+        // The selfie photo still matches its own anchor (single best), and the gallery consensus
+        // (mean of the two best entries: the anchor + a synthetic view at cosine c) still auto-adds.
+        #expect((match.bestSingleSimilarity ?? 0) > 0.9)
+        #expect((match.similarity ?? 0) >= FaceMatchingService.highConfidenceThreshold)
         svc.clearReference(forUser: user)
     }
 }

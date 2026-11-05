@@ -1,7 +1,10 @@
-# StyleMate model licensing (launch review, 2026-11-04)
+# StyleMate model licensing (launch review, 2026-11-04; face models replaced 2026-11-05)
 
-StyleMate is a paid App Store app that bundles five on-device ML models. Three of them, and
-the training data of a fourth, are licensed for **non-commercial research only**. That is
+StyleMate is a paid App Store app that bundles five on-device ML models. On 2026-11-04 three
+of them, and the training data of a fourth, were licensed for **non-commercial research only**.
+**Update 2026-11-05:** the two face models (rows 1–2) are replaced by YuNet (MIT) and SFace
+(Apache-2.0); SCRFD and AdaFace are no longer built or bundled (§2.6, §2.7, §8). The garment
+parsers (rows 3–4) are still non-commercial. That is
 the biggest single launch blocker. It is a legal risk, not a review risk: App Review will not
 spot it, but the licence holders can file a takedown and claim damages after launch.
 
@@ -13,17 +16,17 @@ spot it, but the licence holders can file a takedown and claim damages after lau
 
 | # | Model (bundle name) | Role | Size in app | Weights licence | Paid iOS app may ship it? |
 |---|---|---|---|---|---|
-| 1 | InsightFace **SCRFD-10G**, `det_10g.onnx` from `buffalo_l` (`SCRFD10G.mlpackage`) | Face detection + 5 landmarks | 8 MB | InsightFace model policy: non-commercial research only | **No**, unless InsightFace grants a commercial licence |
-| 2 | **AdaFace IR-101 on WebFace12M** (`MobileFaceNet.mlpackage`) | Face embedding (identity) | 125 MB | Code is MIT. The checkpoint has no stated licence, and its training set (WebFace260M family) is research-only | **No** (no commercial path is known) |
+| 1 | **YuNet 2023mar** (OpenCV Zoo), `face_detection_yunet_2023mar.onnx` (`FaceDetectYuNet.mlpackage`, fp32). *Replaced InsightFace SCRFD-10G on 2026-11-05.* | Face detection + 5 landmarks | 0.3 MB | MIT (§2.6) | **Yes**, with attribution (§3 caveat applies) |
+| 2 | **SFace 2021dec** (OpenCV Zoo), `face_recognition_sface_2021dec.onnx` (`FaceEmbedSFace.mlpackage`, fp16). *Replaced AdaFace IR-101 (WebFace12M) on 2026-11-05.* | Face embedding (identity) | 18 MB | Apache-2.0 (§2.7) | **Yes**, with attribution + modification notice (§3 caveat applies) |
 | 3 | **FASHN human parser**, `fashn-ai/fashn-human-parser`, SegFormer-B4 (`GarmentParser.mlpackage`) | Clothing vs. body parsing | 62 MB | NVIDIA Source Code License for SegFormer (non-commercial) | **No** |
 | 4 | **`sayeed99/segformer-b3-fashion`**, SegFormer-B3 on Fashionpedia (`GarmentLabeler.mlpackage`) | Garment type per pixel | 46 MB | "other", which links to the NVIDIA SegFormer licence | **No** |
 | 5 | **Marqo-FashionSigLIP** (`FashionEncoder.mlpackage` + `FashionVocabulary.json`) | Zero-shot attributes, duplicate matching | 176 MB + 1 MB | Apache-2.0 | **Yes**, with attribution |
 
-Sizes come from CI run 41829764408 (`du -sh`).
+Sizes come from CI run 41829764408 (`du -sh`); face rows from run 42008624154 (the app's `.mlmodelc`: 328 KB and 18 MB, down from 8 MB + 125 MB).
 
 ## 2. Each model, in detail
 
-### 2.1 InsightFace SCRFD-10G (from `buffalo_l`)
+### 2.1 InsightFace SCRFD-10G (from `buffalo_l`) — no longer shipped (2026-11-05)
 
 - **Licence text:** README of https://github.com/deepinsight/insightface, "License" section:
   - "The code of InsightFace is released under the MIT License. There is no limitation for both academic and commercial usage."
@@ -37,7 +40,7 @@ Sizes come from CI run 41829764408 (`du -sh`).
 - **Verdict: cannot ship without a signed licence.**
 - **Opportunity:** `buffalo_l` contains both SCRFD-10G (`det_10g.onnx`) and the ArcFace R50 embedder (`w600k_r50.onnx`). One `buffalo_l` licence would therefore cover the detector and an embedder. The repo still has `scripts/convert_r50.py` for that R50 embedder (input is RGB; see CLAUDE.md).
 
-### 2.2 AdaFace IR-101 (WebFace12M)
+### 2.2 AdaFace IR-101 (WebFace12M) — no longer shipped (2026-11-05)
 
 - **Code:** MIT (https://github.com/mk-minchul/AdaFace).
   - The README gives **no licence for the pretrained checkpoints**. They are Google Drive links in a table.
@@ -77,6 +80,47 @@ Sizes come from CI run 41829764408 (`du -sh`).
   - Include the Apache-2.0 licence text and any NOTICE in an in-app Acknowledgements screen (Profile → About).
   - State that the model was converted and quantized (Apache §4(b): modified files carry a notice).
 
+### 2.6 YuNet 2023mar (ships since 2026-11-05)
+
+- **Source:** https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet, file
+  `face_detection_yunet_2023mar.onnx`, pinned to opencv_zoo commit
+  `48b10fa505aeb51fbd127fc60a5c660040e823b7` (the file last changed in `f12e127`, "update yunet to v2",
+  2023-06-06). SHA-256 `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4`.
+  The model comes from https://github.com/ShiqiYu/libfacedetection.train (BSD-3 code).
+- **Licence text (read 2026-11-05):** the directory README says "All files in this directory are
+  licensed under MIT License"; its LICENSE is MIT, "Copyright (c) 2020 Shiqi Yu".
+- **Training data:** WIDER FACE (§3).
+- **Conversion:** `scripts/convert_face_models.py` (ONNX → onnx2torch → Core ML ML program, **fp32**,
+  weights unchanged). Parity, checked on every build: onnx2torch vs onnxruntime and Core ML vs
+  onnxruntime on random input and on 4 fixture photos; every output cos > 0.9999 and the decoded
+  faces identical (CI run 42008624154: worst cos 1.000000).
+- **Obligation:** keep the copyright and MIT notice: `StyleMate/Resources/Acknowledgements/ACK-12-yunet.md`.
+
+### 2.7 SFace 2021dec (ships since 2026-11-05)
+
+- **Source:** https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface, file
+  `face_recognition_sface_2021dec.onnx`, same pinned commit. SHA-256
+  `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79`. Original code:
+  https://github.com/zhongyy/SFace (the repo states no licence; the ONNX was contributed to OpenCV
+  Zoo by the author's side, "ONNX file conversions … thanks to Chengrui Wang").
+- **Licence text (read 2026-11-05):** "All files in this directory are licensed under Apache 2.0
+  License" (README), LICENSE = Apache-2.0 full text. No NOTICE file.
+- **Training data:** not stated by OpenCV. The SFace paper trains on CASIA-WebFace, VGGFace2 and
+  MS-Celeb-1M (§3 caveat).
+- **Conversion:** same script, **fp16** weights; Core ML vs onnxruntime cos ≥ 0.99989 on random input
+  and 7 real fixture faces (CI run 42008624154).
+- **Obligations (Apache-2.0 §4):** licence text + notice of modification ("converted to Core ML,
+  16-bit weights"): `StyleMate/Resources/Acknowledgements/ACK-13-sface.md`.
+
+### 2.8 Alternatives evaluated for the embedder (2026-11-05)
+
+| Candidate | Weights licence, as read at the source | LFW accuracy in our pipeline (§8) | Verdict |
+|---|---|---|---|
+| **SFace** (OpenCV Zoo) | Apache-2.0, explicit for the model files | see §8 | **Chosen** |
+| **dlib `dlib_face_recognition_resnet_model_v1`** | "I've released them into the public domain" / CC0-1.0 (https://github.com/davisking/dlib-models). Trained on ~3M faces, "about half … from VGG and face scrub" plus web scrapes | see §8 | Cleanest licence, but needs dlib's own 5-point landmarker + 150 px chip alignment and a C++ or ported runtime |
+| **FaceNet Inception-ResNet-v1, VGGFace2** (`facenet-pytorch`, port of davidsandberg/facenet) | Repo MIT; the weights have **no stated licence**; VGGFace2's own licence could not be confirmed (sources disagree: CC BY-SA 4.0 vs non-commercial; the official page no longer shows terms) | see §8 | Not an "explicit commercial-OK" licence: not eligible |
+| InsightFace `w600k_r50` (buffalo_l) | Non-commercial unless licensed (§2.1) | see §8 | Only with a signed licence (§7) |
+
 ## 3. A caveat that applies to every "permissive" face model
 
 Almost every public face detector and recogniser was trained on research-only data:
@@ -95,6 +139,8 @@ No commercially usable, large-scale face-ID training set exists:
 
 ### 4.1 Face detection with 5-point landmarks (replaces SCRFD)
 
+**Done 2026-11-05: YuNet ships (§2.6).**
+
 | Option | Licence (URL) | Landmarks | Notes |
 |---|---|---|---|
 | **YuNet** (OpenCV Zoo, `face_detection_yunet_2023mar.onnx`) | MIT: "All files in this directory are licensed under MIT License" (https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet). Training repo is BSD-3 (https://github.com/ShiqiYu/libfacedetection.train) | 5 points: right eye, left eye, nose tip, right and left mouth corner. Same set as ArcFace; OpenCV's `FaceRecognizerSF.alignCrop` uses them directly | About 0.3 MB, tiny and fast. Trained on WIDER FACE (see §3). Converts to Core ML through ONNX → PyTorch (`onnx2torch`, already used for SCRFD). **Best drop-in.** |
@@ -104,6 +150,8 @@ No commercially usable, large-scale face-ID training set exists:
 | Apple Vision `VNDetectFaceRectanglesRequest` | Part of iOS | Not usable as-is | CLAUDE.md records that Vision landmarks collapsed same-person similarity (0.988 → about 0.2). Usable only as a box proposer in front of YuNet landmarks. |
 
 ### 4.2 Face recognition (replaces AdaFace)
+
+**Done 2026-11-05: SFace ships (§2.7); measured against dlib, FaceNet and the old stack in §8.**
 
 | Option | Licence (URL) | Quality | Notes |
 |---|---|---|---|
@@ -144,6 +192,9 @@ Do **not** train on DeepFashion2, ModaNet, LIP/ATR or CIHP. Their licences are n
 
 ## 5. Recommended launch path (ranked)
 
+**Status 2026-11-05:** the face half of path 1 is done: YuNet + SFace are the default and the
+`buffalo_l` swap is a documented manual change (§7). The InsightFace email is drafted (§9), not sent.
+
 The garment retrain (§4.3 option 2) is on the critical path whatever happens with face models. Run it in parallel with the face-licence enquiry.
 
 | Rank | Path | Legal status | Time to launch-ready | Quality risk | Cost |
@@ -175,10 +226,198 @@ The garment retrain (§4.3 option 2) is on the critical path whatever happens wi
     creativeml-openrail-m; notice: Core ML, 6-bit palettized UNet + text encoder, no safety checker), Apple
     ml-stable-diffusion (MIT, LICENSE.md at the pinned commit), MET Norway (NLOD 2.0 + CC BY 4.0, "Based on
     data from MET Norway") and Open-Meteo (CC BY 4.0). There are no Swift packages (the project has no package
-    references). **Whoever adds or swaps a model adds / deletes its file there.** Still to add if they keep
-    shipping: SCRFD / AdaFace / FASHN parser / Fashionpedia labeler texts (NVIDIA SegFormer licence §3.1 asks
+    references). **Whoever adds or swaps a model adds / deletes its file there.** YuNet (`ACK-12-yunet.md`, MIT) and SFace (`ACK-13-sface.md`, Apache-2.0 + modification notice) were added on 5 Nov with the face swap; SCRFD / AdaFace no longer ship. Still to add if they keep
+    shipping: FASHN parser / Fashionpedia labeler texts (NVIDIA SegFormer licence §3.1 asks
     for a copy of the licence with any redistribution; Fashionpedia annotations are CC BY 4.0).
   - Open-Meteo's licence also asks for a link "next to any location Open-Meteo data are displayed"; the weather
     card shows none yet.
 - Record each shipped model's source URL, licence, commit or hash and conversion script in this file. Bump `FaceMatchingService.modelVersion` on any face-model swap (CLAUDE.md).
 - Keep the weights out of public artifacts. The repo is **public**; CI keeps the models only in the Actions cache, which is correct.
+
+## 7. Plugging in InsightFace `buffalo_l` (only with a signed licence)
+
+The code path is kept ready: `FaceModelSet.insightFaceBuffaloL`, `FaceModelProfile.insightFaceBuffaloL`,
+`SCRFDDetector` (SCRFD-10G decoder) and the converters in `scripts/face_legacy/`. Nothing of it is
+built or bundled today. If the founder signs an InsightFace licence that covers `det_10g.onnx` and
+`w600k_r50.onnx` in a paid iOS app (on-device, bundled in the binary, converted to Core ML fp16):
+
+1. **Profile.** `StyleMate/Services/FaceModelProfile.swift`: `static let active: FaceModelProfile = .insightFaceBuffaloL`.
+   Check its bars against §8 (they are the equal-FAR calibration of the R50 on the same LFW protocol)
+   and against the CI `faces.txt` benchmark of the first green run.
+2. **Build (manual, on purpose).** No build script can fetch InsightFace weights. With the licence
+   signed, add a step to `scripts/build_face_models.sh` (and bump its `face-models` cache key in
+   `ci.yml`, `duo.yml`, `testflight.yml`) that downloads `buffalo_l.zip` from the source named in
+   the contract, checks its SHA-256, and runs
+   `python face_legacy/convert_scrfd.py <det_10g.onnx> "$OUT/FaceDetectSCRFD.mlpackage"` and
+   `python face_legacy/convert_r50.py <w600k_r50.onnx> "$OUT/FaceEmbedArcFaceR50.mlpackage"`
+   (both parity-check against onnxruntime), and drop the YuNet / SFace steps. Add the two
+   converters to the cache key's `hashFiles(...)`. `StyleMate/FaceModels/` is a synchronized
+   folder, so the Xcode project needs no edit.
+3. **Licence gate.** `scripts/check_face_models.sh`: expect `FaceDetectSCRFD.mlmodelc` and
+   `FaceEmbedArcFaceR50.mlmodelc`, and drop those two names from the forbidden list.
+4. **Acknowledgements.** Replace `StyleMate/Resources/Acknowledgements/ACK-12-yunet.md` /
+   `ACK-13-sface.md` with whatever attribution the InsightFace contract requires.
+5. **Users.** `modelVersion` changes (`scrfd10g_w600k_r50_flip`), so every stored gallery is discarded
+   and rebuilt from the selfie frames on first launch. Faces confirmed in "Find yourself" / "Is this
+   you?" are lost (the app keeps their embeddings, not their photos): prompt the user to run
+   **Improve Recognition** again, or swap before launch.
+6. **Docs.** This file (§1 table, licences, hashes), README "How it works", CLAUDE.md face notes.
+
+Swift needs no other change: the R50 input (RGB, (px−127.5)/127.5, 512-d) is described by the
+profile, and `FaceDetector.shared` switches to `SCRFDDetector`.
+
+## 8. Measurements: old stack (SCRFD-10G + AdaFace IR-101) vs new (YuNet + SFace), 2026-11-05
+
+**Evaluation only.** LFW (Labeled Faces in the Wild, UMass; research benchmark, downloaded via the
+scikit-learn figshare mirror) was used to *measure*; nothing derived from it ships. The lab mirrors
+the Swift pipeline (letterboxed 640 detector input, 5-point similarity warp to the ArcFace template,
+cosine of L2-normalized embeddings). It is not in the repo (the scripts live in the session's
+scratchpad); the CI fixture benchmark below is the in-repo, repeatable part. The old stack was run
+with the CVLFace safetensors copy of the same AdaFace IR-101 WebFace12M weights (Google Drive is
+blocked here); its RGB order beat BGR on the fixtures, matching the app's BGR-checkpoint setup.
+The lab CPU was shared and slow, so the old stack (IR-101 is ~24 GFLOPs per face) was measured on
+a 2,440-photo subset; SFace was also measured on all 13,233 photos.
+
+Protocols. *pair*: every same-person pair vs every different-person pair. *g3*: the app's setup:
+each identity's first 3 photos are the gallery ("3-frame selfie"), the next photo the probe, every
+other identity's photos the impostors; *single* = best gallery match (the old app), *top-2* = mean
+of the two best (the new consensus). A photo the detector misses counts as a rejected genuine. FAR
+is per probe-vs-gallery comparison. At FAR ≤ 1e-6 the LFW numbers are dominated by LFW's own label
+errors (a handful of "impostor" photos that are the same person), so they flatten out there.
+
+### 8.1 Identity accuracy on LFW (2,440-photo subset, 610 identities)
+
+| | Old: SCRFD + AdaFace IR-101 | New: YuNet + SFace (flip-averaged) |
+|---|---|---|
+| Photos with no face found | 0.04% | 0.00% |
+| Same-person similarity: median / 5th percentile | 0.706 / 0.536 | 0.698 / 0.513 |
+| Different-person similarity: mean / 99.9th percentile | 0.003 / 0.193 | 0.102 / 0.371 |
+| **pair** TAR at FAR 1e-4 / 1e-5 | 99.81% / 99.81% | 98.88% / 97.02% |
+| **3-photo gallery** TAR at FAR 1e-4 / 1e-5 (old: single best; new: top-2 consensus) | 99.67% / 99.67% | 99.34% / 98.36% |
+| **At the app's auto-add bar** (old 0.55 single; new 0.58 top-2) | TAR 97.87%, FAR 6.7e-7 | TAR 94.26%, FAR 6.7e-7 |
+| **At the app's review bar** (old 0.30; new 0.45, single best) | TAR 99.67%, FAR 3.1e-5 | TAR 99.34%, FAR 7.4e-5 |
+
+(FAR 6.7e-7 is one LFW "impostor" out of 1.49M, a label error that every model scores as the
+same person.) The full 13,233-photo LFW with SFace agrees: official 6,000-pair accuracy 99.48%
+(99.43% without flip; OpenCV's table: 99.40%), pair TAR 98.34% / 94.93% at FAR 1e-4 / 1e-5.
+
+**Reading it:** on clean faces SFace is close, but its stranger scores are much higher (mean 0.10
+vs 0.003), so for the same false-accept rate it must reject more of the user's own photos: about
+3x as many genuine rejections at FAR 1e-5 (pair: 2.98% vs 0.19%). The app absorbs most of that in
+its review tier: at the new bars ~94% of clean photos of you auto-add (old ~98%) and ~99.3% reach
+at least "Is this you?" (old ~99.7%), while strangers are kept at the old auto-add rate. Review
+will see about 2.4x more strangers than before (7.4e-5 vs 3.1e-5 per face per gallery check:
+roughly 1 extra stranger per 25,000 library faces).
+
+### 8.2 Hard cases (150 probes per case, gallery = 3 clean photos)
+
+The same 150 LFW identities, the probe photo degraded; each model at its own FAR-matched bars
+(from its clean gallery protocol). "Missed" = no face found. TAR at FAR 1e-4 / 1e-5.
+
+| Case | Old: SCRFD + AdaFace | New: YuNet (+ tiles) + SFace |
+|---|---|---|
+| Distant face, ~24 px in a 640 px "Find yourself" thumbnail | missed 0.0%, TAR 99.3% / 99.3% | missed 2.7%, TAR 82.0% / 64.7% |
+| Same distant face in the **960 px** thumbnail the app now uses (~36 px) | — | missed 1.3%, TAR 88.0% / 80.0% |
+| Distant face, ~48 px in a 1600 px scan photo (detector sees ~19 px; new stack tiles) | missed 2.0%, TAR 97.3% / 97.3% | missed 0.7%, TAR 95.3% / 90.0% |
+| Sunglasses (dark lenses painted over the eyes from the landmarks; synthetic) | missed 0.7%, TAR 98.7% / 98.7% | missed 0.0%, TAR 89.3% / 68.0% |
+| Frame-filling selfie face (needs the pad retry) | missed 0.7%, TAR 98.7% / 98.7% | missed 0.0%, TAR 94.7% / 90.0% |
+
+Old-stack probes were flip-averaged here (its gallery was not), a small advantage to it. LFW has
+too few strong profiles for a profile row; on the fixtures the cap + sunglasses + profile face is
+the weakest same-person score for both stacks (§8.5). **This is where the free stack is clearly
+worse:** tiny, occluded and turned faces lose 10–35 points of TAR at strict FAR (the 960 px thumbnail wins back about half of it for distant faces). In the app those
+photos mostly drop from auto-add to "Is this you?" or, below 0.45, are skipped; nothing about them
+raises the risk of adding a stranger.
+
+### 8.3 What the test-time tricks bought (SFace, LFW)
+
+| Trick | Measured effect | Shipped |
+|---|---|---|
+| Flip-averaged embedding (face + mirror) | pair TAR at FAR 1e-5 94.30% → 94.93% (full LFW); 6,000-pair accuracy 99.43% → 99.48%; also makes mirrored selfies match | Yes |
+| 3-frame selfie gallery instead of one photo | TAR at FAR 1e-5: pair 97.0% → 3-photo gallery 98.4% (subset) | Yes (already in the app) |
+| **Top-2 consensus** instead of max over the gallery | with a **10-photo** gallery (after "Find yourself"), TAR at FAR 1e-5: max 74.4% → top-2 99.5% (the max admits more strangers the bigger the gallery gets) | Yes, for auto-add / multi-person / learning; review keeps the single best |
+| Small-face tile pass (2x2 overlapping 60% tiles at full input, for photos ≥ 1100 px) | 48 px faces in 1600 px photos: misses 5.6% → 0.3%, TAR at FAR 1e-5 79.0% → 93.8% | Yes |
+| "Find yourself" thumbnail 640 → 960 px | ~24 px faces (now ~36 px): misses 2.7% → 1.3%, TAR at FAR 1e-4 / 1e-5 82.0 / 64.7% → 88.0 / 80.0%. Lab CPU time per photo unchanged (one 640 detector pass either way: 82 → 76 ms); PhotoKit cache window 40 → 18 photos so cached bytes stay ~66 MB | Yes |
+| Quality-weighted crops / templates | Not adopted: quality is already a gate (detector score, size, yaw) and the gallery picks are a diverse spread; no measured gain to justify a weighting | No |
+| Confirmed library faces as extra templates ("Is this you?" picks) | Already the gallery design; the consensus score is what makes a large gallery safe (row above) | Yes |
+
+### 8.4 Alternative recognisers (same YuNet detections, same subset)
+
+| Recogniser | Licence of the weights | g3 TAR at FAR 1e-4 / 1e-5 | pair TAR at FAR 1e-4 / 1e-5 |
+|---|---|---|---|
+| **SFace** (flip) | Apache-2.0 | **99.34% / 98.36%** | **98.88% / 97.02%** |
+| dlib ResNet v1 (flip; dlib's own 5-point landmarks inside YuNet's box, 150 px chip) | Public domain / CC0 | 93.11% / 73.11% | 82.24% / 58.09% |
+| FaceNet Inception-ResNet-v1 VGGFace2 (160 px, our 5-point warp, not its native MTCNN box crop, so understated) | no stated licence on the weights (not eligible) | 54.59% / 32.62% | 38.93% / 21.69% |
+| *InsightFace w600k_r50 (buffalo_l, SCRFD detections), for the licensed path* | non-commercial unless licensed | 99.67% / 99.67% | 99.81% / 99.81% |
+
+dlib is far behind here (it was trained for its own detector's boxes; even so the gap is large),
+so SFace is the pick by measured accuracy, not only by convenience.
+
+### 8.5 CI fixture benchmark (the repo's 13 CC0 photos, `FaceMatchingTests.fixtureFaceBenchmark`)
+
+Each fixture face vs itself under 5 photo transforms (re-frame, half size, mirror, 40% darker,
+JPEG q30) = same-person; every pair of faces from different photos = different-person. The six
+`street_*` photos are one Wikimedia series that probably shows the same woman, so their cross
+pairs are reported apart, not as impostors.
+
+| | Old (lab, Python) | New (lab, Python) | New (CI, Swift/Core ML, run 42062320357) |
+|---|---|---|---|
+| Faces found | 11 | 12 | 12 |
+| Same-person: min / 10th pct / median | 0.846 / 0.887 / 0.954 | 0.484 / 0.790 / 0.938 | 0.562 / 0.759 / 0.921 |
+| Different-person: max / mean | 0.125 / 0.014 | 0.283 / 0.088 | 0.305 / 0.102 |
+| At the app's bars | auto-add TAR 100%, FAR 0% | — | auto-add (0.58) TAR 98.2%, FAR 0%; review (0.45) TAR 100%, FAR 0% |
+
+The Swift numbers track the Python twin, which cross-checks the Swift port (letterbox, BGR order,
+alignment, flip averaging). The cap + sunglasses + profile face (`street_coat_cap`) is the weak
+spot: its re-framed copy scored 0.52 before the tile pass and 0.94 with it (better landmarks from
+2.5x the pixels). Both CI numbers are in `faces.txt` of the `ci-report` artifact.
+
+### 8.6 Worse / better, in one place
+
+- **Worse:** strangers score higher (mean 0.10 vs 0.003); at equal false accepts ~3x more of your
+  own photos fall short of auto-add (most go to "Is this you?"); faces in sunglasses / strong
+  profile / very small lose more similarity than with AdaFace (§8.2); review sees ~2.4x more
+  strangers.
+- **Better:** commercially licensed; 18.3 MB of face weights instead of 133 MB (app ~115 MB
+  smaller, less memory; in the lab SFace ran ~60x faster per face on CPU than IR-101); no missed LFW faces; small
+  faces in big photos found and matched far better (tile pass); a large confirmed gallery can no
+  longer let a stranger in through one odd entry (top-2 consensus, which also protects a future
+  buffalo_l swap).
+- **Unknown until a device test:** real libraries (family look-alikes, years apart, low light).
+  The founder should run "Find yourself" + a scan on their own phone and watch the review queue.
+
+## 9. Draft email to InsightFace (for the founder to send; not sent)
+
+> **To:** recognition-oss-pack@insightface.ai
+> **Cc:** contact@insightface.ai
+> **Subject:** Licence quote: buffalo_l (SCRFD-10G + w600k_r50) in one on-device iOS app
+>
+> Hello,
+>
+> I run StyleMate, a paid (subscription) iPhone app that builds a digital wardrobe from the user's own
+> photo library. To find the user in their photos it needs a face detector with 5-point landmarks and
+> a face-embedding model. Everything runs **on the device**: no face data, image or embedding ever
+> leaves the phone, and we run no servers.
+>
+> We would like a quote for a commercial licence to two models from your `buffalo_l` pack:
+> `det_10g.onnx` (SCRFD-10G) and `w600k_r50.onnx` (ArcFace R50, WebFace600K).
+>
+> - **Scope:** one product (StyleMate on iOS / iPadOS), distributed worldwide through the Apple App Store.
+> - **Form:** the models converted to Apple Core ML (fp16), bundled inside the app binary. Not
+>   redistributed separately and not offered as an SDK or a service.
+> - **Volume:** [expected installs in year 1 / year 3, e.g. 20,000 / 150,000]. Price: [planned
+>   subscription price].
+> - **Term:** we would prefer a perpetual licence for the current model versions, or an annual
+>   licence, rather than a per-install royalty.
+>
+> Could you tell us:
+> 1. the price and terms for this scope (flat fee or per-install, and what is included);
+> 2. whether the licence covers converting and quantizing the models (Core ML, fp16);
+> 3. whether it covers the training data (WebFace600K for the R50), i.e. that we would have no
+>    separate obligation to the dataset owners;
+> 4. any attribution you require in the app;
+> 5. how long contracting usually takes.
+>
+> Thank you,
+> [Name], founder, StyleMate
+> [email, company name and address]

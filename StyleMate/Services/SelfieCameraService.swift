@@ -3,7 +3,7 @@ import Vision
 import SwiftUI
 
 /// Front-camera capture for the identity reference: three frames (looking straight, then a
-/// slight turn each way), each checked with the same SCRFD + AdaFace models the scan uses before
+/// slight turn each way), each checked with the same face detector + embedder the scan uses before
 /// it's accepted. More than one angle gives the reference something to match profile and
 /// three-quarter photos against, which a single straight-on selfie can't.
 @MainActor
@@ -239,7 +239,7 @@ extension SelfieCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         // Live framing only (presence, size, pose). The identity embedding never uses Vision
-        // landmarks; each captured frame is checked with SCRFD + AdaFace.
+        // landmarks; each captured frame is checked with the face detector + embedder.
         let request = VNDetectFaceRectanglesRequest { [weak self] request, _ in
             guard let self else { return }
             let faces = (request.results as? [VNFaceObservation] ?? []).filter { $0.confidence > 0.7 }

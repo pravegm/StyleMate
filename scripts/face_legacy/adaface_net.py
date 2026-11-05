@@ -1,3 +1,4 @@
+# RESEARCH ONLY: not used by any build, never ship its output (see scripts/face_legacy/README.md).
 from collections import namedtuple
 import torch
 import torch.nn as nn
