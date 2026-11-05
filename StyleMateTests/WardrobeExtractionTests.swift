@@ -131,7 +131,7 @@ struct WardrobeExtractionTests {
         func run(_ name: String, _ make: () -> VNRequest) {
             for cpu in [false, true] {
                 let r = make()
-                if cpu, let d = MLAllComputeDevices().first(where: { if case .cpu = $0 { return true }; return false }) {
+                if cpu, let d = (try? r.supportedComputeStageDevices)?[.main]?.first(where: { if case .cpu = $0 { return true }; return false }) {
                     r.setComputeDevice(d, for: .main)
                 }
                 let t0 = Date()
