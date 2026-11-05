@@ -140,7 +140,7 @@ enum GarmentSegmenter {
             let pixelClass = idx.map { Int(labels[$0]) }
             var groups: [Int: [Int]] = [:]
             let maj = majority(pixelClass)
-            if r == .top, let split = layerSplit(idx: idx, pixelClass: pixelClass) {
+            if r == .top, let split = layerSplit(idx: idx, pixelClass: pixelClass, map: map) {
                 groups[split.outerClass] = split.outer
                 groups[split.innerClass] = split.inner
             } else if r == .dress, let split = topBottomSplit(idx: idx, map: map) {
@@ -359,7 +359,7 @@ enum GarmentSegmenter {
     /// substantial garments of different layer rank — an open coat over a knit, a
     /// flannel shirt over a tee. Small stray blobs (a sleeve patch misread) are moved
     /// to the layer they touch.
-    private static func layerSplit(idx: [Int], pixelClass: [Int])
+    private static func layerSplit(idx: [Int], pixelClass: [Int], map: GarmentMap)
         -> (outerClass: Int, outer: [Int], innerClass: Int, inner: [Int])? {
         let n = WardrobeML.gridCount
         var counts: [Int: Int] = [:]
@@ -389,6 +389,11 @@ enum GarmentSegmenter {
         let icx = inner.reduce(0) { $0 + $1 % w } / inner.count
         let left = outer.reduce(0) { $0 + ($1 % w < icx ? 1 : 0) }
         guard min(left, outer.count - left) * 5 >= outer.count else { return nil }
+        // Sleeves are not an inner top: when most of the "inner" layer is sleeve (part map),
+        // it is the outer garment's own arms read as another class (coats then came out as
+        // sleeveless "Vests" / "Gilets").
+        let sleeve = inner.reduce(0) { $0 + (map.part(3, $1) > 0.5 ? 1 : 0) }
+        guard sleeve * 2 < inner.count else { return nil }
         return (outerClass, outer, innerClass, inner)
     }
 
