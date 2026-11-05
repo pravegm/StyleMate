@@ -373,7 +373,8 @@ struct HomeView: View {
                     homeVM.openHeroInDeck(user: authService.user)
                 }
             } label: {
-                OutfitBoard(items: items, isThumbnail: true, padding: DS.Spacing.sm)
+                // The look on you beside the pieces once its try-on is ready (rendered in the background).
+                TryOnLookThumbnail(items: items, padding: DS.Spacing.sm)
                     .frame(height: heroBoardHeight)
                     .frame(maxWidth: .infinity)
                     .studioIsland()

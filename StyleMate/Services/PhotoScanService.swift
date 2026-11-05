@@ -727,6 +727,8 @@ class PhotoScanService: ObservableObject {
             }
             // A recent photo of the user wearing closet items: offer to log the
             // look on that day ("Wore this on Tue?"), so the calendar fills itself.
+            // A confirmed photo of the user: a candidate body for "On you" try-on.
+            if let photoID = prepared.photoID { TryOnBodyLibrary.noteUserPhoto(photoID, date: prepared.photoDate) }
             if let photoID = prepared.photoID, let date = prepared.photoDate {
                 WearLogSuggestions.shared.consider(photoID: photoID, date: date,
                                                    itemIDs: outcome.added + outcome.matched,

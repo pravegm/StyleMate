@@ -29,6 +29,8 @@ enum PerfLog {
         case faceIdentity
         /// One studio render of a wardrobe item, all candidates + checks (`StudioQueue`); outcome = kept / rejected.
         case studioRender
+        /// One outfit drawn on the user's body (`TryOnQueue`: composite + diffusion pass + checks); outcome = kept / rejected.
+        case tryOn
 
         /// Plain-language name for the Diagnostics screen and the report.
         var label: String {
@@ -36,6 +38,7 @@ enum PerfLog {
             case .photoExtraction: return "Clothes found in a photo"
             case .faceIdentity: return "Face check on a photo"
             case .studioRender: return "Studio photo"
+            case .tryOn: return "Outfit on you"
             }
         }
 
@@ -44,6 +47,7 @@ enum PerfLog {
             case .photoExtraction: return "photoExtraction"
             case .faceIdentity: return "faceIdentity"
             case .studioRender: return "studioRender"
+            case .tryOn: return "tryOn"
             }
         }
     }

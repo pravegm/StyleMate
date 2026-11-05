@@ -32,6 +32,10 @@ struct TodayOutfitSheet: View {
     @State private var toastText: String? = nil
     @State private var noticeDismissWork: DispatchWorkItem? = nil
     @State private var gapDismissed = false
+    // Try-on: "On you | Pieces" (remembered), the full-screen viewer.
+    @AppStorage("tryOn.mode") private var tryOnModeRaw = TryOnMode.onYou.rawValue
+    @State private var fullScreenTryOn: TryOnFullScreenItem? = nil
+    @ObservedObject private var tryOnQueue = TryOnQueue.shared
 
     // Drag to decide: right = wear today, left = skip. No stamps — the board's
     // edge tints and one haptic marks the threshold.
@@ -67,6 +71,24 @@ struct TodayOutfitSheet: View {
 
     private func isWide(_ size: CGSize) -> Bool {
         duo.isWideLayout && size.width >= 560
+    }
+
+    private var tryOnMode: Binding<TryOnMode> {
+        Binding(get: { TryOnMode(rawValue: tryOnModeRaw) ?? .onYou }, set: { tryOnModeRaw = $0.rawValue })
+    }
+
+    /// The look can be shown on a body (try-on on, and it has clothes to wear).
+    private func tryOnActive(_ look: Outfit) -> Bool {
+        _ = tryOnQueue.revision
+        return TryOnAvailability.isAvailable && TryOnQueue.wearsOnBody(look.items)
+    }
+
+    /// Renders the next looks in the background (cool, not Low Power; see `TryOnQueue`).
+    private func prerenderTryOns() {
+        guard TryOnAvailability.isAvailable else { return }
+        let looks = homeVM.outfitBatch.map(\.items)
+        let start = min(homeVM.batchIndex, max(0, looks.count - 1))
+        TryOnQueue.shared.prerender(Array(looks.dropFirst(start).prefix(3)))
     }
 
     // MARK: - Body
@@ -113,12 +135,16 @@ struct TodayOutfitSheet: View {
             FullItemImageViewer(path: item.fullImagePath, fallbackPath: item.gridImagePath,
                                 title: ClosetText.displayName(item))
         }
+        .fullScreenCover(item: $fullScreenTryOn) { item in
+            TryOnFullScreenView(image: item.image, title: "On you")
+        }
         .sheet(isPresented: $showDatePicker) { datePickerSheet }
         .sheet(isPresented: $showAddPiece) { addPieceSheet }
         .onChange(of: homeVM.batchIndex) { _ in
             // Keeps and the selection belong to one look.
             lockedItemIDs.removeAll()
             selectedPieceID = nil
+            prerenderTryOns()
         }
         .onChange(of: homeVM.stylistNotice) { notice in
             guard notice != nil else { return }
@@ -132,6 +158,7 @@ struct TodayOutfitSheet: View {
         .animation(DS.Motion.smooth, value: homeVM.stylistNotice)
         .onAppear {
             Haptics.prepare()
+            prerenderTryOns()
             guard currentOutfit != nil else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 if currentOutfit != nil { tutorialManager.startIfFirstTime(.generation) }
@@ -225,13 +252,21 @@ struct TodayOutfitSheet: View {
     /// board never straddles the fold.
     private func wideLayout(_ look: Outfit, size: CGSize) -> some View {
         let gutter = DS.Spacing.lg
+        let onBody = tryOnActive(look)
         return FoldAwareSplit(gutter: gutter, leadingFraction: 0.5) {
-            boardCard(look, inlineControls: false)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // With try-on: the look on you on one pane, the pieces on the other (nothing on the crease).
+            Group {
+                if onBody { onBodyCard(look) } else { boardCard(look, inlineControls: false) }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } trailing: {
             VStack(spacing: DS.Spacing.sm) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                        if onBody {
+                            boardCard(look, inlineControls: false, forcePieces: true)
+                                .frame(height: max(220, size.height * 0.42))
+                        }
                         noteCard(look, lineLimit: 4)
                         piecesList(look)
                         if let gap = activeGap { gapCard(gap) }
@@ -285,26 +320,55 @@ struct TodayOutfitSheet: View {
 
     // MARK: - Board
 
-    private func boardCard(_ look: Outfit, inlineControls: Bool) -> some View {
+    /// The look on the user's body (try-on), with the same card chrome and drag-to-decide as the board.
+    private func onBodyCard(_ look: Outfit) -> some View {
+        OutfitOnBodyView(items: look.items, priority: .user) { img in fullScreenTryOn = TryOnFullScreenItem(image: img) }
+            .studioIsland()
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
+            .dsCardShadow(cornerRadius: DS.Radius.hero)
+            .offset(x: reduceMotion ? 0 : dragX * (isCommitting ? 1 : 0.6))
+            .scaleEffect(boardScale)
+            .opacity(boardOpacity)
+            .gesture(decideGesture)
+    }
+
+    private func boardCard(_ look: Outfit, inlineControls: Bool, forcePieces: Bool = false) -> some View {
         let progress = min(abs(dragX) / threshold, 1)
         let tint = dragX >= 0 ? DS.Colors.accent : DS.Colors.textSecondary
+        let showToggle = !forcePieces && inlineControls && tryOnActive(look)
+        let onYou = showToggle && tryOnMode.wrappedValue == .onYou
         return ZStack(alignment: .bottom) {
-            OutfitBoard(
-                items: look.items,
-                selectedID: inlineControls ? selectedPieceID : nil,
-                lockedIDs: lockedItemIDs,
-                showsControls: inlineControls,
-                swapDisabled: homeVM.isLoading,
-                bottomInset: 40,
-                onTap: { tap($0, inline: inlineControls) },
-                onKeep: { toggleKeep($0) },
-                onSwap: { swap($0) },
-                onPreview: { previewItem = $0 }
-            )
-            .coachAnchor(CoachAnchor.genLook)
+            if onYou {
+                OutfitOnBodyView(items: look.items, priority: .user) { img in fullScreenTryOn = TryOnFullScreenItem(image: img) }
+                    .padding(.top, 52)
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
+            } else {
+                OutfitBoard(
+                    items: look.items,
+                    selectedID: inlineControls ? selectedPieceID : nil,
+                    lockedIDs: lockedItemIDs,
+                    showsControls: inlineControls,
+                    swapDisabled: homeVM.isLoading,
+                    bottomInset: 40,
+                    onTap: { tap($0, inline: inlineControls) },
+                    onKeep: { toggleKeep($0) },
+                    onSwap: { swap($0) },
+                    onPreview: { previewItem = $0 }
+                )
+                .padding(.top, showToggle ? 44 : 0)
+                .coachAnchor(CoachAnchor.genLook)
+                .transition(.opacity)
 
-            boardFooter(inlineControls: inlineControls)
-                .padding(.bottom, DS.Spacing.sm)
+                boardFooter(inlineControls: inlineControls)
+                    .padding(.bottom, DS.Spacing.sm)
+            }
+        }
+        .overlay(alignment: .top) {
+            if showToggle {
+                TryOnModeToggle(mode: tryOnMode)
+                    .padding(.top, DS.Spacing.xs)
+            }
         }
         .studioIsland()
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
@@ -925,4 +989,10 @@ struct TodayOutfitSheet: View {
         }
         .presentationDetents([.medium, .large])
     }
+}
+
+/// A finished try-on shown full screen.
+struct TryOnFullScreenItem: Identifiable {
+    let id = UUID()
+    let image: UIImage
 }
