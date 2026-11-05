@@ -127,7 +127,7 @@ struct AddItemReviewView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: expandedImage != nil)
-            .navigationTitle("Review Items")
+            .navigationTitle("Review items")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -277,7 +277,7 @@ struct AddItemReviewView: View {
                     Image(systemName: "plus.circle.fill")
                     Text(selectedCount == 0 && photoSections.contains(where: { $0.isLoading })
                          ? "Finding clothes…"
-                         : "Add \(selectedCount) Item\(selectedCount == 1 ? "" : "s") to Wardrobe")
+                         : "Add \(selectedCount) \(selectedCount == 1 ? "piece" : "pieces") to wardrobe")
                 }
             }
             .buttonStyle(DSPrimaryButton(isDisabled: disabled))

@@ -133,7 +133,7 @@ struct EditWardrobeItemView: View {
             .tint(DS.Colors.accent)
             .scrollContentBackground(.hidden)
             .background(DS.Colors.backgroundPrimary)
-            .navigationTitle("Edit Item")
+            .navigationTitle("Edit piece")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -145,9 +145,9 @@ struct EditWardrobeItemView: View {
                         .disabled(!canSave)
                 }
             }
-            .confirmationDialog("Replace Photo", isPresented: $showReplacePhotoSource) {
-                Button("Take Photo") { showReplaceCamera = true }
-                Button("Choose from Gallery") { showReplaceGallery = true }
+            .confirmationDialog("Replace photo", isPresented: $showReplacePhotoSource) {
+                Button("Take photo") { showReplaceCamera = true }
+                Button("Choose from gallery") { showReplaceGallery = true }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Use a photo of you wearing it, or of the item on its own.")

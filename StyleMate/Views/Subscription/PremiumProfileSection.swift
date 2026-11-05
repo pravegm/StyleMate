@@ -52,7 +52,7 @@ struct PremiumProfileSection: View {
                     Haptics.light()
                     showManage = true
                 } label: {
-                    Label("Manage Subscription", systemImage: "creditcard")
+                    Label("Manage subscription", systemImage: "creditcard")
                 }
                 .foregroundStyle(DS.Colors.accent)
                 .accessibilityIdentifier("profile.premium.manage")

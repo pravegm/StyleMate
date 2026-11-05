@@ -333,6 +333,30 @@ struct HardeningTests {
         #expect(!FileManager.default.fileExists(atPath: UncertainItemsStore.fileURL(forUser: user).path))
     }
 
+    /// P0-2 (interim, until feat/garment-commercial replaces the segmenters): the two SegFormer models
+    /// ship with the NVIDIA licence text (its §3.1), and Fashionpedia is credited (CC BY 4.0).
+    @Test func garmentSegmentersAreCredited() throws {
+        let all = Acknowledgement.all()
+        for slug in ["fashn-human-parser", "segformer-fashionpedia"] {
+            let ack = try #require(all.first { $0.id.contains(slug) }, "no acknowledgement for \(slug)")
+            #expect(ack.licence == "NVIDIA Source Code License for SegFormer")
+            #expect(ack.body.contains("3.3 Use Limitation"))
+        }
+        let data = try #require(all.first { $0.id.contains("fashionpedia-dataset") })
+        #expect(data.body.contains("creativecommons.org/licenses/by/4.0"))
+        // Shown after every other component.
+        #expect(all.suffix(3).map(\.id).allSatisfy { $0.hasPrefix("ACK-9") })
+    }
+
+    /// D6: Diagnostics speaks words; the raw values are behind Details.
+    @Test func hingeWordsForTheScreen() {
+        #expect(DiagFormat.hingeWord("fullyOpen") == "Fully open")
+        #expect(DiagFormat.hingeWord("partiallyOpen") == "Partly open")
+        #expect(DiagFormat.postureWord("book") == "Book (fold top to bottom)")
+        #expect(DiagFormat.foldWord(CGRect(x: 456, y: 0, width: 40, height: 669), active: false) == "Top to bottom, not in use")
+        #expect(DiagFormat.foldWord(nil, active: false) == "None")
+    }
+
     /// P1-6: a full-size, rotated photo comes back as an upright cutout of at most 1024 px.
     @Test func replacementPhotoIsUprightAndSmall() async throws {
         // 4000 x 3000 sensor pixels shown rotated: a 3000 x 4000 portrait photo.

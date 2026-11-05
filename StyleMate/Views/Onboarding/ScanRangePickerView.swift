@@ -78,7 +78,7 @@ struct ScanRangePickerView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            Text("Scan Photos for Clothing")
+            Text("Scan photos for clothing")
                 .font(DS.Font.title3)
                 .foregroundColor(DS.Colors.textPrimary)
 
@@ -308,7 +308,7 @@ struct ScanRangePickerView: View {
             } label: {
                 HStack {
                     Spacer()
-                    Text(isScanRunning ? "Cancel Current & Start New" : "Start Scanning")
+                    Text(isScanRunning ? "Cancel current & start new" : "Start scanning")
                     Spacer()
                 }
             }
