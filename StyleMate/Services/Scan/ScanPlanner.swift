@@ -277,6 +277,10 @@ struct ScanJob: Codable, Equatable, Sendable {
     var createdAt: Date
     /// Items this job added, across every session it ran in.
     var addedItemIDs: [String] = []
+    /// First run only: before the newest-first walk, rank the last 90 days by
+    /// how outfit-like each photo is and extract the best ~40 first (`FirstLook`).
+    /// Cleared once that pass is done. Optional so older checkpoints decode.
+    var firstLook: Bool? = nil
     /// Photos this job finished (looked at, skipped or extracted), across sessions.
     var photosDone: Int = 0
 

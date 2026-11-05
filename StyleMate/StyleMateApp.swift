@@ -1,7 +1,6 @@
 import SwiftUI
 import PhotosUI
 import Photos
-import GoogleSignIn
 
 @main
 struct StyleMateApp: App {
@@ -13,13 +12,16 @@ struct StyleMateApp: App {
 
     init() {
         // Created here (not lazily) so the background scan, which iOS may launch
-        // without any UI, works on the same objects the UI shows.
+        // without any UI, works on the same objects the UI shows. AuthService
+        // creates (or restores) the local on-device profile: there is no login.
         let auth = AuthService()
         let wardrobe = WardrobeViewModel()
         _authService = StateObject(wrappedValue: auth)
         _wardrobeVM = StateObject(wrappedValue: wardrobe)
         // Background task handlers must be registered before launch finishes.
         BackgroundScanCoordinator.shared.configure(auth: auth, wardrobe: wardrobe)
+        // Morning outfit notification: refresh task + the tap router (a tap can cold-launch the app).
+        if !AppRuntime.isUnitTestHost { MorningLookScheduler.shared.configure(auth: auth, wardrobe: wardrobe) }
     }
 
     var body: some Scene {
@@ -32,9 +34,6 @@ struct StyleMateApp: App {
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 // iPhone Duo / large displays: \.duoLayout (posture, fold, wide layout). Views/Components/DuoLayout.swift
                 .duoLayoutReader()
-                .onOpenURL { url in
-                    GIDSignIn.sharedInstance.handle(url)
-                }
         }
     }
 }
@@ -64,16 +63,13 @@ struct RootView: View {
     var body: some View {
         ZStack {
             Group {
-                if !authService.isAuthenticated {
-                    LoginView()
-                } else if !onboardingManager.hasCompletedOnboarding {
+                if !onboardingManager.hasCompletedOnboarding {
                     OnboardingView()
                 } else {
                     MainTabView(showAddSheet: $showSourcePicker)
                         .environmentObject(outfitsVM)
                 }
             }
-            .animation(.easeInOut(duration: 0.4), value: authService.isAuthenticated)
             .animation(.easeInOut(duration: 0.4), value: onboardingManager.hasCompletedOnboarding)
         }
         .sheet(isPresented: $showSourcePicker) {
@@ -98,7 +94,7 @@ struct RootView: View {
                 var images: [UIImage] = []
                 for item in items {
                     if let data = try? await item.loadTransferable(type: Data.self),
-                       let image = UIImage(data: data) {
+                       let image = ImageDownsampler.downsample(data: data) {   // ≤2048 px, not a 24 MP decode
                         images.append(image)
                     }
                 }
@@ -117,7 +113,7 @@ struct RootView: View {
                     capturedCameraImage = img
                     showCamera = false
                     if let image = img {
-                        reviewImages = [image]
+                        reviewImages = [ImageDownsampler.downsample(image: image)]
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             showReview = true
                         }
@@ -159,49 +155,19 @@ struct RootView: View {
                 }
             )
         }
-        .onChange(of: authService.isAuthenticated) { isAuthenticated in
-            if isAuthenticated, let id = authService.user?.id {
-                wardrobeVM.load(forUser: id)
-                lastUserKey = userKey
-                onboardingManager.check(forUser: id)
-                wardrobeVM.migrateBackgroundRemoval()
-                wardrobeVM.migrateThumbnails()
-
-                Task {
-                    await CloudKitService.shared.setupZone()
-                    let isAvailable = await CloudKitService.shared.checkAccountStatus()
-                    if isAvailable {
-                        await wardrobeVM.restoreFromCloud()
-                    }
-                }
-            } else {
-                wardrobeVM.clear()
-                lastUserKey = ""
-            }
+        .onChange(of: authService.user?.id) { newID in
+            // The local profile changed (Delete Profile & All Data starts a fresh one).
+            guard let id = newID, id != lastUserKey else { return }
+            activateProfile(id)
         }
         .onAppear {
             hasPhotoAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan
-            authService.checkCredentialState()
-            if authService.isAuthenticated, let id = authService.user?.id {
-                wardrobeVM.load(forUser: id)
-                lastUserKey = userKey
-                onboardingManager.check(forUser: id)
-                wardrobeVM.migrateBackgroundRemoval()
-                wardrobeVM.migrateThumbnails()
-
-                Task {
-                    await CloudKitService.shared.setupZone()
-                    let isAvailable = await CloudKitService.shared.checkAccountStatus()
-                    if isAvailable {
-                        await wardrobeVM.restoreFromCloud()
-                    }
-                }
-            }
+            if let id = authService.user?.id { activateProfile(id) }
         }
         .onChange(of: scenePhase) { newPhase in
             switch newPhase {
             case .active:
-                if authService.isAuthenticated, !wardrobeVM.currentUserEmail.isEmpty {
+                if authService.isAuthenticated, !wardrobeVM.currentUserEmail.isEmpty, !AppRuntime.isUnitTestHost {
                     Task {
                         let isAvailable = await CloudKitService.shared.checkAccountStatus()
                         if isAvailable {
@@ -219,6 +185,8 @@ struct RootView: View {
                 }
             case .background:
                 BackgroundScanCoordinator.shared.appDidEnterBackground()
+                // Precompute the next morning look now, while the app last ran.
+                Task { await MorningLookScheduler.shared.reschedule() }
             default:
                 break
             }
@@ -247,15 +215,39 @@ struct RootView: View {
             } else {
                 await PhotoScanService.shared.startScan(
                     forUser: userId,
-                    dateRange: .lastYear,
+                    // Limited access: scan every photo the user chose, whatever its date.
+                    dateRange: PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited ? .all : .lastYear,
                     userGender: authService.user?.gender,
                     wardrobeViewModel: wardrobeVM,
-                    trigger: .initial
+                    trigger: .initial,
+                    firstLook: true
                 )
             }
 
             if PhotoScanService.shared.scanState == .completed {
                 UserDefaults.standard.set(true, forKey: scanKey)
+            }
+        }
+    }
+
+    /// Loads everything that hangs off the local profile id.
+    private func activateProfile(_ id: String) {
+        lastUserKey = id
+        outfitsVM.setUser(id)   // the outfit calendar is scoped per profile (Core Data v2)
+        wardrobeVM.load(forUser: id)
+        onboardingManager.check(forUser: id)
+        UncertainItemsStore.shared.load(forUser: id)
+        WearLogSuggestions.shared.load(forUser: id)
+        wardrobeVM.migrateBackgroundRemoval()
+        wardrobeVM.migrateThumbnails()
+
+        // The unit-test host runs unsigned (no iCloud entitlement): CKContainer would trap.
+        guard !AppRuntime.isUnitTestHost else { return }
+        Task {
+            await CloudKitService.shared.setupZone()
+            let isAvailable = await CloudKitService.shared.checkAccountStatus()
+            if isAvailable {
+                await wardrobeVM.restoreFromCloud()
             }
         }
     }
@@ -373,4 +365,12 @@ private struct AddSourceSheet: View {
             value: appeared
         )
     }
+}
+
+/// Where the app process is running.
+enum AppRuntime {
+    /// Hosting the unit tests (StyleMateTests): an unsigned build without the iCloud
+    /// entitlement, where touching CloudKit at launch would crash the host before the
+    /// tests connect. (UI tests launch a separately signed app without this variable.)
+    static let isUnitTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 }

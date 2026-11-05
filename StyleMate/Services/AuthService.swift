@@ -1,244 +1,119 @@
 import Foundation
-import AuthenticationServices
-import GoogleSignIn
 
-enum AuthProvider: String {
-    case apple
-    case google
-}
-
+/// The app has no server and no account. On first launch it creates a **local,
+/// on-device profile** with a stable UUID; every per-user key (wardrobe, scan
+/// progress, face gallery, onboarding) hangs off that id. iCloud sync uses the
+/// device's own iCloud account through CloudKit's private database, so no
+/// sign-in is needed for it either.
+///
+/// Migration: people who installed an earlier build signed in with Apple or
+/// Google. Their persisted user id is kept as the local profile id, so their
+/// wardrobe, outfits and face reference stay exactly where they are.
+///
+/// (The type keeps its old name and `isAuthenticated` so the rest of the app,
+/// the background scan and the UI-test hooks don't need to change.)
 @MainActor
 class AuthService: ObservableObject {
     @Published var user: User?
+    /// Always true once the local profile exists (immediately after init).
     @Published var isAuthenticated = false
 
-    static private let currentUserObjectKey = "currentUserObject"
-    static private let userProfilesKey = "userProfiles"
-    static private let authUserIDKey = "authUserID"
-    static private let authProviderKey = "authProvider"
+    nonisolated static let currentUserObjectKey = "currentUserObject"
+    nonisolated static let userProfilesKey = "userProfiles"
+    /// The local profile's id.
+    nonisolated static let localProfileIDKey = "localProfileID"
+    // Legacy Apple / Google session keys (read once, for migration).
+    nonisolated static let legacyAuthUserIDKey = "authUserID"
+    nonisolated static let legacyAuthProviderKey = "authProvider"
+
+    nonisolated static let defaultStyles: [OutfitType] = [.everyday, .formal, .date, .sports, .party, .business]
 
     init() {
         #if DEBUG
-        // UI-test launch arguments (StyleMate/Debug/DebugLaunchSupport.swift): sign in a local demo
-        // user without Apple/Google. Not persisted as an Apple/Google session, so
-        // checkCredentialState() leaves it alone and a normal launch never restores it.
+        // UI-test launch arguments (StyleMate/Debug/DebugLaunchSupport.swift): use a fixed demo
+        // profile instead of the device's local one.
         if let demoUser = DebugLaunchSupport.applyIfNeeded() {
             self.user = demoUser
             self.isAuthenticated = true
             return
         }
         #endif
-        restoreSession()
-    }
-
-    // MARK: - Session Restoration
-
-    private func restoreSession() {
-        guard let providerRaw = UserDefaults.standard.string(forKey: Self.authProviderKey),
-              let _ = AuthProvider(rawValue: providerRaw),
-              let userID = UserDefaults.standard.string(forKey: Self.authUserIDKey) else {
-            return
-        }
-
-        if let userData = UserDefaults.standard.data(forKey: Self.currentUserObjectKey),
-           let decodedUser = try? JSONDecoder().decode(User.self, from: userData),
-           decodedUser.id == userID {
-            self.user = decodedUser
-            self.isAuthenticated = true
-        } else {
-            let profiles = Self.loadUserProfiles()
-            if let profile = profiles[userID] {
-                self.user = profile
-                self.isAuthenticated = true
-            }
-        }
-    }
-
-    // MARK: - Sign in with Apple
-
-    func handleAppleSignIn(result: Result<ASAuthorization, Error>) -> String? {
-        switch result {
-        case .success(let authorization):
-            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
-                return "Unexpected credential type."
-            }
-            return processAppleCredential(credential)
-
-        case .failure(let error):
-            if (error as NSError).code == ASAuthorizationError.canceled.rawValue {
-                return nil
-            }
-            return error.localizedDescription
-        }
-    }
-
-    private func processAppleCredential(_ credential: ASAuthorizationAppleIDCredential) -> String? {
-        let userID = credential.user
-
-        let freshName = buildAppleName(from: credential.fullName)
-        let freshEmail = credential.email
-
-        let profiles = Self.loadUserProfiles()
-        if let existingUser = profiles[userID] {
-            var updatedUser = existingUser
-            if let name = freshName {
-                updatedUser.name = name
-            }
-            if let email = freshEmail, !email.isEmpty {
-                updatedUser.email = email
-            }
-            self.user = updatedUser
-        } else {
-            let newUser = User(
-                id: userID,
-                email: freshEmail,
-                name: freshName ?? "User",
-                preferredStyles: [.everyday, .formal, .date, .sports, .party, .business],
-                notificationsEnabled: true,
-                dateCreated: Date()
-            )
-            self.user = newUser
-        }
-
+        self.user = Self.resolveLocalProfile(defaults: .standard)
         self.isAuthenticated = true
-        persistAuthSession(provider: .apple, userID: userID)
-        saveCurrentUser()
-        print("[StyleMate] Apple sign-in: name=\(self.user?.name ?? "nil"), email=\(self.user?.email ?? "nil")")
-        return nil
-    }
-
-    private func buildAppleName(from nameComponents: PersonNameComponents?) -> String? {
-        guard let components = nameComponents else { return nil }
-        var parts: [String] = []
-        if let given = components.givenName, !given.isEmpty { parts.append(given) }
-        if let family = components.familyName, !family.isEmpty { parts.append(family) }
-        let name = parts.joined(separator: " ")
-        return name.isEmpty ? nil : name
-    }
-
-    // MARK: - Sign in with Google
-
-    func handleGoogleSignIn() {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let rootVC = windowScene.windows.first?.rootViewController else {
-            return
-        }
-
-        GIDSignIn.sharedInstance.signIn(withPresenting: rootVC) { [weak self] result, error in
-            Task { @MainActor in
-                guard let self = self else { return }
-
-                if let error = error {
-                    let nsError = error as NSError
-                    if nsError.code == GIDSignInError.canceled.rawValue {
-                        return
-                    }
-                    return
-                }
-
-                guard let googleUser = result?.user,
-                      let userID = googleUser.userID else {
-                    return
-                }
-
-                self.processGoogleUser(googleUser, userID: userID)
-            }
-        }
-    }
-
-    private func processGoogleUser(_ googleUser: GIDGoogleUser, userID: String) {
-        let profiles = Self.loadUserProfiles()
-        if let existingUser = profiles[userID] {
-            var updatedUser = existingUser
-            if let name = googleUser.profile?.name, !name.isEmpty {
-                updatedUser.name = name
-            }
-            if let email = googleUser.profile?.email, !email.isEmpty {
-                updatedUser.email = email
-            }
-            self.user = updatedUser
-        } else {
-            let newUser = User(
-                id: userID,
-                email: googleUser.profile?.email,
-                name: googleUser.profile?.name ?? "User",
-                preferredStyles: [.everyday, .formal, .date, .sports, .party, .business],
-                notificationsEnabled: true,
-                dateCreated: Date()
-            )
-            self.user = newUser
-        }
-
-        self.isAuthenticated = true
-        persistAuthSession(provider: .google, userID: userID)
         saveCurrentUser()
     }
 
-    // MARK: - Credential State Checks
+    // MARK: - Local profile
 
-    func checkCredentialState() {
-        guard let providerRaw = UserDefaults.standard.string(forKey: Self.authProviderKey),
-              let provider = AuthProvider(rawValue: providerRaw) else {
-            return
+    /// The profile to use on this device: the one already in use, an earlier
+    /// Apple/Google user (migration), or a brand-new one. Only touches
+    /// `defaults`, so it's unit-tested.
+    nonisolated static func resolveLocalProfile(defaults: UserDefaults, now: Date = Date(),
+                                                adoptExisting: Bool = true) -> User {
+        let profiles = loadUserProfiles(defaults: defaults)
+
+        // 1. This device's local profile.
+        if let id = defaults.string(forKey: localProfileIDKey), !id.isEmpty {
+            return profiles[id] ?? decodedCurrentUser(defaults: defaults, id: id) ?? newUser(id: id, now: now)
         }
 
-        switch provider {
-        case .apple:
-            checkAppleCredentialState()
-        case .google:
-            checkGoogleCredentialState()
+        // 2. Migration: a persisted Apple / Google session. Keep its id.
+        var adopted: User?
+        if let legacyID = defaults.string(forKey: legacyAuthUserIDKey), !legacyID.isEmpty {
+            adopted = decodedCurrentUser(defaults: defaults, id: legacyID) ?? profiles[legacyID]
+                ?? newUser(id: legacyID, now: now)
+        } else if adoptExisting, let current = decodedCurrentUser(defaults: defaults, id: nil) {
+            adopted = current
+        } else if adoptExisting, !profiles.isEmpty {
+            // Signed out of an earlier build but the data is still here: prefer
+            // the profile that has a wardrobe, most recently created first.
+            let ranked = profiles.values.sorted { $0.dateCreated > $1.dateCreated }
+            adopted = ranked.first { hasWardrobe(defaults: defaults, userId: $0.id) } ?? ranked.first
         }
+
+        let user = adopted ?? newUser(id: UUID().uuidString, now: now)
+        defaults.set(user.id, forKey: localProfileIDKey)
+        defaults.removeObject(forKey: legacyAuthUserIDKey)
+        defaults.removeObject(forKey: legacyAuthProviderKey)
+        print("[StyleMate] Local profile: \(adopted != nil ? "kept existing user" : "created") \(user.id)")
+        return user
     }
 
-    private func checkAppleCredentialState() {
-        guard let userID = UserDefaults.standard.string(forKey: Self.authUserIDKey) else { return }
-
-        let provider = ASAuthorizationAppleIDProvider()
-        provider.getCredentialState(forUserID: userID) { state, _ in
-            Task { @MainActor in
-                switch state {
-                case .revoked, .notFound:
-                    self.signOut()
-                case .authorized:
-                    break
-                default:
-                    break
-                }
-            }
-        }
+    nonisolated private static func newUser(id: String, now: Date) -> User {
+        User(id: id, email: nil, name: "", preferredStyles: defaultStyles,
+             notificationsEnabled: false, dateCreated: now)
     }
 
-    private func checkGoogleCredentialState() {
-        GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
-            Task { @MainActor in
-                if error != nil || user == nil {
-                    self.signOut()
-                }
-            }
-        }
+    nonisolated private static func decodedCurrentUser(defaults: UserDefaults, id: String?) -> User? {
+        guard let data = defaults.data(forKey: currentUserObjectKey),
+              let user = try? JSONDecoder().decode(User.self, from: data), !user.id.isEmpty else { return nil }
+        if let id, user.id != id { return nil }
+        return user
     }
 
-    // MARK: - Sign Out
+    /// Same key scheme as `WardrobeViewModel.storageKey(for:)`.
+    nonisolated private static func hasWardrobe(defaults: UserDefaults, userId: String) -> Bool {
+        let key = "wardrobe_\(userId.replacingOccurrences(of: "@", with: "_").replacingOccurrences(of: ".", with: "_"))"
+        return defaults.data(forKey: key) != nil
+    }
 
-    func signOut() {
-        let providerRaw = UserDefaults.standard.string(forKey: Self.authProviderKey)
-        if providerRaw == AuthProvider.google.rawValue {
-            GIDSignIn.sharedInstance.signOut()
+    /// "Delete Profile & All Data": forget this profile and start a fresh one
+    /// (the app goes back to onboarding).
+    func resetLocalProfile() {
+        if let id = user?.id {
+            var profiles = Self.loadUserProfiles()
+            profiles.removeValue(forKey: id)
+            Self.saveUserProfiles(profiles)
         }
-
-        self.user = nil
-        self.isAuthenticated = false
-        UserDefaults.standard.removeObject(forKey: Self.authUserIDKey)
-        UserDefaults.standard.removeObject(forKey: Self.authProviderKey)
         UserDefaults.standard.removeObject(forKey: Self.currentUserObjectKey)
+        UserDefaults.standard.removeObject(forKey: Self.localProfileIDKey)
+        // A brand-new id: never re-adopt another profile left on the phone here.
+        user = Self.resolveLocalProfile(defaults: .standard, adoptExisting: false)
+        isAuthenticated = true
+        saveCurrentUser()
     }
 
     // MARK: - Persistence Helpers
-
-    private func persistAuthSession(provider: AuthProvider, userID: String) {
-        UserDefaults.standard.set(provider.rawValue, forKey: Self.authProviderKey)
-        UserDefaults.standard.set(userID, forKey: Self.authUserIDKey)
-    }
 
     func saveCurrentUser() {
         guard let user = self.user else { return }
@@ -250,17 +125,17 @@ class AuthService: ObservableObject {
         }
     }
 
-    static func loadUserProfiles() -> [String: User] {
-        guard let data = UserDefaults.standard.data(forKey: userProfilesKey),
+    nonisolated static func loadUserProfiles(defaults: UserDefaults = .standard) -> [String: User] {
+        guard let data = defaults.data(forKey: userProfilesKey),
               let dict = try? JSONDecoder().decode([String: User].self, from: data) else {
             return [:]
         }
         return dict
     }
 
-    static func saveUserProfiles(_ profiles: [String: User]) {
+    nonisolated static func saveUserProfiles(_ profiles: [String: User], defaults: UserDefaults = .standard) {
         if let data = try? JSONEncoder().encode(profiles) {
-            UserDefaults.standard.set(data, forKey: userProfilesKey)
+            defaults.set(data, forKey: userProfilesKey)
         }
     }
 }

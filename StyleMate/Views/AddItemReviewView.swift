@@ -89,6 +89,7 @@ struct AddItemReviewView: View {
                             }
                             if !allReviewItems.isEmpty {
                                 selectionSummary
+                                UncertainItemsNote(deselected: allReviewItems.filter { !$0.isSelected }.compactMap { $0.garmentImage })
                             }
                             ForEach($photoSections) { $section in
                                 photoSectionView($section)
@@ -342,6 +343,7 @@ struct AddItemReviewView: View {
                                 colors: seg.colors,
                                 pattern: pattern,
                                 brand: seg.brand,
+                                isSelected: ItemTrust.isConfident(seg),
                                 garmentImage: seg.maskImage,
                                 material: seg.material ?? "",
                                 fit: seg.fit,
@@ -400,6 +402,7 @@ struct AddItemReviewView: View {
                     colors: seg.colors,
                     pattern: pattern,
                     brand: seg.brand,
+                    isSelected: ItemTrust.isConfident(seg),
                     garmentImage: seg.maskImage,
                     material: seg.material ?? "",
                     fit: seg.fit,
