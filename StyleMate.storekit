@@ -1,0 +1,100 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_GB",
+        "policyText" : "",
+        "policyURL" : "https://pravegm.github.io/StyleMate/privacy.html"
+      }
+    ]
+  },
+  "identifier" : "5E1D7A21",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_GB",
+    "_storefront" : "GBR",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "7A3C1E01",
+      "localizations" : [
+        {
+          "description" : "Unlimited wardrobe items",
+          "displayName" : "StyleMate Premium",
+          "locale" : "en_GB"
+        }
+      ],
+      "name" : "StyleMate Premium",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "24.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "7A3C1E02",
+          "introductoryOffer" : {
+            "internalID" : "7A3C1E04",
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "Unlimited wardrobe items, billed yearly",
+              "displayName" : "Premium Annual",
+              "locale" : "en_GB"
+            }
+          ],
+          "productID" : "com.stylemates.StyleMate.premium.annual",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Premium Annual",
+          "subscriptionGroupID" : "7A3C1E01",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "3.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "7A3C1E03",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited wardrobe items, billed monthly",
+              "displayName" : "Premium Monthly",
+              "locale" : "en_GB"
+            }
+          ],
+          "productID" : "com.stylemates.StyleMate.premium.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Premium Monthly",
+          "subscriptionGroupID" : "7A3C1E01",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

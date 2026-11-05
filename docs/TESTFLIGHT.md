@@ -58,6 +58,68 @@ TestFlight builds use Apple's *Production* iCloud environment, which needs the a
    the deployment to **Production**.
 6. Open StyleMate again. Backup starts on the next launch, including everything added before.
 
+### 6. Set up StyleMate Premium (subscriptions, about 30 minutes, once)
+The app is free for the first 50 wardrobe pieces (sample clothes don't count); StyleMate Premium
+(monthly or yearly) makes the wardrobe unlimited. Every other feature is free. The app reads the
+plans, prices and trial from App Store Connect, so nothing in the code changes when you change a
+price. Until this step is done, the paywall in TestFlight says "Couldn't reach the App Store";
+everything else works.
+
+**a. Paid Apps agreement (needed before any subscription can be sold, or tested in TestFlight)**
+1. App Store Connect › **Business** (older accounts: **Agreements, Tax, and Banking**).
+2. Next to **Paid Apps**, press **View and Agree to Terms** (only the Account Holder can).
+3. Add a **bank account** and complete the **tax forms** (from the UK: the U.S. form W-8BEN as an
+   individual, or W-8BEN-E as a company). Wait until the agreement's status says **Active**; that
+   can take a day or two after the bank details go in.
+
+**b. The subscription group and the two plans**
+1. App Store Connect › **Apps** › StyleMate › **Monetization › Subscriptions** (left column).
+2. Under **Subscription Groups** press **Create**. Reference name: `StyleMate Premium`.
+3. In the group, press **Create** for each plan. Type the product IDs *exactly*: the app looks for
+   these two.
+
+| | Reference name | Product ID | Duration | Suggested price |
+|---|---|---|---|---|
+| 1 | Premium Annual | `com.stylemates.StyleMate.premium.annual` | 1 year | £24.99 |
+| 2 | Premium Monthly | `com.stylemates.StyleMate.premium.monthly` | 1 month | £3.99 |
+
+4. For each plan:
+   - **Subscription Prices** › **Add Subscription Price**: United Kingdom, the price above; let
+     Apple fill in the other countries. (£24.99 a year is about 48% less than 12 × £3.99. The app
+     works the saving out from the real prices and shows it on the annual plan, rounded down:
+     "Save 47%".)
+   - **App Store Localization** › English (U.K.): display name `Premium Annual` /
+     `Premium Monthly` (the paywall shows this name), description
+     `Unlimited wardrobe, billed yearly` / `Unlimited wardrobe, billed monthly`.
+   - **Review Information**: upload a screenshot of the paywall (from the latest green CI run's
+     `e2e-screens` artifact, the file ending `-paywall.png`) and paste the review note from
+     `docs/APP-STORE-LISTING.md` ("In-App Purchase review notes").
+5. **1-week free trial on the annual plan**: Premium Annual › **Subscription Prices** › **View all
+   Subscription Pricing** › **Introductory Offers** › **Create Introductory Offer**: all countries,
+   starts today, no end date, **Free**, **1 week**. The paywall shows the trial only to people who
+   can still get it.
+6. Group **levels**: Premium Annual at level 1, Premium Monthly at level 2 (moving from monthly to
+   annual then counts as an upgrade).
+7. Group **App Store Localization** › English (U.K.): display name `StyleMate Premium`.
+8. Recommended: group › **Billing Grace Period** › on (6 days, all renewals). If someone's card
+   fails, they keep Premium while Apple retries; the app already handles this.
+9. The first time, the subscriptions go to review **with an app version**: when you submit
+   StyleMate, tick both plans under the version's **In-App Purchases and Subscriptions**. Until
+   then they say "Ready to Submit", which is fine for TestFlight.
+
+**c. Buying Premium in TestFlight (free)**
+- TestFlight purchases use Apple's test system: no money is charged, and the purchase sheet says
+  it's a test. You use your normal Apple Account.
+- Renewals are sped up. Apple's current TestFlight rule is that any plan renews about once a day,
+  up to six times, then it stops by itself (Apple has changed this rule before). So within a week
+  you can see a renewal and the end: when Premium ends, Profile says "Premium ended", new pieces
+  past 50 wait again, and every piece you already have stays in the closet.
+- What to try: get the closet to 50 pieces (your own photos; sample clothes don't count) and let
+  the scan keep going. Home shows "N more pieces found — Unlock with Premium". Tap it, pick
+  Annual, **Start free trial**: the waiting pieces appear in the closet at once. Profile › StyleMate
+  Premium shows the plan and renewal date, **Manage Subscription** and **Restore Purchases**.
+  Delete and reinstall the app, then **Restore Purchases**: Premium comes back.
+
 ## Making a build (every time)
 1. Open https://github.com/pravegm/StyleMate/actions/workflows/testflight.yml.
 2. Press **Run workflow**, then the green **Run workflow** button. You can type a note about what to test.
@@ -71,6 +133,8 @@ TestFlight builds use Apple's *Production* iCloud environment, which needs the a
 - **Today's Outfit**: pick a mood, look through the 5 options, swap a piece, and save.
 - **Outfits calendar**: the saved look is on today's date.
 - **iPhone Duo**: try each screen open flat, half-open, and on the cover screen when closed.
+- **Premium** (after step 6): the paywall from Home's "more pieces found" card, a free-trial
+  purchase, the pieces unlocking, and Profile › StyleMate Premium.
 - **Diagnostics (once on each phone, about 10 minutes)**: plug the phone in, then open **Profile → About →
   Diagnostics** and press **Run benchmark**. Keep StyleMate on screen until it says Done. On the Duo, also do the
   **iPhone Duo hinge** check on the same screen (open flat, hold at about 90°, close, tapping **Record** each

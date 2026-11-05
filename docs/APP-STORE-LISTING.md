@@ -82,6 +82,15 @@ That is 164 characters.
 > • Delete everything at any time from Profile
 >
 > StyleMate works best with photos that show your outfit. Scans run while the app is open; you can pause and resume anytime.
+>
+> **FREE TO START, PREMIUM FOR YOUR WHOLE WARDROBE**
+> • Every feature is free for your first 50 wardrobe pieces
+> • StyleMate Premium makes the wardrobe unlimited: every piece the scan finds goes straight into your closet
+> • Premium is an auto-renewable subscription, monthly or yearly (the yearly plan starts with a 1-week free trial for new subscribers)
+>
+> Payment is charged to your Apple Account at confirmation of purchase, or when the free trial ends. Subscriptions renew automatically unless cancelled at least 24 hours before the end of the current period; renewal is charged within the 24 hours before it ends. Manage or cancel anytime in your Apple Account settings. If Premium ends, every piece already in your closet stays.
+> Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
+> Privacy Policy: https://pravegm.github.io/StyleMate/privacy.html
 
 Sentence-level dependencies:
 
@@ -97,7 +106,49 @@ Sentence-level dependencies:
 - **Primary category:** Lifestyle. **Secondary:** Photo & Video.
 - **Age rating:** no user-generated content sharing, no web views, no mature content, so expect the lowest rating. Answer the questionnaire honestly about camera and photo use.
 - **Privacy policy URL** and **Support URL** are required. See LAUNCH-READINESS.md §6.
-- **App Privacy label:** "Data Not Collected". This holds only when the conditions in LAUNCH-READINESS.md §7 are met.
+- **App Privacy label:** "Data Not Collected". This holds only when the conditions in LAUNCH-READINESS.md §7 are met. Subscriptions don't change it: Apple processes the purchases and the app checks the subscription on the device with StoreKit, so StyleMate collects no "Purchases" data.
+- **Terms of Use (EULA):** the app uses Apple's standard EULA. In App Store Connect › App Information, leave **License Agreement** on the standard one. The description above links it, as guideline 3.1.2 requires for subscription apps.
+
+## Subscriptions (StyleMate Premium)
+
+Set up in App Store Connect as described in `docs/TESTFLIGHT.md` §6.
+
+| | Product ID | Suggested price | Intro offer |
+|---|---|---|---|
+| Premium Annual | `com.stylemates.StyleMate.premium.annual` | £24.99 / year | 1-week free trial |
+| Premium Monthly | `com.stylemates.StyleMate.premium.monthly` | £3.99 / month | none |
+
+Group: **StyleMate Premium** (annual level 1, monthly level 2). Billing grace period: on.
+
+**What the paywall shows (3.1.2 checklist)**: the plan name, the price and billing period of each
+plan as StoreKit returns them, the per-month price of the annual plan and its saving (both worked
+out from the two real prices), the free trial only when the user is eligible, the amount billed
+after the trial as large as the trial itself ("1-week free trial, then £24.99 per year"), the
+auto-renew and cancellation terms, **Restore Purchases**, **Terms of Use** and **Privacy Policy**
+links, and a close button. Profile › StyleMate Premium has **Manage Subscription** (Apple's sheet)
+and **Restore Purchases**.
+
+### In-App Purchase review notes
+
+Paste into each subscription's **Review Information › Review Notes**, and into the app version's
+**App Review Information › Notes** (adapted):
+
+> StyleMate is free for the first 50 wardrobe items; StyleMate Premium (auto-renewable,
+> monthly or yearly) removes the limit. Every other feature is free. No sign-in is needed.
+>
+> To reach the paywall quickly: on the welcome screen tap "Try with sample photos" to see a
+> wardrobe, then open Profile › StyleMate Premium › "See Premium plans". The paywall also opens
+> from Wardrobe › + › Choose from Gallery once the closet holds 50 of your own items, and from the
+> "N more pieces found — Unlock with Premium" card on Home when the photo scan has found more than
+> 50. (Sample-photo items don't count towards the 50.)
+>
+> After purchase, items found past the limit are added to the wardrobe immediately. Restore
+> Purchases is on the paywall and in Profile. Subscription status is checked on the device with
+> StoreKit 2; the app has no server and no account.
+
+**Review screenshot**: the paywall, from the `e2e-screens` CI artifact (`…-paywall.png`; the
+`-dark` one too if you want a second). It's the real app on a simulator with StoreKit Test prices,
+which match the suggested prices above.
 
 ## Screenshot plan
 

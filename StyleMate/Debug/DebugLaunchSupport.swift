@@ -25,6 +25,17 @@ enum DebugLaunchSupport {
         static let demoUser = "-uiTestDemoUser"
         static let skipOnboarding = "-uiTestSkipOnboarding"
         static let seedWardrobe = "-uiTestSeedWardrobe"
+        /// `-uiTestSeedWardrobeCount 50`: seed exactly this many items (the catalog repeats).
+        static let seedCount = "-uiTestSeedWardrobeCount"
+        /// `-uiTestSeedLocked 23`: also seed this many pieces waiting for Premium (LockedItemsStore).
+        static let seedLocked = "-uiTestSeedLocked"
+    }
+
+    /// The integer after `flag` in the launch arguments (`-flag 50`), if any.
+    static func intArgument(_ flag: String) -> Int? {
+        let args = arguments
+        guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+        return Int(args[i + 1])
     }
 
     static let demoUserID = "uitest-demo-user"
@@ -82,7 +93,7 @@ enum DebugLaunchSupport {
         try? fm.removeItem(at: WardrobeImageFileHelper.folderURL)
         if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             // Scan checkpoints + held "not sure" items, item embeddings.
-            for dir in ["ScanProgress", "WardrobeEmbeddings"] {
+            for dir in ["ScanProgress", "WardrobeEmbeddings", "Premium"] {
                 try? fm.removeItem(at: support.appendingPathComponent(dir))
             }
         }
@@ -121,30 +132,48 @@ enum DebugLaunchSupport {
         vm.load(forUser: userId)
         guard vm.items.isEmpty else { return }
 
+        let catalog = SeedCatalog.items
+        let count = intArgument(Argument.seedCount) ?? catalog.count
         var items: [WardrobeItem] = []
-        for spec in SeedCatalog.items {
-            let image = GarmentArtist.render(spec)
-            guard let path = WardrobeImageFileHelper.saveImageAsPNG(image) else { continue }
-            let thumb = WardrobeImageFileHelper.saveThumbnail(image)
-            items.append(WardrobeItem(
-                category: spec.category,
-                product: spec.product,
-                colors: spec.colors,
-                brand: spec.brand,
-                pattern: spec.pattern,
-                imagePath: path,
-                croppedImagePath: path,
-                thumbnailPath: thumb,
-                material: spec.material,
-                fit: spec.fit,
-                neckline: spec.neckline,
-                sleeveLength: spec.sleeve,
-                garmentLength: spec.length,
-                details: spec.details
-            ))
+        for i in 0..<max(0, count) {
+            if let item = seedItem(catalog[i % catalog.count]) { items.append(item) }
         }
         vm.items = items   // didSet persists under the user's wardrobe key
         print("[UITest] Seeded \(items.count) wardrobe items")
+
+        // Pieces the scan found past the free tier, waiting for Premium.
+        if let lockedCount = intArgument(Argument.seedLocked), lockedCount > 0 {
+            for i in 0..<lockedCount {
+                // Start mid-catalog so the waiting pieces differ from the first closet tiles.
+                if let item = seedItem(catalog[(i + 7) % catalog.count]) {
+                    LockedItemsStore.shared.lock(item, forUser: userId)
+                }
+            }
+            LockedItemsStore.flushWrites()
+            print("[UITest] Seeded \(LockedItemsStore.shared.count) locked items")
+        }
+    }
+
+    private static func seedItem(_ spec: SeedGarment) -> WardrobeItem? {
+        let image = GarmentArtist.render(spec)
+        guard let path = WardrobeImageFileHelper.saveImageAsPNG(image) else { return nil }
+        let thumb = WardrobeImageFileHelper.saveThumbnail(image)
+        return WardrobeItem(
+            category: spec.category,
+            product: spec.product,
+            colors: spec.colors,
+            brand: spec.brand,
+            pattern: spec.pattern,
+            imagePath: path,
+            croppedImagePath: path,
+            thumbnailPath: thumb,
+            material: spec.material,
+            fit: spec.fit,
+            neckline: spec.neckline,
+            sleeveLength: spec.sleeve,
+            garmentLength: spec.length,
+            details: spec.details
+        )
     }
 }
 

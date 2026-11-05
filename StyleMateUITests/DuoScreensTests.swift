@@ -1,4 +1,5 @@
 import XCTest
+import StoreKitTest
 
 /// iPhone Duo screenshots, driven by `.github/workflows/duo.yml` on the iPhone Duo simulator (iOS 27.1).
 ///
@@ -133,6 +134,55 @@ final class DuoScreensTests: E2ETestCase {
             start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
         }
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "pop")], timeout: 1.0)
+    }
+
+    // MARK: - StyleMate Premium (paywall on every display)
+
+    /// 50 pieces (the free tier's limit) + 23 waiting: Home's locked card, the paywall (cover: one column;
+    /// inner: closet | plans split on the crease when half-open).
+    @MainActor
+    func test02_DuoPaywall() throws {
+        guard bridgeURL != nil else { throw XCTSkip("DUO_BRIDGE_URL not set: not on the Duo CI") }
+        let session = try SKTestSession(contentsOf: SubscriptionE2ETests.storeKitConfigURL)
+        session.resetToDefaultState()
+        session.disableDialogs = true
+        session.clearTransactions()
+        session.storefront = "GBR"
+        defer { session.clearTransactions() }
+
+        app = makeApp()
+        app.launchArguments += ["-uiTestSeedWardrobeCount", "50", "-uiTestSeedLocked", "23"]
+        app.launch()
+        dismissSpringboardAlertIfPresent()
+        let card = app.buttons.matching(NSPredicate(format:
+            "identifier == 'premium.lockedCard' OR label CONTAINS 'more pieces found'")).firstMatch
+        guard card.waitForExistence(timeout: 60) else { XCTFail("No locked-pieces card on Home"); return }
+        shoot("20-home-locked")
+
+        card.tap()
+        let annual = app.buttons["paywall.plan.annual"]
+        XCTAssertNotNil(waitForAny([annual, app.buttons["paywall.retry"]], timeout: 45), "Paywall didn't open")
+        // The purchase itself is proven by SubscriptionE2ETests on the iPhone simulator: after a hinge
+        // cycle the Duo simulator's accessibility tree still shows the screen under a full-screen
+        // cover (run 42007188514), so it can't be driven from here.
+        shoot("21-paywall")
+
+        // Buy the annual plan from the test side (StoreKit Test): the app hears it on
+        // Transaction.updates, the paywall turns into the success screen and the pieces unlock.
+        let bought = expectation(description: "annual bought")
+        Task {
+            _ = try? await session.buyProduct(identifier: "com.stylemates.StyleMate.premium.annual", options: [])
+            bought.fulfill()
+        }
+        wait(for: [bought], timeout: 60)
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "unlock")], timeout: 4)
+        shoot("22-paywall-success")
+        // "Done" sits at the bottom centre of the cover display (tapped by position: see above).
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.9)).tap()
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "dismiss")], timeout: 2)
+        openTab("Profile")
+        _ = anyElement(NSPredicate(format: "identifier == 'profile.premium.status'")).waitForExistence(timeout: 10)
+        shoot("23-profile-premium")
     }
 
     // No seated (tabletop) pass: the Duo simulator shows the inner display sideways and simctl can't rotate it,
