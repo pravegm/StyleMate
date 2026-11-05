@@ -11,9 +11,13 @@ import Foundation
 ///   flat-lay silhouette filled with the garment's own fabric (`StudioTemplate`)
 ///   when one fits, else text-to-image from the measured description. Several
 ///   candidates; the one that looks most like the real garment wins.
-/// - **Trousers, shoes, bags, hats** already have a product-like silhouette, so
-///   image-to-image from the cutout at ~0.5 strength turns them into a studio
-///   shot while keeping their exact look (rips, wash, sole, buckle).
+/// - **Trousers, shoes, hats** are generated from a product template too
+///   (front view full length; one shoe from the side, toe left; a hat in
+///   three-quarter view — `StudioTemplate`). Refining the worn cutout at
+///   0.45–0.5 mostly reproduced it: bent knees, a coat hem across the hips, a
+///   pair of shoes at street angles in street light (studio coverage lab, Nov 2026).
+/// - **Bags, eyewear, belts, jewelry, skirts, shorts, turbans** have no template:
+///   image-to-image from the cutout at ~0.45–0.5, which keeps their exact look.
 /// - Anything cut off by the photo frame is generated (a render can't invent the
 ///   missing half faithfully from a partial cutout).
 struct StudioPlan {
@@ -45,13 +49,29 @@ struct StudioPlan {
         "person, model, mannequin, body, skin, hands, face, hanger, multiple items, stack, folded, props, " +
         "accessories, text, watermark, logo, label, white patch, cropped, cut off, frame, border, blurry, deformed"
 
-    static func negative(for kind: GarmentKind) -> String {
+    /// `productShot`: drawn from a product template (one shoe, side view; a hat
+    /// on its own; trousers laid out full length).
+    static func negative(for kind: GarmentKind, productShot: Bool = false) -> String {
         switch kind {
         case .outerLayer: return baseNegative + ", shirt underneath, white t-shirt, inner layer, sherpa lining, white collar, patch"
         case .innerTop: return baseNegative + ", jacket, layered, second shirt, collar tag"
         case .onePiece: return baseNegative + ", jacket, belt, second garment"
-        case .footwear: return baseNegative + ", single shoe, socks, feet, box"
+        case .footwear: return baseNegative + (productShot ? ", pair, two shoes, socks, feet, legs, box" : ", single shoe, socks, feet, box")
+        case .headwear: return baseNegative + (productShot ? ", head, hair, mannequin head" : "")
+        case .lower: return baseNegative + (productShot ? ", legs, feet, shoes, top, shirt" : "")
         default: return baseNegative
+        }
+    }
+
+    /// A shoe named for a one-shoe prompt ("black leather chelsea boot, single shoe").
+    static func singleShoe(_ product: String) -> String {
+        switch product {
+        case "Heels": return "high heel pump"
+        case "Flats": return "ballet flat"
+        case "Slides": return "slide sandal"
+        default:
+            let p = product.lowercased()
+            return p.hasSuffix("s") ? String(p.dropLast()) : p
         }
     }
 
@@ -63,9 +83,14 @@ struct StudioPlan {
     static let textAnchor = "flat lay product photo, single garment"
     static let templateAnchor = "isolated product photo"
 
+    /// Kinds drawn from a product template when one fits (instead of refined
+    /// from the worn cutout, which mostly reproduced the street photo).
+    static let productShotKinds: Set<GarmentKind> = [.lower, .footwear, .headwear]
+
     static func make(product: String, category: Category, colors: [String], pattern: Pattern,
                      material: String?, sleeve: SleeveLength?, neckline: Neckline?, details: String?,
-                     kind: GarmentKind, truncated: Bool, cutout: CGImage? = nil, embedding: [Float]? = nil) -> StudioPlan {
+                     kind: GarmentKind, truncated: Bool, cutout: CGImage? = nil, embedding: [Float]? = nil,
+                     fit itemFit: Fit? = nil) -> StudioPlan {
         var details = details
         // Rips are what make a pair of jeans that pair: say so when the encoder sees them
         // (lab: ripped jeans +0.033/+0.042 over "plain", all other bottoms <= +0.001).
@@ -75,28 +100,40 @@ struct StudioPlan {
                 details = ["ripped knees, distressed", details].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
             }
         }
-        let desc = describe(product: product, colors: colors, pattern: pattern, material: material,
-                            sleeve: sleeve, neckline: neckline, details: details)
         let label = "\(category.rawValue)|\(product)", solid = pattern == .solid
         let layered: Set<GarmentKind> = [.innerTop, .outerLayer, .onePiece]
-        if layered.contains(kind) || truncated {
-            let view: String
+        // Template-guided: start from a product silhouette in the item's own fabric.
+        var template: CGImage?, strength: Float = 0.65
+        if useTemplates, let cutout, layered.contains(kind) || truncated || productShotKinds.contains(kind),
+           let shape = StudioTemplate.shape(product: product, kind: kind, sleeve: sleeve, fit: itemFit) {
+            template = StudioTemplate.render(cutout: cutout, shape: shape, solid: solid)
+            strength = StudioTemplate.strength(shape)
+        }
+        if layered.contains(kind) || truncated || template != nil {
+            let productShot = template != nil && productShotKinds.contains(kind)
+            let name = kind == .footwear && template != nil ? singleShoe(product) : product
+            let desc = describe(product: name, colors: colors, pattern: pattern, material: material,
+                                sleeve: sleeve, neckline: neckline, details: details)
+            let anchor = template == nil ? textAnchor : templateAnchor
+            let prompt: String
             switch kind {
-            case .lower: view = "front view, full length"
-            case .footwear: view = "a pair, side view"
-            default: view = "front view"
-            }
-            // Template-guided: start from a flat-lay silhouette in the garment's own fabric.
-            var template: CGImage?
-            if useTemplates, let cutout, let shape = StudioTemplate.shape(product: product, kind: kind, sleeve: sleeve) {
-                template = StudioTemplate.render(cutout: cutout, shape: shape, solid: solid)
+            case .footwear:
+                prompt = "\(desc), \(template == nil ? "a pair, side view" : "single shoe, side view"), \(anchor)"
+            case .headwear:
+                prompt = "\(desc), three-quarter view, \(anchor)"
+            case .lower:
+                prompt = "\(desc), \(anchor), front view, full length"
+            default:
+                prompt = "\(desc), \(anchor), front view"
             }
             return StudioPlan(
                 mode: .generate,
-                prompt: fit("\(desc), \(template == nil ? textAnchor : templateAnchor), \(view), centered, plain white background, studio lighting"),
-                negativePrompt: negative(for: kind),
-                candidates: 3, productLabel: label, isSolid: solid, template: template)
+                prompt: fit(prompt + ", centered, plain white background, studio lighting"),
+                negativePrompt: negative(for: kind, productShot: productShot),
+                candidates: 3, productLabel: label, isSolid: solid, template: template, templateStrength: strength)
         }
+        let desc = describe(product: product, colors: colors, pattern: pattern, material: material,
+                            sleeve: sleeve, neckline: neckline, details: details)
         let view: String
         switch kind {
         case .footwear: view = "a pair of \(desc), side view"
@@ -128,7 +165,8 @@ struct StudioPlan {
         var parts = prompt.components(separatedBy: ", ")
         // The framing tail ("isolated product photo, ...") must survive: trim
         // from the description clauses just before it.
-        let markers = ["laid flat", "isolated product photo", "front view", "side view", "three-quarter view"]
+        let markers = ["laid flat", "isolated product photo", "flat lay product photo", "front view", "side view",
+                       "three-quarter view", "single shoe", "a pair"]
         let tailStart = parts.firstIndex { p in markers.contains { p.hasPrefix($0) } } ?? parts.count
         var cut = tailStart
         while estimatedTokens(parts.joined(separator: ", ")) > maxPromptTokens, cut > 1 {

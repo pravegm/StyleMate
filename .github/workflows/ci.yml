@@ -206,6 +206,101 @@ jobs:
             ${{ runner.temp }}/report
           if-no-files-found: ignore
 
+  # Studio renders for every product family (StudioCoverageTests: shoes, hats, full-length
+  # trousers, a light-grey coat) from the fixed cutouts in StyleMateTests/Fixtures/studio. The
+  # simulator runs the diffusion UNet on its CPU (~6 min per candidate), so the manifest is split
+  # over three runners; each uploads `studio-coverage-<shard>` (renders + coverage_shard<n>.json).
+  studio:
+    needs: models
+    if: github.event_name != 'schedule'
+    runs-on: xcode-27
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore face models
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            MobileFaceNet.mlpackage
+            SCRFD10G.mlpackage
+          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          fail-on-cache-miss: true
+      - name: Restore wardrobe models
+        uses: actions/cache/restore@v4
+        with:
+          path: StyleMate/ML
+          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          fail-on-cache-miss: true
+      - name: Restore studio models
+        uses: actions/cache/restore@v4
+        with:
+          path: StudioModels.bundle
+          key: studio-models-v1-${{ hashFiles('scripts/build_studio_models.sh', 'scripts/convert_studio_model.py') }}
+          fail-on-cache-miss: true
+      - name: Place studio models
+        run: mkdir -p StyleMate/ML/Studio && mv StudioModels.bundle StyleMate/ML/Studio/
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Write Secrets.swift
+        run: |
+          cat > StyleMate/Secrets.swift <<'EOF'
+          enum Secrets {
+              static let geminiAPIKey = ""
+          }
+          EOF
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=[(rt,x) for rt,xs in d.items() if "iOS" in rt for x in xs if x["name"].startswith("iPhone") and "Pro" in x["name"]]
+          c.sort(key=lambda t:t[0])
+          print(c[-1][1]["udid"])')
+          echo "SIM=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" || true
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build.log | grep -E "error:|\*\* TEST BUILD" || true
+          grep -q "\*\* TEST BUILD SUCCEEDED \*\*" build.log
+      - name: Studio coverage renders
+        run: |
+          set -o pipefail
+          export TEST_RUNNER_FIXTURES_DIR="$GITHUB_WORKSPACE/StyleMateTests/Fixtures"
+          export TEST_RUNNER_REPORT_DIR="$RUNNER_TEMP/report"
+          export TEST_RUNNER_STUDIO_SHARD="${{ matrix.shard }}"
+          mkdir -p "$RUNNER_TEMP/report"
+          xcodebuild test-without-building \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            -only-testing:StyleMateTests/StudioCoverageTests \
+            -resultBundlePath "$RUNNER_TEMP/studio.xcresult" \
+            2>&1 | tee studio.log | grep -E "✔|✘|Test .*(passed|failed)|error:|\[Report\]|\[Studio\]|\*\* TEST" || true
+          grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" studio.log
+      - name: Upload renders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-coverage-${{ matrix.shard }}
+          path: |
+            studio.log
+            ${{ runner.temp }}/report
+          if-no-files-found: ignore
+
   # End-to-end UI tests (StyleMateUITests): drive the real app in the simulator with the DEBUG
   # launch hooks (demo user, skipped onboarding, seeded wardrobe) and export every step's
   # screenshot from the .xcresult into the `e2e-screens` artifact. Independent of `test`.

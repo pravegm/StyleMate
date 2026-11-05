@@ -163,14 +163,16 @@ enum StudioPipeline {
 
     // MARK: - Candidate evaluation
 
-    /// Kinds whose product is two separate objects (a pair of shoes).
-    private static func isPaired(_ label: String) -> Bool { label.hasPrefix("Footwear|") }
+    /// Renders whose product is two separate objects: a pair of shoes refined
+    /// from the worn pair. A shoe template asks for ONE shoe, so a second shoe
+    /// there is a second object (the closet keeps one look).
+    private static func isPaired(_ plan: StudioPlan) -> Bool { plan.productLabel.hasPrefix("Footwear|") && plan.template == nil }
 
     /// Returns the measured candidate (with a `rejection` reason when it fails a
     /// hard check), or nil when nothing is separable from the background.
     static func evaluate(_ render: CGImage, reference: ColorStats?, embedding: [Float], plan: StudioPlan? = nil,
                          minSimilarity: Float = 0) -> Candidate? {
-        guard let cut = isolateProduct(render, keepPairs: plan.map { isPaired($0.productLabel) } ?? true) else { return nil }
+        guard let cut = isolateProduct(render, keepPairs: plan.map(isPaired) ?? true) else { return nil }
         var image = cut.image
         if let ref = reference, let matched = ColorStats.match(image, to: ref) { image = matched }
         let framed = GarmentCutout.frame(image)

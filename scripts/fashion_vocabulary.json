@@ -78,6 +78,9 @@
   "hair_check": {"template": "a photo of {}", "labels": [
     ["Hair", "a person's hair"], ["Hair", "long dark hair"], ["Accessories|Turbans", "a turban"], ["Accessories|Scarves", "a headscarf hijab"]
   ]},
+  "neutral_tone": {"template": "a photo of a {} garment", "labels": [
+    ["White", "white"], ["White", "bright white"], ["White", "ivory"], ["Silver", "light grey"], ["Silver", "silver grey"], ["Silver", "heather grey"]
+  ]},
   "pattern": {"template": "a garment with a {} pattern", "labels": [
     ["Solid", "solid plain single color"], ["Solid Denim", "acid wash denim"], ["Solid Denim", "distressed ripped denim"], ["Stripes", "striped"], ["Checks", "small check"], ["Plaid", "plaid tartan"], ["Polka Dot", "polka dot"],
     ["Floral", "floral print"], ["Animal Print", "leopard animal print"], ["Camouflage", "camouflage"], ["Geometric", "geometric print"],
