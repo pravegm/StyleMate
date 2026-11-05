@@ -89,7 +89,11 @@ final class WardrobeML {
     /// 15 feet, 16 body (skin / hair: GarmentNet has no finer body parts), 17 jewelry.
     func parse(_ image: CGImage) -> (labels: [UInt8], confidence: [Float])? {
         guard let map = segment(image) else { return nil }
-        let labels = map.classes.map { GarmentMap.parserRegion($0) }
+        // Only confident body: the person channel's soft rim around a garment is not skin.
+        var labels = [UInt8](repeating: 0, count: map.classes.count)
+        for (i, c) in map.classes.enumerated() {
+            labels[i] = c == GarmentMap.body && map.part(4, i) < 0.8 ? 0 : GarmentMap.parserRegion(c)
+        }
         return (labels, [Float](repeating: 1, count: labels.count))
     }
 
@@ -246,7 +250,7 @@ struct GarmentMap {
         case 15, 16: return 9                        // hat
         case 17, 26: return 10                       // scarf
         case 14: return 11                           // glasses
-        case 18: return 13                           // glove ~ hands
+        case 18: return 17                           // glove: an accessory, not skin
         case 23, 24: return 15                       // feet
         case 19: return 17                           // jewelry (watch)
         case body: return 16                         // body

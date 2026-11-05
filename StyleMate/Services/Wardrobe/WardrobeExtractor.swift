@@ -1,5 +1,6 @@
 import CoreGraphics
 import UIKit
+import Vision
 
 /// The on-device wardrobe pipeline: photo of the user → one clean cutout +
 /// attributes per garment and accessory they're wearing.
@@ -164,10 +165,29 @@ enum WardrobeExtractor {
     }
 
     private static func segmentation(_ out: GarmentMap, crop: Crop, pixels: [UInt8]) -> Segmentation {
-        // The grey padding past the photo's edge is never garment (it was
-        // segmented as a grey bar on a white shirt, a block under white jeans).
         var map = out
         let w = WardrobeML.gridW, h = WardrobeML.gridH, f = crop.photoInGrid
+        // Apple's person matte (on-device Vision; also runs in the simulator) has much
+        // crisper outer edges than GarmentNet's 1/4-res maps: worn garments end where the
+        // person ends (no pavement rim that skews colours), and "body" is the matte minus
+        // garments. A carried bag may hang outside it.
+        let tm = Date()
+        if let m = personMatte(crop.image) {
+            for y in 0..<h {
+                let my = min(m.h - 1, y * m.h / h)
+                for x in 0..<w {
+                    let v = m.v[my * m.w + min(m.w - 1, x * m.w / w)]
+                    let i = y * w + x
+                    let c = map.classes[i]
+                    if c == GarmentMap.body { if v < 128 { map.classes[i] = 0 } }
+                    else if c == 0 { if v >= 200 { map.classes[i] = GarmentMap.body } }
+                    else if c != 25 && v < 48 { map.classes[i] = 0 }
+                }
+            }
+        }
+        WardrobeML.shared.record("matte", Date().timeIntervalSince(tm))
+        // The grey padding past the photo's edge is never garment (it was
+        // segmented as a grey bar on a white shirt, a block under white jeans).
         let x0 = max(0, Int(f.minX.rounded(.up))), y0 = max(0, Int(f.minY.rounded(.up)))
         let x1 = min(w, Int(f.maxX.rounded(.down))), y1 = min(h, Int(f.maxY.rounded(.down)))
         if x0 > 0 || y0 > 0 || x1 < w || y1 < h {
@@ -237,6 +257,25 @@ enum WardrobeExtractor {
             return (whole, segmentation(out, crop: whole, pixels: pixels))
         }
         return (crop, nil)
+    }
+
+    /// Vision's person segmentation (balanced quality) as 8-bit coverage, or nil.
+    private static func personMatte(_ image: CGImage) -> (w: Int, h: Int, v: [UInt8])? {
+        let request = VNGeneratePersonSegmentationRequest()
+        request.qualityLevel = .balanced
+        request.outputPixelFormat = kCVPixelFormatType_OneComponent8
+        let handler = VNImageRequestHandler(cgImage: image, options: [:])
+        guard (try? handler.perform([request])) != nil, let buffer = request.results?.first?.pixelBuffer else { return nil }
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let mw = CVPixelBufferGetWidth(buffer), mh = CVPixelBufferGetHeight(buffer)
+        let stride = CVPixelBufferGetBytesPerRow(buffer)
+        guard mw > 0, mh > 0, let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+        let p = base.assumingMemoryBound(to: UInt8.self)
+        var v = [UInt8](repeating: 0, count: mw * mh)
+        var any = false
+        for y in 0..<mh { for x in 0..<mw { let b = p[y * stride + x]; v[y * mw + x] = b; if b > 128 { any = true } } }
+        return any ? (mw, mh, v) : nil
     }
 
     // MARK: - Close-ups for small items

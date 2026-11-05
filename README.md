@@ -22,13 +22,12 @@ StyleMate finds the photos of *you* in your library, cuts out every garment and 
 
 For each photo of you, `WardrobeExtractor`:
 
-1. **Finds and crops the person** at a 2:3 portrait aspect so the garments fill the analysis grid.
-2. **Parses** the crop with two Core ML segmentation models on a shared 384×576 grid:
-   - **GarmentParser** — the FASHN human parser (SegFormer-B4): which pixels are clothing vs face/hair/arms/hands/legs/torso, and the coarse region (top, dress, skirt, pants, shoes, bag, hat, scarf, glasses, belt, jewelry). Skin never leaks into a garment.
-   - **GarmentLabeler** — a Fashionpedia SegFormer-B3: the garment *type* per pixel, plus its hood / collar / lapel / sleeve *part* channels. `GarmentSegmenter` votes inside each region, which splits an open coat or jacket from the top underneath it, a black top from black jeans the parser merged into one "jumpsuit", and black boots from black trousers or tights. The part channels confirm hoods (no "hoodie" without one), sleeves and tailored lapels.
-   - Grey padding past the photo's edge is masked out, so it never becomes garment. **Close-up passes** re-parse the head, each hand and the feet at full resolution to find what the full-body pass missed (sunglasses, a cap or turban, a watch, a bag, shoes).
+1. **Finds and crops the person** at a 2:3 portrait aspect so the garments fill the analysis grid (when the person already fills the photo, that first pass is reused instead of run again).
+2. **Segments** the crop with **GarmentNet** (`GarmentNet.mlpackage`), StyleMate's own Core ML model: a frozen **DINOv2 ViT-S/14** backbone (Meta, Apache-2.0) plus a small head StyleMate trained from scratch on **Fashionpedia** garments and **COCO** people (annotations CC BY 4.0; `.github/workflows/garment-model.yml`, CPU runners). On a 384×576 grid it labels every pixel with a Fashionpedia garment class (shirt, top, sweater, cardigan, jacket, vest, coat, dress, jumpsuit, pants, shorts, skirt, tights, shoe, bag, hat, headband / headscarf, glasses, watch, belt, scarf, tie…), "body" (skin or hair, so skin never leaks into a garment) or the scene, and gives low-res class probabilities and hood / collar / lapel / sleeve part maps.
+   - `GarmentSegmenter` groups the pixels by region and votes inside each, which splits an open coat or jacket from the top underneath it (only when the outer layer flanks the inner one) and a black top from black jeans read as one "jumpsuit"; slivers of a main garment (a coat hem read as "skirt") join their neighbour; the part maps confirm hoods (no "hoodie" without one) and tailored lapels.
+   - Grey padding past the photo's edge is masked out, so it never becomes garment. **Close-ups run only where needed**: a found sunglasses / watch / cap / belt too small to cut out cleanly, or a missing item the full-body probabilities still point at (glasses or a hat in the head, a bag, a watch, shoes at the feet); overlapping close-ups share one pass.
 3. **Cuts each item out** at full resolution (`GarmentCutout`): edge-aware mask upsampling guided by the photo, colour decontamination of soft edges (no halos), and a pyramid fill of small holes where a hand, arm, hair, strap or belt covered the fabric. Every cutout is trimmed and centred on a transparent square, and shown on a soft studio backdrop (`ItemCutoutTile`).
-4. **Names it** (`FashionClassifier`): **Marqo-FashionSigLIP** (Apache-2.0) embeds the cutout and is compared zero-shot against precomputed text embeddings (`FashionVocabulary.json`) for product (and therefore category), pattern, material, fit, sleeve, neckline and length. Tops, layers and one-pieces are ranked across all three groups (a back-view coat the labeler called a dress becomes a coat); a top seen only between jacket halves or cut off by the frame is limited to everyday tops; rare prints need a clear margin over "Solid". Colours are *measured*: k-means (k=5, merged shades) over the fabric pixels in CIELAB after a damped white balance / exposure correction from the scene, named by hue family then lightness and chroma (so denim is Blue and a dusty-pink coat Pink, not Charcoal and Gray). On Apple Intelligence devices (iOS 27+), Apple's **on-device** foundation model (`SystemLanguageModel`, never Private Cloud Compute) adds a short details line and any clearly readable brand (`GarmentDescriber`).
+4. **Names it** (`FashionClassifier`): **Marqo-FashionSigLIP** (Apache-2.0) embeds the cutout and is compared zero-shot against precomputed text embeddings (`FashionVocabulary.json`) for product (and therefore category), pattern, material, fit, sleeve, neckline and length. Tops, layers and one-pieces are ranked across all three groups (a back-view coat the segmenter called a dress becomes a coat); a top seen only between jacket halves or cut off by the frame is limited to everyday tops; rare prints need a clear margin over "Solid". Colours are *measured*: k-means (k=5, merged shades) over the fabric pixels in CIELAB after a damped white balance / exposure correction from the scene, named by hue family then lightness and chroma (so denim is Blue and a dusty-pink coat Pink, not Charcoal and Gray). On Apple Intelligence devices (iOS 27+), Apple's **on-device** foundation model (`SystemLanguageModel`, never Private Cloud Compute) adds a short details line and any clearly readable brand (`GarmentDescriber`).
 5. **Scores the view** (size, sharpness, not cut off by the frame, little occlusion). Items too small or too poor to make a good wardrobe image are skipped — a better photo will catch them.
 6. **Trust before volume** (`ItemTrust`): the scan only adds items it's sure about. Cutouts that split into several pieces (hair + lens "ties"), views with quality under 0.4, and small jewelry / ties / belts without a clear view are held back — Home shows "We weren't sure about 1 item — tap to add" — and start deselected in the manual review screen.
 
@@ -75,7 +74,7 @@ The calendar also **fills itself** (`Services/Insights/WearLogSuggestions`): whe
 ## Architecture
 
 - **Language / UI**: Swift, SwiftUI (UIKit interop for `ImagePicker` and camera capture). MVVM.
-- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder, and the studio-render diffusion model (DreamShaper 8 img2img: text encoder, UNet, VAE encoder/decoder). Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
+- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, GarmentNet garment segmenter (DINOv2 + StyleMate's Fashionpedia head), Marqo-FashionSigLIP encoder, and the studio-render diffusion model (DreamShaper 8 img2img: text encoder, UNet, VAE encoder/decoder). Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
 - **Local persistence**: `UserDefaults` (wardrobe items per user, sync ledger), wardrobe images / thumbnails / outfit-history snapshots under `Application Support/wardrobe_images/`, the selfie under `Application Support/Selfie/`, the face gallery under `Application Support/FaceReference/` (with per-entry provenance: selfie / confirmed / learned), item embeddings under `Application Support/WardrobeEmbeddings/items.bin` (compact binary, written off the main thread, debounced), studio renders' bookkeeping under `Application Support/Studio/`, Core Data (outfit history, scoped per user; a damaged store is moved to `Application Support/CoreDataBackups/` instead of crashing). Personal files are excluded from iCloud Backup and use `completeUntilFirstUserAuthentication` file protection (`LocalStore`); older builds' `Documents/` files are moved there automatically.
 - **Cloud**: CloudKit private DB only (your own iCloud). No third-party AI services.
 - **Weather**: met.no primary with Open-Meteo fallback (no key).
@@ -83,7 +82,7 @@ The calendar also **fills itself** (`Services/Insights/WearLogSuggestions`): whe
 ```
 StyleMate/
 ├── Models/                      # WardrobeItem, Category (+ WardrobeViewModel), ProductType, OutfitType, User, Core Data model
-├── ML/                          # git-ignored: GarmentParser / GarmentLabeler / FashionEncoder .mlpackage + FashionVocabulary.json;
+├── ML/                          # git-ignored: GarmentNet / FashionEncoder .mlpackage + FashionVocabulary.json;
 │                                #   Studio/StudioModels.bundle (compiled diffusion .mlmodelc + tokenizer)
 ├── Services/
 │   ├── Wardrobe/                # WardrobeExtractor, WardrobeML, GarmentSegmenter, GarmentCutout, FashionClassifier, ColorNamer, GarmentDescriber, ItemEmbeddingStore
@@ -126,7 +125,8 @@ To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
 2. Generate the git-ignored models (Python 3.11):
    ```bash
    bash scripts/build_face_models.sh       # -> MobileFaceNet.mlpackage + SCRFD10G.mlpackage at the repo root
-   bash scripts/build_wardrobe_models.sh   # -> StyleMate/ML/*.mlpackage + FashionVocabulary.json
+   gh run download <run_id in scripts/garment/model.json> -n garment-head -D scripts/garment/.artifacts
+   bash scripts/build_wardrobe_models.sh   # -> StyleMate/ML/GarmentNet + FashionEncoder .mlpackage + FashionVocabulary.json
    bash scripts/build_studio_models.sh     # -> StyleMate/ML/Studio/StudioModels.bundle (macOS + Xcode, 30-90 min)
    ```
    The face embedder takes **BGR** input (handled in `createInputMultiArray`); see `scripts/convert_adaface.py`, `convert_scrfd.py` and `convert_wardrobe_models.py` (each parity-checks Core ML against PyTorch).
@@ -147,7 +147,7 @@ StyleMate runs natively full screen on the iPhone Duo's inner and cover displays
 
 ## Licensing note
 
-The bundled model weights come with their own licences, several of which are research / non-commercial (SCRFD, AdaFace's training data, the SegFormer-based parsers). The studio-render model (DreamShaper 8) is CreativeML OpenRAIL-M: commercial use is allowed, but its use restrictions must be passed on in the app's terms. They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
+The bundled model weights come with their own licences, two of which are research / non-commercial (SCRFD, AdaFace's training data). The garment segmenter is StyleMate's own GarmentNet (DINOv2 Apache-2.0 backbone, head trained on CC BY 4.0 Fashionpedia / COCO annotations); the non-commercial FASHN / SegFormer models it replaced are no longer bundled. The studio-render model (DreamShaper 8) is CreativeML OpenRAIL-M: commercial use is allowed, but its use restrictions must be passed on in the app's terms. They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
 
 ## License
 
