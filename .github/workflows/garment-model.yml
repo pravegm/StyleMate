@@ -35,7 +35,7 @@ env:
   CHUNKS: 16
   MAX_IMAGES: 16000
   COCO_IMAGES: 5000
-  PIP_PKGS: numpy<2 timm==1.0.11 opencv-python-headless==4.10.0.84 pycocotools==2.0.8 pillow
+  PIP_PKGS: numpy<2 timm==1.0.11 huggingface_hub==0.26.2 safetensors==0.4.5 opencv-python-headless==4.10.0.84 pycocotools==2.0.8 pillow
 
 jobs:
   pca:
