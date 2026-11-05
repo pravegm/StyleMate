@@ -225,6 +225,13 @@ enum GarmentSegmenter {
             }
         }
 
+        // Small accessories: only the pixels GarmentNet is fairly sure of, so sunglasses don't
+        // take the eyebrows and a watch doesn't take the wrist (their boxes were too big).
+        for k in merged.indices where [.eyewear, .jewelry].contains(merged[k].kind) {
+            let sure = merged[k].pixels.filter { map.prob(merged[k].cls, $0) >= 0.4 }
+            if sure.count * 3 >= merged[k].pixels.count { merged[k].pixels = sure }
+        }
+
         var instances: [GarmentInstance] = []
         for g in merged {
             if var inst = makeInstance(kind: g.kind, cls: g.cls, pixels: g.pixels, labels: labels) {
@@ -461,7 +468,7 @@ enum GarmentSegmenter {
         let keep = Set(sizes.enumerated()
             .filter { Double($0.element) >= Double(largest) * 0.12 }
             .sorted { $0.element > $1.element }
-            .prefix(kind == .belt ? 1 : 4).map { $0.offset + 1 })   // a belt is one piece
+            .prefix(kind == .belt || kind == .jewelry ? 1 : 4).map { $0.offset + 1 })   // a belt / watch is one piece
         // A tie is one solid piece; several small dark fragments labelled "tie"
         // are hair or a shadow (seen in the e2e gallery test).
         if cls == 17, keep.count > 1 || Double(largest) < Double(n) * 0.002 { return nil }

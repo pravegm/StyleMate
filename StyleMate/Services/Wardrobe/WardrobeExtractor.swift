@@ -67,6 +67,15 @@ enum WardrobeExtractor {
             let inst = use.inst
             // A small accessory GarmentNet is unsure of is the commonest phantom item (eyeglasses on
             // a face, clogs at a hem): skip it; a clearer photo will find it.
+            // Shoes cut off by the bottom of the photo, and a sliver of trousers at the bottom edge,
+            // are not usable wardrobe items (and the benchmark's photos don't count them as worn items).
+            let f = use.crop.photoInGrid
+            let atBottom = CGFloat(inst.box.3) >= f.maxY - 2
+            let sliver = Double(inst.box.3 - inst.box.1) < Double(f.height) * 0.12
+            if atBottom, inst.kind == .footwear || (inst.kind == .lower && sliver) {
+                log("drop cut-off \(inst.kind.rawValue)")
+                continue
+            }
             if [.eyewear, .jewelry, .belt, .headwear, .bag, .footwear].contains(inst.kind), inst.confidence < 0.4 {
                 log("drop unsure \(inst.kind.rawValue) (p=\(String(format: "%.2f", inst.confidence)))")
                 continue
