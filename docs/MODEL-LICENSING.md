@@ -121,6 +121,26 @@ Sizes come from CI run 41829764408 (`du -sh`); face rows from run 42008624154 (t
 | **FaceNet Inception-ResNet-v1, VGGFace2** (`facenet-pytorch`, port of davidsandberg/facenet) | Repo MIT; the weights have **no stated licence**; VGGFace2's own licence could not be confirmed (sources disagree: CC BY-SA 4.0 vs non-commercial; the official page no longer shows terms) | see §8 | Not an "explicit commercial-OK" licence: not eligible |
 | InsightFace `w600k_r50` (buffalo_l) | Non-commercial unless licensed (§2.1) | see §8 | Only with a signed licence (§7) |
 
+### 2.9 Studio render model (`StudioModels.bundle`, DreamShaper 8 on SD 1.5)
+
+- **Licence:** CreativeML OpenRAIL-M (Lykon/dreamshaper-8 model card; Stable Diffusion 1.5).
+  Commercial use is allowed; the licence's use restrictions (Attachment A) must be passed on in
+  the app's terms.
+- **Studio coverage work (Nov 2026) added no model weights.** Shoes, hats and full-length trousers
+  are drawn from procedural product templates (`StudioTemplate`: polygons filled with the item's
+  own fabric, drawn in code), not from new networks. Considered and not bundled:
+  - **ControlNet** (canny / lineart / softedge for SD 1.5) from the cutout's edges. Apple's Core ML
+    pipeline supports it, but it needs a second ~700 MB network and a UNet re-converted with
+    ControlNet inputs, and every step runs both. Worse, it would lock the render to the worn
+    pose (bent knees, a pair at street angles), which is exactly what the templates remove.
+  - **IP-Adapter**: needs a CLIP image tower and adapter attention layers that Apple's
+    ml-stable-diffusion pipeline does not implement.
+  - **LCM-LoRA** (fewer steps): changes every category's look; not evaluated for launch.
+  No licence for any of these is relied on, so none is recorded as cleared.
+- **Test fixtures only:** some `StyleMateTests/Fixtures/studio/` cutouts were cut offline with
+  the FASHN parser (research/evaluation use, never shipped) from CC0 photos (see
+  `StyleMateTests/Fixtures/CREDITS.md`).
+
 ## 3. A caveat that applies to every "permissive" face model
 
 Almost every public face detector and recogniser was trained on research-only data:

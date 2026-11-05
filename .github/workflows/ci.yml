@@ -17,6 +17,8 @@ name: CI
 #     for the UI tests and screenshots, `[tests: StyleMateTests/TryOnTests, ...]` to run only those
 #     unit tests, `[skip ci]` for no run at all. Docs-only pushes don't run (and don't cancel a run).
 #   - Run workflow (dispatch): the `unit_tests` and `ui_tests` inputs do the same.
+#   - Studio coverage renders (3 Macs, ~45 min): only with `[studio]` or `[full]` in the commit message
+#     (any branch, main included) or the dispatch input `studio`.
 # The `models` job only takes a Mac when a model cache is actually missing.
 
 on:
@@ -35,6 +37,10 @@ on:
         description: "Run the UI tests (e2e-screens)"
         type: boolean
         default: true
+      studio:
+        description: "Also run the studio coverage renders (3 Macs, ~45 min)"
+        type: boolean
+        default: false
       audit:
         description: "Also run the concurrency audit (strict concurrency + Thread Sanitizer, ~1 h)"
         type: boolean
@@ -55,6 +61,7 @@ jobs:
     outputs:
       build_models: ${{ steps.models.outputs.build }}
       ui: ${{ steps.tier.outputs.ui }}
+      studio: ${{ steps.tier.outputs.studio }}
       unit_tests: ${{ steps.tier.outputs.unit_tests }}
     steps:
       - uses: actions/checkout@v4
@@ -65,23 +72,30 @@ jobs:
           REF: ${{ github.ref }}
           MSG: ${{ github.event.head_commit.message }}
           UI_INPUT: ${{ inputs.ui_tests }}
+          STUDIO_INPUT: ${{ inputs.studio }}
           TESTS_INPUT: ${{ inputs.unit_tests }}
         run: |
-          ui=false; tests=""
+          ui=false; studio=false; tests=""
           if [ "$REF" = "refs/heads/main" ] || [ "$EVENT" = "pull_request" ]; then
             ui=true
           elif [ "$EVENT" = "workflow_dispatch" ]; then
             [ "$UI_INPUT" = "true" ] && ui=true
+            [ "$STUDIO_INPUT" = "true" ] && studio=true
             tests="$TESTS_INPUT"
-          else
+          fi
+          # Studio coverage renders (3 Macs, ~45 min) only when asked, on any branch: they come from fixed
+          # fixture cutouts, so other branches' merges don't change them.
+          case "$MSG" in *"[studio]"*|*"[full]"*) studio=true;; esac
+          if [ "$REF" != "refs/heads/main" ] && [ "$EVENT" = "push" ]; then
             case "$MSG" in *"[ui]"*|*"[full]"*) ui=true;; esac
             tests=$(printf '%s' "$MSG" | sed -n 's/.*\[tests:\([^]]*\)\].*/\1/p' | head -1)
           fi
           # Test identifiers only (StyleMateTests/Suite/test), so nothing else reaches xcodebuild.
           tests=$(printf '%s' "$tests" | tr -cd 'A-Za-z0-9_/,.' )
           echo "ui=$ui" >> "$GITHUB_OUTPUT"
+          echo "studio=$studio" >> "$GITHUB_OUTPUT"
           echo "unit_tests=$tests" >> "$GITHUB_OUTPUT"
-          echo "UI tests: $ui | unit tests: ${tests:-all}"
+          echo "UI tests: $ui | studio renders: $studio | unit tests: ${tests:-all}"
       - name: Are the model caches there?
         id: models
         env:
@@ -297,6 +311,99 @@ jobs:
           path: |
             build.log
             test.log
+            ${{ runner.temp }}/report
+          if-no-files-found: ignore
+
+  # Studio renders for every product family (StudioCoverageTests: shoes, hats, full-length
+  # trousers, a light-grey coat) from the fixed cutouts in StyleMateTests/Fixtures/studio. The
+  # simulator runs the diffusion UNet on its CPU (~2–4 min per candidate), so the manifest is split
+  # over three runners; each uploads `studio-coverage-<shard>` (renders + coverage_shard<n>.json).
+  studio:
+    needs: [plan, models]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.models.result != 'failure' && github.event_name != 'schedule' && needs.plan.outputs.studio == 'true' }}
+    runs-on: xcode-27
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore face models
+        uses: actions/cache/restore@v4
+        with:
+          path: StyleMate/FaceModels
+          key: face-models-v2-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_face_models.py') }}
+          fail-on-cache-miss: true
+      - name: Restore wardrobe models
+        uses: actions/cache/restore@v4
+        with:
+          path: StyleMate/ML
+          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          fail-on-cache-miss: true
+      - name: Restore studio models
+        uses: actions/cache/restore@v4
+        with:
+          path: StudioModels.bundle
+          key: studio-models-v1-${{ hashFiles('scripts/build_studio_models.sh', 'scripts/convert_studio_model.py') }}
+          fail-on-cache-miss: true
+      - name: Place studio models
+        run: mkdir -p StyleMate/ML/Studio && mv StudioModels.bundle StyleMate/ML/Studio/
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Write Secrets.swift
+        run: |
+          cat > StyleMate/Secrets.swift <<'EOF'
+          enum Secrets {
+              static let geminiAPIKey = ""
+          }
+          EOF
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=[(rt,x) for rt,xs in d.items() if "iOS" in rt for x in xs if x["name"].startswith("iPhone") and "Pro" in x["name"]]
+          c.sort(key=lambda t:t[0])
+          print(c[-1][1]["udid"])')
+          echo "SIM=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" || true
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build.log | grep -E "error:|\*\* TEST BUILD" || true
+          grep -q "\*\* TEST BUILD SUCCEEDED \*\*" build.log
+      - name: Studio coverage renders
+        run: |
+          set -o pipefail
+          export TEST_RUNNER_FIXTURES_DIR="$GITHUB_WORKSPACE/StyleMateTests/Fixtures"
+          export TEST_RUNNER_REPORT_DIR="$RUNNER_TEMP/report"
+          export TEST_RUNNER_STUDIO_SHARD="${{ matrix.shard }}"
+          mkdir -p "$RUNNER_TEMP/report"
+          xcodebuild test-without-building \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            -only-testing:StyleMateTests/StudioCoverageTests \
+            -resultBundlePath "$RUNNER_TEMP/studio.xcresult" \
+            2>&1 | tee studio.log | grep -E "✔|✘|Test .*(passed|failed)|error:|\[Report\]|\[Studio\]|\*\* TEST" || true
+          grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" studio.log
+      - name: Upload renders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-coverage-${{ matrix.shard }}
+          path: |
+            studio.log
             ${{ runner.temp }}/report
           if-no-files-found: ignore
 

@@ -336,10 +336,8 @@ jobs:
       - name: Restore face models
         uses: actions/cache/restore@v4
         with:
-          path: |
-            MobileFaceNet.mlpackage
-            SCRFD10G.mlpackage
-          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          path: StyleMate/FaceModels
+          key: face-models-v2-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_face_models.py') }}
           fail-on-cache-miss: true
       - name: Restore wardrobe models
         uses: actions/cache/restore@v4
