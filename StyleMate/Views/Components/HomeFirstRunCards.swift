@@ -85,7 +85,10 @@ struct HomeFirstRunCards: View {
         .onChange(of: router.pendingMorningLook) { day in
             guard let day else { return }
             router.pendingMorningLook = nil
-            homeVM.openMorningLook(dayKey: day, wardrobe: wardrobe.items, user: auth.user)
+            // The tab shell switches to Home on the same change; present once it's in front.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                homeVM.openMorningLook(dayKey: day, wardrobe: wardrobe.items, user: auth.user)
+            }
         }
         .onAppear {
             if let day = router.pendingMorningLook {
@@ -182,7 +185,7 @@ struct UncertainItemsCard: View {
                 HStack(spacing: DS.Spacing.sm) {
                     HStack(spacing: -10) {
                         ForEach(items.prefix(3)) { held in
-                            ItemCutoutTile(image: WardrobeImageFileHelper.loadImage(at: held.item.thumbnailPath ?? held.item.imagePath),
+                            AsyncItemTile(path: held.item.thumbnailPath ?? held.item.imagePath,
                                            height: 40, cornerRadius: 10, inset: 4)
                                 .frame(width: 40)
                                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(DS.Colors.backgroundCard, lineWidth: 2))
@@ -238,7 +241,7 @@ struct WearLogPromptCard: View {
                 }
                 HStack(spacing: DS.Spacing.xs) {
                     ForEach(items.prefix(4)) { item in
-                        ItemCutoutTile(image: WardrobeImageFileHelper.loadImage(at: item.thumbnailPath ?? item.imagePath),
+                        AsyncItemTile(path: item.thumbnailPath ?? item.imagePath,
                                        height: 56, cornerRadius: 12, inset: 6)
                             .frame(width: 56)
                     }
@@ -334,7 +337,7 @@ struct UncertainItemsSheet: View {
     private func row(_ entry: UncertainItemsStore.HeldItem) -> some View {
         let item = entry.item
         return HStack(spacing: DS.Spacing.sm) {
-            ItemCutoutTile(image: WardrobeImageFileHelper.loadImage(at: item.imagePath), height: 72, cornerRadius: 14, inset: 6)
+            AsyncItemTile(path: item.imagePath, height: 72, cornerRadius: 14, inset: 6)
                 .frame(width: 72)
             VStack(alignment: .leading, spacing: 2) {
                 Text(ClosetText.displayName(item))

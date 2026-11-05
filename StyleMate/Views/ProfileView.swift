@@ -128,17 +128,22 @@ struct ProfileView: View {
                             .padding(.top, DS.Spacing.xs)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, DS.Spacing.sm)
+                        .padding(.bottom, DS.Spacing.sm)
                         .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 0, leading: DS.Spacing.md, bottom: 0, trailing: DS.Spacing.md))
                     }
+                    .listSectionSpacing(.compact)
 
                     Section {
                         // Fields are seeded once (see .onAppear below) and saved on a
                         // debounce. Do NOT write authService.user per keystroke or
                         // re-seed via per-field .onAppear — that re-rendered the Form
                         // mid-edit and reverted the text, hanging the screen.
-                        TextField("Name", text: $editName)
-                            .onChange(of: editName) { _ in scheduleProfileSave() }
+                        LabeledContent("Name") {
+                            TextField("Name", text: $editName)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        .onChange(of: editName) { _ in scheduleProfileSave() }
 
                         Picker("Gender", selection: $editGender) {
                             ForEach(genderOptions, id: \.self) { option in
@@ -148,8 +153,11 @@ struct ProfileView: View {
                         .pickerStyle(MenuPickerStyle())
                         .onChange(of: editGender) { _ in scheduleProfileSave() }
 
-                        TextField("Age", text: $editAge)
-                            .keyboardType(.numberPad)
+                        LabeledContent("Age") {
+                            TextField("Age", text: $editAge)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                        }
                             .onChange(of: editAge) { newAge in
                                 editAge = String(newAge.filter(\.isNumber).prefix(3))
                                 scheduleProfileSave()
@@ -253,7 +261,7 @@ struct ProfileView: View {
                                 } else {
                                     Text("Not yet synced")
                                         .font(DS.Font.caption1)
-                                        .foregroundColor(DS.Colors.textTertiary)
+                                        .foregroundColor(DS.Colors.textSecondary)
                                 }
                             }
                             Spacer()
@@ -575,7 +583,7 @@ struct ProfileView: View {
                 .foregroundColor(DS.Colors.textPrimary)
             Text(label)
                 .font(DS.Font.caption2)
-                .foregroundColor(DS.Colors.textTertiary)
+                .foregroundColor(DS.Colors.textSecondary)
         }
     }
 
@@ -585,15 +593,12 @@ struct ProfileView: View {
     private var syncStatusIndicator: some View {
         switch cloudKitService.syncStatus {
         case .syncing:
+            // A system symbol effect: honours Reduce Motion and doesn't leak a
+            // repeatForever animation into the rest of the list.
             Image(systemName: "arrow.triangle.2.circlepath")
                 .foregroundColor(DS.Colors.accent)
-                .rotationEffect(.degrees(syncRotation))
-                .onAppear {
-                    withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
-                        syncRotation = 360
-                    }
-                }
-                .onDisappear { syncRotation = 0 }
+                .symbolEffect(.rotate, options: .repeating)
+                .accessibilityLabel("Syncing")
         case .success:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(DS.Colors.success)
@@ -617,7 +622,7 @@ struct StylePreferencesSheet: View {
     @EnvironmentObject var authService: AuthService
     private let maxStyles = 6
     private let allStyles = OutfitType.allCases
-    private let columns = [GridItem(.flexible()), GridItem(.flexible())]
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: DS.Spacing.sm)]
     private let cellHeight: CGFloat = 56
 
     var isChanged: Bool {
@@ -758,7 +763,8 @@ private struct SamplePhotoCreditsView: View {
 
 // MARK: - Retake Selfie Sheet
 
-private struct RetakeSelfieSheet: View {
+/// Also opened from Home's scan banner when the scan has no selfie to match.
+struct RetakeSelfieSheet: View {
     @EnvironmentObject var authService: AuthService
     @Environment(\.dismiss) private var dismiss
     @State private var selfieImage: UIImage?

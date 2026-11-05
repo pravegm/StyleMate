@@ -16,6 +16,94 @@ struct HomeView: View {
     @State private var showScanReview = false
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.duoLayout) private var duo
+    @ScaledMetric(relativeTo: .body) private var heroBoardHeight: CGFloat = 230
+    /// The rounded temperature today's look was picked for.
+    @State private var heroTemperature: Int? = nil
+
+    // MARK: - Outfit sheet presentation
+
+    private func outfitSheetBinding(wide: Bool) -> Binding<Bool> {
+        Binding(
+            get: { homeVM.showOutfitSheet && duo.isWideLayout == wide },
+            set: { homeVM.showOutfitSheet = $0 }
+        )
+    }
+
+    @ViewBuilder
+    private var outfitSheet: some View {
+        if let outfit = homeVM.todayOutfit {
+            TodayOutfitSheet(outfit: outfit, isPresented: $homeVM.showOutfitSheet)
+                .environmentObject(homeVM)
+                .environmentObject(wardrobeViewModel)
+                .environmentObject(outfitsVM)
+                .environmentObject(authService)
+                .environmentObject(tutorialManager)
+        }
+    }
+
+    // MARK: - Blocks (stacked on a phone, two columns when wide)
+
+    /// Staged entrance: fade + rise, or a plain fade under Reduce Motion.
+    private func entrance<V: View>(_ view: V, delay: Double) -> some View {
+        view
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared || reduceMotion ? 0 : 20)
+            .animation(reduceMotion ? DS.Motion.reduced : .easeOut(duration: 0.5).delay(delay), value: appeared)
+    }
+
+    private var greetingBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            entrance(heroGreetingSection, delay: 0)
+                .padding(.top, DS.Spacing.lg)
+
+            if photoScanService.scanState != .idle {
+                ScanProgressBanner(
+                    scanService: photoScanService,
+                    showReview: $showScanReview
+                )
+                .environmentObject(wardrobeViewModel)
+                .padding(.top, DS.Spacing.md)
+                .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .top).combined(with: .opacity))
+                .animation(DSMotionEnv.resolve(.spring(response: 0.4, dampingFraction: 0.8), reduceMotion: reduceMotion),
+                           value: photoScanService.scanState)
+            }
+
+            if photoScanService.scanState == .idle,
+               let userId = authService.user?.id,
+               !PhotoScanService.shared.loadLastScanItemIDs(forUser: userId).isEmpty {
+                Button {
+                    Haptics.light()
+                    showScanReview = true
+                } label: {
+                    Label("Review last scan results", systemImage: "slider.horizontal.3")
+                        .font(DS.Font.footnote.weight(.medium))
+                        .foregroundStyle(DS.Colors.accent)
+                        .frame(minHeight: 44)
+                }
+            }
+
+            HomeFirstRunCards(homeVM: homeVM)   // samples, held items, "Wore this?", morning-look ask
+        }
+    }
+
+    @ViewBuilder
+    private var heroBlock: some View {
+        if showsTodayLook {
+            entrance(todaysOutfitHero.coachAnchor(CoachAnchor.todayOutfit), delay: 0.1)
+                .padding(.top, DS.Spacing.lg)
+        }
+    }
+
+    private var styleMeBlock: some View {
+        entrance(styleMeHeroCard.coachAnchor(CoachAnchor.styleMe), delay: 0.15)
+            .padding(.top, DS.Spacing.xl)
+    }
+
+    private var wardrobeBlock: some View {
+        entrance(wardrobeSection, delay: 0.2)
+            .padding(.top, DS.Spacing.xl)
+    }
 
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
@@ -33,73 +121,37 @@ struct HomeView: View {
                 DS.Colors.backgroundPrimary.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // MARK: - Hero Greeting + Weather
-                        heroGreetingSection
-                            .padding(.top, DS.Spacing.lg)
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 20)
-                            .animation(.easeOut(duration: 0.5), value: appeared)
-
-                        // MARK: - Scan Progress Banner
-                        if photoScanService.scanState != .idle {
-                            ScanProgressBanner(
-                                scanService: photoScanService,
-                                showReview: $showScanReview
-                            )
-                            .environmentObject(wardrobeViewModel)
-                            .padding(.top, DS.Spacing.md)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: photoScanService.scanState)
-                        }
-
-                        if photoScanService.scanState == .idle,
-                           let userId = authService.user?.id,
-                           !PhotoScanService.shared.loadLastScanItemIDs(forUser: userId).isEmpty {
-                            Button {
-                                Haptics.light()
-                                showScanReview = true
-                            } label: {
-                                HStack(spacing: DS.Spacing.xs) {
-                                    Image(systemName: "slider.horizontal.3")
-                                        .font(.system(size: 12))
-                                    Text("Review last scan results")
-                                        .font(DS.Font.caption1)
-                                }
-                                .foregroundColor(DS.Colors.accent)
-                                .padding(.top, DS.Spacing.xs)
+                    if duo.isWideLayout {
+                        // Wide (Duo inner display): greeting + Style me | today's
+                        // look + wardrobe, each column at a readable width.
+                        // Split exactly at the crease when half-open.
+                        FoldAwareSplit(gutter: DS.Spacing.xl, stackedSpacing: 0) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                greetingBlock
+                                heroBlock
                             }
+                            .frame(maxWidth: 560, alignment: .leading)
+                            .frame(maxWidth: .infinity)
+                        } trailing: {
+                            VStack(alignment: .leading, spacing: 0) {
+                                styleMeBlock
+                                wardrobeBlock
+                            }
+                            .frame(maxWidth: 560, alignment: .leading)
+                            .frame(maxWidth: .infinity)
                         }
-
-                        HomeFirstRunCards(homeVM: homeVM)   // samples, held items, "Wore this?", morning-look ask
-
-                        // MARK: - Today's Outfit Hero
-                        if homeVM.heroOutfit != nil || homeVM.isGeneratingHero {
-                            todaysOutfitHero
-                                .coachAnchor(CoachAnchor.todayOutfit)
-                                .padding(.top, DS.Spacing.xl)
-                                .opacity(appeared ? 1 : 0)
-                                .offset(y: appeared ? 0 : 20)
-                                .animation(.easeOut(duration: 0.5).delay(0.1), value: appeared)
+                        .padding(.horizontal, DS.Spacing.lg)
+                        .padding(.bottom, DS.Spacing.xxxl)
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            greetingBlock
+                            heroBlock
+                            styleMeBlock
+                            wardrobeBlock
                         }
-
-                        // MARK: - Style Me Hero Card
-                        styleMeHeroCard
-                            .coachAnchor(CoachAnchor.styleMe)
-                            .padding(.top, DS.Spacing.xl)
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 20)
-                            .animation(.easeOut(duration: 0.5).delay(0.15), value: appeared)
-
-                        // MARK: - Your Wardrobe
-                        wardrobeSection
-                            .padding(.top, DS.Spacing.xl)
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 20)
-                            .animation(.easeOut(duration: 0.5).delay(0.2), value: appeared)
+                        .padding(.horizontal, DS.Spacing.screenH)
+                        .padding(.bottom, DS.Spacing.xxxl)
                     }
-                    .padding(.horizontal, DS.Spacing.screenH)
-                    .padding(.bottom, DS.Spacing.xxxl)
                 }
 
                 if homeVM.isLoading {
@@ -109,35 +161,43 @@ struct HomeView: View {
                     )
                 }
             }
-            .fullScreenCover(isPresented: $homeVM.showOutfitSheet) {
-                if let outfit = homeVM.todayOutfit {
-                    TodayOutfitSheet(outfit: outfit, isPresented: $homeVM.showOutfitSheet)
-                        .environmentObject(homeVM)
-                        .environmentObject(wardrobeViewModel)
-                        .environmentObject(outfitsVM)
-                        .environmentObject(authService)
-                        .environmentObject(tutorialManager)
-                }
+            // Phone / cover display: a full-height sheet (a full-screen cover put a
+            // stray system element in the Duo cover's trailing rail). Wide: a page sheet.
+            .sheet(isPresented: outfitSheetBinding(wide: false)) {
+                outfitSheet
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.hidden)
+            }
+            .sheet(isPresented: outfitSheetBinding(wide: true)) {
+                outfitSheet
+                    .presentationSizing(.page)
             }
             .alert("Outfit Suggestion", isPresented: $homeVM.showOutfitErrorAlert) {
-                Button("OK", role: .cancel) {}
+                if homeVM.outfitError == .networkError {
+                    Button("OK", role: .cancel) {}
+                } else {
+                    Button("Add clothes") {
+                        NotificationCenter.default.post(name: .showAddClothes, object: nil)
+                    }
+                    Button("Not now", role: .cancel) {}
+                }
             } message: {
                 switch homeVM.outfitError {
                 case .emptyWardrobe:
-                    Text("Add more items to your wardrobe to get outfit suggestions. You need at least a top, bottom, and shoes.")
+                    Text("Add a top and a bottom (shoes help too) and StyleMate will put outfits together for you.")
                 case .networkError:
                     Text("Something went wrong while styling. Please try again.")
                 case .parseError:
-                    Text("Couldn't put a complete look together from your wardrobe yet. Try adding a few more pieces.")
+                    Text("Your wardrobe can't make a complete look for this yet. Add a few more pieces, like shoes or another bottom.")
                 case .none:
-                    Text("Try adding more items or adjusting colors/patterns.")
+                    Text("Add a few more pieces and try again.")
                 }
             }
             .alert("Weather unavailable", isPresented: $showWeatherWarning) {
-                Button("Yes", role: .destructive) {
-                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
+                Button("Style anyway") {
+                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user, pinned: pinnedForStyleMe)
                 }
-                Button("No", role: .cancel) {}
+                Button("Cancel", role: .cancel) {}
             } message: {
                 if homeVM.isWeatherLoading {
                     Text("Weather is still loading. Outfit suggestions may not be seasonally appropriate. Continue?")
@@ -164,15 +224,12 @@ struct HomeView: View {
                 if homeVM.weather == nil && !homeVM.isWeatherLoading {
                     homeVM.requestWeatherForCurrentLocation()
                 }
-                homeVM.ensureHero(wardrobe: wardrobeViewModel.items, user: authService.user)
+                refreshHeroIfNeeded()
                 withAnimation { appeared = true }
             }
-            .onChange(of: homeVM.weather?.temperature2m) { _ in
-                homeVM.ensureHero(wardrobe: wardrobeViewModel.items, user: authService.user)
-            }
-            .onChange(of: homeVM.weatherError) { _ in
-                homeVM.ensureHero(wardrobe: wardrobeViewModel.items, user: authService.user)
-            }
+            .onChange(of: homeVM.weather?.temperature2m) { _ in refreshHeroIfNeeded() }
+            .onChange(of: homeVM.weatherError) { _ in refreshHeroIfNeeded() }
+            .onChange(of: wardrobeViewModel.items.count) { _ in refreshHeroIfNeeded() }
             .onChange(of: homeVM.isLoading) { isLoading in
                 if isLoading {
                     loadingProgress = 0.0
@@ -234,85 +291,166 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Today's Outfit Hero
+    // MARK: - Today's look (hero)
+    //
+    // The app opens on an answer: the stylist's pick for today's weather as a
+    // small outfit board, with "Wear today" (logs it) and "More options" (the
+    // five-option deck). Once today is logged, it shows what you're wearing.
+    // The morning notification deep-links here.
+
+    /// Today's logged look, as wardrobe items (nil when nothing is logged today).
+    private var todaysLoggedItems: [WardrobeItem]? {
+        let today = Calendar.current.startOfDay(for: Date())
+        guard let outfit = outfitsVM.outfitsByDate[today]?.last,
+              let logged = outfit.items as? Set<OutfitItem> else { return nil }
+        let byID = Dictionary(wardrobeViewModel.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let items = logged.compactMap { $0.id.flatMap { byID[$0] } }
+        return items.isEmpty ? nil : items
+    }
+
+    /// "Style me" with the defaults asks for the same thing as Today's look, so the
+    /// deck opens on that exact look (a mood or a description makes a new request).
+    private var pinnedForStyleMe: Outfit? {
+        guard todaysLoggedItems == nil, homeVM.selectedMood == nil, !homeVM.isCustomDescriptionValid,
+              (homeVM.selectedOutfitType ?? .everyday) == .everyday,
+              let hero = homeVM.heroOutfit else { return nil }
+        return hero
+    }
+
+    private var showsTodayLook: Bool {
+        todaysLoggedItems != nil || homeVM.heroOutfit != nil || homeVM.isGeneratingHero
+    }
+
+    private var todayWeatherLine: String {
+        var parts: [String] = []
+        if let c = homeVM.lastCelsius {
+            parts.append("\(DSFormat.degrees(celsius: c, fahrenheit: homeVM.displayFahrenheit))°")
+        }
+        if let w = homeVM.weather { parts.append(w.displayDescription) }
+        return parts.joined(separator: " · ")
+    }
 
     @ViewBuilder
     private var todaysOutfitHero: some View {
-        if let hero = homeVM.heroOutfit {
-            Button {
-                Haptics.medium()
-                homeVM.openHeroInDeck(user: authService.user)
-            } label: {
-                VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Today's Outfit")
-                            .font(DS.Font.title2)
-                            .foregroundStyle(DS.Colors.textPrimary)
-                        Spacer()
-                        HStack(spacing: 2) {
-                            Text("Style it")
-                                .font(DS.Font.subheadline.weight(.semibold))
-                            Image(systemName: "chevron.right")
-                                .font(DS.Font.footnote.weight(.semibold))
-                        }
-                        .foregroundStyle(DS.Colors.accent)
-                    }
-
-                    heroPreviewRow(hero)
-
-                    if !hero.explanation.isEmpty {
-                        HStack(alignment: .top, spacing: DS.Spacing.xs) {
-                            Image(systemName: "sparkles")
-                                .font(DS.Font.footnote)
-                                .foregroundStyle(DS.Colors.accent)
-                                .padding(.top, 1)
-                            Text(hero.explanation)
-                                .font(DS.Font.subheadline)
-                                .foregroundStyle(DS.Colors.textSecondary)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-                .padding(DS.Spacing.lg)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(DS.Colors.backgroundCard)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
-                .dsElevatedShadow(cornerRadius: DS.Radius.hero)
-            }
-            .buttonStyle(DSTapBounce())
+        if let logged = todaysLoggedItems {
+            todayLookCard(items: logged, note: nil, isLogged: true)
+        } else if let hero = homeVM.heroOutfit {
+            todayLookCard(items: hero.items, note: hero.explanation, isLogged: false)
         } else if homeVM.isGeneratingHero {
             heroSkeleton
         }
     }
 
-    private func heroPreviewRow(_ outfit: Outfit) -> some View {
-        let items = outfit.items.sorted { $0.category.wearingOrder < $1.category.wearingOrder }
-        return HStack(spacing: DS.Spacing.sm) {
-            ForEach(items.prefix(5)) { item in
-                Group {
-                    if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFit()
-                    } else {
-                        RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
-                            .fill(DS.Colors.backgroundSecondary)
-                            .overlay(
-                                Image(systemName: item.category.iconName)
-                                    .foregroundStyle(DS.Colors.textTertiary)
-                            )
+    private func todayLookCard(items: [WardrobeItem], note: String?, isLogged: Bool) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            HStack(alignment: .center, spacing: DS.Spacing.xs) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isLogged ? "Today you're wearing" : "Today's look")
+                        .font(DS.Font.title3)
+                        .foregroundStyle(DS.Colors.textPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                    if !todayWeatherLine.isEmpty {
+                        Text(todayWeatherLine)
+                            .font(DS.Font.footnote)
+                            .foregroundStyle(DS.Colors.textSecondary)
                     }
                 }
-                .frame(height: 104)
-                .frame(maxWidth: .infinity)
+                Spacer(minLength: 0)
+                if isLogged {
+                    Label("Logged", systemImage: "checkmark.circle.fill")
+                        .font(DS.Font.footnote.weight(.semibold))
+                        .foregroundStyle(DS.Colors.success)
+                }
+            }
+
+            Button {
+                Haptics.medium()
+                if isLogged {
+                    NotificationCenter.default.post(name: .showOutfitsCalendar, object: nil)
+                } else {
+                    homeVM.openHeroInDeck(user: authService.user)
+                }
+            } label: {
+                OutfitBoard(items: items, isThumbnail: true, padding: DS.Spacing.sm)
+                    .frame(height: heroBoardHeight)
+                    .frame(maxWidth: .infinity)
+                    .background(StudioSurface())
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            }
+            .buttonStyle(DSTapBounce())
+            .accessibilityLabel(items.map { ClosetText.displayName($0) }.joined(separator: ", "))
+            .accessibilityHint(isLogged ? "Opens your outfit calendar" : "Opens this look to keep or swap pieces")
+            .accessibilityIdentifier("home.todayLook.board")
+
+            if let note, !note.isEmpty {
+                Text(note)
+                    .font(DS.Font.subheadline)
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: DS.Spacing.sm) {
+                Button {
+                    Haptics.medium()
+                    // The deck starts on exactly this look, then four more.
+                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user,
+                                              pinned: isLogged ? nil : homeVM.heroOutfit)
+                } label: {
+                    Text("More options")
+                }
+                .buttonStyle(DSOutlineButton())
+                .disabled(homeVM.isLoading)
+                .accessibilityHint("Builds five outfits for today")
+                .accessibilityIdentifier("home.todayLook.more")
+
+                if !isLogged {
+                    Button {
+                        wearHeroToday(items)
+                    } label: {
+                        Text("Wear today")
+                    }
+                    .buttonStyle(DSPrimaryButton())
+                    .accessibilityHint("Logs this outfit to today")
+                    .accessibilityIdentifier("home.todayLook.wear")
+                }
             }
         }
-        .frame(height: 104)
-        .padding(.vertical, DS.Spacing.sm)
-        .padding(.horizontal, DS.Spacing.md)
-        .background(DS.Colors.styleBoard)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+        .padding(DS.Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.Colors.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
+        .dsElevatedShadow(cornerRadius: DS.Radius.hero)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.todayLook")
+        .animation(DSMotionEnv.resolve(DS.Motion.smooth, reduceMotion: reduceMotion), value: isLogged)
+    }
+
+    private func wearHeroToday(_ items: [WardrobeItem]) {
+        Haptics.success()
+        withAnimation(DSMotionEnv.resolve(DS.Motion.smooth, reduceMotion: reduceMotion)) {
+            outfitsVM.addOutfit(date: Calendar.current.startOfDay(for: Date()), items: items,
+                                source: MyOutfitsViewModel.Source.stylist)
+        }
+    }
+
+    /// Re-picks today's look when the wardrobe loses one of its pieces or the
+    /// temperature moves (the pick itself is seeded by the date, so it's stable).
+    private func refreshHeroIfNeeded() {
+        let items = wardrobeViewModel.items
+        guard let hero = homeVM.heroOutfit else {
+            homeVM.ensureHero(wardrobe: items, user: authService.user)
+            heroTemperature = homeVM.lastCelsius.map { DSFormat.degrees(celsius: $0, fahrenheit: false) }
+            return
+        }
+        let ids = Set(items.map(\.id))
+        let temp = homeVM.lastCelsius.map { DSFormat.degrees(celsius: $0, fahrenheit: false) }
+        let lostPiece = hero.items.contains { !ids.contains($0.id) }
+        let weatherMoved = heroTemperature != nil && temp != nil && abs((temp ?? 0) - (heroTemperature ?? 0)) >= 3
+        if lostPiece || weatherMoved {
+            homeVM.generateHero(wardrobe: items, user: authService.user)
+        }
+        if heroTemperature == nil || weatherMoved { heroTemperature = temp }
     }
 
     private var heroSkeleton: some View {
@@ -367,21 +505,15 @@ struct HomeView: View {
                 if homeVM.isWeatherLoading || homeVM.weather == nil || homeVM.weatherError != nil {
                     showWeatherWarning = true
                 } else {
-                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user)
+                    homeVM.suggestTodayOutfit(from: wardrobeViewModel.items, user: authService.user, pinned: pinnedForStyleMe)
                 }
             }) {
-                HStack(spacing: DS.Spacing.sm) {
-                    Image(systemName: "sparkles")
-                        .font(DS.Font.headline)
-                    Text("Generate 5 Outfits")
-                    Spacer()
-                    Image(systemName: "arrow.right")
-                        .font(DS.Font.headline)
-                }
+                Label("Style me", systemImage: "sparkles")
             }
             .buttonStyle(DSPrimaryButton(isDisabled: ctaDisabled))
             .disabled(ctaDisabled)
-            .opacity(ctaDisabled ? 0.5 : 1.0)
+            .accessibilityHint("Builds five outfits from your wardrobe")
+            .accessibilityIdentifier("home.styleMe")
         }
         .padding(DS.Spacing.lg)
         .background(
@@ -408,10 +540,17 @@ struct HomeView: View {
 
                 let categoryCounts = Dictionary(grouping: wardrobeViewModel.items, by: { $0.category })
                     .map { (category: $0.key, items: $0.value, count: $0.value.count) }
-                    .sorted { $0.count > $1.count }
+                    // Stable order (ties by shelf order): a Dictionary's order changes
+                    // between renders, which reshuffled the cards on every update.
+                    .sorted {
+                        if $0.count != $1.count { return $0.count > $1.count }
+                        return $0.category.wearingOrder != $1.category.wearingOrder
+                            ? $0.category.wearingOrder < $1.category.wearingOrder
+                            : $0.category.rawValue < $1.category.rawValue
+                    }
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: DS.Spacing.sm) {
+                    HStack(alignment: .top, spacing: DS.Spacing.sm) {
                         ForEach(categoryCounts.prefix(6), id: \.category) { entry in
                             Button(action: {
                                 Haptics.light()
@@ -426,8 +565,8 @@ struct HomeView: View {
                             .buttonStyle(DSTapBounce())
                             .scrollTransition(.interactive, axis: .horizontal) { content, phase in
                                 content
-                                    .opacity(phase.isIdentity ? 1 : 0.7)
-                                    .scaleEffect(phase.isIdentity ? 1 : 0.94)
+                                    .opacity(phase.isIdentity || reduceMotion ? 1 : 0.7)
+                                    .scaleEffect(phase.isIdentity || reduceMotion ? 1 : 0.94)
                             }
                         }
                     }
@@ -473,7 +612,7 @@ struct HomeView: View {
             if let trailing = trailing {
                 Text(trailing)
                     .font(DS.Font.footnote)
-                    .foregroundStyle(DS.Colors.textTertiary)
+                    .foregroundStyle(DS.Colors.textSecondary)
             }
         }
     }
@@ -486,81 +625,40 @@ private struct WardrobeCategoryCard: View {
     let items: [WardrobeItem]
     let count: Int
 
-    // Decoded thumbnails are held in state and produced ONCE off the main thread.
-    // Previously this was a computed property that ran items.shuffled() and
-    // decoded (often full-res) images on every render — re-decoding different
-    // random images each pass defeated the cache and blocked the main thread for
-    // seconds during launch.
-    @State private var thumbs: [UIImage] = []
-    @State private var loadedCount: Int = -1
+    /// Scales with Dynamic Type so the title and count never clip.
+    @ScaledMetric(relativeTo: .headline) private var cardWidth: CGFloat = 148
+    @ScaledMetric(relativeTo: .headline) private var tileHeight: CGFloat = 72
 
     var body: some View {
         VStack(spacing: DS.Spacing.xs) {
-            thumbnailArea
+            // Two newest cutouts, fitted (never cropped) on the studio backdrop,
+            // loaded off the main thread.
+            HStack(spacing: DS.Spacing.micro) {
+                ForEach(Array(items.suffix(2).reversed())) { item in
+                    AsyncItemTile(path: item.gridImagePath, height: tileHeight,
+                                  cornerRadius: DS.Radius.control, inset: 6)
+                }
+            }
+            .padding(.horizontal, DS.Spacing.xs)
+            .accessibilityHidden(true)
 
             Text(category.rawValue)
                 .font(DS.Font.headline)
                 .foregroundStyle(DS.Colors.textPrimary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
-            Text("\(count) items")
+            Text("\(count) item\(count == 1 ? "" : "s")")
                 .font(DS.Font.footnote)
                 .foregroundStyle(DS.Colors.textSecondary)
         }
-        .frame(width: 130)
-        .padding(.vertical, DS.Spacing.sm)
+        .frame(width: cardWidth)
+        .padding(.top, DS.Spacing.xs)
+        .padding(.bottom, DS.Spacing.sm)
         .background(DS.Colors.backgroundCard)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         .dsCardShadow()
-        .onAppear { loadThumbsIfNeeded() }
-        .onChange(of: items.count) { _ in loadThumbsIfNeeded() }
-    }
-
-    @ViewBuilder
-    private var thumbnailArea: some View {
-        if thumbs.count >= 2 {
-            HStack(spacing: DS.Spacing.micro) {
-                ForEach(0..<2, id: \.self) { i in
-                    Image(uiImage: thumbs[i])
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
-                }
-            }
-        } else if thumbs.count == 1 {
-            Image(uiImage: thumbs[0])
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 80, height: 80)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
-        } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
-                    .fill(DS.Colors.accentSoft)
-                    .frame(width: 80, height: 80)
-                Image(systemName: category.iconName)
-                    .font(.system(size: 30))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(DS.Colors.accent)
-            }
-        }
-    }
-
-    private func loadThumbsIfNeeded() {
-        guard loadedCount != items.count else { return }
-        loadedCount = items.count
-        let snapshot = items
-        DispatchQueue.global(qos: .userInitiated).async {
-            var result: [UIImage] = []
-            for item in snapshot {
-                if let img = item.thumbnailImage ?? item.croppedImage ?? item.image {
-                    result.append(img)
-                    if result.count >= 2 { break }
-                }
-            }
-            DispatchQueue.main.async { self.thumbs = result }
-        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -602,17 +700,22 @@ private struct OutfitTypeChipRow: View {
                                 withAnimation(DS.Motion.snappy) { selectedOutfitType = type }
                             }
                         )
+                        .accessibilityIdentifier("home.occasion.\(type.rawValue)")
                     }
                 }
                 .padding(.horizontal, DS.Spacing.micro)
+                .padding(.vertical, 2)
             }
+            // Chips scroll out under the card's padding to its rounded edge
+            // instead of being cut mid-card.
+            .scrollClipDisabled()
 
             // Mood — optional; tap again to clear. Shapes palette, textures and fit.
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                 HStack(spacing: DS.Spacing.micro) {
                     Text("How do you want to feel?")
                         .font(DS.Font.footnote)
-                        .foregroundStyle(selectedMood == nil ? DS.Colors.textTertiary : DS.Colors.accent)
+                        .foregroundStyle(selectedMood == nil ? DS.Colors.textSecondary : DS.Colors.accent)
                     if let mood = selectedMood {
                         Text("· \(mood.label)")
                             .font(DS.Font.footnote.weight(.semibold))
@@ -638,17 +741,20 @@ private struct OutfitTypeChipRow: View {
                             )
                             .accessibilityLabel("\(mood.label) mood")
                             .accessibilityAddTraits(selectedMood == mood ? .isSelected : [])
+                            .accessibilityIdentifier("mood.\(mood.rawValue)")
                         }
                     }
                     .padding(.horizontal, DS.Spacing.micro)
+                    .padding(.vertical, 2)
                 }
+                .scrollClipDisabled()
             }
 
             // Always-visible free text — what the user types here takes priority.
             VStack(alignment: .leading, spacing: DS.Spacing.micro) {
                 Text("Describe your own occasion or add details")
                     .font(DS.Font.footnote)
-                    .foregroundStyle(hasCustom ? DS.Colors.accent : DS.Colors.textTertiary)
+                    .foregroundStyle(hasCustom ? DS.Colors.accent : DS.Colors.textSecondary)
 
                 HStack(alignment: .top, spacing: DS.Spacing.xs) {
                     Image(systemName: "text.bubble")

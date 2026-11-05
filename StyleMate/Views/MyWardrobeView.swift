@@ -5,10 +5,15 @@ import SwiftUI
 /// filter chips (shelf, colour, pattern), sort (newest, colour, worn most /
 /// least / recently — from the outfit log), search, multi-select removal and a
 /// zoom into each item's page.
+///
+/// iPhone / Duo cover display: one stack (grid → item page).
+/// Wide (Duo inner display, regular width): a split view — shelves, sort and
+/// colours in the sidebar, the grid (up to 5 columns) beside the item page.
 struct MyWardrobeView: View {
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
     @EnvironmentObject var outfitsViewModel: MyOutfitsViewModel
     @Binding var showAddSheet: Bool
+    @Environment(\.duoLayout) private var duo
 
     @State private var filter = ClosetFilter()
     @AppStorage("closet.sort") private var sort: ClosetSort = .newest
@@ -20,90 +25,191 @@ struct MyWardrobeView: View {
     @State private var selection: Set<UUID> = []
     @State private var confirmBulkRemove = false
     @State private var pendingRemoval: WardrobeItem? = nil
+    /// The pushed item page (phone / cover display).
     @State private var detailItem: WardrobeItem? = nil
+    /// The item in the page pane (wide). Separate from `detailItem`, so folding
+    /// to the cover display never finds a stale push waiting (the pane
+    /// auto-shows the first item).
+    @State private var paneItem: WardrobeItem? = nil
+    /// The pane's item was picked by the person (not the automatic first one).
+    @State private var paneIsChosen = false
     @State private var editingItem: WardrobeItem? = nil
     @Namespace private var zoomNS
 
+    private var isWide: Bool { duo.isWideLayout }
+
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: largeTiles ? 150 : 100), spacing: 10, alignment: .top)]
+        // Wide: an even count in the grid's pane (the crease falls between panes).
+        if isWide {
+            return Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: largeTiles ? 2 : 4)
+        }
+        return [GridItem(.adaptive(minimum: largeTiles ? 150 : 100), spacing: 10, alignment: .top)]
     }
 
     var body: some View {
-        NavigationStack {
-            let all = wardrobeViewModel.items
-            let visible = ClosetEngine.apply(all, filter: filter, sort: sort, wear: wear)
-
-            ZStack(alignment: .bottomTrailing) {
-                DS.Colors.backgroundPrimary.ignoresSafeArea()
-
-                if all.isEmpty {
-                    emptyCloset
-                } else {
-                    closet(all: all, visible: visible)
-                }
-
-                if !isSelecting {
-                    addButton
-                }
-            }
-            .navigationTitle("Wardrobe")
-            .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $filter.query, placement: .navigationBarDrawer(displayMode: .automatic),
-                        prompt: "Search name, color, brand")
-            .toolbar { toolbar(all: all, visible: visible) }
-            .safeAreaInset(edge: .bottom) {
-                if isSelecting { selectionBar(visible: visible) }
-            }
-            .navigationDestination(item: $detailItem) { item in
-                ItemDetailView(item: item, wear: wear[item.id]) { removed in
-                    removeAfterPop(removed)
-                }
-                .navigationTransition(.zoom(sourceID: item.id, in: zoomNS))
-            }
-            .sheet(item: $editingItem) { item in
-                EditWardrobeItemView(item: item) { updated in
-                    ClosetActions.update(updated, in: wardrobeViewModel)
-                }
-            }
-            .confirmationDialog(bulkTitle, isPresented: $confirmBulkRemove, titleVisibility: .visible) {
-                Button("Remove \(selection.count) item\(selection.count == 1 ? "" : "s")", role: .destructive) {
-                    removeSelected()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("They'll be removed from your wardrobe and iCloud. Your photos aren't touched.")
-            }
-            .confirmationDialog("Remove this item?", isPresented: Binding(
-                get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }
-            ), titleVisibility: .visible, presenting: pendingRemoval) { item in
-                Button("Remove from wardrobe", role: .destructive) {
-                    Haptics.warning()
-                    ClosetActions.remove([item], from: wardrobeViewModel)
-                    pendingRemoval = nil
-                }
-                Button("Cancel", role: .cancel) { pendingRemoval = nil }
-            } message: { _ in
-                Text("Use this when it isn't yours or was picked up by mistake. Your photos aren't touched.")
-            }
-            .onReceive(outfitsViewModel.$outfitsByDate) { wear = ClosetWear.stats(from: $0) }
-            .onChange(of: wardrobeViewModel.items.count) { _ in
-                // Drop selections of items that are gone.
-                let ids = Set(wardrobeViewModel.items.map(\.id))
-                selection.formIntersection(ids)
-                if wardrobeViewModel.items.isEmpty { isSelecting = false }
+        Group {
+            if isWide { splitCloset } else { stackCloset }
+        }
+        .sheet(item: $editingItem) { item in
+            EditWardrobeItemView(item: item) { updated in
+                ClosetActions.update(updated, in: wardrobeViewModel)
             }
         }
+        .confirmationDialog(bulkTitle, isPresented: $confirmBulkRemove, titleVisibility: .visible) {
+            Button("Remove \(selection.count) item\(selection.count == 1 ? "" : "s")", role: .destructive) {
+                removeSelected()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("They'll be removed from your wardrobe and iCloud. Your photos aren't touched.")
+        }
+        .confirmationDialog("Remove this item?", isPresented: Binding(
+            get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }
+        ), titleVisibility: .visible, presenting: pendingRemoval) { item in
+            Button("Remove from Wardrobe", role: .destructive) {
+                Haptics.warning()
+                if detailItem?.id == item.id { detailItem = nil }
+                if paneItem?.id == item.id { paneItem = nil }
+                ClosetActions.remove([item], from: wardrobeViewModel)
+                pendingRemoval = nil
+                showFirstItemIfNeeded()
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+        } message: { _ in
+            Text("Use this when it isn't yours or was picked up by mistake. Your photos aren't touched.")
+        }
+        .onReceive(outfitsViewModel.$outfitsByDate) { wear = ClosetWear.stats(from: $0) }
+        .onChange(of: wardrobeViewModel.items.count) { _ in
+            // Drop selections of items that are gone.
+            let ids = Set(wardrobeViewModel.items.map(\.id))
+            selection.formIntersection(ids)
+            if let d = detailItem, !ids.contains(d.id) { detailItem = nil }
+            if let p = paneItem, !ids.contains(p.id) { paneItem = nil }
+            if wardrobeViewModel.items.isEmpty { isSelecting = false }
+        }
+        // Unfolding keeps an open item page (it moves into the pane); folding to
+        // the cover returns to the grid.
+        .onChange(of: isWide) { wide in
+            if wide {
+                if let d = detailItem { paneItem = d; paneIsChosen = true }
+                detailItem = nil
+            } else {
+                // Folding: a page the person opened stays open (pushed); the
+                // pane's automatic first item doesn't.
+                detailItem = paneIsChosen ? paneItem : nil
+            }
+        }
+    }
+
+    /// Opens an item: pushed on a phone, in the page pane when wide.
+    private func open(_ item: WardrobeItem) {
+        if isWide {
+            paneItem = item
+            paneIsChosen = true
+        } else {
+            detailItem = item
+        }
+    }
+
+    // MARK: - Phone: one stack
+
+    private var stackCloset: some View {
+        NavigationStack {
+            closetContent(showsFilterBar: true)
+                .navigationTitle("Wardrobe")
+                .navigationBarTitleDisplayMode(.large)
+                .searchable(text: $filter.query, placement: .navigationBarDrawer(displayMode: .automatic),
+                            prompt: "Search name, color, brand")
+                .toolbar { toolbar }
+                .safeAreaInset(edge: .bottom) {
+                    if isSelecting { selectionBar }
+                }
+                .navigationDestination(item: $detailItem) { item in
+                    ItemDetailView(item: item, wear: wear[item.id]) { removed in
+                        removeAfterPop(removed)
+                    }
+                    .navigationTransition(.zoom(sourceID: item.id, in: zoomNS))
+                }
+        }
+    }
+
+    // MARK: - Wide: grid | item page
+
+    /// Grid (filters pinned on top) beside the item page. `FoldAwareSplit` puts
+    /// the split on the crease when the Duo is half-open, so no tile or the page
+    /// ever straddles the fold; flat it is an even two-pane split.
+    private var splitCloset: some View {
+        NavigationStack {
+            FoldAwareSplit(gutter: DS.Spacing.md, stackedSpacing: 0) {
+                closetContent(showsFilterBar: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .safeAreaInset(edge: .bottom) {
+                        if isSelecting { selectionBar }
+                    }
+            } trailing: {
+                detailPane
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+            .navigationTitle("Wardrobe")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $filter.query, prompt: "Search name, color, brand")
+            .toolbar { toolbar }
+            .onAppear { showFirstItemIfNeeded() }
+            .onChange(of: wardrobeViewModel.items.count) { _ in showFirstItemIfNeeded() }
+        }
+    }
+
+    @ViewBuilder
+    private var detailPane: some View {
+        if let item = paneItem {
+            ItemDetailView(item: item, wear: wear[item.id], embedded: true) { removed in
+                paneItem = nil
+                withAnimation(DS.Motion.smooth) {
+                    ClosetActions.remove([removed], from: wardrobeViewModel)
+                }
+                showFirstItemIfNeeded()
+            }
+            .id(item.id)
+            .transition(.opacity)
+        } else {
+            ContentUnavailableView("Pick an item",
+                                   systemImage: "hanger",
+                                   description: Text("Its details, colors and wear history show here."))
+        }
+    }
+
+    /// Wide layout: the page pane is never empty while there's something to show.
+    private func showFirstItemIfNeeded() {
+        guard isWide, paneItem == nil else { return }
+        paneItem = ClosetEngine.apply(wardrobeViewModel.items, filter: filter, sort: sort, wear: wear).first
+        paneIsChosen = false
     }
 
     // MARK: - Closet
 
     @ViewBuilder
-    private func closet(all: [WardrobeItem], visible: [WardrobeItem]) -> some View {
+    private func closetContent(showsFilterBar: Bool) -> some View {
+        let all = wardrobeViewModel.items
+        let visible = ClosetEngine.apply(all, filter: filter, sort: sort, wear: wear)
+        ZStack {
+            DS.Colors.backgroundPrimary.ignoresSafeArea()
+            if all.isEmpty {
+                emptyCloset
+            } else {
+                closet(all: all, visible: visible, showsFilterBar: showsFilterBar)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func closet(all: [WardrobeItem], visible: [WardrobeItem], showsFilterBar: Bool) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 summaryHeader(all: all)
                     .padding(.horizontal, DS.Spacing.screenH)
                     .padding(.bottom, DS.Spacing.sm)
+                    .padding(.top, showsFilterBar ? 0 : DS.Spacing.sm)
 
                 Section {
                     VStack(alignment: .leading, spacing: DS.Spacing.lg) {
@@ -129,15 +235,17 @@ struct MyWardrobeView: View {
                     }
                     .padding(.horizontal, DS.Spacing.screenH)
                     .padding(.top, DS.Spacing.sm)
-                    .padding(.bottom, 120)
+                    .padding(.bottom, DS.Spacing.xxl)
                 } header: {
-                    ClosetFilterBar(
-                        filter: $filter, sort: $sort, groupBySection: $groupBySection, largeTiles: $largeTiles,
-                        counts: ClosetEngine.counts(all), total: all.count,
-                        swatches: ClosetColor.swatches(for: all),
-                        patterns: ClosetEngine.patterns(in: all),
-                        hasWearLog: !wear.isEmpty
-                    )
+                    if showsFilterBar {
+                        ClosetFilterBar(
+                            filter: $filter, sort: $sort, groupBySection: $groupBySection, largeTiles: $largeTiles,
+                            counts: ClosetEngine.counts(all), total: all.count,
+                            swatches: ClosetColor.swatches(for: all),
+                            patterns: ClosetEngine.patterns(in: all),
+                            hasWearLog: !wear.isEmpty
+                        )
+                    }
                 }
             }
         }
@@ -150,6 +258,7 @@ struct MyWardrobeView: View {
             .font(DS.Font.subheadline)
             .foregroundStyle(DS.Colors.textSecondary)
             .monospacedDigit()
+            .accessibilityIdentifier("closet.summary")
     }
 
     private func resultLine(count: Int, total: Int) -> some View {
@@ -165,6 +274,7 @@ struct MyWardrobeView: View {
             }
             .font(DS.Font.footnote.weight(.semibold))
             .foregroundStyle(DS.Colors.accent)
+            .frame(minHeight: 44)
         }
     }
 
@@ -181,21 +291,24 @@ struct MyWardrobeView: View {
 
     private func cell(_ item: WardrobeItem) -> some View {
         let selected = selection.contains(item.id)
+        let isOpen = isWide && paneItem?.id == item.id
         return Button {
             if isSelecting {
                 Haptics.selection()
                 if selected { selection.remove(item.id) } else { selection.insert(item.id) }
             } else {
-                detailItem = item
+                open(item)
             }
         } label: {
-            ClosetItemCell(item: item, isSelecting: isSelecting, isSelected: selected, showsCaption: largeTiles)
+            ClosetItemCell(item: item, isSelecting: isSelecting, isSelected: selected || isOpen,
+                           showsCaption: largeTiles || isWide)
         }
         .buttonStyle(DSTapBounce())
         .matchedTransitionSource(id: item.id, in: zoomNS)
+        .accessibilityIdentifier("closet.item.\(item.id.uuidString)")
         .contextMenu {
             if !isSelecting {
-                Button { detailItem = item } label: { Label("View", systemImage: "eye") }
+                Button { open(item) } label: { Label("View", systemImage: "eye") }
                 Button { editingItem = item } label: { Label("Edit details", systemImage: "pencil") }
                 Button {
                     withAnimation(DS.Motion.snappy) {
@@ -205,7 +318,7 @@ struct MyWardrobeView: View {
                 } label: { Label("Select", systemImage: "checkmark.circle") }
                 Divider()
                 Button(role: .destructive) { pendingRemoval = item } label: {
-                    Label("Not mine — remove", systemImage: "trash")
+                    Label("Remove from Wardrobe", systemImage: "trash")
                 }
             }
         }
@@ -265,29 +378,12 @@ struct MyWardrobeView: View {
 
     // MARK: - Chrome
 
-    private var addButton: some View {
-        Button {
-            Haptics.medium()
-            showAddSheet = true
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 58, height: 58)
-                .background(DS.Colors.accent, in: Circle())
-                .shadow(color: DS.Colors.accent.opacity(0.35), radius: 12, x: 0, y: 6)
-        }
-        .buttonStyle(DSTapBounce())
-        .coachAnchor(CoachAnchor.addFAB)
-        .accessibilityLabel("Add clothes")
-        .padding(.trailing, DS.Spacing.screenH)
-        .padding(.bottom, DS.Spacing.lg)
-    }
-
     @ToolbarContentBuilder
-    private func toolbar(all: [WardrobeItem], visible: [WardrobeItem]) -> some ToolbarContent {
-        if !all.isEmpty {
-            ToolbarItem(placement: .topBarTrailing) {
+    private var toolbar: some ToolbarContent {
+        // One group, so Select and + always sit together (the Duo's cover
+        // display otherwise floated + into its trailing rail).
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if !wardrobeViewModel.items.isEmpty {
                 Button(isSelecting ? "Done" : "Select") {
                     Haptics.light()
                     withAnimation(DS.Motion.snappy) {
@@ -296,10 +392,23 @@ struct MyWardrobeView: View {
                     }
                 }
                 .fontWeight(isSelecting ? .semibold : .regular)
+                .accessibilityIdentifier("closet.select")
+            }
+            if !isSelecting {
+                Button {
+                    Haptics.medium()
+                    showAddSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 17, weight: .semibold))
+                }
+                .accessibilityLabel("Add clothes")
+                .accessibilityIdentifier("closet.add")
             }
         }
         if isSelecting {
             ToolbarItem(placement: .topBarLeading) {
+                let visible = ClosetEngine.apply(wardrobeViewModel.items, filter: filter, sort: sort, wear: wear)
                 let allVisibleSelected = !visible.isEmpty && visible.allSatisfy { selection.contains($0.id) }
                 Button(allVisibleSelected ? "Deselect all" : "Select all") {
                     Haptics.light()
@@ -310,7 +419,7 @@ struct MyWardrobeView: View {
         }
     }
 
-    private func selectionBar(visible: [WardrobeItem]) -> some View {
+    private var selectionBar: some View {
         HStack(spacing: DS.Spacing.md) {
             Text(selection.isEmpty ? "Select items" : "\(selection.count) selected")
                 .font(DS.Font.subheadline.weight(.semibold))
@@ -323,7 +432,7 @@ struct MyWardrobeView: View {
             } label: {
                 Label("Remove", systemImage: "trash")
                     .font(DS.Font.headline)
-                    .foregroundStyle(selection.isEmpty ? DS.Colors.textTertiary : DS.Colors.error)
+                    .foregroundStyle(selection.isEmpty ? DS.Colors.textSecondary : DS.Colors.error)
                     .padding(.horizontal, DS.Spacing.md)
                     .frame(height: 44)
                     .background((selection.isEmpty ? DS.Colors.fill : DS.Colors.error.opacity(0.12)),
@@ -382,18 +491,19 @@ extension ClosetWear {
 // MARK: - Category Icon Mapping
 
 extension Category {
+    /// SF Symbols that read as the garment (no weather / furniture glyphs).
     var iconName: String {
         switch self {
-        case .tops:       return "tshirt"
-        case .bottoms:    return "figure.stand"
-        case .midLayers:  return "wind"
-        case .outerwear:  return "cloud.rain"
-        case .onePieces:  return "figure.dance"
-        case .footwear:   return "shoeprints.fill"
-        case .accessories: return "suitcase"
-        case .innerwear:  return "bed.double"
-        case .activewear: return "figure.run"
-        case .ethnicWear: return "sparkles"
+        case .tops:        return "tshirt"
+        case .bottoms:     return "figure.walk"
+        case .midLayers:   return "square.stack"
+        case .outerwear:   return "hanger"
+        case .onePieces:   return "figure.stand.dress"
+        case .footwear:    return "shoe"
+        case .accessories: return "handbag"
+        case .innerwear:   return "tshirt"
+        case .activewear:  return "figure.run"
+        case .ethnicWear:  return "sparkles"
         }
     }
 }
@@ -466,7 +576,8 @@ struct CategoryDetailView: View {
                                         product = nil
                                     }
                                     ForEach(products, id: \.self) { p in
-                                        ClosetChip(title: p, isSelected: product.map(Self.key) == Self.key(p)) {
+                                        ClosetChip(title: ClosetText.displayProduct(p),
+                                                   isSelected: product.map(Self.key) == Self.key(p)) {
                                             product = p
                                         }
                                     }
@@ -483,6 +594,7 @@ struct CategoryDetailView: View {
                                 }
                                 .buttonStyle(DSTapBounce())
                                 .matchedTransitionSource(id: item.id, in: zoomNS)
+                                .accessibilityIdentifier("closet.item.\(item.id.uuidString)")
                             }
                         }
                         .padding(.horizontal, DS.Spacing.screenH)

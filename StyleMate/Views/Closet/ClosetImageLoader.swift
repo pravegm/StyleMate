@@ -9,9 +9,16 @@ import UIKit
 final class ClosetImageLoader {
     static let shared = ClosetImageLoader()
 
+    /// Byte budget for decoded, display-ready images (cost = width × height × 4).
+    static let cacheByteLimit = 96 * 1024 * 1024
+    /// Long-side cap for what the closet, boards and item pages draw. A full-size
+    /// cutout can be ~2000 px (16 MB decoded); nothing on screen needs more than this.
+    static let displayMaxPixels: CGFloat = 1400
+
     private let cache: NSCache<NSString, UIImage> = {
         let c = NSCache<NSString, UIImage>()
-        c.countLimit = 500
+        c.totalCostLimit = ClosetImageLoader.cacheByteLimit
+        c.countLimit = 600
         return c
     }()
 
@@ -25,9 +32,13 @@ final class ClosetImageLoader {
         if let hit = cached(path) { return hit }
         let cache = self.cache
         return await Task.detached(priority: .userInitiated) { () -> UIImage? in
-            guard let image = WardrobeImageFileHelper.loadImage(at: path) else { return nil }
+            // Decode straight to display size with ImageIO (the full bitmap is never
+            // materialized); fall back to the helper for anything ImageIO can't read.
+            let url = WardrobeImageFileHelper.fileURL(for: path)
+            guard let image = ImageDownsampler.downsample(fileURL: url, maxPixels: ClosetImageLoader.displayMaxPixels)
+                    ?? WardrobeImageFileHelper.loadImage(at: path) else { return nil }
             let ready = image.preparingForDisplay() ?? image
-            cache.setObject(ready, forKey: path as NSString)
+            cache.setObject(ready, forKey: path as NSString, cost: WardrobeImageFileHelper.decodedCost(of: ready))
             return ready
         }.value
     }

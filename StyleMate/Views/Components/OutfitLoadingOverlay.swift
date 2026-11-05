@@ -3,6 +3,8 @@ import SwiftUI
 struct StylingLoadingView: View {
     let progress: Double
     var weather: Weather?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .headline) private var barWidth: CGFloat = 220
 
     private var stage: (icon: String, message: String, accent: Bool) {
         switch progress {
@@ -11,9 +13,9 @@ struct StylingLoadingView: View {
         case 0.15..<0.30:
             let weatherText: String
             if let w = weather, let city = w.city, !city.isEmpty {
-                weatherText = "\(Int(w.temperature2m))°C in \(city)"
+                weatherText = "\(DSFormat.degrees(celsius: w.temperature2m, fahrenheit: false))°C in \(city)"
             } else if let w = weather {
-                weatherText = "\(Int(w.temperature2m))°C"
+                weatherText = "\(DSFormat.degrees(celsius: w.temperature2m, fahrenheit: false))°C"
             } else {
                 weatherText = ""
             }
@@ -40,19 +42,19 @@ struct StylingLoadingView: View {
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(stage.accent ? DS.Colors.accent : DS.Colors.textPrimary)
                     .contentTransition(.symbolEffect(.replace))
-                    .symbolEffect(.pulse, options: .repeating)
+                    .symbolEffect(.pulse, options: reduceMotion ? .nonRepeating : .repeating)
 
                 Text(stage.message)
                     .font(DS.Font.headline)
                     .foregroundColor(DS.Colors.textPrimary)
                     .multilineTextAlignment(.center)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .move(edge: .bottom)))
                     .id(stage.message)
                     .animation(.easeInOut(duration: 0.4), value: stage.message)
 
                 ProgressView(value: progress)
                     .progressViewStyle(LinearProgressViewStyle(tint: DS.Colors.accent))
-                    .frame(width: 220)
+                    .frame(width: barWidth)
 
                 HStack(spacing: DS.Spacing.xs) {
                     let thresholds = [0.0, 0.15, 0.30, 0.50, 0.70, 0.85]
@@ -75,6 +77,7 @@ struct StylingLoadingView: View {
 struct OutfitLoadingOverlay: View {
     let progress: Double
     var message: String = "Analyzing your items…"
+    @ScaledMetric(relativeTo: .headline) private var barWidth: CGFloat = 200
 
     var body: some View {
         ZStack {
@@ -83,7 +86,7 @@ struct OutfitLoadingOverlay: View {
             VStack(spacing: DS.Spacing.lg) {
                 ProgressView(value: progress)
                     .progressViewStyle(LinearProgressViewStyle(tint: DS.Colors.accent))
-                    .frame(width: 200)
+                    .frame(width: barWidth)
 
                 Text(message)
                     .font(DS.Font.headline)

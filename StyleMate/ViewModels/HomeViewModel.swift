@@ -154,7 +154,9 @@ class HomeViewModel: ObservableObject {
 
     // MARK: - Suggest Today Outfit
 
-    func suggestTodayOutfit(from items: [WardrobeItem], user: User?) {
+    /// - Parameter pinned: shown as option 1 (Home's "Today's look" → More options,
+    ///   so the deck starts on exactly the look the card showed).
+    func suggestTodayOutfit(from items: [WardrobeItem], user: User?, pinned: Outfit? = nil) {
         guard !isLoading else { return }
         Task {
             isLoading = true
@@ -191,7 +193,14 @@ class HomeViewModel: ObservableObject {
             switch result {
             case .success(let looks):
                 // Belt and braces: every shown look is complete and distinct.
-                let validated = OutfitValidator.validateAndRepair(looks, wardrobe: items)
+                var validated = OutfitValidator.validateAndRepair(looks, wardrobe: items)
+                let owned = Set(items.map { $0.id })
+                if let pinned, !pinned.items.isEmpty, pinned.items.allSatisfy({ owned.contains($0.id) }) {
+                    let count = max(validated.count, 1)
+                    let signature = OutfitValidator.signature(of: pinned)
+                    validated = Array(([pinned] + validated.filter { OutfitValidator.signature(of: $0) != signature })
+                        .prefix(count))
+                }
                 batchToken += 1
                 shuffleHistory.removeAll()
                 outfitBatch = validated
@@ -261,8 +270,9 @@ class HomeViewModel: ObservableObject {
     @Published var heroOutfit: Outfit?
     @Published var isGeneratingHero = false
 
-    /// The wardrobe must be this rich before we surface a "Today's Outfit" on Home.
-    static let minItemsForHero = 30
+    /// Home's "Today's look" shows as soon as the wardrobe can make an outfit
+    /// (a top and a bottom); the engine returns nothing below that.
+    static let minItemsForHero = 2
 
     private static let heroCacheKey = "todayHeroOutfit"
 

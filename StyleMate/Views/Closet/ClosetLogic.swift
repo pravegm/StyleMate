@@ -433,10 +433,10 @@ enum ClosetAttributes {
             out.append(ClosetAttribute(label: "Fit", value: fit.rawValue, icon: "ruler"))
         }
         if let sleeve = item.sleeveLength, item.category.supportsSleeves {
-            out.append(ClosetAttribute(label: "Sleeve", value: sleeve.rawValue, icon: "hand.raised"))
+            out.append(ClosetAttribute(label: "Sleeve", value: sleeve.rawValue, icon: "arrow.left.and.right"))
         }
         if let neck = item.neckline, item.category.supportsNeckline {
-            out.append(ClosetAttribute(label: "Neckline", value: neck.rawValue, icon: "person.crop.circle"))
+            out.append(ClosetAttribute(label: "Neckline", value: neck.rawValue, icon: "circle.dotted"))
         }
         if let length = item.garmentLength, item.category.supportsLength {
             out.append(ClosetAttribute(label: "Length", value: length.rawValue, icon: "arrow.up.and.down"))

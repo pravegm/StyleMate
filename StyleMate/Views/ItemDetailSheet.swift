@@ -18,11 +18,18 @@ struct ItemDetailView: View {
     @State private var confirmRemove = false
     @State private var showFullImage = false
     @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.duoLayout) private var duo
 
-    init(item: WardrobeItem, wear: WearStat?, onDelete: @escaping (WardrobeItem) -> Void) {
+    /// Shown as a pane next to the closet grid (wide layout) instead of pushed:
+    /// no navigation title of its own, the ⋯ menu sits in the header.
+    var embedded = false
+
+    init(item: WardrobeItem, wear: WearStat?, embedded: Bool = false, onDelete: @escaping (WardrobeItem) -> Void) {
         self.itemID = item.id
         self.fallback = item
         self.wear = wear
+        self.embedded = embedded
         self.onDelete = onDelete
     }
 
@@ -32,46 +39,30 @@ struct ItemDetailView: View {
 
     var body: some View {
         let item = self.item
-        ScrollView {
-            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
-                hero(item)
-                header(item)
-                Group {
-                    colors(item)
-                    attributes(item)
-                    notes(item)
-                    actions
-                }
-                .dsAppear(appeared)
-            }
-            .padding(.horizontal, DS.Spacing.screenH)
-            .padding(.top, DS.Spacing.xs)
-            .padding(.bottom, DS.Spacing.xxl)
-        }
-        .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
-        .navigationTitle(ClosetText.displayProduct(item.product))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button { showEdit = true } label: { Label("Edit details", systemImage: "pencil") }
-                    Button(role: .destructive) { confirmRemove = true } label: {
-                        Label("Not mine — remove", systemImage: "trash")
+        Group {
+            if embedded {
+                page(item)
+            } else {
+                page(item)
+                    .navigationTitle(ClosetText.displayProduct(item.product))
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) { moreMenu }
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel("More actions")
             }
         }
-        .onAppear { withAnimation(DS.Motion.gentle.delay(0.12)) { appeared = true } }
+        .onAppear {
+            withAnimation(DSMotionEnv.resolve(DS.Motion.gentle.delay(0.12), reduceMotion: reduceMotion)) {
+                appeared = true
+            }
+        }
         .sheet(isPresented: $showEdit) {
             EditWardrobeItemView(item: item) { updated in
                 ClosetActions.update(updated, in: wardrobeViewModel)
             }
         }
         .confirmationDialog("Remove this item?", isPresented: $confirmRemove, titleVisibility: .visible) {
-            Button("Remove from wardrobe", role: .destructive) {
+            Button("Remove from Wardrobe", role: .destructive) {
                 Haptics.warning()
                 onDelete(item)
             }
@@ -81,6 +72,71 @@ struct ItemDetailView: View {
         }
         .fullScreenCover(isPresented: $showFullImage) {
             FullItemImageViewer(path: item.fullImagePath, fallbackPath: item.gridImagePath, title: ClosetText.displayName(item))
+        }
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button { showEdit = true } label: { Label("Edit details", systemImage: "pencil") }
+                .accessibilityIdentifier("itemDetail.edit")
+            Divider()
+            Button(role: .destructive) { confirmRemove = true } label: {
+                Label("Remove from Wardrobe", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("More actions")
+        .accessibilityIdentifier("itemDetail.more")
+    }
+
+    @ViewBuilder
+    private func page(_ item: WardrobeItem) -> some View {
+        if duo.isWideLayout && !embedded {
+            // Wide, full-screen page: the picture on one half, the details on
+            // the other (split on the crease when the Duo is half-open).
+            FoldAwareSplit(gutter: DS.Spacing.lg, stackedSpacing: 0) {
+                hero(item)
+                    .frame(maxWidth: 520)
+                    .padding(DS.Spacing.lg)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } trailing: {
+                ScrollView {
+                    details(item)
+                        .padding(.vertical, DS.Spacing.lg)
+                        .padding(.trailing, DS.Spacing.lg)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+            .accessibilityIdentifier("itemDetail.root")
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                    hero(item)
+                    details(item)
+                }
+                .padding(.horizontal, DS.Spacing.screenH)
+                .padding(.top, DS.Spacing.xs)
+                .padding(.bottom, DS.Spacing.xxl)
+            }
+            .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+            .accessibilityIdentifier("itemDetail.root")
+        }
+    }
+
+    private func details(_ item: WardrobeItem) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+            header(item)
+            Group {
+                colors(item)
+                attributes(item)
+                notes(item)
+                actions
+            }
+            .dsAppear(appeared)
         }
     }
 
@@ -105,12 +161,19 @@ struct ItemDetailView: View {
     private func header(_ item: WardrobeItem) -> some View {
         let section = ClosetSection.of(item)
         return VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            Label(section.title, systemImage: section.iconName)
-                .font(DS.Font.footnote.weight(.semibold))
-                .foregroundStyle(DS.Colors.accent)
+            HStack {
+                Label(section.title, systemImage: section.iconName)
+                    .font(DS.Font.footnote.weight(.semibold))
+                    .foregroundStyle(DS.Colors.accent)
+                if embedded {
+                    Spacer()
+                    moreMenu.foregroundStyle(DS.Colors.accent)
+                }
+            }
             Text(ClosetText.displayName(item))
                 .font(DS.Font.title2)
                 .foregroundStyle(DS.Colors.textPrimary)
+                .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             Label(ClosetAttributes.wearSummary(wear), systemImage: "calendar")
@@ -151,14 +214,31 @@ struct ItemDetailView: View {
 
     // MARK: - Attributes
 
+    /// Label / value pairs in a two-column grid, like Settings' "About".
     private func attributes(_ item: WardrobeItem) -> some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+        let rows = ClosetAttributes.chips(for: item)
+        return VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             sectionLabel("Details")
-            FlowLayout(spacing: DS.Spacing.xs) {
-                ForEach(ClosetAttributes.chips(for: item)) { chip in
-                    AttributeChip(attribute: chip)
+            Grid(alignment: .leading, horizontalSpacing: DS.Spacing.md, verticalSpacing: 10) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { Divider() }
+                    GridRow(alignment: .firstTextBaseline) {
+                        Text(row.label)
+                            .font(DS.Font.subheadline)
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .gridColumnAlignment(.leading)
+                        Text(row.value)
+                            .font(DS.Font.subheadline.weight(.medium))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
             }
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.vertical, DS.Spacing.sm)
+            .background(DS.Colors.backgroundCard,
+                        in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         }
     }
 
@@ -177,67 +257,32 @@ struct ItemDetailView: View {
 
     // MARK: - Actions
 
+    /// One plain destructive row; editing lives in the ⋯ menu.
     private var actions: some View {
-        VStack(spacing: DS.Spacing.sm) {
-            Button {
-                Haptics.light()
-                showEdit = true
-            } label: {
-                Label("Edit details", systemImage: "pencil")
-            }
-            .buttonStyle(DSSecondaryButton())
-
-            Button {
-                confirmRemove = true
-            } label: {
-                Label("Not mine — remove", systemImage: "trash")
-                    .font(DS.Font.headline)
-                    .foregroundStyle(DS.Colors.error)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: DS.ButtonSize.height)
-                    .background(DS.Colors.error.opacity(0.10),
-                                in: RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
-            }
-            .buttonStyle(DSTapBounce())
-            .accessibilityHint("Removes this item from your wardrobe")
+        Button(role: .destructive) {
+            confirmRemove = true
+        } label: {
+            Text("Remove from Wardrobe")
+                .font(DS.Font.body)
+                .foregroundStyle(DS.Colors.error)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DS.Spacing.md)
+                .frame(minHeight: 48)
+                .background(DS.Colors.backgroundCard,
+                            in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         }
-        .padding(.top, DS.Spacing.xs)
+        .buttonStyle(DSTapBounce())
+        .accessibilityHint("For items that aren't yours or were picked up by mistake")
+        .accessibilityIdentifier("itemDetail.remove")
+        .padding(.top, DS.Spacing.sm)
     }
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())
             .font(DS.Font.footnote.weight(.semibold))
             .tracking(0.6)
-            .foregroundStyle(DS.Colors.textTertiary)
+            .foregroundStyle(DS.Colors.textSecondary)
             .accessibilityAddTraits(.isHeader)
-    }
-}
-
-/// One attribute: a small caption label over its value, on a card capsule.
-private struct AttributeChip: View {
-    let attribute: ClosetAttribute
-
-    var body: some View {
-        HStack(spacing: DS.Spacing.xs) {
-            Image(systemName: attribute.icon)
-                .font(DS.Font.footnote.weight(.semibold))
-                .foregroundStyle(DS.Colors.accent)
-                .frame(minWidth: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(attribute.label)
-                    .font(DS.Font.caption2)
-                    .foregroundStyle(DS.Colors.textTertiary)
-                Text(attribute.value)
-                    .font(DS.Font.subheadline.weight(.medium))
-                    .foregroundStyle(DS.Colors.textPrimary)
-            }
-        }
-        .padding(.horizontal, DS.Spacing.sm)
-        .padding(.vertical, DS.Spacing.xs)
-        .background(DS.Colors.backgroundCard,
-                    in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(attribute.label): \(attribute.value)")
     }
 }
 

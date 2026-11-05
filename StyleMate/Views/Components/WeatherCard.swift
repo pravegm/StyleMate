@@ -51,9 +51,22 @@ struct WeatherInlineRow: View {
                         .font(DS.Font.title3)
                         .foregroundColor(DS.Colors.accent)
 
-                    Text("\(Int(displayFahrenheit ? tempF : tempC))°")
-                        .font(DS.Font.display)
-                        .foregroundColor(DS.Colors.textPrimary)
+                    // The unit sits on the temperature; tapping it switches °C / °F.
+                    let degrees = Int((displayFahrenheit ? tempF : tempC).rounded())
+                    Button(action: { Haptics.light(); onToggleUnit() }) {
+                        HStack(alignment: .firstTextBaseline, spacing: 1) {
+                            Text("\(degrees)°")
+                                .font(DS.Font.display)
+                                .foregroundColor(DS.Colors.textPrimary)
+                            Text(displayFahrenheit ? "F" : "C")
+                                .font(DS.Font.title3)
+                                .foregroundColor(DS.Colors.accent)
+                        }
+                    }
+                    .buttonStyle(DSTapBounce())
+                    .accessibilityLabel("\(degrees) degrees \(displayFahrenheit ? "Fahrenheit" : "Celsius")")
+                    .accessibilityHint("Switches to \(displayFahrenheit ? "Celsius" : "Fahrenheit")")
+                    .accessibilityIdentifier("home.temperatureUnit")
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(weather.displayDescription)
@@ -64,20 +77,9 @@ struct WeatherInlineRow: View {
                         if let city = city {
                             Text(city)
                                 .font(DS.Font.subheadline)
-                                .foregroundColor(DS.Colors.textTertiary)
+                                .foregroundColor(DS.Colors.textSecondary)
                                 .lineLimit(1)
                         }
-                    }
-
-                    Spacer()
-
-                    Button(action: { Haptics.light(); onToggleUnit() }) {
-                        Text(displayFahrenheit ? "°F" : "°C")
-                            .font(DS.Font.caption1)
-                            .foregroundColor(DS.Colors.accent)
-                            .padding(.horizontal, DS.Spacing.xs)
-                            .padding(.vertical, DS.Spacing.micro)
-                            .dsGlassChipUnselected()
                     }
                 }
             } else {
