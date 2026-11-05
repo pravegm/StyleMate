@@ -50,14 +50,23 @@ final class CloudKitService: ObservableObject {
     ]
     nonisolated static let assetKeys: [CKRecord.FieldKey] = ["imageAsset", "croppedImageAsset"]
 
-    /// Set once we hit a permanent provisioning/schema rejection (e.g. the record type
-    /// isn't configured in this build's container, or no iCloud account). Further cloud
-    /// calls are short-circuited for the session. Cleared next launch.
-    private var cloudUnavailable = false
+    /// Set once we hit a permanent provisioning/schema rejection — the usual one being a
+    /// TestFlight/App Store build whose Production schema hasn't been deployed yet
+    /// (`cloudkit/schema.ckdb`, `.github/workflows/cloudkit-schema.yml`), or no iCloud
+    /// account. Every further cloud call returns at once for the rest of the session: no
+    /// retry loop, no error state shown, and the wardrobe keeps working locally. Pending
+    /// changes stay in the ledger and go up on a later launch once iCloud accepts them.
+    private var cloudUnavailable = false {
+        didSet { if cloudUnavailable != oldValue { isUnavailable = cloudUnavailable } }
+    }
+    /// For UI that wants to say "iCloud backup is unavailable" (quietly; never an alert).
+    @Published private(set) var isUnavailable = false
     private var zoneReady = false
 
-    /// Errors that won't fix themselves by retrying.
-    private func isPermanent(_ error: Error) -> Bool {
+    private func isPermanent(_ error: Error) -> Bool { Self.isPermanent(error) }
+
+    /// Errors that won't fix themselves by retrying (schema / provisioning / account).
+    nonisolated static func isPermanent(_ error: Error) -> Bool {
         guard let ck = error as? CKError else { return false }
         switch ck.code {
         case .serverRejectedRequest, .badContainer, .missingEntitlement, .notAuthenticated,
@@ -155,6 +164,7 @@ final class CloudKitService: ObservableObject {
                         latchIfPermanent(error, context: "Upload record")
                     }
                 }
+                if cloudUnavailable { break }   // e.g. schema not deployed: stop, keep the rest pending
             } catch let ck as CKError where ck.code == .limitExceeded && batch.count > 1 {
                 // Request too large (assets): split and retry the halves.
                 let mid = batch.count / 2
@@ -177,7 +187,11 @@ final class CloudKitService: ObservableObject {
         guard !cloudUnavailable else { return [] }
         syncStatus = .syncing
         let confirmed = await uploadBatch(items, userID: userID)
-        syncStatus = confirmed.count == items.count ? .success : .error("Some items couldn't be backed up")
+        if cloudUnavailable {
+            syncStatus = .idle   // not provisioned / no account: quiet, the items stay pending
+        } else {
+            syncStatus = confirmed.count == items.count ? .success : .error("Some items couldn't be backed up")
+        }
         if !confirmed.isEmpty {
             lastSyncDate = Date()
             UserDefaults.standard.set(lastSyncDate, forKey: "lastCloudKitSync")
@@ -266,8 +280,21 @@ final class CloudKitService: ObservableObject {
         case failed
     }
 
+    /// The item for a pulled record, regardless of the profile id that uploaded it.
+    ///
+    /// The private database belongs to the device's iCloud account, so everything in the
+    /// zone is this person's wardrobe. Since login was removed (Nov 2026) the app's profile
+    /// id is a per-install UUID: a reinstall or a new iPhone gets a NEW id, and filtering on
+    /// `userID` (as before) restored nothing there. The `userID` field is still written on
+    /// upload, for diagnostics only.
+    nonisolated static func restoredItem(from record: CKRecord) -> WardrobeItem? {
+        guard record.recordType == recordType else { return nil }
+        return wardrobeItem(from: record)
+    }
+
     /// Fetches the changes since `token` (nil = everything), metadata only. Pages are
     /// accumulated and returned only if every page (and every record) succeeded.
+    /// `userID` is the current profile (kept for API stability; pulls aren't filtered on it).
     func fetchChanges(userID: String, since token: CKServerChangeToken?) async -> PullResult {
         guard !cloudUnavailable else { return .failed }
         await setupZone()
@@ -284,8 +311,9 @@ final class CloudKitService: ObservableObject {
                 for (_, modification) in changes.modificationResultsByID {
                     switch modification {
                     case .success(let mod):
-                        guard (mod.record["userID"] as? String) == userID else { continue }
-                        if let item = Self.wardrobeItem(from: mod.record) {
+                        // Every record in the zone is this wardrobe's, whatever profile id
+                        // tagged it — see `restoredItem(from:)`.
+                        if let item = Self.restoredItem(from: mod.record) {
                             result.modified.append(item)
                         }
                     case .failure(let error):
