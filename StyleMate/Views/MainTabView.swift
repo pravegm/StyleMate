@@ -79,22 +79,56 @@ struct MainTabView: View {
 
 /// Profile on a phone; on the Duo's inner display the settings list takes one
 /// half (never spanning the crease) and a wardrobe summary the other.
+///
+/// ProfileView is always the first child of the same layout, so its identity (and its
+/// NavigationStack: a pushed Diagnostics or Acknowledgements screen) survives folding and
+/// unfolding. An if/else between two containers rebuilt it, which popped Diagnostics in the
+/// middle of the Duo hinge check (Duo run 42002975851, 08-diagnostics).
 private struct ProfileTab: View {
     @Environment(\.duoLayout) private var duo
+    @State private var frame: CGRect = .zero
 
     var body: some View {
-        if duo.isWideLayout {
-            FoldAwareSplit(gutter: DS.Spacing.lg, stackedSpacing: 0) {
-                ProfileView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } trailing: {
+        let wide = duo.isWideLayout
+        let fold = duo.posture == .book ? duo.crease(in: frame).map { ($0.minX, $0.maxX) } : nil
+        ProfilePanesLayout(fold: fold, gutter: DS.Spacing.lg) {
+            ProfileView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if wide {
                 ProfileSummaryPanel()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
-        } else {
-            ProfileView()
         }
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
+    }
+}
+
+/// One subview: it fills the bounds. Two: side by side, split at the fold band (gutter / 2 each
+/// side of it) when there is one, else in halves with a `gutter` gap.
+private struct ProfilePanesLayout: Layout {
+    var fold: (CGFloat, CGFloat)?
+    var gutter: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else {
+            for s in subviews { s.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size)) }
+            return
+        }
+        let w = bounds.width
+        var firstEnd = fold.map { $0.0 - gutter / 2 } ?? (w / 2 - gutter / 2)
+        let secondStart = fold.map { $0.1 + gutter / 2 } ?? (w / 2 + gutter / 2)
+        let gap = max(0, secondStart - firstEnd)
+        firstEnd = min(max(firstEnd, w / 4), w * 3 / 4 - gap)
+        let start = firstEnd + gap
+        subviews[0].place(at: bounds.origin, anchor: .topLeading,
+                          proposal: ProposedViewSize(width: firstEnd, height: bounds.height))
+        subviews[1].place(at: CGPoint(x: bounds.minX + start, y: bounds.minY), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: w - start, height: bounds.height))
     }
 }
 

@@ -1,0 +1,13 @@
+Profile > About > Acknowledgements lists every file in this folder named ACK-<order>-<slug>.md
+(sorted by name). Drop a file in to add a component; delete it when the component stops shipping.
+The Xcode folder is a synchronized group, so files are copied flat into the app bundle: keep the
+ACK- prefix and a unique name. This file is not shown (no ACK- prefix).
+
+Format (see the existing files):
+  # Title shown in the list
+  licence: Apache License 2.0                 (optional header lines: key: value)
+  kind: On-device model (what it does)
+  source: https://where-the-licence-was-verified
+
+  Markdown body: attribution, notice of modification, then the full licence text.
+  Headings (#, ##), bullets (- ), "---" rules and inline **bold** / links are rendered.

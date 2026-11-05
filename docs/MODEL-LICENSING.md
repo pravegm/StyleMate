@@ -166,5 +166,19 @@ The garment retrain (§4.3 option 2) is on the critical path whatever happens wi
 - **Acknowledgements screen** in the app (Profile → About → Acknowledgements) with:
   - Licence texts for FashionSigLIP and SigLIP (Apache-2.0), Fashionpedia (CC BY 4.0 attribution), YuNet (MIT) / SFace (Apache-2.0) if used, DINOv2 / ConvNeXt (Apache / MIT) if used.
   - GoogleSignIn-iOS and its dependencies AppAuth, GTMAppAuth and GTMSessionFetcher (Apache-2.0), if Google Sign-In stays.
+  - **Done (5 Nov 2026, `feat/diagnostics`)**: the screen exists and lists every `ACK-<order>-<slug>.md` in
+    `StyleMate/Resources/Acknowledgements/` (format in `ACKNOWLEDGEMENTS-HOWTO.txt` there). Seeded with, each
+    verified at its source on 5 Nov: Marqo-FashionSigLIP + SigLIP ViT-B-16 (Apache-2.0 full text from
+    apache.org; model cards at huggingface.co/Marqo/marqo-fashionSigLIP and timm/ViT-B-16-SigLIP say
+    apache-2.0; notice: converted to Core ML, fp16), Stable Diffusion 1.5 / DreamShaper 8 (CreativeML Open
+    RAIL-M full text incl. Attachment A from github.com/CompVis/stable-diffusion; Lykon/dreamshaper-8 card says
+    creativeml-openrail-m; notice: Core ML, 6-bit palettized UNet + text encoder, no safety checker), Apple
+    ml-stable-diffusion (MIT, LICENSE.md at the pinned commit), MET Norway (NLOD 2.0 + CC BY 4.0, "Based on
+    data from MET Norway") and Open-Meteo (CC BY 4.0). There are no Swift packages (the project has no package
+    references). **Whoever adds or swaps a model adds / deletes its file there.** Still to add if they keep
+    shipping: SCRFD / AdaFace / FASHN parser / Fashionpedia labeler texts (NVIDIA SegFormer licence §3.1 asks
+    for a copy of the licence with any redistribution; Fashionpedia annotations are CC BY 4.0).
+  - Open-Meteo's licence also asks for a link "next to any location Open-Meteo data are displayed"; the weather
+    card shows none yet.
 - Record each shipped model's source URL, licence, commit or hash and conversion script in this file. Bump `FaceMatchingService.modelVersion` on any face-model swap (CLAUDE.md).
 - Keep the weights out of public artifacts. The repo is **public**; CI keeps the models only in the Actions cache, which is correct.
