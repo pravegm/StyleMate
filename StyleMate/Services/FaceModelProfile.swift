@@ -130,8 +130,10 @@ extension FaceModelProfile {
         detectorThreshold: 0.6, minLibraryDetectorScore: 0.75, minSelfieDetectorScore: 0.8)
 
     /// InsightFace buffalo_l (SCRFD-10G + w600k_r50). Only with a signed InsightFace licence.
-    /// w600k_r50 is RGB, (px - 127.5) / 127.5, 512-d. Bars: equal-FAR calibration on the same LFW
-    /// protocol (docs/MODEL-LICENSING.md §8); re-check them on the CI fixtures before shipping.
+    /// w600k_r50 is RGB, (px - 127.5) / 127.5, 512-d. Bars from the same LFW protocol
+    /// (docs/MODEL-LICENSING.md §8): strangers mean 0.005, 99.9th pct 0.21 (like AdaFace), so
+    /// auto-add 0.50 top-2 (TAR 98.4%, FAR at the label-error floor), review 0.35 single (FAR 4e-6).
+    /// Re-check on the CI fixture benchmark before shipping.
     static let insightFaceBuffaloL = FaceModelProfile(
         set: .insightFaceBuffaloL,
         modelVersion: "scrfd10g_w600k_r50_flip",
@@ -144,8 +146,8 @@ extension FaceModelProfile {
         embeddingDimension: 512,
         flipAverage: true,
         galleryConsensus: 2,
-        highConfidence: 0.55, borderline: 0.30, multiPerson: 0.58, ambiguityMargin: 0.08,
-        autoLearn: 0.62, autoLearnSelfie: 0.50, autoLearnMargin: 0.15,
+        highConfidence: 0.50, borderline: 0.35, multiPerson: 0.55, ambiguityMargin: 0.08,
+        autoLearn: 0.60, autoLearnSelfie: 0.50, autoLearnMargin: 0.15,
         galleryDuplicate: 0.95, learnedDuplicate: 0.90,
         clusterLink: 0.5, offerFloor: 0.15, preselect: 0.40,
         alsoYouCluster: 0.40, alsoYouMember: 0.30, alsoYouSingle: 0.45, alsoYouPreselect: 0.50,

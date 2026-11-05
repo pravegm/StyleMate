@@ -20,7 +20,7 @@ reports problems; it does not change those files.
 - **Required-reason APIs re-checked** on 5f27503: still UserDefaults only, so the manifest is still accurate. The CI build log shows `CpResource … StyleMate.app/PrivacyInfo.xcprivacy`, so it is bundled.
 
 **Still open, in priority order:**
-1. **Model licences:** nothing has changed. The same SCRFD (`buffalo_l`), AdaFace, FASHN and Fashionpedia-SegFormer weights are built by `scripts/`.
+1. **Model licences:** nothing has changed. The same SCRFD (`buffalo_l`), AdaFace, FASHN and Fashionpedia-SegFormer weights are built by `scripts/`. **Update 5 Nov 2026:** the face pair is now YuNet + SFace (commercially usable, `docs/MODEL-LICENSING.md` §2.6–2.8, §8); SCRFD and AdaFace no longer ship.
 2. **Placeholder links:** `LoginView.swift:117,120` still point to `your-terms-url.com` / `your-privacy-url.com`. There is no hosted privacy policy yet.
 3. **Login wall and Google Sign-In:**
    - `StyleMateApp` still shows `LoginView` until sign-in.
@@ -169,10 +169,10 @@ Cheap mitigations:
 | Component | Size (CI `du -sh`) |
 |---|---|
 | FashionEncoder (FashionSigLIP, fp16) | 176 MB |
-| MobileFaceNet (AdaFace IR-101, fp16) | 125 MB |
+| FaceEmbedSFace (SFace, fp16; was AdaFace IR-101, 125 MB, until 5 Nov) | 18 MB |
 | GarmentParser (FASHN, int8) | 62 MB |
 | GarmentLabeler (Fashionpedia SegFormer, int8) | 46 MB |
-| SCRFD10G | 8.2 MB |
+| FaceDetectYuNet (YuNet, fp32; was SCRFD10G, 8.2 MB) | 0.3 MB |
 | FashionVocabulary.json | 1.2 MB |
 | **Models total** | **≈ 418 MB** |
 | Code, assets, GoogleSignIn | ≈ 10–20 MB |
