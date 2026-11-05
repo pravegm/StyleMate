@@ -404,23 +404,23 @@ struct PaywallView: View {
     @ViewBuilder
     private var successView: some View {
         if duo.isWideLayout {
-            VStack(spacing: 0) {
-                Spacer(minLength: DS.Spacing.xl)
-                FoldAwareSplit(gutter: DS.Spacing.xl, stackedSpacing: DS.Spacing.lg) {
-                    successMessage
-                        .frame(maxWidth: 400)
-                        .frame(maxWidth: .infinity)
-                } trailing: {
-                    VStack(spacing: DS.Spacing.lg) {
-                        successTiles
-                        doneButton
-                    }
+            // The split takes the whole height and each pane centres its content in it, so the two
+            // halves sit level in the middle of the screen (clear of the close button above).
+            FoldAwareSplit(gutter: DS.Spacing.xl, stackedSpacing: DS.Spacing.lg) {
+                successMessage
                     .frame(maxWidth: 400)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } trailing: {
+                VStack(spacing: DS.Spacing.xl) {
+                    successTiles
+                    doneButton
                 }
-                .padding(.horizontal, DS.Spacing.lg)
-                Spacer(minLength: DS.Spacing.xl)
+                .frame(maxWidth: 400)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .padding(.horizontal, DS.Spacing.lg)
+            .padding(.top, DS.Spacing.xxxl)
+            .padding(.bottom, DS.Spacing.xl)
         } else {
             VStack(spacing: DS.Spacing.lg) {
                 Spacer(minLength: DS.Spacing.xl)
