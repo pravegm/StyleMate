@@ -64,7 +64,9 @@ class FirstRunE2ETests: E2ETestCase {
         openTab("Home")
         if remove.waitForExistence(timeout: 5) {
             remove.tap()
-            XCTAssertTrue(waitToDisappear(remove, timeout: 10), "Sample clothes weren't removed")
+            // Removal waits for the still-running sample import to stop, which can take a
+            // while on a busy CI runner.
+            XCTAssertTrue(waitToDisappear(remove, timeout: 30), "Sample clothes weren't removed")
             snap("home-samples-removed")
         } else {
             note("samples", "No sample items were extracted on this run (models missing?)")
