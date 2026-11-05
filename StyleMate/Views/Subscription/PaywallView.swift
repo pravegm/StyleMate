@@ -28,6 +28,9 @@ struct PaywallView: View {
     @State private var restoreMessage: String?
     /// Set once a purchase (or restore) made Premium active here: how many pieces it unlocked.
     @State private var unlocked: Int?
+    /// Pieces waiting when the paywall opened (Premium can also arrive via Transaction.updates:
+    /// Ask to Buy approved, bought on another device), so the success screen can count what unlocked.
+    @State private var lockedAtOpen: Int?
 
     private var selected: Product? { store.product(selectedID) ?? store.products.first }
     private var userId: String { wardrobe.currentUserEmail }
@@ -47,6 +50,7 @@ struct PaywallView: View {
         .overlay(alignment: .topTrailing) { closeButton }
         .animation(DS.Motion.smooth, value: store.isPremium)
         .task { await store.loadProducts() }
+        .onAppear { if lockedAtOpen == nil { lockedAtOpen = locked.count } }
         .alert("Purchase didn't go through", isPresented: Binding(
             get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
         )) {
@@ -441,7 +445,7 @@ struct PaywallView: View {
     }
 
     private var successDetail: String {
-        if let n = unlocked, n > 0 {
+        if let n = unlocked ?? lockedAtOpen.map({ max(0, $0 - locked.count) }), n > 0 {
             return "\(n) piece\(n == 1 ? " was" : "s were") added to your closet. Everything StyleMate finds from now on goes straight in."
         }
         return "Your wardrobe is now unlimited. Everything StyleMate finds goes straight into your closet."
