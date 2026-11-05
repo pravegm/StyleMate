@@ -75,33 +75,38 @@ struct TodayOutfitSheet: View {
         // Our own header row instead of a navigation bar: on the Duo's cover
         // display the system moves bar items into its trailing rail, which split
         // the close button from the title.
-        VStack(spacing: 0) {
-            header
-            GeometryReader { geo in
-                ZStack {
-                    if homeVM.allOutfitsSeen {
-                        endOfBatchView
-                    } else if let look = currentOutfit {
-                        if isWide(geo.size) {
-                            wideLayout(look, size: geo.size)
-                        } else {
-                            phoneLayout(look)
+        // Hosted in a NavigationStack with its bar hidden, so the page sheet keeps
+        // its full page size on the Duo's inner display.
+        NavigationStack {
+            VStack(spacing: 0) {
+                header
+                GeometryReader { geo in
+                    ZStack {
+                        if homeVM.allOutfitsSeen {
+                            endOfBatchView
+                        } else if let look = currentOutfit {
+                            if isWide(geo.size) {
+                                wideLayout(look, size: geo.size)
+                            } else {
+                                phoneLayout(look)
+                            }
                         }
-                    }
 
-                    overlays
+                        overlays
+                    }
                 }
             }
-        }
-        .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
-        // First-generation coach tour.
-        .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
-            GeometryReader { geo in
-                if tutorialManager.activeTour == .generation {
-                    CoachMarkOverlay(tutorial: tutorialManager, tour: .generation, anchors: anchors, proxy: geo)
+            .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+            // First-generation coach tour (inside the stack: preferences don't cross it).
+            .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
+                GeometryReader { geo in
+                    if tutorialManager.activeTour == .generation {
+                        CoachMarkOverlay(tutorial: tutorialManager, tour: .generation, anchors: anchors, proxy: geo)
+                    }
                 }
+                .ignoresSafeArea()
             }
-            .ignoresSafeArea()
+            .toolbar(.hidden, for: .navigationBar)
         }
         .sheet(item: $previewItem) { item in
             FullItemImageViewer(path: item.fullImagePath, fallbackPath: item.gridImagePath,

@@ -648,8 +648,10 @@ struct AddOutfitSheet: View {
             HStack(spacing: DS.Spacing.xs) {
                 ForEach(groups) { group in
                     let picked = group.items.filter { selectedItems.contains($0) }.count
-                    ClosetChip(title: group.section.chipTitle, systemImage: group.section.iconName,
-                               count: picked > 0 ? picked : group.items.count,
+                    // A check replaces the shelf glyph once something on it is picked.
+                    ClosetChip(title: group.section.chipTitle,
+                               systemImage: picked > 0 ? "checkmark.circle.fill" : group.section.iconName,
+                               count: group.items.count,
                                isSelected: currentShelf == group.section) {
                         withAnimation(DS.Motion.snappy) { shelf = group.section }
                     }

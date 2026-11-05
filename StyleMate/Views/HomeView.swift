@@ -159,9 +159,12 @@ struct HomeView: View {
                     )
                 }
             }
-            // Phone / cover display: full screen. Wide: a page sheet.
-            .fullScreenCover(isPresented: outfitSheetBinding(wide: false)) {
+            // Phone / cover display: a full-height sheet (a full-screen cover put a
+            // stray system element in the Duo cover's trailing rail). Wide: a page sheet.
+            .sheet(isPresented: outfitSheetBinding(wide: false)) {
                 outfitSheet
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.hidden)
             }
             .sheet(isPresented: outfitSheetBinding(wide: true)) {
                 outfitSheet
