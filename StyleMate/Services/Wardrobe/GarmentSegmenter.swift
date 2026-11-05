@@ -158,6 +158,22 @@ enum GarmentSegmenter {
             }
         }
 
+        // A tunic / kurta / shirt-dress read as a top over a dress is one long garment
+        // (a dress worn under a plain top is rare; under an open jacket it stays two).
+        if !pending.contains(where: { $0.kind == .outerLayer }),
+           let d = pending.firstIndex(where: { $0.kind == .onePiece }),
+           let tIdx = pending.firstIndex(where: { $0.kind == .innerTop }) {
+            let top = pending[tIdx], dress = pending[d]
+            let w = WardrobeML.gridW
+            let ty = top.pixels.reduce(0) { $0 + $1 / w } / max(1, top.pixels.count)
+            let dy = dress.pixels.reduce(0) { $0 + $1 / w } / max(1, dress.pixels.count)
+            if ty <= dy {
+                let big = top.pixels.count > dress.pixels.count ? top : dress
+                pending[d] = (big.kind, big.cls, dress.pixels + top.pixels)
+                pending.remove(at: tIdx)
+            }
+        }
+
         // Merge same-family groups of one-per-person kinds (bottoms, shoes).
         var merged: [(kind: GarmentKind, cls: Int, pixels: [Int])] = []
         for g in pending {
@@ -307,6 +323,14 @@ enum GarmentSegmenter {
         }
     }
 
+    /// Class pairs GarmentNet confuses on ONE garment far more often than people wear
+    /// them together: a coat / jacket / cape read partly as a vest, a cardigan partly as
+    /// a sweater (benchmark: phantom "Vests" next to coats, a coat as cardigan + sweater).
+    private static func oneGarment(_ a: Int, _ b: Int) -> Bool {
+        let pair = Set([a, b])
+        return (pair.contains(6) && !pair.isDisjoint(with: [5, 10, 13])) || pair == [3, 4]
+    }
+
     /// Splits the upper-body region into an outer and an inner layer when it holds two
     /// substantial garments of different layer rank — an open coat over a knit, a
     /// flannel shirt over a tee. Small stray blobs (a sleeve patch misread) are moved
@@ -321,7 +345,8 @@ enum GarmentSegmenter {
         // smaller layer only needs to be a real garment-sized area.
         let minPart = max(idx.count / 20, Int(Double(n) * 0.004))
         guard let a = ranked.first, a.value >= minPart,
-              let b = ranked.dropFirst().first(where: { layerRank($0.key) != layerRank(a.key) && $0.value >= minPart })
+              let b = ranked.dropFirst().first(where: { layerRank($0.key) != layerRank(a.key) && $0.value >= minPart
+                                                       && !oneGarment(a.key, $0.key) })
         else { return nil }
         let (outerClass, innerClass) = layerRank(a.key) > layerRank(b.key) ? (a.key, b.key) : (b.key, a.key)
         let innerRank = layerRank(innerClass)
@@ -385,7 +410,7 @@ enum GarmentSegmenter {
         let keep = Set(sizes.enumerated()
             .filter { Double($0.element) >= Double(largest) * 0.12 }
             .sorted { $0.element > $1.element }
-            .prefix(4).map { $0.offset + 1 })
+            .prefix(kind == .belt ? 1 : 4).map { $0.offset + 1 })   // a belt is one piece
         // A tie is one solid piece; several small dark fragments labelled "tie"
         // are hair or a shadow (seen in the e2e gallery test).
         if cls == 17, keep.count > 1 || Double(largest) < Double(n) * 0.002 { return nil }
@@ -401,6 +426,23 @@ enum GarmentSegmenter {
             }
         }
         guard count > 0 else { return nil }
+        // GarmentNet's 1/4-res outline runs ~1 grid px into the scene: peel that rim (only
+        // where the garment meets the scene, not body or another garment) so pavement and
+        // walls don't tint the cutout's edge colours.
+        if !kind.isSmall {
+            var peel: [Int] = []
+            for y in y0..<y1 {
+                for x in x0..<x1 {
+                    let i = y * w + x
+                    guard mask[i] != 0 else { continue }
+                    if (x > 0 && labels[i - 1] == 0 && mask[i - 1] == 0) || (x < w - 1 && labels[i + 1] == 0 && mask[i + 1] == 0)
+                        || (y > 0 && labels[i - w] == 0 && mask[i - w] == 0) || (y < h - 1 && labels[i + w] == 0 && mask[i + w] == 0) {
+                        peel.append(i)
+                    }
+                }
+            }
+            if peel.count * 4 < count { for i in peel { mask[i] = 0 }; count -= peel.count }
+        }
 
         // Amodal completion: the parts of the garment hidden behind something — a
         // hand, an arm, hair, a bag or strap, a belt, a scarf, or (for an open

@@ -81,6 +81,10 @@ final class WardrobeML {
               let a = Self.read(aux, h: GarmentMap.lowH, w: GarmentMap.lowW) else { return nil }
         var classes = [UInt8](repeating: 0, count: Self.gridCount)
         for i in 0..<Self.gridCount { classes[i] = UInt8(max(0, min(27, c[i].rounded()))) }
+        // Only confident body: the person channel's soft rim just outside a garment is scene.
+        for i in 0..<Self.gridCount where classes[i] == GarmentMap.body && a[4 * GarmentMap.lowCount + GarmentMap.low(i)] < 0.6 {
+            classes[i] = 0
+        }
         return GarmentMap(classes: classes, probs: p, aux: a)
     }
 

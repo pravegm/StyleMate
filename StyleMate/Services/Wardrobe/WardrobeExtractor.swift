@@ -1,6 +1,5 @@
 import CoreGraphics
 import UIKit
-import Vision
 
 /// The on-device wardrobe pipeline: photo of the user → one clean cutout +
 /// attributes per garment and accessory they're wearing.
@@ -167,25 +166,6 @@ enum WardrobeExtractor {
     private static func segmentation(_ out: GarmentMap, crop: Crop, pixels: [UInt8]) -> Segmentation {
         var map = out
         let w = WardrobeML.gridW, h = WardrobeML.gridH, f = crop.photoInGrid
-        // Apple's person matte (on-device Vision; also runs in the simulator) has much
-        // crisper outer edges than GarmentNet's 1/4-res maps: worn garments end where the
-        // person ends (no pavement rim that skews colours), and "body" is the matte minus
-        // garments. A carried bag may hang outside it.
-        let tm = Date()
-        if let m = personMatte(crop.image) {
-            for y in 0..<h {
-                let my = min(m.h - 1, y * m.h / h)
-                for x in 0..<w {
-                    let v = m.v[my * m.w + min(m.w - 1, x * m.w / w)]
-                    let i = y * w + x
-                    let c = map.classes[i]
-                    if c == GarmentMap.body { if v < 128 { map.classes[i] = 0 } }
-                    else if c == 0 { if v >= 200 { map.classes[i] = GarmentMap.body } }
-                    else if c != 25 && v < 48 { map.classes[i] = 0 }
-                }
-            }
-        }
-        WardrobeML.shared.record("matte", Date().timeIntervalSince(tm))
         // The grey padding past the photo's edge is never garment (it was
         // segmented as a grey bar on a white shirt, a block under white jeans).
         let x0 = max(0, Int(f.minX.rounded(.up))), y0 = max(0, Int(f.minY.rounded(.up)))
@@ -257,61 +237,6 @@ enum WardrobeExtractor {
             return (whole, segmentation(out, crop: whole, pixels: pixels))
         }
         return (crop, nil)
-    }
-
-    /// One reused request on one serial queue: Vision loads the segmentation model per
-    /// request object (a fresh request per photo reloaded it every time), and a request
-    /// is not thread-safe.
-    private static let matteQueue = DispatchQueue(label: "StyleMate.wardrobe.matte", qos: .userInitiated)
-    nonisolated(unsafe) private static var matteRequest: VNGeneratePersonSegmentationRequest?
-    /// Set when a matte request ever hangs; later photos skip the matte.
-    nonisolated(unsafe) private static var matteDisabled = false
-    nonisolated(unsafe) private static var matteWarm = false
-
-    /// Vision's person segmentation (balanced quality) as 8-bit coverage, or nil.
-    private static func personMatte(_ image: CGImage) -> (w: Int, h: Int, v: [UInt8])? {
-        guard !matteDisabled else { return nil }
-        // The matte comes back at ~384x512 anyway: hand Vision a <= 768 px image.
-        let s = min(1, 768 / CGFloat(max(image.width, image.height)))
-        let small = s < 1 ? (resized(image, w: Int(CGFloat(image.width) * s), h: Int(CGFloat(image.height) * s)) ?? image) : image
-        // A watchdog: a Vision request that never returns must not stall a scan (the first
-        // call loads the model, so it gets longer).
-        let done = DispatchSemaphore(value: 0)
-        var result: (w: Int, h: Int, v: [UInt8])?
-        matteQueue.async {
-            defer { done.signal() }
-            let request: VNGeneratePersonSegmentationRequest
-            if let r = matteRequest { request = r } else {
-                request = VNGeneratePersonSegmentationRequest()
-                request.qualityLevel = .balanced
-                request.outputPixelFormat = kCVPixelFormatType_OneComponent8
-                #if targetEnvironment(simulator)
-                // The simulator has no Neural Engine and emulates the GPU path very slowly
-                // (measured: 94 s for one accurate matte vs 4 s on the CPU).
-                request.usesCPUOnly = true
-                #endif
-                matteRequest = request
-            }
-            guard (try? VNImageRequestHandler(cgImage: small, options: [:]).perform([request])) != nil,
-                  let buffer = request.results?.first?.pixelBuffer else { return }
-            CVPixelBufferLockBaseAddress(buffer, .readOnly)
-            defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-            let mw = CVPixelBufferGetWidth(buffer), mh = CVPixelBufferGetHeight(buffer)
-            let stride = CVPixelBufferGetBytesPerRow(buffer)
-            guard mw > 0, mh > 0, let base = CVPixelBufferGetBaseAddress(buffer) else { return }
-            let p = base.assumingMemoryBound(to: UInt8.self)
-            var v = [UInt8](repeating: 0, count: mw * mh)
-            var any = false
-            for y in 0..<mh { for x in 0..<mw { let b = p[y * stride + x]; v[y * mw + x] = b; if b > 128 { any = true } } }
-            if any { result = (mw, mh, v) }
-        }
-        guard done.wait(timeout: .now() + (matteWarm ? 15 : 120)) == .success else {
-            matteDisabled = true
-            print("[Wardrobe] person matte timed out; continuing without it")
-            return nil
-        }
-        matteWarm = true
-        return result
     }
 
     // MARK: - Close-ups for small items
@@ -483,17 +408,6 @@ enum WardrobeExtractor {
                 uses.append(Use(inst: best, crop: z, pixels: s.pixels, zoomed: true))
                 foundNow.insert(kind)
                 log("close-up found \(kind.rawValue)")
-            }
-            // A head close-up without headwear: is the "hair" a turban or headscarf?
-            if zoom.wanted.contains(.headwear), !foundNow.contains(.headwear),
-               let hair = GarmentSegmenter.headInstance(labels: s.labels),
-               let cut = GarmentCutout.render(crop: z.image, cropPixels: s.pixels, instance: hair, photoInGrid: z.photoInGrid),
-               let cg = cut.image.cgImage, let input = FashionClassifier.onWhite(cg, side: 224),
-               let emb = WardrobeML.shared.embed(input), let vocab = WardrobeML.shared.vocabulary,
-               let best = vocab.best(in: "hair_check", for: emb), best.label != "Hair", best.margin > 0.02 {
-                uses.append(Use(inst: hair, crop: z, pixels: s.pixels, zoomed: true))
-                foundNow.insert(.headwear)
-                log("head close-up: the hair is \(best.label) (+\(String(format: "%.3f", best.margin)))")
             }
         }
         log("close-ups: \(merged.count) run (\(zooms.count) wanted)")
