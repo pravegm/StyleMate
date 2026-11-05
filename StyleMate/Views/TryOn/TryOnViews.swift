@@ -455,3 +455,61 @@ struct TryOnCachedImage<Fallback: View>: View {
         }
     }
 }
+
+// MARK: - Status chip (On you selected, image not ready yet)
+
+/// Under the interactive pieces board while a look's try-on isn't ready: "Dressing you…", "Shows best as
+/// pieces", or "See it on you" (no body photo yet). Asks for the render (and, the first time, picks the
+/// body photo) so the board can switch to the image as soon as it lands.
+struct TryOnStatusChip: View {
+    let items: [WardrobeItem]
+
+    @ObservedObject private var queue = TryOnQueue.shared
+    @ObservedObject private var bodies = TryOnBodyLibrary.shared
+    @EnvironmentObject private var authService: AuthService
+    @State private var showBodySheet = false
+
+    private var state: TryOnQueue.State { _ = queue.revision; return queue.state(for: items) }
+
+    var body: some View {
+        Group {
+            switch state {
+            case .queued, .rendering:
+                Label { Text("Dressing you…") } icon: { ProgressView().controlSize(.small) }
+                    .chipStyle()
+                    .accessibilityIdentifier("tryon.rendering")
+            case .rejected:
+                Label("This one shows best as pieces", systemImage: "square.grid.2x2")
+                    .chipStyle()
+                    .accessibilityIdentifier("tryon.rejected")
+            case .needsBody:
+                Button { showBodySheet = true } label: {
+                    Label(bodies.status == .searching || bodies.status == .generating ? "Finding a photo of you…" : "See it on you",
+                          systemImage: "person.crop.rectangle")
+                        .chipStyle()
+                }
+                .buttonStyle(DSTapBounce())
+                .accessibilityIdentifier("tryon.findPhoto")
+            case .ready, .unavailable:
+                EmptyView()
+            }
+        }
+        .task(id: "\(queue.key(for: items) ?? "-")|\(state)") {
+            if state == .queued { queue.request(items, priority: .user) }
+            if state == .needsBody {
+                bodies.chooseAutomaticallyIfNeeded(userId: authService.user?.id ?? "", gender: authService.user?.gender)
+            }
+        }
+        .sheet(isPresented: $showBodySheet) { TryOnBodySheet() }
+    }
+}
+
+private extension View {
+    func chipStyle() -> some View {
+        self.font(DS.Font.footnote.weight(.semibold))
+            .foregroundStyle(DS.Colors.textPrimary)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 36)
+            .dsGlassCapsule()
+    }
+}

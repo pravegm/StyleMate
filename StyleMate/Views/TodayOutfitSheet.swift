@@ -336,7 +336,11 @@ struct TodayOutfitSheet: View {
         let progress = min(abs(dragX) / threshold, 1)
         let tint = dragX >= 0 ? DS.Colors.accent : DS.Colors.textSecondary
         let showToggle = !forcePieces && inlineControls && tryOnActive(look)
-        let onYou = showToggle && tryOnMode.wrappedValue == .onYou
+        // "On you" when ready: the image replaces the board only once it exists; until then the board
+        // stays interactive with a status chip ("Dressing you…").
+        let wantsOnYou = showToggle && tryOnMode.wrappedValue == .onYou
+        let ready: Bool = { if case .ready = tryOnQueue.state(for: look.items) { return true }; return false }()
+        let onYou = wantsOnYou && ready
         return ZStack(alignment: .bottom) {
             if onYou {
                 OutfitOnBodyView(items: look.items, priority: .user) { img in fullScreenTryOn = TryOnFullScreenItem(image: img) }
@@ -360,8 +364,14 @@ struct TodayOutfitSheet: View {
                 .coachAnchor(CoachAnchor.genLook)
                 .transition(.opacity)
 
-                boardFooter(inlineControls: inlineControls)
-                    .padding(.bottom, DS.Spacing.sm)
+                Group {
+                    if wantsOnYou && selectedPieceID == nil && lockedItemIDs.isEmpty {
+                        TryOnStatusChip(items: look.items)
+                    } else {
+                        boardFooter(inlineControls: inlineControls)
+                    }
+                }
+                .padding(.bottom, DS.Spacing.sm)
             }
         }
         .overlay(alignment: .top) {

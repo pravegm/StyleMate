@@ -45,10 +45,10 @@ class TryOnE2ETests: E2ETestCase {
         // The seeded body + composite (Debug build on the simulator's CPU: allow a few minutes).
         let image = app.buttons["tryon.image"]
         let rejected = app.descendants(matching: .any)["tryon.rejected"]
-        let setup = app.buttons["tryon.findPhoto"]
-        let which = waitForAny([image, rejected, setup], timeout: 360)
+        // Until the image is ready the pieces stay, with a status chip ("Dressing you…").
+        let which = waitForAny([image, rejected], timeout: 360)
         note("tryon-state", "state=\(which.map(String.init) ?? "timeout")\n" + visibleButtonLabels())
-        XCTAssertEqual(which, 0, "The try-on image never appeared (0 = image, 1 = rejected, 2 = no body)")
+        XCTAssertEqual(which, 0, "The try-on image never appeared (0 = image, 1 = rejected)")
         snap("deck-on-you")
 
         image.tap()
