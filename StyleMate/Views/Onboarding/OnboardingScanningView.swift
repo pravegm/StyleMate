@@ -85,7 +85,7 @@ struct OnboardingScanningView: View {
                 .font(DS.Font.title1)
                 .foregroundStyle(DS.Colors.textPrimary)
                 .multilineTextAlignment(.center)
-            Text(FirstLook.counterText(items: scan.itemsFound, photos: scan.photosExamined))
+            Text(counterLine)
                 .font(DS.Font.title3.monospacedDigit())
                 .foregroundStyle(DS.Colors.accent)
                 .contentTransition(.numericText())
@@ -103,6 +103,15 @@ struct OnboardingScanningView: View {
         if handingOff && scan.itemsFound == 0 { return "You're all set" }
         if handingOff { return "Your closet is ready" }
         return mode == .samples ? "Building a sample closet" : "Building your closet"
+    }
+
+    /// "0 items found" under "You're all set" reads like a failure; while pieces are still coming, say so.
+    private var counterLine: String {
+        if handingOff && scan.itemsFound == 0 {
+            if case .error = scan.scanState, mode == .library { return "No photos scanned yet" }
+            return "Your first pieces are on the way"
+        }
+        return FirstLook.counterText(items: scan.itemsFound, photos: scan.photosExamined)
     }
 
     private var statusLine: String {
