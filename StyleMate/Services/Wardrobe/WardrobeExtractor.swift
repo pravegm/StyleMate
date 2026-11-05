@@ -264,6 +264,11 @@ enum WardrobeExtractor {
         let request = VNGeneratePersonSegmentationRequest()
         request.qualityLevel = .balanced
         request.outputPixelFormat = kCVPixelFormatType_OneComponent8
+        #if targetEnvironment(simulator)
+        // The simulator has no Neural Engine and emulates the GPU path very slowly
+        // (measured: 94 s for one accurate matte vs 4 s on the CPU).
+        request.usesCPUOnly = true
+        #endif
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         guard (try? handler.perform([request])) != nil, let buffer = request.results?.first?.pixelBuffer else { return nil }
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
