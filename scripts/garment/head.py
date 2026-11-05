@@ -44,11 +44,10 @@ class GarmentHead(nn.Module):
         self.inp = CBA(in_ch, mid, 1)
         self.ctx = nn.Sequential(CBA(mid, mid, 3), CBA(mid, mid, 3, groups=mid // 32 if mid >= 64 else 1))
         self.aux = nn.Conv2d(mid, num_classes, 1)
-        # RGB stem: 336x224 -> 168x112 -> 84x56
+        # RGB stem: a 4x4 / stride-4 patch conv straight to 168x112 (cheap on CPU), then 84x56
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
-        self.s2 = CBA(3, 16, 3, 2)
-        self.s4 = nn.Sequential(CBA(16, 32, 3, 2), SepBlock(32, 32))
+        self.s4 = nn.Sequential(nn.Conv2d(3, 32, 4, 4, bias=False), nn.BatchNorm2d(32), nn.ReLU(inplace=True), SepBlock(32, 32))
         self.s8 = nn.Sequential(CBA(32, 64, 3, 2), SepBlock(64, 64))
         # decoder
         self.red = CBA(mid, 96, 1)
@@ -62,7 +61,7 @@ class GarmentHead(nn.Module):
         f = self.inp(feats)
         f = f + self.ctx(f)
         x = (rgb - self.mean) / self.std
-        s4 = self.s4(self.s2(x))
+        s4 = self.s4(x)
         s8 = self.s8(s4)
         y = F.interpolate(self.red(f), size=s8.shape[-2:], mode="bilinear", align_corners=False)
         y = self.d8(torch.cat([y, s8], 1))

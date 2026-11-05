@@ -1,0 +1,6 @@
+{
+  "comment": "The trained GarmentNet head that ships: the garment-head artifact of this garment-model.yml run (CI downloads it). sha256 is of garment_head.pt.",
+  "run_id": 0,
+  "artifact": "garment-head",
+  "sha256": ""
+}

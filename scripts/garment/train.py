@@ -169,7 +169,7 @@ def main():
     val = Chunks(va_dirs)
     print(f"train {len(train)} samples from {len(tr_dirs)} chunks, val {len(val)}", flush=True)
     in_ch = train.feats[0].shape[-1]
-    model = GarmentHead(in_ch, mid=a.mid).to(memory_format=torch.channels_last)
+    model = GarmentHead(in_ch, mid=a.mid)
     if a.resume:
         model.load_state_dict(torch.load(a.resume, map_location="cpu")["state_dict"])
     w, freq = class_weights(train)
@@ -197,8 +197,6 @@ def main():
         run = 0.0
         b = 0
         for b, batch in enumerate(tl):
-            batch = [batch[0].contiguous(memory_format=torch.channels_last),
-                     batch[1].contiguous(memory_format=torch.channels_last)] + list(batch[2:])
             lr = set_lr(max(step / steps, (time.time() - t0) / budget))
             loss = losses(model, batch, w, part_pos)
             opt.zero_grad(set_to_none=True)
