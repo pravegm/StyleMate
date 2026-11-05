@@ -43,4 +43,13 @@ struct DuoLayoutTests {
         #expect(state(.fullyOpen).foldBand(in: CGRect(x: 520, y: 0, width: 400, height: 669)) == nil)
         #expect(state(.partiallyOpen).foldBand(in: CGRect(x: 8, y: 280, width: 440, height: 389)) == nil)
     }
+
+    @Test func foldRunsThroughACentredSheetNotThroughAnEdge() {
+        // Flat: a 653 pt sheet centred on the display has the fold in its middle.
+        #expect(state(.fullyOpen).foldRunsThrough(CGRect(x: 149, y: 0, width: 653, height: 1)))
+        // Half-open: the system puts the sheet on one half; its corner reaches 10 pt into the band.
+        #expect(!state(.partiallyOpen).foldRunsThrough(CGRect(x: 9, y: 0, width: 457, height: 1)))
+        // The cover display has no fold.
+        #expect(!state(.closed, crease: nil).foldRunsThrough(CGRect(x: 0, y: 0, width: 466, height: 1)))
+    }
 }
