@@ -14,7 +14,7 @@ import Foundation
 ///   doesn't cover) stays small, smaller still without the diffusion pass.
 /// Thresholds are calibrated in `tryon-lab/gate_cal.py` (see docs/TRY-ON.md).
 enum TryOnGate {
-    static var minSimilarity: Float = 0.62
+    static var minSimilarity: Float = 0.50
     static var minVisible: Float = 0.30
     static var maxChromaShift: Float = 22
     static var maxLightShift: Float = 34

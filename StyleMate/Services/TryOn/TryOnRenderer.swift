@@ -161,9 +161,17 @@ enum TryOnRenderer {
             let w = min(1, wgt.v[i] * 1.2)
             guard w > 0.001, !c.protected[i], R.px[i * 4 + 3] > 0 else { continue }
             let garment = c.cover[i] > 0.4
+            // Garments take only the diffusion's light (a luminance ratio), never its colour: the item's
+            // own colour and texture stay exactly the composite's.
+            var ratio: Float = 1
+            if garment {
+                let yr = 0.299 * lowR[0].v[i] + 0.587 * lowR[1].v[i] + 0.114 * lowR[2].v[i] + 4
+                let yc = 0.299 * lowC[0].v[i] + 0.587 * lowC[1].v[i] + 0.114 * lowC[2].v[i] + 4
+                ratio = min(1.25, max(0.75, yr / yc))
+            }
             for ch in 0..<3 {
                 let comp = Float(c.image.px[i * 4 + ch])
-                let v: Float = garment ? lowR[ch].v[i] + (comp - lowC[ch].v[i]) : Float(R.px[i * 4 + ch])
+                let v: Float = garment ? comp * ratio : Float(R.px[i * 4 + ch])
                 final.px[i * 4 + ch] = UInt8(min(255, max(0, comp * (1 - w) + v * w)))
             }
         }
