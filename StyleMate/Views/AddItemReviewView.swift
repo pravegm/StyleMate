@@ -40,6 +40,7 @@ struct AddItemReviewView: View {
         /// FashionSigLIP embedding of the cutout (visual duplicate matching).
         var featurePrint: [Float]? = nil
         var quality: Float = 0
+        var truncated: Bool = false
 
         var isDuplicate: Bool { duplicateMatch != nil }
     }
@@ -355,7 +356,8 @@ struct AddItemReviewView: View {
                                 garmentLength: seg.garmentLength,
                                 details: seg.details ?? "",
                                 featurePrint: seg.featurePrint,
-                                quality: seg.quality
+                                quality: seg.quality,
+                                truncated: seg.truncated
                             )
                         }
 
@@ -414,7 +416,8 @@ struct AddItemReviewView: View {
                     garmentLength: seg.garmentLength,
                     details: seg.details ?? "",
                                 featurePrint: seg.featurePrint,
-                                quality: seg.quality
+                                quality: seg.quality,
+                                truncated: seg.truncated
                 )
             }
 
@@ -540,7 +543,7 @@ struct AddItemReviewView: View {
                 details: item.details.isEmpty ? nil : item.details
             )
             if let fp = item.featurePrint {
-                ItemEmbeddingStore.shared.set(fp, quality: item.quality, for: wardrobeItem.id)
+                ItemEmbeddingStore.shared.set(fp, quality: item.quality, truncated: item.truncated, for: wardrobeItem.id)
             }
             wardrobeViewModel.items.append(wardrobeItem)
             wardrobeViewModel.syncItemToCloud(wardrobeItem)

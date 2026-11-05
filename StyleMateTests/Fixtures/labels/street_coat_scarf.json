@@ -1,0 +1,12 @@
+{
+  "fixture": "street_coat_scarf.jpg",
+  "items": [
+    {"id": "grey_coat", "kind": "outerLayer", "categories": ["Outerwear"], "products": ["Coats", "Overcoats", "Trench Coats"], "colors_primary": ["Gray", "Silver"], "colors_all": ["Charcoal", "Gray", "Silver", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.234, 0.199, 0.616, 0.597], "sleeve": ["Long Sleeve"]},
+    {"id": "black_top", "kind": "innerTop", "categories": ["Tops", "One-Pieces", "Mid-Layers"], "products": ["T-Shirts", "Tunics", "Turtlenecks", "Sweaters", "Dresses", "Tank Tops"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.36, 0.2, 0.48, 0.62]},
+    {"id": "leather_leggings", "kind": "lower", "categories": ["Bottoms"], "products": ["Leggings"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.344, 0.445, 0.479, 0.845]},
+    {"id": "silk_scarf", "kind": "neckwear", "categories": ["Accessories"], "products": ["Scarves"], "colors_primary": ["Burgundy", "Red", "Maroon", "Gray", "Yellow", "Gold", "Silver", "White"], "colors_all": ["Black", "Burgundy", "Charcoal", "Gold", "Gray", "Maroon", "Pink", "Red", "Silver", "White", "Yellow"], "pattern": ["Geometric", "Paisley", "Floral", "Stripes"], "core": true, "bbox": [0.263, 0.116, 0.591, 0.486]},
+    {"id": "red_sunglasses", "kind": "eyewear", "categories": ["Accessories"], "products": ["Sunglasses"], "colors_primary": ["Red", "Coral", "Pink", "Burgundy"], "colors_all": ["Black", "Burgundy", "Coral", "Maroon", "Pink", "Red"], "pattern": null, "core": true, "bbox": [0.441, 0.081, 0.539, 0.124]},
+    {"id": "white_sneakers", "kind": "footwear", "categories": ["Footwear"], "products": ["Sneakers", "Platform Shoes"], "colors_primary": ["White", "Silver"], "colors_all": ["Gray", "Silver", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.344, 0.838, 0.466, 0.97]},
+    {"id": "black_bag", "kind": "bag", "categories": ["Accessories"], "products": ["Handbags", "Crossbody Bags", "Clutches", "Backpacks"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.228, 0.503, 0.344, 0.673]}
+  ]
+}

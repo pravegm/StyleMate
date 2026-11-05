@@ -25,11 +25,14 @@ For each photo of you, `WardrobeExtractor`:
 1. **Finds and crops the person** at a 2:3 portrait aspect so the garments fill the analysis grid.
 2. **Parses** the crop with two Core ML segmentation models on a shared 384×576 grid:
    - **GarmentParser** — the FASHN human parser (SegFormer-B4): which pixels are clothing vs face/hair/arms/hands/legs/torso, and the coarse region (top, dress, skirt, pants, shoes, bag, hat, scarf, glasses, belt, jewelry). Skin never leaks into a garment.
-   - **GarmentLabeler** — a Fashionpedia SegFormer-B3: the garment *type* per pixel. `GarmentSegmenter` votes inside each region, which splits an open coat or jacket from the top underneath it.
+   - **GarmentLabeler** — a Fashionpedia SegFormer-B3: the garment *type* per pixel, plus its hood / collar / lapel / sleeve *part* channels. `GarmentSegmenter` votes inside each region, which splits an open coat or jacket from the top underneath it, a black top from black jeans the parser merged into one "jumpsuit", and black boots from black trousers or tights. The part channels confirm hoods (no "hoodie" without one), sleeves and tailored lapels.
+   - Grey padding past the photo's edge is masked out, so it never becomes garment. **Close-up passes** re-parse the head, each hand and the feet at full resolution to find what the full-body pass missed (sunglasses, a cap or turban, a watch, a bag, shoes).
 3. **Cuts each item out** at full resolution (`GarmentCutout`): edge-aware mask upsampling guided by the photo, colour decontamination of soft edges (no halos), and a pyramid fill of small holes where a hand, arm, hair, strap or belt covered the fabric. Every cutout is trimmed and centred on a transparent square, and shown on a soft studio backdrop (`ItemCutoutTile`).
-4. **Names it** (`FashionClassifier`): **Marqo-FashionSigLIP** (Apache-2.0) embeds the cutout and is compared zero-shot against precomputed text embeddings (`FashionVocabulary.json`) for product (and therefore category), pattern, material, fit, sleeve, neckline and length; colours are *measured* by k-means over the fabric pixels in CIELAB. On Apple Intelligence devices (iOS 27+), Apple's **on-device** foundation model (`SystemLanguageModel`, never Private Cloud Compute) adds a short details line and any clearly readable brand (`GarmentDescriber`).
+4. **Names it** (`FashionClassifier`): **Marqo-FashionSigLIP** (Apache-2.0) embeds the cutout and is compared zero-shot against precomputed text embeddings (`FashionVocabulary.json`) for product (and therefore category), pattern, material, fit, sleeve, neckline and length. Tops, layers and one-pieces are ranked across all three groups (a back-view coat the labeler called a dress becomes a coat); a top seen only between jacket halves or cut off by the frame is limited to everyday tops; rare prints need a clear margin over "Solid". Colours are *measured*: k-means (k=5, merged shades) over the fabric pixels in CIELAB after a damped white balance / exposure correction from the scene, named by hue family then lightness and chroma (so denim is Blue and a dusty-pink coat Pink, not Charcoal and Gray). On Apple Intelligence devices (iOS 27+), Apple's **on-device** foundation model (`SystemLanguageModel`, never Private Cloud Compute) adds a short details line and any clearly readable brand (`GarmentDescriber`).
 5. **Scores the view** (size, sharpness, not cut off by the frame, little occlusion). Items too small or too poor to make a good wardrobe image are skipped — a better photo will catch them.
 6. **Trust before volume** (`ItemTrust`): the scan only adds items it's sure about. Cutouts that split into several pieces (hair + lens "ties"), views with quality under 0.4, and small jewelry / ties / belts without a clear view are held back — Home shows "We weren't sure about 1 item — tap to add" — and start deselected in the manual review screen.
+
+6. **Studio image** (`Services/Wardrobe/Studio/`): every item gets a lifelike catalog photo made **on the iPhone** by a Stable Diffusion 1.5-class model (dreamshaper-8, Core ML on the Neural Engine). Tops, layers and dresses are *generated* by image-to-image (0.65) from a **flat-lay silhouette filled with the garment's own fabric** (`StudioTemplate`: t-shirt, shirt, jacket, coat, tunic, dress or tank; trousers for bottoms cut off by the frame), which locks one whole garment, centred, in its real colour and texture. Text-to-image is only the fallback; without a template the model tends to draw a person wearing the garment. Trousers, shoes, bags and hats are *refined* from the cutout (image-to-image at ~0.5), which keeps their exact look. Anything cut off by the photo frame, or with occluded parts left unfilled, is generated. Several candidates are rendered in one batch and cut out of their white background. A candidate is rejected outright for a second object, a white panel, a body or mannequin, touching the frame, a "failed render" look (zero-shot), or too little FashionSigLIP similarity to your item (0.80 for a refine, 0.70 text-to-image, 0.55 template). The best of the rest wins; if none is left, the clean cutout stays. Renders run in the background (`StudioQueue`), always from the original cutout, and wait while a photo scan runs, the phone is hot, in Low Power Mode, low on battery or memory; they stop when the app is backgrounded. The item page can flip between **Studio** and **From your photo**. Timing: the CI simulator runs the UNet on its CPU (about 15 min for two candidates); on an iPhone's Neural Engine expect roughly a second per denoising step, so about 40–60 s per item (an estimate from Apple's ml-stable-diffusion benchmarks for SD 1.5, not yet measured on a device). The closet keeps showing the cutout until the render lands.
 
 Then `DuplicateDetector` compares the item with the wardrobe using the visual embeddings (`ItemEmbeddingStore`) plus attribute gates. The same garment seen again in a **better** photo **upgrades** the wardrobe image instead of adding a duplicate.
 
@@ -69,17 +72,19 @@ The calendar also **fills itself** (`Services/Insights/WearLogSuggestions`): whe
 ## Architecture
 
 - **Language / UI**: Swift, SwiftUI (UIKit interop for `ImagePicker` and camera capture). MVVM.
-- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder. Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
-- **Local persistence**: `UserDefaults` (wardrobe items per user, sync ledger), wardrobe images / thumbnails / outfit-history snapshots under `Application Support/wardrobe_images/`, the selfie under `Application Support/Selfie/`, the face gallery under `Application Support/FaceReference/` (with per-entry provenance: selfie / confirmed / learned), item embeddings under `Application Support/WardrobeEmbeddings/`, Core Data (outfit history, scoped per user; a damaged store is moved to `Application Support/CoreDataBackups/` instead of crashing). Personal files are excluded from iCloud Backup and use `completeUntilFirstUserAuthentication` file protection (`LocalStore`); older builds' `Documents/` files are moved there automatically.
+- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder, and the studio-render diffusion model (DreamShaper 8 img2img: text encoder, UNet, VAE encoder/decoder). Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
+- **Local persistence**: `UserDefaults` (wardrobe items per user, sync ledger), wardrobe images / thumbnails / outfit-history snapshots under `Application Support/wardrobe_images/`, the selfie under `Application Support/Selfie/`, the face gallery under `Application Support/FaceReference/` (with per-entry provenance: selfie / confirmed / learned), item embeddings under `Application Support/WardrobeEmbeddings/items.bin` (compact binary, written off the main thread, debounced), studio renders' bookkeeping under `Application Support/Studio/`, Core Data (outfit history, scoped per user; a damaged store is moved to `Application Support/CoreDataBackups/` instead of crashing). Personal files are excluded from iCloud Backup and use `completeUntilFirstUserAuthentication` file protection (`LocalStore`); older builds' `Documents/` files are moved there automatically.
 - **Cloud**: CloudKit private DB only (your own iCloud). No third-party AI services.
 - **Weather**: met.no primary with Open-Meteo fallback (no key).
 
 ```
 StyleMate/
 ├── Models/                      # WardrobeItem, Category (+ WardrobeViewModel), ProductType, OutfitType, User, Core Data model
-├── ML/                          # git-ignored: GarmentParser / GarmentLabeler / FashionEncoder .mlpackage + FashionVocabulary.json
+├── ML/                          # git-ignored: GarmentParser / GarmentLabeler / FashionEncoder .mlpackage + FashionVocabulary.json;
+│                                #   Studio/StudioModels.bundle (compiled diffusion .mlmodelc + tokenizer)
 ├── Services/
 │   ├── Wardrobe/                # WardrobeExtractor, WardrobeML, GarmentSegmenter, GarmentCutout, FashionClassifier, ColorNamer, GarmentDescriber, ItemEmbeddingStore
+│   ├── Studio/                  # StudioRenderer (on-device img2img product render)
 │   ├── Outfits/                 # OutfitEngine, StyleKnowledge, OutfitMood, StyleIntentParser, OnDeviceStylist
 │   ├── ImageAnalysisService     # thin entry point to the wardrobe pipeline
 │   ├── SCRFDDetector / FaceMatchingService   # face detection, alignment, AdaFace embeddings, identity resolution
@@ -93,6 +98,7 @@ StyleMate/
 │   ├── AuthService (local profile), CloudKitService, PersistenceController, OnboardingManager
 │   ├── SelfieCameraService, WeatherService, LocationService
 ├── ViewModels/                  # HomeViewModel, MyOutfitsViewModel, FaceReferenceViewModel
+├── Vendor/StableDiffusion/      # Apple ml-stable-diffusion Swift pipeline (MIT, vendored; see its README)
 ├── Views/                       # Home, TodayOutfitSheet, MyWardrobe, ItemDetail, AddItem*, MyOutfits, Profile, Onboarding/, Components/
 ├── DesignSystem.swift
 └── StyleMateApp.swift
@@ -106,6 +112,10 @@ Declared in `Info.plist`: **Photos** (wardrobe building and scan; `PHPhotoLibrar
 
 Nobody needs a local Mac build to work on StyleMate: **every branch push runs `.github/workflows/ci.yml`** on GitHub's Apple-silicon `xcode-27` runner. It regenerates all models into the Actions cache, builds the app, and runs the simulator tests (including end-to-end garment extraction on CC0 street photos in `StyleMateTests/Fixtures/`, whose cutouts are uploaded in the `ci-report` artifact).
 
+**Wardrobe benchmark**: `WardrobeBenchmarkTests` scores extraction against hand labels (`StyleMateTests/Fixtures/labels/<photo>.json`: every garment's kind, accepted products and colours, pattern, sleeve and box). Predictions are matched to labels by box overlap; precision / recall, category, product and colour accuracy, pattern errors, fragment rate, seconds per photo and the duplicate-threshold check go to `benchmark.json` and `duplicates.json` in the report. The test fails if a headline metric drops more than 3 points below `labels/baseline.json`; update that file when a change is a real improvement. The studio tests save every render candidate with its scores (`studio_pipeline/`) and compare a Core ML render with a diffusers reference of the same request.
+
+**End-to-end UI tests**: the `ui-tests` CI job drives the real app in the simulator with XCUITest (`StyleMateUITests/`). It covers the closet, "Style Me" (mood → 5 options → swap a piece → save → the look appears on today's date in the calendar), manual outfit logging, and a gallery import through the system photo picker into on-device extraction. DEBUG-only launch arguments (`-uiTestResetState`, `-uiTestDemoUser`, `-uiTestSkipOnboarding`, `-uiTestSeedWardrobe`, in `StyleMate/Debug/DebugLaunchSupport.swift`) sign in a demo user and seed a wardrobe. Screenshots of every step are uploaded as the `e2e-screens` artifact. The simulator build is ad-hoc signed so CloudKit's entitlements survive.
+
 To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
 
 1. `git clone https://github.com/pravegm/StyleMate.git`
@@ -113,6 +123,7 @@ To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
    ```bash
    bash scripts/build_face_models.sh       # -> MobileFaceNet.mlpackage + SCRFD10G.mlpackage at the repo root
    bash scripts/build_wardrobe_models.sh   # -> StyleMate/ML/*.mlpackage + FashionVocabulary.json
+   bash scripts/build_studio_models.sh     # -> StyleMate/ML/Studio/StudioModels.bundle (macOS + Xcode, 30-90 min)
    ```
    The face embedder takes **BGR** input (handled in `createInputMultiArray`); see `scripts/convert_adaface.py`, `convert_scrfd.py` and `convert_wardrobe_models.py` (each parity-checks Core ML against PyTorch).
 3. `open StyleMate.xcodeproj`, set your signing team, and run (a real device for the selfie camera).
@@ -132,7 +143,7 @@ StyleMate runs natively full screen on the iPhone Duo's inner and cover displays
 
 ## Licensing note
 
-The bundled model weights come with their own licences, several of which are research / non-commercial (SCRFD, AdaFace's training data, the SegFormer-based parsers). They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
+The bundled model weights come with their own licences, several of which are research / non-commercial (SCRFD, AdaFace's training data, the SegFormer-based parsers). The studio-render model (DreamShaper 8) is CreativeML OpenRAIL-M: commercial use is allowed, but its use restrictions must be passed on in the app's terms. They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
 
 ## License
 

@@ -27,6 +27,10 @@ enum ClosetActions {
                     WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
                 }
                 WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
+                // The original cutout a studio render was made from.
+                if let original = StudioStore.shared.originalCutout(for: item) {
+                    WardrobeImageFileHelper.deleteImage(at: original)
+                }
                 ItemEmbeddingStore.shared.remove(item.id)
             }
         }

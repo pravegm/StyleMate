@@ -1,0 +1,10 @@
+{
+  "fixture": "casual_denim_jacket_hat.jpg",
+  "items": [
+    {"id": "denim_jacket", "kind": "outerLayer", "categories": ["Outerwear"], "products": ["Denim Jackets"], "colors_primary": ["Blue", "Light Blue"], "colors_all": ["Blue", "Light Blue", "Navy", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.268, 0.388, 0.838, 0.749], "sleeve": ["Long Sleeve"]},
+    {"id": "cream_top", "kind": "innerTop", "categories": ["Tops"], "products": ["T-Shirts", "Tank Tops", "Blouses", "Camisoles", "Tunics"], "colors_primary": ["White", "Cream"], "colors_all": ["Beige", "Cream", "Silver", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.4, 0.47, 0.73, 0.73]},
+    {"id": "white_ripped_jeans", "kind": "lower", "categories": ["Bottoms"], "products": ["Jeans"], "colors_primary": ["White"], "colors_all": ["Cream", "Light Blue", "Silver", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.358, 0.723, 0.746, 1.0]},
+    {"id": "fedora", "kind": "headwear", "categories": ["Accessories"], "products": ["Fedoras", "Sun Hats"], "colors_primary": ["Tan", "Beige"], "colors_all": ["Beige", "Brown", "Khaki", "Tan"], "pattern": ["Solid"], "core": true, "bbox": [0.321, 0.257, 0.645, 0.389]},
+    {"id": "necklace", "kind": "jewelry", "categories": ["Accessories"], "products": ["Necklaces", "Chains", "Pendants"], "colors_primary": ["Gold", "Silver"], "colors_all": ["Gold", "Silver"], "pattern": null, "core": false, "bbox": [0.47, 0.47, 0.56, 0.56]}
+  ]
+}

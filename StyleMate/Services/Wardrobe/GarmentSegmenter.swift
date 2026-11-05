@@ -43,6 +43,13 @@ struct GarmentInstance {
     let box: (Int, Int, Int, Int)
     /// Mask touches the grid edge on these sides (garment may be cut off by the frame).
     let touchesEdge: (top: Bool, bottom: Bool, left: Bool, right: Bool)
+    /// Separate pieces kept (an open jacket's halves, two shoes; >1 for a
+    /// one-piece garment means a fragmented mask).
+    var parts: Int = 1
+
+    /// Labeler part evidence for upper-body garments (share of the mask).
+    struct PartShares { let hood: Float; let collar: Float; let lapel: Float; let sleeve: Float }
+    var partShares: PartShares?
 }
 
 /// Fuses the two segmentation maps into per-item masks.
@@ -70,7 +77,8 @@ enum GarmentSegmenter {
         (.top, [1, 2, 3, 4, 5, 6, 10, 13, 11, 12]),
         (.dress, [11, 12, 10, 13]),
         (.skirt, [9, 11]),
-        (.pants, [7, 8, 22, 12]),
+        // 24: black boots / shoes the parser merges into black trousers or tights.
+        (.pants, [7, 8, 22, 12, 24]),
         (.feet, [24, 23]),
         (.bag, [25]),
         (.hat, [15, 16]),
@@ -79,6 +87,10 @@ enum GarmentSegmenter {
         (.belt, [20]),
         (.jewelry, [19])
     ]
+
+    /// Exported labeler part channels (after the 27 garment classes): hood,
+    /// collar, lapel, sleeve (Fashionpedia 28, 29, 30, 32).
+    static let partChannels = (hood: 27, collar: 28, lapel: 29, sleeve: 30)
 
     private static func kind(forLabelerClass c: Int, region: P) -> GarmentKind {
         switch c {
@@ -96,11 +108,23 @@ enum GarmentSegmenter {
         }
     }
 
-    static func segment(parser labels: [UInt8], labelerLogits logits: [Float]) -> [GarmentInstance] {
-        let n = WardrobeML.gridCount
-        guard labels.count == n, logits.count >= 27 * n else { return [] }
+    /// A garment the parser split over two regions (boots as "feet" and as
+    /// "pants"; jeans as "dress" and "pants") is merged back into one.
+    private static func family(_ c: Int) -> Int {
+        switch c {
+        case 7, 8, 22: return 7      // trousers / shorts / tights
+        case 23, 24: return 24       // shoes, socks
+        default: return c
+        }
+    }
 
-        var instances: [GarmentInstance] = []
+    static func segment(parser labels: [UInt8], labelerLogits logits: [Float]) -> [GarmentInstance] {
+        let n = WardrobeML.gridCount, w = WardrobeML.gridW
+        guard labels.count == n, logits.count >= 27 * n else { return [] }
+        let hasParts = logits.count >= 31 * n
+
+        // (kind, labeler class, pixels) groups from every region, merged below.
+        var pending: [(kind: GarmentKind, cls: Int, pixels: [Int])] = []
         for (region, classes) in allowed {
             var idx: [Int] = []
             for i in 0..<n where labels[i] == region.rawValue { idx.append(i) }
@@ -128,24 +152,124 @@ enum GarmentSegmenter {
 
             // Group pixels into items.
             var groups: [Int: [Int]] = [:]    // labeler class → grid indices
+            let nonShoe = region == .pants ? pixelClass.filter { $0 != 24 } : pixelClass
+            let maj = nonShoe.isEmpty ? 7 : majority(nonShoe)
             if region == .top, let split = layerSplit(idx: idx, pixelClass: pixelClass) {
                 groups[split.outerClass] = split.outer
                 groups[split.innerClass] = split.inner
-            } else if region == .top {
-                groups[majority(pixelClass)] = idx
-            } else {
-                groups[majority(pixelClass)] = idx
-            }
-
-            for (cls, pixels) in groups {
-                let k = kind(forLabelerClass: cls, region: region)
-                if let inst = makeInstance(kind: k, labelerClass: cls, pixels: pixels, parser: labels) {
-                    instances.append(inst)
+            } else if region == .dress || (region == .top && (maj == 11 || maj == 12)),
+                      let split = topBottomSplit(idx: idx, logits: logits) {
+                // A black top over black jeans reads as one "jumpsuit".
+                groups[split.topClass] = split.top
+                groups[split.bottomClass] = split.bottom
+            } else if region == .pants {
+                // Shoes in the bottom quarter of a trouser region are boots.
+                var y0 = Int.max, y1 = 0
+                for i in idx { y0 = min(y0, i / w); y1 = max(y1, i / w) }
+                let footLine = y0 + (y1 - y0) * 3 / 4
+                var shoe: [Int] = [], rest: [Int] = []
+                for (k, i) in idx.enumerated() {
+                    if pixelClass[k] == 24 && i / w >= footLine { shoe.append(i) } else { rest.append(i) }
                 }
+                if Double(shoe.count) >= Double(n) * 0.0015 {
+                    groups[24] = shoe
+                    groups[maj == 24 ? 7 : maj] = rest
+                } else {
+                    groups[maj == 24 ? 7 : maj] = idx
+                }
+            } else {
+                groups[maj] = idx
+            }
+            for (cls, pixels) in groups where !pixels.isEmpty {
+                pending.append((kind(forLabelerClass: cls, region: region), cls, pixels))
+            }
+        }
+
+        // Merge same-family groups of one-per-person kinds (bottoms, shoes).
+        var merged: [(kind: GarmentKind, cls: Int, pixels: [Int])] = []
+        for g in pending {
+            if [.lower, .footwear].contains(g.kind),
+               let j = merged.firstIndex(where: { $0.kind == g.kind && family($0.cls) == family(g.cls) }) {
+                if g.pixels.count > merged[j].pixels.count { merged[j].cls = g.cls }
+                merged[j].pixels += g.pixels
+            } else {
+                merged.append(g)
+            }
+        }
+
+        var instances: [GarmentInstance] = []
+        for g in merged {
+            if var inst = makeInstance(kind: g.kind, labelerClass: g.cls, pixels: g.pixels, parser: labels) {
+                if hasParts, [.innerTop, .outerLayer, .onePiece].contains(g.kind) {
+                    inst.partShares = partShares(mask: inst.mask, logits: logits)
+                }
+                instances.append(inst)
             }
         }
         // Largest first: the hero garments lead the review list.
         return instances.sorted { $0.pixelCount > $1.pixelCount }
+    }
+
+    /// When the labeler, unrestricted, sees a top over trousers inside one
+    /// region (each >= 25% of it, the top above), the region is two garments.
+    private static func topBottomSplit(idx: [Int], logits: [Float])
+        -> (topClass: Int, top: [Int], bottomClass: Int, bottom: [Int])? {
+        let n = WardrobeML.gridCount, w = WardrobeML.gridW
+        let tops: Set<Int> = [1, 2, 3], bottoms: Set<Int> = [7, 8, 22]
+        var top: [Int] = [], bottom: [Int] = [], other: [Int] = []
+        var topCounts: [Int: Int] = [:], bottomCounts: [Int: Int] = [:]
+        for i in idx {
+            var best = 1, bestV = -Float.infinity
+            for c in 1..<27 {
+                let v = logits[c * n + i]
+                if v > bestV { bestV = v; best = c }
+            }
+            if tops.contains(best) { top.append(i); topCounts[best, default: 0] += 1 }
+            else if bottoms.contains(best) { bottom.append(i); bottomCounts[best, default: 0] += 1 }
+            else { other.append(i) }
+        }
+        guard top.count * 4 >= idx.count, bottom.count * 4 >= idx.count else { return nil }
+        let ty = top.reduce(0) { $0 + $1 / w } / top.count, by = bottom.reduce(0) { $0 + $1 / w } / bottom.count
+        guard ty < by else { return nil }
+        // The rest goes to whichever side of the boundary it is on.
+        let line = (ty + by) / 2
+        for i in other { if i / w < line { top.append(i) } else { bottom.append(i) } }
+        let tc = topCounts.max { $0.value < $1.value }?.key ?? 2
+        let bc = bottomCounts.max { $0.value < $1.value }?.key ?? 7
+        return (tc, top, bc, bottom)
+    }
+
+    /// Share of an upper-body garment's pixels the unrestricted labeler calls
+    /// hood / collar / lapel / sleeve.
+    private static func partShares(mask: [UInt8], logits: [Float]) -> GarmentInstance.PartShares {
+        let n = WardrobeML.gridCount
+        var hood = 0, collar = 0, lapel = 0, sleeve = 0, total = 0
+        for i in 0..<n where mask[i] != 0 {
+            total += 1
+            var best = 0, bestV = -Float.infinity
+            for c in 0..<31 {
+                let v = logits[c * n + i]
+                if v > bestV { bestV = v; best = c }
+            }
+            switch best {
+            case partChannels.hood: hood += 1
+            case partChannels.collar: collar += 1
+            case partChannels.lapel: lapel += 1
+            case partChannels.sleeve: sleeve += 1
+            default: break
+            }
+        }
+        let t = Float(max(1, total))
+        return .init(hood: Float(hood) / t, collar: Float(collar) / t, lapel: Float(lapel) / t, sleeve: Float(sleeve) / t)
+    }
+
+    /// An instance from one parser class alone (the hair region, to check for
+    /// a turban or headscarf the parser took for hair).
+    static func instance(kind: GarmentKind, parserClass: P, labels: [UInt8]) -> GarmentInstance? {
+        var px: [Int] = []
+        for i in 0..<labels.count where labels[i] == parserClass.rawValue { px.append(i) }
+        guard Double(px.count) >= Double(WardrobeML.gridCount) * 0.002 else { return nil }
+        return makeInstance(kind: kind, labelerClass: 15, pixels: px, parser: labels)
     }
 
     /// Layer rank of an upper-body class: what can be worn over what.
@@ -230,6 +354,9 @@ enum GarmentSegmenter {
             .filter { Double($0.element) >= Double(largest) * 0.12 }
             .sorted { $0.element > $1.element }
             .prefix(4).map { $0.offset + 1 })
+        // A tie is one solid piece; several small dark fragments labelled "tie"
+        // are hair or a shadow (seen in the e2e gallery test).
+        if labelerClass == 17, keep.count > 1 || Double(largest) < Double(n) * 0.002 { return nil }
         var count = 0
         var x0 = w, y0 = h, x1 = 0, y1 = 0
         for i in 0..<n {
@@ -277,6 +404,27 @@ enum GarmentSegmenter {
                     if occluders.contains(parser[i]) { holes[i] = 1; holeCount += 1 }
                 }
             }
+            // Trousers: a hand resting on the thigh bites a notch into the leg's
+            // outline that the small closing misses. Fill row runs bounded by the
+            // garment on both sides that are entirely hand / arm / bag (the gap
+            // between the legs is skin or background, so it stays open).
+            if kind == .lower {
+                let hand: Set<UInt8> = [P.hands.rawValue, P.arms.rawValue, P.bag.rawValue]
+                for y in y0..<y1 {
+                    var x = x0
+                    while x < x1 {
+                        guard mask[y * w + x] != 0 else { x += 1; continue }
+                        var e = x + 1
+                        while e < x1 && mask[y * w + e] != 0 { e += 1 }
+                        var g = e
+                        while g < x1 && mask[y * w + g] == 0 && hand.contains(parser[y * w + g]) { g += 1 }
+                        if g > e, g < x1, mask[y * w + g] != 0, g - e <= (x1 - x0) / 3 {
+                            for xx in e..<g where holes[y * w + xx] == 0 { holes[y * w + xx] = 1; holeCount += 1 }
+                        }
+                        x = g > e ? g : e
+                    }
+                }
+            }
             // Only credible completions: an open jacket's gap can be large; for
             // anything else a "hole" over a third of the garment is a different
             // garment or a body part, not an occlusion.
@@ -287,7 +435,8 @@ enum GarmentSegmenter {
         return GarmentInstance(
             kind: kind, labelerClass: labelerClass, mask: mask, holes: holes,
             pixelCount: count, holeCount: holeCount, box: (x0, y0, x1, y1),
-            touchesEdge: (top: y0 <= 1, bottom: y1 >= h - 1, left: x0 <= 1, right: x1 >= w - 1))
+            touchesEdge: (top: y0 <= 1, bottom: y1 >= h - 1, left: x0 <= 1, right: x1 >= w - 1),
+            parts: keep.count)
     }
 
     /// Morphological close with a 3x3 element (fills 1-px cracks along seams).

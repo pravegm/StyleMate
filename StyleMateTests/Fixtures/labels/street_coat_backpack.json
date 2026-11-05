@@ -1,0 +1,10 @@
+{
+  "fixture": "street_coat_backpack.jpg",
+  "items": [
+    {"id": "grey_jacket", "kind": "outerLayer", "categories": ["Outerwear"], "products": ["Jackets", "Coats", "Overcoats", "Bomber Jackets", "Shirt Jackets"], "colors_primary": ["Gray", "Silver"], "colors_all": ["Black", "Charcoal", "Gray", "Silver", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.33, 0.168, 0.717, 0.685], "sleeve": ["Long Sleeve", "3/4 Sleeve"]},
+    {"id": "leather_joggers", "kind": "lower", "categories": ["Bottoms", "Activewear"], "products": ["Joggers", "Trousers", "Track Pants", "Sweatpants", "Cargo Pants"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.411, 0.571, 0.642, 0.834]},
+    {"id": "backpack", "kind": "bag", "categories": ["Accessories"], "products": ["Backpacks"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal", "Gray"], "pattern": ["Solid"], "core": true, "bbox": [0.244, 0.527, 0.475, 0.847]},
+    {"id": "sneakers", "kind": "footwear", "categories": ["Footwear"], "products": ["Sneakers"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal", "Gray", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.426, 0.794, 0.635, 0.981]},
+    {"id": "cap", "kind": "headwear", "categories": ["Accessories"], "products": ["Baseball Caps"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.374, 0.044, 0.549, 0.137]}
+  ]
+}

@@ -58,12 +58,33 @@ jobs:
           test -f StyleMate/ML/GarmentLabeler.mlpackage/Manifest.json
           test -f StyleMate/ML/FashionEncoder.mlpackage/Manifest.json
           test -f StyleMate/ML/FashionVocabulary.json
+      # Studio-render diffusion model (SD 1.5-class img2img / text2img, ~1 GB). Cached at the repo root,
+      # NOT under StyleMate/ML, so a wardrobe-cache miss can never sweep it into the wardrobe cache.
+      - name: Restore studio models
+        id: scache
+        uses: actions/cache@v4
+        with:
+          path: StudioModels.bundle
+          key: studio-models-v1-${{ hashFiles('scripts/build_studio_models.sh', 'scripts/convert_studio_model.py') }}
+      - name: Build studio models
+        if: steps.scache.outputs.cache-hit != 'true'
+        run: bash scripts/build_studio_models.sh --out "$GITHUB_WORKSPACE/StudioModels.bundle"
+      - name: Check the studio models
+        run: |
+          du -sh StudioModels.bundle StudioModels.bundle/*
+          for m in TextEncoder Unet VAEEncoder VAEDecoder; do
+            test -f "StudioModels.bundle/$m.mlmodelc/coremldata.bin"
+          done
+          test -s StudioModels.bundle/vocab.json
+          test -s StudioModels.bundle/merges.txt
+          cat StudioModels.bundle/studio_manifest.json
 
   test:
     needs: models
     if: github.event_name != 'schedule'
     runs-on: xcode-27
-    timeout-minutes: 75
+    # 75 -> 120: the studio-render test runs SD img2img on the simulator's CPU.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - name: Restore face models
@@ -80,6 +101,16 @@ jobs:
           path: StyleMate/ML
           key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
           fail-on-cache-miss: true
+      - name: Restore studio models
+        uses: actions/cache/restore@v4
+        with:
+          path: StudioModels.bundle
+          key: studio-models-v1-${{ hashFiles('scripts/build_studio_models.sh', 'scripts/convert_studio_model.py') }}
+          fail-on-cache-miss: true
+      - name: Place studio models
+        # StyleMate/ML/Studio/StudioModels.bundle is inside the synchronized group, so Xcode copies the
+        # .bundle (and the compiled .mlmodelc folders in it) into the app verbatim.
+        run: mkdir -p StyleMate/ML/Studio && mv StudioModels.bundle StyleMate/ML/Studio/
 
       - name: Select Xcode
         run: |
@@ -120,6 +151,14 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee build.log | grep -E "error:|warning: .*StyleMate/|\*\* TEST BUILD" || true
           grep -q "\*\* TEST BUILD SUCCEEDED \*\*" build.log
+
+      - name: Check the studio models in the app
+        # They ship inside StudioModels.bundle so Xcode copies the compiled .mlmodelc folders verbatim.
+        run: |
+          APP=$(find "$RUNNER_TEMP/dd/Build/Products" -maxdepth 2 -name StyleMate.app -type d | head -1)
+          ls -la "$APP/StudioModels.bundle"
+          du -sh "$APP" "$APP/StudioModels.bundle"
+          diff -rq StyleMate/ML/Studio/StudioModels.bundle "$APP/StudioModels.bundle"
 
       - name: Unit tests
         run: |

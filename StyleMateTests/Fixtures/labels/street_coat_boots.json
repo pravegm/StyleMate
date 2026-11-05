@@ -1,0 +1,10 @@
+{
+  "fixture": "street_coat_boots.jpg",
+  "items": [
+    {"id": "grey_coat", "kind": "outerLayer", "categories": ["Outerwear"], "products": ["Coats", "Overcoats", "Blazers", "Jackets"], "colors_primary": ["Gray", "Silver"], "colors_all": ["Charcoal", "Gray", "Lavender", "Silver"], "pattern": ["Solid"], "core": true, "bbox": [0.396, 0.201, 0.669, 0.602], "sleeve": ["Long Sleeve"]},
+    {"id": "black_drape", "kind": "neckwear", "categories": ["Accessories"], "products": ["Scarves"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal", "Gray"], "pattern": ["Solid"], "core": true, "bbox": [0.447, 0.126, 0.646, 0.465]},
+    {"id": "sunglasses", "kind": "eyewear", "categories": ["Accessories"], "products": ["Sunglasses"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": null, "core": true, "bbox": [0.439, 0.154, 0.477, 0.184]},
+    {"id": "leather_leggings", "kind": "lower", "categories": ["Bottoms"], "products": ["Leggings"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal", "Gray"], "pattern": ["Solid"], "core": true, "bbox": [0.419, 0.582, 0.601, 0.81]},
+    {"id": "boots", "kind": "footwear", "categories": ["Footwear"], "products": ["Boots", "Ankle Boots", "Chelsea Boots"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.432, 0.788, 0.574, 0.949]}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "fixture": "flannel_shirt_group.jpg",
+  "items": [
+    {"id": "flannel_shirt", "kind": "innerTop", "categories": ["Tops", "Outerwear"], "products": ["Flannel Shirts", "Shirts", "Button-Down Shirts", "Shirt Jackets"], "colors_primary": ["Red"], "colors_all": ["Black", "Burgundy", "Charcoal", "Maroon", "Red", "White"], "pattern": ["Plaid", "Checks"], "core": true, "bbox": [0.137, 0.257, 0.828, 0.98], "sleeve": ["Long Sleeve"]},
+    {"id": "black_tee", "kind": "innerTop", "categories": ["Tops"], "products": ["T-Shirts", "Tank Tops"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.27, 0.3, 0.6, 0.98]},
+    {"id": "sunglasses", "kind": "eyewear", "categories": ["Accessories"], "products": ["Sunglasses"], "colors_primary": ["Black", "Brown", "Charcoal", "Gold"], "colors_all": ["Black", "Brown", "Charcoal", "Gold", "Gray", "Tan"], "pattern": null, "core": true, "bbox": [0.362, 0.236, 0.551, 0.305]},
+    {"id": "pendant", "kind": "jewelry", "categories": ["Accessories"], "products": ["Necklaces", "Chains", "Pendants"], "colors_primary": ["Gold"], "colors_all": ["Gold"], "pattern": null, "core": false, "bbox": [0.41, 0.33, 0.49, 0.52]}
+  ]
+}

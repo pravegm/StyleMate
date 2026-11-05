@@ -10,7 +10,8 @@ import Foundation
 ///   and coarse region (top / dress / skirt / pants / feet / bag / hat / scarf /
 ///   glasses / belt / jewelry). Softmax on a 576x384 grid.
 /// - **GarmentLabeler** (Fashionpedia SegFormer): garment *type* per pixel, which
-///   splits a jacket from the shirt under it. Logits for 27 classes, same grid.
+///   splits a jacket from the shirt under it. Logits for 27 garment classes plus
+///   hood / collar / lapel / sleeve parts (31 channels), same grid.
 /// - **FashionEncoder** (Marqo-FashionSigLIP): a 768-d embedding of an item
 ///   cutout, compared against precomputed text embeddings
 ///   (`FashionVocabulary.json`) for zero-shot product / pattern / material, and
@@ -80,7 +81,8 @@ final class WardrobeML {
         return (labels, conf)
     }
 
-    /// Labeler logits, channel-major `[27][gridCount]`, for a 512x512 RGB image
+    /// Labeler logits, channel-major `[31][gridCount]` (27 garments + 4 parts;
+    /// older builds: 27), for a 512x512 RGB image
     /// (the same crop as the parser, stretched square as in training).
     func label(_ image: CGImage) -> [Float]? {
         loadIfNeeded()

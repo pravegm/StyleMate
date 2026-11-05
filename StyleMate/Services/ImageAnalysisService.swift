@@ -30,6 +30,8 @@ class ImageAnalysisService {
         var featurePrint: [Float]? = nil
         /// 0...1 quality of this view of the item (see WardrobeExtractor).
         var quality: Float = 0
+        /// The item was cut off by the photo frame.
+        var truncated: Bool = false
     }
 
     // MARK: - On-device Segmentation Pipeline
@@ -56,7 +58,8 @@ class ImageAnalysisService {
                 garmentLength: a.garmentLength,
                 details: (notes?.details).flatMap { $0.isEmpty ? nil : $0 },
                 brand: notes?.brand ?? "",
-                maskImage: item.cutout, featurePrint: a.embedding, quality: item.quality))
+                maskImage: item.cutout, featurePrint: a.embedding, quality: item.quality,
+                truncated: item.truncated))
         }
         return out
     }

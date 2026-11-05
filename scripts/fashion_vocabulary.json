@@ -1,6 +1,6 @@
 {
   "upper_inner": {"template": "a photo of {}", "labels": [
-    ["Tops|T-Shirts", "a plain t-shirt"], ["Tops|Graphic Tees", "a graphic print t-shirt"], ["Tops|Polo T-Shirts", "a polo shirt"],
+    ["Tops|T-Shirts", "a plain t-shirt"], ["Tops|T-Shirts", "a short sleeve crew neck t-shirt"], ["Tops|Graphic Tees", "a graphic print t-shirt"], ["Tops|Polo T-Shirts", "a polo shirt"],
     ["Tops|Shirts", "a shirt"], ["Tops|Button-Down Shirts", "a button-down oxford shirt"], ["Tops|Flannel Shirts", "a flannel check shirt"],
     ["Tops|Blouses", "a blouse"], ["Tops|Henley", "a henley shirt"], ["Tops|Tank Tops", "a tank top"], ["Tops|Camisoles", "a camisole"],
     ["Tops|Crop Tops", "a crop top"], ["Tops|Tube Tops", "a tube top"], ["Tops|Off-Shoulder Tops", "an off-shoulder top"],
@@ -13,7 +13,7 @@
   ]},
   "upper_outer": {"template": "a photo of {}", "labels": [
     ["Outerwear|Jackets", "a jacket"], ["Outerwear|Leather Jackets", "a leather jacket"], ["Outerwear|Denim Jackets", "a denim jacket"],
-    ["Outerwear|Bomber Jackets", "a bomber jacket"], ["Outerwear|Puffer Jackets", "a puffer jacket"], ["Outerwear|Coats", "a coat"],
+    ["Outerwear|Bomber Jackets", "a bomber jacket"], ["Outerwear|Puffer Jackets", "a puffer jacket"], ["Outerwear|Coats", "a coat"], ["Outerwear|Coats", "a long coat seen from behind"],
     ["Outerwear|Overcoats", "a long wool overcoat"], ["Outerwear|Trench Coats", "a trench coat"], ["Outerwear|Blazers", "a blazer"],
     ["Outerwear|Parkas", "a parka"], ["Outerwear|Windbreakers", "a windbreaker"], ["Outerwear|Raincoats", "a raincoat"],
     ["Outerwear|Shirt Jackets", "a shirt jacket shacket"], ["Outerwear|Capes", "a cape"],
@@ -25,7 +25,8 @@
   "lower": {"template": "a photo of {}", "labels": [
     ["Bottoms|Jeans", "jeans"], ["Bottoms|Trousers", "trousers"], ["Bottoms|Chinos", "chinos"], ["Bottoms|Cargo Pants", "cargo pants"],
     ["Bottoms|Wide-Leg Pants", "wide-leg pants"], ["Bottoms|Palazzo Pants", "palazzo pants"], ["Bottoms|Linen Pants", "linen pants"],
-    ["Bottoms|Sweatpants", "sweatpants"], ["Bottoms|Joggers", "joggers"], ["Bottoms|Leggings", "leggings"], ["Bottoms|Shorts", "shorts"],
+    ["Bottoms|Sweatpants", "sweatpants"], ["Bottoms|Joggers", "joggers"], ["Bottoms|Joggers", "leather jogger pants with elastic cuffs"],
+    ["Bottoms|Joggers", "jogger pants with elastic ankle cuffs"], ["Bottoms|Leggings", "leggings"], ["Bottoms|Leggings", "skin-tight leggings"], ["Bottoms|Shorts", "shorts"],
     ["Bottoms|Capris", "capri pants"], ["Bottoms|Culottes", "culottes"], ["Bottoms|Skirts", "a skirt"], ["Bottoms|Mini Skirts", "a mini skirt"],
     ["Bottoms|Skorts", "a skort"], ["Activewear|Track Pants", "track pants"], ["Activewear|Yoga Pants", "yoga pants"],
     ["Activewear|Athletic Shorts", "athletic shorts"], ["Activewear|Cycling Shorts", "cycling shorts"],
@@ -52,11 +53,11 @@
     ["Accessories|Baseball Caps", "a baseball cap"], ["Accessories|Beanies", "a knit beanie"], ["Accessories|Fedoras", "a fedora hat"],
     ["Accessories|Bucket Hats", "a bucket hat"], ["Accessories|Sun Hats", "a wide-brim sun hat"], ["Accessories|Berets", "a beret"],
     ["Accessories|Bandanas", "a bandana"], ["Accessories|Turbans", "a turban"], ["Accessories|Headbands", "a headband"],
-    ["Accessories|Scarves", "a headscarf"], ["Accessories|Hair Accessories", "a hair clip accessory"]
+    ["Accessories|Scarves", "a headscarf"], ["Accessories|Scarves", "a hijab"], ["Accessories|Hair Accessories", "a hair clip accessory"]
   ]},
   "bag": {"template": "a photo of {}", "labels": [
     ["Accessories|Handbags", "a handbag"], ["Accessories|Tote Bags", "a tote bag"], ["Accessories|Crossbody Bags", "a crossbody bag"],
-    ["Accessories|Backpacks", "a backpack"], ["Accessories|Clutches", "a clutch purse"], ["Accessories|Fanny Packs", "a fanny pack belt bag"],
+    ["Accessories|Backpacks", "a backpack"], ["Accessories|Backpacks", "a backpack with shoulder straps"], ["Accessories|Clutches", "a clutch purse"], ["Accessories|Fanny Packs", "a fanny pack belt bag"],
     ["Accessories|Briefcases", "a briefcase"], ["Accessories|Messenger Bags", "a messenger bag"], ["Accessories|Wallets", "a wallet"]
   ]},
   "neckwear": {"template": "a photo of {}", "labels": [
@@ -66,8 +67,19 @@
     ["Accessories|Watches", "a wrist watch"], ["Accessories|Bracelets", "a bracelet"], ["Accessories|Necklaces", "a necklace"],
     ["Accessories|Chains", "a chain necklace"], ["Accessories|Pendants", "a pendant necklace"], ["Accessories|Earrings", "earrings"], ["Accessories|Rings", "a ring"]
   ]},
+  "render_qc": {"template": "a photo of {}", "labels": [
+    ["stack", "a stack of folded clothes"], ["flatlay", "a flat lay of several clothing items with accessories"],
+    ["panel", "a t-shirt with a white rectangle on it"], ["person", "a person wearing clothes"], ["mannequin", "a mannequin"]
+  ]},
+  "lower_details": {"template": "a photo of {}", "labels": [
+    ["ripped", "ripped jeans with torn knees"], ["ripped", "distressed jeans with holes"],
+    ["plain", "plain jeans without holes"], ["plain", "smooth plain trousers"]
+  ]},
+  "hair_check": {"template": "a photo of {}", "labels": [
+    ["Hair", "a person's hair"], ["Hair", "long dark hair"], ["Accessories|Turbans", "a turban"], ["Accessories|Scarves", "a headscarf hijab"]
+  ]},
   "pattern": {"template": "a garment with a {} pattern", "labels": [
-    ["Solid", "solid plain single color"], ["Stripes", "striped"], ["Checks", "small check"], ["Plaid", "plaid tartan"], ["Polka Dot", "polka dot"],
+    ["Solid", "solid plain single color"], ["Solid Denim", "acid wash denim"], ["Solid Denim", "distressed ripped denim"], ["Stripes", "striped"], ["Checks", "small check"], ["Plaid", "plaid tartan"], ["Polka Dot", "polka dot"],
     ["Floral", "floral print"], ["Animal Print", "leopard animal print"], ["Camouflage", "camouflage"], ["Geometric", "geometric print"],
     ["Houndstooth", "houndstooth"], ["Paisley", "paisley"], ["Tie-Dye", "tie-dye"]
   ]},

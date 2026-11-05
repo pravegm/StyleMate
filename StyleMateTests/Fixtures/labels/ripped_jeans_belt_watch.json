@@ -1,0 +1,11 @@
+{
+  "fixture": "ripped_jeans_belt_watch.jpg",
+  "items": [
+    {"id": "navy_tee", "kind": "innerTop", "categories": ["Tops"], "products": ["T-Shirts"], "colors_primary": ["Navy", "Blue"], "colors_all": ["Blue", "Charcoal", "Navy"], "pattern": ["Solid"], "core": true, "bbox": [0.15, 0.0, 0.784, 0.37], "sleeve": ["Short Sleeve"]},
+    {"id": "ripped_jeans", "kind": "lower", "categories": ["Bottoms"], "products": ["Jeans"], "colors_primary": ["Light Blue", "Blue"], "colors_all": ["Blue", "Light Blue", "Navy", "Silver", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.116, 0.253, 0.777, 1.0]},
+    {"id": "belt", "kind": "belt", "categories": ["Accessories"], "products": ["Belts"], "colors_primary": ["Black", "Charcoal"], "colors_all": ["Black", "Charcoal", "Gold"], "pattern": null, "core": true, "bbox": [0.286, 0.253, 0.537, 0.33]},
+    {"id": "watch", "kind": "jewelry", "categories": ["Accessories"], "products": ["Watches"], "colors_primary": ["Black", "Navy", "Charcoal", "Blue"], "colors_all": ["Black", "Blue", "Charcoal", "Gray", "Navy", "Silver"], "pattern": null, "core": true, "bbox": [0.816, 0.279, 0.936, 0.327]},
+    {"id": "printed_bag", "kind": "bag", "categories": ["Accessories"], "products": ["Backpacks", "Tote Bags", "Handbags", "Messenger Bags"], "colors_primary": ["Black", "Purple", "Lavender", "Blue", "Navy", "Charcoal", "Gray", "Yellow"], "colors_all": ["Black", "Blue", "Charcoal", "Gray", "Lavender", "Light Blue", "Navy", "Orange", "Purple", "Red", "White", "Yellow"], "pattern": null, "core": true, "bbox": [0.709, 0.438, 1.0, 1.0]},
+    {"id": "bracelet", "kind": "jewelry", "categories": ["Accessories"], "products": ["Bracelets"], "colors_primary": ["Black"], "colors_all": ["Black"], "pattern": null, "core": false, "bbox": [0.1, 0.345, 0.155, 0.37]}
+  ]
+}

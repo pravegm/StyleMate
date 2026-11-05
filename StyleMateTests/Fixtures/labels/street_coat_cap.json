@@ -1,0 +1,9 @@
+{
+  "fixture": "street_coat_cap.jpg",
+  "items": [
+    {"id": "grey_coat", "kind": "outerLayer", "categories": ["Outerwear"], "products": ["Coats", "Overcoats", "Jackets", "Shirt Jackets"], "colors_primary": ["Gray", "Silver"], "colors_all": ["Black", "Charcoal", "Gray", "Silver", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.425, 0.153, 0.915, 0.583], "sleeve": ["Long Sleeve", "3/4 Sleeve"]},
+    {"id": "leather_joggers", "kind": "lower", "categories": ["Bottoms", "Activewear"], "products": ["Joggers", "Trousers", "Track Pants", "Sweatpants"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.515, 0.569, 0.73, 0.841]},
+    {"id": "sneakers", "kind": "footwear", "categories": ["Footwear"], "products": ["Sneakers"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal", "Gray", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.445, 0.839, 0.665, 0.973]},
+    {"id": "cap", "kind": "headwear", "categories": ["Accessories"], "products": ["Baseball Caps"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal", "Gray"], "pattern": ["Solid"], "core": true, "bbox": [0.534, 0.015, 0.7, 0.111]}
+  ]
+}

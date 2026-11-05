@@ -1,0 +1,9 @@
+{
+  "fixture": "street_leather_tunic.jpg",
+  "items": [
+    {"id": "leather_tunic", "kind": "onePiece", "categories": ["One-Pieces", "Tops", "Outerwear"], "products": ["Dresses", "Shirt Dresses", "Tunics", "Shirts", "Leather Jackets"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.382, 0.235, 0.594, 0.597], "sleeve": ["Short Sleeve"]},
+    {"id": "leather_leggings", "kind": "lower", "categories": ["Bottoms"], "products": ["Leggings"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal", "Gray"], "pattern": ["Solid"], "core": true, "bbox": [0.402, 0.577, 0.618, 0.846]},
+    {"id": "sneakers", "kind": "footwear", "categories": ["Footwear"], "products": ["Sneakers"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal", "Gray", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.418, 0.832, 0.657, 0.988]},
+    {"id": "sunglasses", "kind": "eyewear", "categories": ["Accessories"], "products": ["Sunglasses"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": null, "core": true, "bbox": [0.432, 0.17, 0.514, 0.197]}
+  ]
+}

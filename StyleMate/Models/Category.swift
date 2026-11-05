@@ -395,9 +395,11 @@ class WardrobeViewModel: ObservableObject {
             UserDefaults.standard.removeObject(forKey: flag + userId)
         }
 
-        // Embeddings: drop this user's entries in memory and on disk first (the store
-        // would otherwise rewrite them on its next save).
+        // Embeddings and studio-render bookkeeping: drop this user's entries in memory and
+        // on disk first (the stores would otherwise rewrite them on their next save).
         ItemEmbeddingStore.shared.remove(userItems.map(\.id))
+        StudioQueue.shared.cancel()
+        StudioStore.shared.remove(userItems.map(\.id))
 
         // Is anyone else's wardrobe on this phone? If not, wipe the shared folders whole
         // (catches orphaned files too); otherwise delete only this user's files.
@@ -410,6 +412,8 @@ class WardrobeViewModel: ObservableObject {
         } else {
             try? fm.removeItem(at: WardrobeImageFileHelper.folderURL)
             try? fm.removeItem(at: LocalStore.documents.appendingPathComponent(WardrobeImageFileHelper.folderName))
+            ItemEmbeddingStore.shared.removeAll()
+            StudioStore.shared.removeAll()
             try? fm.removeItem(at: LocalStore.applicationSupport.appendingPathComponent("WardrobeEmbeddings"))
         }
         WardrobeImageFileHelper.removeAllFromCache()

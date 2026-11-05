@@ -57,3 +57,29 @@ jacket, overcoat, crop top, jeans, sneakers, sunglasses, crossbody bag and scarf
 - App size is roughly 400 MB of models before any compression of the face model.
 - Item images are cutouts of the worn garment, not generated product renders
   like Google's. That is the trade-off of staying fully on-device.
+
+### Studio renders (lifelike item images, on-device)
+
+The founder's bar is lifelike catalog images, as Google Photos Wardrobe shows them
+("shirts need to look like shirts"), not cutouts. The decision is fully on-device: Apple cloud
+would be acceptable, but **iOS 27 has no headless Apple image API**. `ImageCreator` is
+discontinued, and Image Playground's photoreal mode is sheet-only, runs on PCC, needs a user
+confirmation per image and is rate-limited. So we run our own diffusion model on the Neural
+Engine.
+
+**Local experiments** (dreamshaper-8 = SD 1.5, CreativeML OpenRAIL-M):
+- **Image-to-image from the cutout at about 0.5:**
+  - Great for trousers and shoes: ripped white jeans and a blurry sneaker both became studio shots that keep their look.
+  - Bad for worn tops: the pose is kept and the model invents a mannequin.
+- **Text-to-image flat-lay from the measured description:** gives true catalog shirts and jackets. Four out of four denim jacket candidates were lifelike. Ranking by FashionSigLIP similarity to the real cutout picks the closest one (0.70–0.78).
+- **Text-to-image without negatives, or with "ghost mannequin" in the prompt:** draws people. The negatives and the "flat lay, top-down" wording are what make it work.
+
+**Pipeline** (`Services/Wardrobe/Studio/`):
+1. Plan: generate or refine.
+2. Render N candidates.
+3. Isolate the product (Vision foreground mask, largest object, so props are dropped).
+4. Match its Lab colours to the real garment.
+5. Score it: similarity minus body and cut-off penalties.
+6. Keep the best one, or keep the cutout if nothing reaches a similarity of 0.6.
+
+`StudioQueue` re-renders new and upgraded items in the background. The original cutout is kept as "From your photo".

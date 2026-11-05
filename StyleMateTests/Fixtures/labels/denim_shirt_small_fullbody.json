@@ -1,0 +1,9 @@
+{
+  "fixture": "denim_shirt_small_fullbody.jpg",
+  "items": [
+    {"id": "denim_jacket", "kind": "outerLayer", "categories": ["Outerwear", "Tops"], "products": ["Denim Jackets", "Shirt Jackets", "Shirts", "Button-Down Shirts"], "colors_primary": ["Blue", "Light Blue"], "colors_all": ["Blue", "Light Blue", "Navy"], "pattern": ["Solid"], "core": true, "bbox": [0.38, 0.499, 0.644, 0.703], "sleeve": ["Long Sleeve"]},
+    {"id": "black_top", "kind": "innerTop", "categories": ["Tops"], "products": ["T-Shirts", "Tank Tops", "Camisoles", "Crop Tops"], "colors_primary": ["Black"], "colors_all": ["Black", "Charcoal"], "pattern": ["Solid"], "core": true, "bbox": [0.455, 0.53, 0.577, 0.72]},
+    {"id": "black_jeans", "kind": "lower", "categories": ["Bottoms"], "products": ["Jeans"], "colors_primary": ["Black", "Charcoal"], "colors_all": ["Black", "Charcoal", "Gray"], "pattern": ["Solid"], "core": true, "bbox": [0.465, 0.7, 0.565, 0.86]},
+    {"id": "sneakers", "kind": "footwear", "categories": ["Footwear"], "products": ["Sneakers"], "colors_primary": ["Black", "Navy", "Charcoal"], "colors_all": ["Black", "Blue", "Charcoal", "Gray", "Navy", "White"], "pattern": ["Solid"], "core": true, "bbox": [0.488, 0.857, 0.596, 0.909]}
+  ]
+}
