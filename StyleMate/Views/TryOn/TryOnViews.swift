@@ -422,3 +422,33 @@ struct TryOnLookThumbnail: View {
         }
     }
 }
+
+/// A cached try-on of `items` if there is one (never renders), else `fallback`. For the calendar.
+struct TryOnCachedImage<Fallback: View>: View {
+    let items: [WardrobeItem]
+    var cornerRadius: CGFloat = DS.Radius.control
+    @ViewBuilder let fallback: () -> Fallback
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .accessibilityIdentifier("tryon.calendar")
+            } else {
+                fallback()
+            }
+        }
+        .task(id: items.map(\.id)) {
+            guard TryOnAvailability.isAvailable, let key = TryOnQueue.shared.key(for: items),
+                  let url = TryOnStore.shared.imageURL(key) else { image = nil; return }
+            image = await Task.detached(priority: .utility) { UIImage(contentsOfFile: url.path) }.value
+        }
+    }
+}

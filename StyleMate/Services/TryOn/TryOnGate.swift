@@ -12,12 +12,15 @@ import Foundation
 /// - **face unchanged**: face / hair / hands pixels are byte-identical to the photo;
 /// - **little invented**: the share of the person that had to be filled (old clothes the new outfit
 ///   doesn't cover) stays small, smaller still without the diffusion pass.
-/// Thresholds are calibrated in `tryon-lab/gate_cal.py` (see docs/TRY-ON.md).
+/// Thresholds from `tryon-lab/gate_cal.py` (90 pieces, 6 CC0 bodies x 7 outfits, composite): a correctly
+/// drawn piece scored similarity 0.513-0.949 (median 0.742) with chroma shift <= 2 and lightness shift
+/// <= 15; the most similar *other* item scored up to 0.856 (a navy vs a black tee), so similarity only
+/// catches gross failures and the colour check tells similar items apart.
 enum TryOnGate {
     static var minSimilarity: Float = 0.50
     static var minVisible: Float = 0.30
-    static var maxChromaShift: Float = 22
-    static var maxLightShift: Float = 34
+    static var maxChromaShift: Float = 12
+    static var maxLightShift: Float = 30
     static var maxFilledShare: Float = 0.12
     static var maxFilledShareHarmonized: Float = 0.35
 

@@ -27,7 +27,7 @@ as pieces. Everything runs on the iPhone; no photo, face or wardrobe data leaves
 | Garment geometry | `TryOnGarment.swift` | From the item image's silhouette: torso box (median run width over 55–85% of the height), hem, sleeves (pixels outside the torso columns: root + far end), bottoms' waist width and crotch. |
 | Composite | `TryOnCompositor.swift` | Each piece is split into parts and each part is mapped onto the skeleton with an affine transform: torso → shoulder line (width = chest × fit, length from product + length attribute: tee to the hip, cropped to the waist, coats to the knee, dresses by Short / Knee / Midi / Full); sleeves → upper arm and forearm (bent at the elbow; long sleeves end at the wrist); trousers → hips box + thigh / shin per leg (full-length ones end at the ankle). Drawn bottom → one-piece → top → outer layer. Shading = the photo's lighting (luminance ratio at two coarse scales, clamped 0.8–1.04) so the old garment's texture never prints through. Old clothing the new outfit doesn't cover becomes skin on the limbs / neck (median skin tone from the face and hands, shaded) or background elsewhere (push-pull fill). Shoes: the photo's footwear is recoloured toward the new pair (shape stays the photo's). Face, hair, hands, glasses, hat, bag and jewelry are copied back byte for byte. |
 | Harmonise | `TryOnHarmonizer.swift` | **Differential diffusion** (training-free per-pixel strength) with the studio's own dreamshaper-8 Core ML model: a 512×512 square around the person, DPM-Solver++ 2M Karras, 20 scheduled steps, guidance 5. Strength 0 on face / hands / background, 0.25 on garments (relight), 0.45 on their edges, 0.6 around fills, 0.75 on uncovered skin, 0.85 on uncovered background — so about 17 UNet steps run. Garments then take only the diffusion's **light** (a low-pass luminance ratio, clamped 0.75–1.25); their colour and texture stay the composite's. Uncovered skin / background take the diffusion's pixels (this is what turns a flat skin fill into real legs). |
-| Gate | `TryOnGate.swift` | Per worn piece: visible share ≥ 0.30 (an inner top under an outer layer is exempt), FashionSigLIP similarity of the piece as it appears on the body (masked crop on white) vs the item ≥ 0.50, median Lab chroma shift ≤ 22 and lightness shift ≤ 34. Whole image: face / hair / hands byte-identical (0 changed pixels), filled share of the person ≤ 0.12 without the diffusion pass / ≤ 0.35 with it. Any failure → the pieces. |
+| Gate | `TryOnGate.swift` | Per worn piece: visible share ≥ 0.30 (an inner top under an outer layer is exempt), FashionSigLIP similarity of the piece as it appears on the body (masked crop on white) vs the item ≥ 0.50, median Lab chroma shift ≤ 12 and lightness shift ≤ 30. Whole image: face / hair / hands byte-identical (0 changed pixels), filled share of the person ≤ 0.12 without the diffusion pass / ≤ 0.35 with it. Any failure → the pieces. |
 | Queue + cache | `TryOnQueue.swift`, `TryOnStore.swift` | User requests (the look on screen) first; background requests (the morning look on Home, the next deck options) wait for the studio queue's rules (no scan or studio render running, not hot, not Low Power, battery) and never run beside a studio render (two ~1 GB UNets). Cache key = SHA-256 of (pipeline version, body photo id, worn item ids + image paths), so a new studio render or a swap re-renders. Renders and the body photo live in `Application Support/TryOn/` (excluded from backup, protected). Stops and unloads in the background. `PerfLog.Metric.tryOn` times every render. |
 | Availability | `TryOnStore.swift` → `TryOnAvailability` | One switch (`isAvailable`); making it a Premium perk is a one-line change. |
 
@@ -53,8 +53,18 @@ Approaches considered (see "Licences" for why the off-the-shelf VTON models were
 
 Lab (`C:/Users/59527/StyleMate/tryon-lab/`, CPU, diffusers reference of the Swift code: `tryon.py`,
 `harmonize.py`, `gate_cal.py`; bodies = the CC0 fixture photos, items = studio renders made by the app's
-pipeline from CC0 photos, now `StyleMateTests/Fixtures/tryon/items`): see the numbers in the final
-section of this file and the CI `ci-report/_temp/report/tryon/` sheets.
+pipeline from CC0 photos, now `StyleMateTests/Fixtures/tryon/items`):
+
+- **Gate calibration** (`gate_cal.py`, composite, 90 pieces = 6 bodies × 7 outfits): a correctly drawn
+  piece's FashionSigLIP similarity on the body vs its own image: min 0.513, p10 0.574, median 0.742
+  (bottoms lowest: only the legs show). The best-scoring *other* item: median 0.683, p90 0.759, max
+  0.856 (navy vs black tee). Colour shift of correct pieces: ΔC ≤ 2.0, ΔL ≤ 15. Hence similarity ≥ 0.50
+  (gross failures), ΔC ≤ 12 (tells a navy tee from a black one, ΔC ≈ 20).
+- **Diffusion pass** (`harmonize.py`, CPU, 20 scheduled / 16–17 run steps, 8–13 min per look on the lab
+  CPU): turns flat skin fills into real legs and arms and hides seams; the first version (strength 0.45
+  on garments, colour from the diffusion) drifted a black dress toward navy and softened jeans, hence
+  the light-only relight and 0.25 on garments.
+- See the CI `ci-report/_temp/report/tryon/` sheets for the Swift pipeline's own output.
 
 ## Quality — honest status
 
