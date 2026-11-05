@@ -102,6 +102,57 @@ struct ReliabilityTests {
         #expect(out.needAssets.map(\.id) == [fresh.id])
     }
 
+    // MARK: - Fresh install / new iPhone (per-install profile ids)
+
+    private func record(id: UUID, uploadedBy profileID: String, product: String = "Jeans") -> CKRecord {
+        let rid = CKRecord.ID(recordName: id.uuidString, zoneID: CKRecordZone.ID(zoneName: CloudKitService.zoneName))
+        let r = CKRecord(recordType: CloudKitService.recordType, recordID: rid)
+        r["userID"] = profileID
+        r["category"] = StyleMate.Category.bottoms.rawValue
+        r["product"] = product
+        r["colors"] = ["Blue"]
+        r["brand"] = ""
+        r["pattern"] = Pattern.solid.rawValue
+        r["imagePath"] = "\(id.uuidString).png"
+        r["croppedImagePath"] = "\(id.uuidString).png"
+        return r
+    }
+
+    @Test func freshInstallAdoptsTheWardrobeAnOldProfileIdUploaded() throws {
+        // The reinstall got a new local profile UUID; the zone's records carry the old one.
+        let oldProfile = UUID().uuidString
+        let ids = [UUID(), UUID(), UUID()]
+        let pulled = ids.compactMap { CloudKitService.restoredItem(from: record(id: $0, uploadedBy: oldProfile)) }
+        #expect(pulled.map(\.id) == ids)
+
+        var changes = CloudKitService.CloudChanges()
+        changes.modified = pulled
+        changes.isFullFetch = true
+        let out = CloudMerge.apply(changes, to: [], ledger: SyncLedger(), preferLocal: true,
+                                   fileExists: { _ in false })
+        #expect(Set(out.items.map(\.id)) == Set(ids))
+        #expect(Set(out.needAssets.map(\.id)) == Set(ids))          // images come down next
+        #expect(out.items.allSatisfy { $0.product == "Jeans" && $0.category == .bottoms })
+    }
+
+    @Test func otherRecordTypesAreNotRestored() {
+        let r = CKRecord(recordType: "SomethingElse",
+                         recordID: CKRecord.ID(recordName: UUID().uuidString,
+                                               zoneID: CKRecordZone.ID(zoneName: CloudKitService.zoneName)))
+        #expect(CloudKitService.restoredItem(from: r) == nil)
+    }
+
+    @Test func aPendingWipeBlocksPullsForEveryProfile() throws {
+        // "Delete Everything" starts a new profile; until the zone deletion is confirmed the
+        // new profile must not pull the deleted wardrobe back.
+        let suite = "reltest-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(!WardrobeViewModel.mustWipeZoneBeforePull(ledger: SyncLedger(), defaults: defaults))
+        defaults.set(true, forKey: WardrobeViewModel.pendingZoneWipeKey)
+        #expect(WardrobeViewModel.mustWipeZoneBeforePull(ledger: SyncLedger(), defaults: defaults))
+    }
+
     // MARK: - Sync ledger
 
     @Test func uploadConfirmationOnlyClearsTheChangeItCarried() {

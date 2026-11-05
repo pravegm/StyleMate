@@ -266,8 +266,21 @@ final class CloudKitService: ObservableObject {
         case failed
     }
 
+    /// The item for a pulled record, regardless of the profile id that uploaded it.
+    ///
+    /// The private database belongs to the device's iCloud account, so everything in the
+    /// zone is this person's wardrobe. Since login was removed (Nov 2026) the app's profile
+    /// id is a per-install UUID: a reinstall or a new iPhone gets a NEW id, and filtering on
+    /// `userID` (as before) restored nothing there. The `userID` field is still written on
+    /// upload, for diagnostics only.
+    nonisolated static func restoredItem(from record: CKRecord) -> WardrobeItem? {
+        guard record.recordType == recordType else { return nil }
+        return wardrobeItem(from: record)
+    }
+
     /// Fetches the changes since `token` (nil = everything), metadata only. Pages are
     /// accumulated and returned only if every page (and every record) succeeded.
+    /// `userID` is the current profile (kept for API stability; pulls aren't filtered on it).
     func fetchChanges(userID: String, since token: CKServerChangeToken?) async -> PullResult {
         guard !cloudUnavailable else { return .failed }
         await setupZone()
@@ -284,8 +297,9 @@ final class CloudKitService: ObservableObject {
                 for (_, modification) in changes.modificationResultsByID {
                     switch modification {
                     case .success(let mod):
-                        guard (mod.record["userID"] as? String) == userID else { continue }
-                        if let item = Self.wardrobeItem(from: mod.record) {
+                        // Every record in the zone is this wardrobe's, whatever profile id
+                        // tagged it — see `restoredItem(from:)`.
+                        if let item = Self.restoredItem(from: mod.record) {
                             result.modified.append(item)
                         }
                     case .failure(let error):

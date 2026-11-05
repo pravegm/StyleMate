@@ -222,6 +222,15 @@ class WardrobeViewModel: ObservableObject {
         await syncWithCloud()
     }
 
+    /// Set by "Delete Everything" until iCloud confirms the zone is gone. Device-wide.
+    static let pendingZoneWipeKey = "cloudPendingZoneWipe"
+
+    /// A pull may only run once a requested iCloud wipe is confirmed — for ANY profile on the
+    /// phone (pulls restore the whole zone, whatever profile id uploaded it).
+    static func mustWipeZoneBeforePull(ledger: SyncLedger, defaults: UserDefaults = .standard) -> Bool {
+        ledger.pendingZoneWipe || defaults.bool(forKey: pendingZoneWipeKey)
+    }
+
     @MainActor
     private func syncWithCloud() async {
         guard !currentUserEmail.isEmpty, !isSyncing else { return }
@@ -230,8 +239,9 @@ class WardrobeViewModel: ObservableObject {
         let user = currentUserEmail
         let cloud = CloudKitService.shared
 
-        if ledger.pendingZoneWipe {
+        if WardrobeViewModel.mustWipeZoneBeforePull(ledger: ledger) {
             guard await cloud.deleteAllData(), currentUserEmail == user else { return }
+            UserDefaults.standard.removeObject(forKey: WardrobeViewModel.pendingZoneWipeKey)
             ledger.pendingZoneWipe = false
             ledger.token = nil
             saveLedger()
@@ -415,12 +425,13 @@ class WardrobeViewModel: ObservableObject {
         SyncLedger.remove(userKey: key)
         UserDefaults.standard.removeObject(forKey: "cloudReconciled_\(key)")
         if includingCloud {
-            var wipe = SyncLedger()
-            wipe.pendingZoneWipe = true
-            wipe.save(userKey: key)
+            // Device-wide, not per profile: "Delete Everything" starts a NEW profile id, and
+            // pulls aren't filtered by profile, so the new profile must not pull the old
+            // wardrobe back before the zone deletion is confirmed.
+            UserDefaults.standard.set(true, forKey: WardrobeViewModel.pendingZoneWipeKey)
             Task { @MainActor in
                 if await CloudKitService.shared.deleteAllData() {
-                    SyncLedger.remove(userKey: key)
+                    UserDefaults.standard.removeObject(forKey: WardrobeViewModel.pendingZoneWipeKey)
                 }
             }
         }
