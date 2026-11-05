@@ -429,7 +429,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = StyleMate/Info.plist;
-				INFOPLIST_KEY_NSCameraUsageDescription = "This app needs access to your camera to let you add photos of your clothes to your wardrobe.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "StyleMate uses your camera to capture clothing items and take a reference selfie for finding your outfit photos.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "This app uses your location to show local weather on the home screen.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to show local weather on the home screen.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -463,7 +463,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = StyleMate/Info.plist;
-				INFOPLIST_KEY_NSCameraUsageDescription = "This app needs access to your camera to let you add photos of your clothes to your wardrobe.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "StyleMate uses your camera to capture clothing items and take a reference selfie for finding your outfit photos.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "This app uses your location to show local weather on the home screen.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to show local weather on the home screen.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
