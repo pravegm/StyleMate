@@ -1,7 +1,9 @@
-# StyleMate model licensing (launch review, 2026-11-04)
+# StyleMate model licensing (launch review, 2026-11-04; garment models replaced 2026-11-05)
 
-StyleMate is a paid App Store app that bundles five on-device ML models. Three of them, and
-the training data of a fourth, are licensed for **non-commercial research only**. That is
+StyleMate is a paid App Store app that bundles on-device ML models. On 2026-11-04 three of them,
+and the training data of a fourth, were licensed for **non-commercial research only**. The two
+garment segmenters among them (FASHN parser, Fashionpedia SegFormer) were **replaced on
+2026-11-05 by StyleMate's own GarmentNet** (section 2.6); the two face models remain. That is
 the biggest single launch blocker. It is a legal risk, not a review risk: App Review will not
 spot it, but the licence holders can file a takedown and claim damages after launch.
 
@@ -15,11 +17,11 @@ spot it, but the licence holders can file a takedown and claim damages after lau
 |---|---|---|---|---|---|
 | 1 | InsightFace **SCRFD-10G**, `det_10g.onnx` from `buffalo_l` (`SCRFD10G.mlpackage`) | Face detection + 5 landmarks | 8 MB | InsightFace model policy: non-commercial research only | **No**, unless InsightFace grants a commercial licence |
 | 2 | **AdaFace IR-101 on WebFace12M** (`MobileFaceNet.mlpackage`) | Face embedding (identity) | 125 MB | Code is MIT. The checkpoint has no stated licence, and its training set (WebFace260M family) is research-only | **No** (no commercial path is known) |
-| 3 | **FASHN human parser**, `fashn-ai/fashn-human-parser`, SegFormer-B4 (`GarmentParser.mlpackage`) | Clothing vs. body parsing | 62 MB | NVIDIA Source Code License for SegFormer (non-commercial) | **No** |
-| 4 | **`sayeed99/segformer-b3-fashion`**, SegFormer-B3 on Fashionpedia (`GarmentLabeler.mlpackage`) | Garment type per pixel | 46 MB | "other", which links to the NVIDIA SegFormer licence | **No** |
+| 3 | **GarmentNet** (`GarmentNet.mlpackage`): StyleMate's own segmenter. Frozen **DINOv2 ViT-S/14-reg4** backbone + a head StyleMate trained from scratch on **Fashionpedia** and **COCO** people (section 2.6) | Garment class per pixel, body vs scene, garment parts | 22 MB | Backbone weights Apache-2.0 (Meta). Head: StyleMate's own, trained on CC BY 4.0 annotations | **Yes**, with attribution (Apache-2.0 notice + CC BY 4.0 credits, in `ACK-14-garmentnet.md`) |
+| ~~4~~ | ~~FASHN human parser (`GarmentParser`) and `sayeed99/segformer-b3-fashion` (`GarmentLabeler`)~~ | Removed 2026-11-05 (sections 2.3, 2.4) | — | NVIDIA SegFormer licence (non-commercial) | No longer bundled; CI fails if either is in `StyleMate/ML` or the Release app |
 | 5 | **Marqo-FashionSigLIP** (`FashionEncoder.mlpackage` + `FashionVocabulary.json`) | Zero-shot attributes, duplicate matching | 176 MB + 1 MB | Apache-2.0 | **Yes**, with attribution |
 
-Sizes come from CI run 41829764408 (`du -sh`).
+Sizes come from CI run 41829764408 (`du -sh`); GarmentNet's from the CI run in section 2.6.
 
 ## 2. Each model, in detail
 
@@ -47,7 +49,10 @@ Sizes come from CI run 41829764408 (`du -sh`).
   - InsightFace applies the same "trained on research data = non-commercial" rule to its own WebFace600K models.
 - **Verdict: cannot ship.** Nobody offers a commercial licence for these weights. The AdaFace authors (MSU) have no commercial programme, and the dataset licensor is a university consortium. Treat this as having no commercial path.
 
-### 2.3 FASHN human parser (`fashn-ai/fashn-human-parser`)
+### 2.3 FASHN human parser (`fashn-ai/fashn-human-parser`) — replaced 2026-11-05
+
+> **No longer shipped.** GarmentNet (section 2.6) replaced it. Its converter is kept, marked
+> research-only and unused, in `scripts/research/convert_segformer_wardrobe_models.py`.
 
 - **Licence:**
   - Model card at https://huggingface.co/fashn-ai/fashn-human-parser: licence tag `nvidia-segformer`, and "This model inherits the NVIDIA Source Code License for SegFormer."
@@ -62,7 +67,9 @@ Sizes come from CI run 41829764408 (`du -sh`).
   - There are no published SegFormer terms or prices.
 - **Verdict: cannot ship.** FASHN cannot relicense NVIDIA's terms. Any commercial permission would have to come from NVIDIA, and FASHN's fine-tune would also need FASHN's permission.
 
-### 2.4 `sayeed99/segformer-b3-fashion` (Fashionpedia)
+### 2.4 `sayeed99/segformer-b3-fashion` (Fashionpedia) — replaced 2026-11-05
+
+> **No longer shipped.** GarmentNet (section 2.6) replaced it (same research-only converter).
 
 - **Licence:** the model card (https://huggingface.co/sayeed99/segformer-b3-fashion) has licence `other`, and "The license for this model can be found here" links to the NVlabs SegFormer LICENSE.
   - The base model is `nvidia/mit-b3`. The training dataset is `sayeed99/fashion_segmentation`, which is derived from Fashionpedia.
@@ -76,6 +83,57 @@ Sizes come from CI run 41829764408 (`du -sh`).
 - **Verdict: can ship.** Obligations:
   - Include the Apache-2.0 licence text and any NOTICE in an in-app Acknowledgements screen (Profile → About).
   - State that the model was converted and quantized (Apache §4(b): modified files carry a notice).
+
+### 2.6 GarmentNet (StyleMate's garment segmenter, ships from 2026-11-05)
+
+One Core ML model replaces both SegFormers: `StyleMate/ML/GarmentNet.mlpackage`, input 448x672 RGB,
+outputs a per-pixel class on the 384x576 analysis grid (0 scene, 1–26 Fashionpedia whole garments,
+27 person-not-garment), low-res garment probabilities and hood / collar / lapel / sleeve / person maps.
+
+| Part | What | Licence (verified at the source, 2026-11-05) |
+|---|---|---|
+| Backbone | **DINOv2 ViT-S/14 with 4 registers**, frozen, layers 8 and 12 (`vit_small_patch14_reg4_dinov2.lvd142m`). Weights: Meta's checkpoint (https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_reg4_pretrain.pth) as mirrored by timm (https://huggingface.co/timm/vit_small_patch14_reg4_dinov2.lvd142m) | **Apache-2.0** for code *and* weights: "DINOv2 code and model weights are released under the Apache License 2.0" (https://github.com/facebookresearch/dinov2, README "License"). The timm card is tagged apache-2.0. Not the XRay-DINO / Cell-DINO variants, which are NC. |
+| Head | ~0.9 M parameters: PCA projection of the two layers (fit on Fashionpedia training images), a token-grid context block, a 4x4 RGB patch stem and a two-step decoder (`scripts/garment/head.py`). **Trained from scratch** (no third-party segmentation checkpoint) | StyleMate's own work |
+| Training data: garments | **Fashionpedia** 2020 train set (16,000 images used, plus val 1,158 for model selection): whole-garment masks of the 26 worn classes (umbrella excluded) and the hood / collar / lapel / sleeve part masks, rasterised into person crops and small-item close-ups shaped like the app's (`scripts/garment/fashionpedia.py`). Data from https://github.com/cvdfoundation/fashionpedia (S3 bucket `ifashionist-dataset`) | Annotations **CC BY 4.0** ("The annotations ... are licensed under a Creative Commons Attribution 4.0 License", https://fashionpedia.github.io/home/data_license.html). Images: "Fashionpedia does not own the copyright of the images" — Flickr / Unsplash / Pexels / ... terms of use; used only to compute training features, never redistributed (same caveat as section 3, lower risk). |
+| Training data: people | **COCO 2017** train person masks (5,000 images with a large person) teach the person channel (Fashionpedia has no skin / body masks); people's clothes are ignored in the garment loss | Annotations **CC BY 4.0** ("The annotations in this dataset ... are licensed under a Creative Commons Attribution 4.0 License", https://cocodataset.org/#termsofuse). Images under the Flickr terms; training only, never redistributed. |
+| Apple Vision | Not used by the garment pipeline. Tried 5 Nov: `VNGeneratePersonSegmentationRequest` as an outer bound never returned inside the CI test host (a 120 s watchdog fired on every attempt), so GarmentNet's own person channel defines body. The upstream multi-person isolation (`FaceMatchingService`, person-instance mask) is unchanged | Apple platform API |
+| Not used | DeepFashion2, ModaNet, LIP, ATR, CIHP, any SegFormer / Mask2Former / FASHN weights, or distillation from the old non-commercial models | — |
+| Tooling | PyTorch (BSD-3), timm (Apache-2.0), pycocotools (BSD-2), OpenCV (Apache-2.0), coremltools (BSD-3). None of it ships in the app. | — |
+
+- **Training:** `.github/workflows/garment-model.yml` on standard ubuntu runners, CPU only, no paid GPU: `pca` (fit the
+  projection on 300 images) → `extract` (19 parallel chunks: frozen-backbone features stored int8, crops, labels) → `train`
+  (time-budgeted cosine schedule). Settings in `scripts/garment/train_config.json`. Val mIoU (Fashionpedia val, 27 classes
+  incl. "none"): **0.410 over the 27 classes (garment classes 0.388, pixel accuracy 0.927)**; per-class IoUs are in the run's `garment_head_history.json`.
+- **The shipped head:** the `garment-head` artifact of run **42026153584** (https://github.com/pravegm/StyleMate/actions/runs/42026153584),
+  `garment_head.pt` sha256 `1ccf3edfd20fb24793046b441c3bd849598b9208182d436dc45d8eb5df334059`, pinned in `scripts/garment/model.json`. Weights are never committed (public repo).
+  **Exposure:** on a public repo any signed-in GitHub user can download a workflow artifact while it is retained, so the
+  ~4 MB head (not the Core ML app model) is effectively public for 90 days. That is a business choice, not a licence
+  problem: it is StyleMate's own model, its backbone is Apache-2.0 and its training annotations CC BY 4.0. To keep it
+  private, set the training run's artifact retention to 1 day after CI has cached the converted model, or move the
+  repo / the training workflow to a private repository.
+  **Persistence (chosen: Actions cache by sha256):** the artifact expires after 90 days, so CI's `models` job keeps the
+  head in the Actions cache as `garment-head-<sha256>` (restored first; the artifact is only the first source), and the
+  `plan` job restores that key on every CI run so it is never evicted. Caches are branch-scoped: main's first CI run
+  after the merge copies it from the artifact into main's cache. The converted app model also stays in the
+  `wardrobe-models-v2-*` cache. If both caches and the artifact were ever gone, retrain with `[garment-train]`
+  (deterministic in code, not bit-identical). **Keep a private copy anyway** (`gh run download 42026153584 -n garment-head`).
+- **Status (5 Nov 2026, 22:00 UTC):** GarmentNet does not yet hold main's benchmark within 3 points on every metric. With the
+  stage-1 head (garment mIoU 0.345) the fusion reached recall 0.964, product 0.870, category 0.926, precision 0.885
+  (7 phantom items), colour 0.759 / 0.796, at 16 s per photo (main: 118–139 s). The final head above (0.388) is being
+  measured. Plan: `[garment-more]` (16,000 more Fashionpedia images, training continued from this head, Ubuntu runners
+  only) plus fusion tuning on the CI benchmark; main keeps the old models until a head passes.
+- **Conversion:** `scripts/convert_wardrobe_models.py` (via `scripts/build_wardrobe_models.sh`, CI `models` job): traced
+  PyTorch → Core ML (iOS 17, fp16 compute, **int8 linear weight quantization**), plain-matmul attention (ANE-friendly), argmax and
+  resize inside the model so the app reads a 221k-value class map instead of 6.9 M logits. Parity vs PyTorch fp32 on the
+  fixture photos is asserted (class agreement > 0.97) in the build log. The `.mlpackage` metadata records the head sha256 and run.
+- **Obligations:** Apache-2.0 §4 — ship the licence text and a modification notice for the DINOv2 weights; CC BY 4.0 — credit
+  Fashionpedia and COCO, link the licence, say what was changed. Both are in
+  `StyleMate/Resources/Acknowledgements/ACK-14-garmentnet.md` (the Acknowledgements screen's format; it shows up there
+  once that screen is on main).
+- **Body / skin / hands:** FASHN's explicit face / arm / hand classes are replaced by GarmentNet's person channel (person and
+  not a garment = skin or hair; confident cells only). Measured in the CI simulator on 5 Nov: Vision's person-instance mask and
+  a standalone person segmentation work, hand pose returns no hands, body pose fails, and person segmentation inside the
+  extraction tests never returned, so no Vision request is used by the garment pipeline itself.
 
 ## 3. A caveat that applies to every "permissive" face model
 
@@ -115,6 +173,10 @@ No commercially usable, large-scale face-ID training set exists:
 
 ### 4.3 Garment segmentation (replaces FASHN + the Fashionpedia SegFormer)
 
+> **Done 2026-11-05: option 2 shipped as GarmentNet (section 2.6)** — DINOv2 ViT-S/14 frozen + a head trained on Fashionpedia,
+> on CPU CI runners instead of a rented GPU (no cost), with COCO person masks standing in for FASHN's body classes. The text
+> below is the original analysis.
+
 **No commercial licence route is known for either SegFormer.** Options:
 
 1. **Ask NVIDIA** through the research-licence request form (https://www.nvidia.com/en-us/research/inquiries/) for a commercial licence to MiT-B3/B4 derivatives, and **ask FASHN** (https://fashn.ai) about their fine-tune. A long shot, and it should not be on the critical path.
@@ -144,7 +206,7 @@ Do **not** train on DeepFashion2, ModaNet, LIP/ATR or CIHP. Their licences are n
 
 ## 5. Recommended launch path (ranked)
 
-The garment retrain (§4.3 option 2) is on the critical path whatever happens with face models. Run it in parallel with the face-licence enquiry.
+The garment retrain (§4.3 option 2) was on the critical path whatever happens with face models. **It is done (GarmentNet, section 2.6, 2026-11-05)**; only the face models remain.
 
 | Rank | Path | Legal status | Time to launch-ready | Quality risk | Cost |
 |---|---|---|---|---|---|
@@ -165,6 +227,7 @@ The garment retrain (§4.3 option 2) is on the critical path whatever happens wi
 
 - **Acknowledgements screen** in the app (Profile → About → Acknowledgements) with:
   - Licence texts for FashionSigLIP and SigLIP (Apache-2.0), Fashionpedia (CC BY 4.0 attribution), YuNet (MIT) / SFace (Apache-2.0) if used, DINOv2 / ConvNeXt (Apache / MIT) if used.
+  - Garment model (DINOv2 Apache-2.0 + Fashionpedia / COCO CC BY 4.0): `StyleMate/Resources/Acknowledgements/ACK-14-garmentnet.md`.
   - GoogleSignIn-iOS and its dependencies AppAuth, GTMAppAuth and GTMSessionFetcher (Apache-2.0), if Google Sign-In stays.
   - **Done (5 Nov 2026, `feat/diagnostics`)**: the screen exists and lists every `ACK-<order>-<slug>.md` in
     `StyleMate/Resources/Acknowledgements/` (format in `ACKNOWLEDGEMENTS-HOWTO.txt` there). Seeded with, each

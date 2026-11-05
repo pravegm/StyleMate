@@ -1,4 +1,7 @@
 {
   "chunks_run": 42010903178,
-  "train": {"stages": 2, "hours": 4.7, "workers": 1, "batch": 16, "lr": 0.002, "eval_every": 1500, "epochs": 20}
+  "pca_run": 42010903178,
+  "skip": 16000,
+  "init_run": 42026153584,
+  "train": {"stages": 1, "hours": 4.7, "workers": 1, "batch": 16, "lr": 0.001, "eval_every": 1500, "epochs": 20}
 }
