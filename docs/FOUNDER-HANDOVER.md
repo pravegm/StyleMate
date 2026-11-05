@@ -39,6 +39,16 @@ leaves the phone is the user's own iCloud backup.
    "studio" card even in dark mode, so black garments stay visible.
 8. **Try with sample photos**: 6 bundled sample photos let anyone (including Apple's reviewer)
    see a full wardrobe without their own photos. Samples are removed with one tap.
+9. **StyleMate Premium (how it makes money)**: everything is free for the first 50 pieces in the
+   wardrobe (sample clothes don't count). Premium, monthly or yearly through Apple, makes it
+   unlimited. When the closet is full, the photo scan keeps finding pieces and keeps them waiting:
+   Home says "23 more pieces found — Unlock with Premium", and subscribing puts them all in the
+   closet at once. Adding by camera or gallery at 50 opens the plans instead. Nobody ever loses a
+   piece: if Premium ends, everything already in the closet stays, only new pieces wait again.
+   Prices are set by you in App Store Connect (suggested £3.99 a month, £24.99 a year with a
+   1-week free trial); the app shows whatever Apple returns. There is no StyleMate server, and
+   Apple handles all payments. *Status: built and tested with Apple's StoreKit Test on the
+   simulator; real (free, sandbox) purchases need the App Store Connect setup below first.*
 
 How it was checked: every change runs through GitHub Actions on a Mac. Each push runs the full unit-test
 suite, including real-model extraction on 13 real photos, face matching, outfit engine,
@@ -55,6 +65,9 @@ Follow `docs/TESTFLIGHT.md` (about 15 minutes, once). In short:
 3. Turn on GitHub Pages (publishes the privacy policy).
 4. Press **Run workflow** on the TestFlight action. Install from TestFlight on the iPhone 17 Pro
    and the Duo.
+5. For Premium: accept the **Paid Apps agreement** (with bank and tax details) and create the
+   subscription group with its two plans, exactly as in `docs/TESTFLIGHT.md` §6 (about 30
+   minutes). Buying in TestFlight is free.
 
 Install on Wi-Fi: the on-device models make the app large (about 1.3 GB). The Release build was
 checked on 5 Nov: every model is inside the app and no test-only code ships (run 41959627949).
@@ -76,6 +89,11 @@ background, and fastest when the phone is charging.
    "spam" recently. Space StyleMate's submission away from any new game submission.
 3. **App Store listing**: a draft name, subtitle, keywords, description and screenshot plan are in
    `docs/APP-STORE-LISTING.md`.
+4. **Premium prices and trial**: the suggestion is £3.99 a month and £24.99 a year (about 48%
+   cheaper) with a 1-week free trial on the yearly plan. You can change prices in App Store
+   Connect at any time without a new build. The 50-piece free limit is in the app
+   (`WardrobeAllowance.freeItemLimit`); changing it needs a build. Subscriptions need the Paid
+   Apps agreement and banking/tax details (`docs/TESTFLIGHT.md` §6).
 
 ## How good the wardrobe is now (measured)
 

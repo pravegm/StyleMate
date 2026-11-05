@@ -73,7 +73,10 @@ class SubscriptionE2ETests: E2ETestCase {
         XCTAssertTrue(lockedCard().waitForExistence(timeout: 10), "Closet shows no locked-pieces card")
         snap("closet-locked-card")
 
-        lockedCard().tap()
+        // Home and the closet both have the card (an off-screen tab can stay in the tree): tap the visible one.
+        let cards = app.buttons.matching(NSPredicate(format:
+            "identifier == 'premium.lockedCard' OR label CONTAINS 'more pieces found'")).allElementsBoundByIndex
+        (cards.first { $0.isHittable } ?? lockedCard()).tap()
         let annual = app.buttons["paywall.plan.annual"]
         let retry = app.buttons["paywall.retry"]
         let found = waitForAny([annual, retry], timeout: 45)
