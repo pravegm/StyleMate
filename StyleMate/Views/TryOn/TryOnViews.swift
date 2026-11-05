@@ -116,6 +116,9 @@ struct OutfitOnBodyView: View {
             } else {
                 image = nil
                 if state == .queued { queue.request(items, priority: priority) }
+                if state == .needsBody {
+                    bodies.chooseAutomaticallyIfNeeded(userId: authService.user?.id ?? "", gender: authService.user?.gender)
+                }
             }
         }
         .sheet(isPresented: $showBodySheet) { TryOnBodySheet() }

@@ -178,10 +178,23 @@ final class TryOnBodyLibrary: ObservableObject {
             if await use(UIImage(cgImage: img), source: .model, score: 0.6) { return }
         }
         StudioRenderer.shared.unload()
-        status = .missing
+        status = current.map { Status.ready($0) } ?? Status.missing
     }
 
     static var modelSteps = 20
+
+    private var autoAttempted = false
+
+    /// The first time a look wants a body and none is chosen: pick the user's best photo (or the model)
+    /// without asking. Once per launch.
+    func chooseAutomaticallyIfNeeded(userId: String, gender: String?) {
+        guard !autoAttempted, status == .missing, TryOnAvailability.isAvailable else { return }
+        #if DEBUG
+        if TryOnDebugSeed.isActive { return }
+        #endif
+        autoAttempted = true
+        Task { await findBestPhoto(userId: userId, gender: gender) }
+    }
 
     func turnOff() {
         TryOnAvailability.userEnabled = false

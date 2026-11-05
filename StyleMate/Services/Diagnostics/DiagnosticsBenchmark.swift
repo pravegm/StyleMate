@@ -171,7 +171,7 @@ final class DiagnosticsBenchmark: ObservableObject {
            let body = samples.first(where: { $0.0.contains("pink_coat") })?.1.cgImage {
             stage = "Dressing a sample photo (On you)"
             let pieces = tryOnPieces
-            let note = await Task.detached(priority: .userInitiated) { () -> String in
+            let note = await Task.detached(priority: .userInitiated) { () async -> String in
                 let t0 = DispatchTime.now().uptimeNanoseconds
                 guard case .success(let model) = TryOnBodyAnalyzer.analyze(body) else { return "On you: the sample body couldn't be analysed." }
                 let t1 = DispatchTime.now().uptimeNanoseconds
