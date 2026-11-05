@@ -50,7 +50,10 @@ enum FashionClassifier {
 
     private static let upperGroups: [(GarmentKind, String)] = [(.innerTop, "upper_inner"), (.outerLayer, "upper_outer"), (.onePiece, "onepiece")]
 
-    static func classify(_ cutout: UIImage, kind: GarmentKind, scene: SceneLight = .neutral, context: Context = .none) -> Attributes? {
+    /// `colourSource`: where to measure colours, if not the cutout itself (the extractor passes the
+    /// garment's confident interior, so edge bleed, skin and background never tint the name).
+    static func classify(_ cutout: UIImage, kind: GarmentKind, scene: SceneLight = .neutral, context: Context = .none,
+                         colourSource: CGImage? = nil) -> Attributes? {
         guard let cg = cutout.cgImage else { return nil }
         let ml = WardrobeML.shared
         guard let vocab = ml.vocabulary, let input = onWhite(cg, side: 224),
@@ -103,7 +106,7 @@ enum FashionClassifier {
            m.margin > 0.004 {
             material = m.label
         }
-        let clusters = ColorNamer.clusters(cg, scene: scene)
+        let clusters = ColorNamer.clusters(colourSource ?? cg, scene: scene)
         // A print must clearly beat "Solid" — zero-shot happily calls a plain grey
         // jersey "houndstooth" by a hair; rare prints need a bigger margin, and
         // denim's wash and rips are not a print.

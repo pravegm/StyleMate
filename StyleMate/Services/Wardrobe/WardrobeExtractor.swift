@@ -57,7 +57,7 @@ enum WardrobeExtractor {
         let scene = SceneLight(photo: source)
 
         // 2b. Close-ups where the full-body pass says a small item is likely.
-        var uses: [Use] = seg.instances.map { Use(inst: $0, crop: crop, pixels: seg.pixels, zoomed: false) }
+        var uses: [Use] = seg.instances.map { Use(inst: $0, crop: crop, pixels: seg.pixels, zoomed: false, map: seg.map) }
         closeUps(&uses, seg: seg, crop: crop, photo: source, log: log)
         let hasOuter = uses.contains { $0.inst.kind == .outerLayer }
 
@@ -83,7 +83,13 @@ enum WardrobeExtractor {
                   }) else { continue }
             WardrobeML.shared.record("cutout", Date().timeIntervalSince(tc))
             let tk = Date()
-            guard let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context),
+            // Colours from the confident interior only (edge bleed, skin, wall).
+            let core = use.map.flatMap { GarmentSegmenter.interior(inst, map: $0) }.flatMap {
+                GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: $0,
+                                     photoInGrid: use.crop.photoInGrid, fill: false)?.image.cgImage
+            }
+            guard let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context,
+                                                         colourSource: core),
                   !blockedProducts.contains(attrs.product) else { continue }
             WardrobeML.shared.record("classify", Date().timeIntervalSince(tk))
             // Too few source-photo pixels to make a decent wardrobe image
@@ -139,6 +145,8 @@ enum WardrobeExtractor {
         var crop: Crop
         var pixels: [UInt8]
         var zoomed: Bool
+        /// The GarmentNet map the instance came from (colour sampling).
+        var map: GarmentMap? = nil
     }
 
     // MARK: - Person crop
@@ -401,7 +409,7 @@ enum WardrobeExtractor {
                     hypot(CGFloat(i.box.0 + i.box.2) / 2 - cx, CGFloat(i.box.1 + i.box.3) / 2 - cy)
                 }
                 if let m = s.instances.filter({ $0.kind == uses[k].inst.kind }).min(by: { distance($0) < distance($1) }) {
-                    uses[k] = Use(inst: m, crop: z, pixels: s.pixels, zoomed: true)
+                    uses[k] = Use(inst: m, crop: z, pixels: s.pixels, zoomed: true, map: s.map)
                 }
             }
             // The close-up is paid for: also take a small accessory it finds that nobody asked
@@ -426,7 +434,7 @@ enum WardrobeExtractor {
                     log("close-up: \(kind.rawValue) is \(Int(share * 100))% another garment, skipped")
                     continue
                 }
-                uses.append(Use(inst: best, crop: z, pixels: s.pixels, zoomed: true))
+                uses.append(Use(inst: best, crop: z, pixels: s.pixels, zoomed: true, map: s.map))
                 foundNow.insert(kind)
                 log("close-up found \(kind.rawValue)")
             }

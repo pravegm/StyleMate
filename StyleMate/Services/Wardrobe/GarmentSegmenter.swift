@@ -166,6 +166,19 @@ enum GarmentSegmenter {
         // A long coat whose hem GarmentNet reads as a "dress" (or vest / gilet, the commonest
         // misreads on the fixtures) is one garment: a one-piece directly below an outer layer
         // or top in the same colour joins it. A dress under a coat is normally another colour.
+        // Does a one-piece region look more like trousers / a skirt (a dhoti, a long skirt) than
+        // like the hem of the garment above? Then it is its own garment, whatever its colour.
+        func looksLikeBottom(_ px: [Int]) -> Bool {
+            var bottom: Float = 0, upper: Float = 0
+            var k = 0
+            while k < px.count {
+                let i = px[k]
+                for c in [7, 8, 9, 21, 22] { bottom += map.prob(c, i) }
+                for c in [1, 2, 3, 4, 5, 6, 10, 13] { upper += map.prob(c, i) }
+                k += max(1, px.count / 2000)
+            }
+            return bottom > upper
+        }
         if let colour {
             func close(_ a: [Int], _ b: [Int]) -> Bool {
                 guard let ca = colour(a), let cb = colour(b) else { return false }
@@ -175,7 +188,7 @@ enum GarmentSegmenter {
             }
             let w = WardrobeML.gridW
             func meanY(_ px: [Int]) -> Int { px.reduce(0) { $0 + $1 / w } / max(1, px.count) }
-            while let d = pending.firstIndex(where: { $0.kind == .onePiece }),
+            while let d = pending.firstIndex(where: { $0.kind == .onePiece && !looksLikeBottom($0.pixels) }),
                   let u = pending.firstIndex(where: { [.outerLayer, .innerTop].contains($0.kind)
                       && meanY($0.pixels) < meanY(pending[d].pixels) && close($0.pixels, pending[d].pixels) }) {
                 let keepUpper = pending[u]
@@ -187,7 +200,7 @@ enum GarmentSegmenter {
         // A tunic / kurta / shirt-dress read as a top over a dress is one long garment
         // (a dress worn under a plain top is rare; under an open jacket it stays two).
         if !pending.contains(where: { $0.kind == .outerLayer }),
-           let d = pending.firstIndex(where: { $0.kind == .onePiece }),
+           let d = pending.firstIndex(where: { $0.kind == .onePiece && !looksLikeBottom($0.pixels) }),
            let tIdx = pending.firstIndex(where: { $0.kind == .innerTop }) {
             let top = pending[tIdx], dress = pending[d]
             let w = WardrobeML.gridW
@@ -573,6 +586,25 @@ enum GarmentSegmenter {
     /// Morphological close with a 3x3 element (fills 1-px cracks along seams).
     private static func close(_ m: [UInt8], w: Int, h: Int) -> [UInt8] {
         square(square(m, w: w, h: h, r: 1, dilate: true), w: w, h: h, r: 1, dilate: false)
+    }
+
+    /// The item's confident interior, for measuring its colour: the mask eroded by ~4% of
+    /// its box (at least 2 grid px) and limited to pixels where GarmentNet gives the item's
+    /// class at least 0.5. Nil when too little would be left (small or thin items).
+    static func interior(_ inst: GarmentInstance, map: GarmentMap) -> GarmentInstance? {
+        let w = WardrobeML.gridW, h = WardrobeML.gridH
+        let (x0, y0, x1, y1) = inst.box
+        let r = max(2, min(x1 - x0, y1 - y0) / 25)
+        var core = square(inst.mask, w: w, h: h, r: r, dilate: false)
+        var n = 0
+        for i in 0..<core.count where core[i] != 0 {
+            if map.prob(inst.labelerClass, i) < 0.5 && map.classes[i] != UInt8(inst.labelerClass) { core[i] = 0 } else { n += 1 }
+        }
+        guard n * 4 >= inst.pixelCount, n >= 400 else { return nil }
+        var out = inst
+        out.mask = core
+        out.holes = [UInt8](repeating: 0, count: core.count)
+        return out
     }
 
     /// Binary dilation (any set pixel in the window) or erosion (all set) with a
