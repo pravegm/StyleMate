@@ -12,7 +12,7 @@ class FirstRunE2ETests: E2ETestCase {
             + darkModeArguments
         addUIInterruptionMonitor(withDescription: "System permission alerts") { alert in
             for label in ["Allow While Using App", "Allow Full Access", "Allow", "OK"] {
-                let button = alert.buttons[label]
+                let button = alert.buttons.matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label)).firstMatch   // iOS 27 alerts can list a button twice
                 if button.exists { button.tap(); return true }
             }
             return false

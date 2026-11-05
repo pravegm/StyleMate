@@ -25,20 +25,18 @@ struct DiagnosticsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+            // Everything inside the split, so nothing (not even the intro line) runs across a half-open fold.
+            FoldAwareSplit(gutter: DS.Spacing.lg) {
                 Text("Numbers for the StyleMate team: how fast the on-device AI runs on this phone. Nothing leaves your phone unless you share the report.")
                     .font(DS.Font.subheadline)
                     .foregroundStyle(DS.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-
-                FoldAwareSplit(gutter: DS.Spacing.lg) {
-                    phoneCard
-                    benchmarkCard
-                } trailing: {
-                    liveCard
-                    if hingeAvailable { hingeCard }
-                    shareCard
-                }
+                phoneCard
+                benchmarkCard
+            } trailing: {
+                liveCard
+                if hingeAvailable { hingeCard }
+                shareCard
             }
             .padding(.horizontal, DS.Spacing.screenH)
             .padding(.vertical, DS.Spacing.md)

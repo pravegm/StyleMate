@@ -37,7 +37,11 @@ class DiagnosticsE2ETests: E2ETestCase {
         app.swipeUp()
         snap("diagnostics-middle")
         let share = button(id: "diagnostics.share", label: "Share report")
-        XCTAssertTrue(scrollUntilHittable(share, maxSwipes: 6), "No Share report button")
+        // The share card is the last thing on the screen, so it sits just above the tab bar:
+        // swipe to the end and check it's tappable (scrollUntilHittable wants it higher up).
+        for _ in 0..<4 where !(share.exists && share.isHittable) { app.swipeUp() }
+        app.swipeUp()
+        XCTAssertTrue(share.waitForExistence(timeout: 5) && share.isHittable, "No Share report button")
         XCTAssertTrue(anyElement(NSPredicate(format: "label CONTAINS 'Live stats'")).exists, "No live stats card")
         snap("diagnostics-bottom")
 
