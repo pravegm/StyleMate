@@ -28,11 +28,14 @@ enum TryOnCompositor {
         let W = body.width, H = body.height
         guard let canvas = TryOnDraw.context(width: W, height: H) else { return nil }
         var items: [(UUID, TryOnRole, [Float])] = []
+        let hasOuter = garments.contains { $0.role == .outer }
         for g in garments.filter({ $0.role.isWorn && $0.role != .shoes }).sorted(by: { $0.role < $1.role }) {
             let layers: [Layer]
             switch g.role {
             case .bottom: layers = placeBottom(body, g)
-            case .top, .onePiece: layers = placeTop(body, g, layerScale: 1)
+            // Under an outer layer the inner top's sleeves are hidden by the layer's own (drawing them
+            // left strips of the tee beside the coat's sleeves, CI review Nov 2026).
+            case .top, .onePiece: layers = placeTop(body, g, layerScale: 1, sleeves: !hasOuter)
             case .outer: layers = placeTop(body, g, layerScale: 1.06)
             default: layers = []
             }
@@ -71,9 +74,9 @@ enum TryOnCompositor {
         }
 
         // Exposed old clothing -> skin on the limbs, background elsewhere.
-        let protected = labels.map { TryOnLabel.protected.contains($0) }
+        let protected = body.protectSoft.map { $0 >= 0.99 }
         var exposed = [Bool](repeating: false, count: n)
-        for i in 0..<n where TryOnLabel.clothing.contains(labels[i]) && cover[i] <= 0.4 && !protected[i] { exposed[i] = true }
+        for i in 0..<n where TryOnLabel.clothing.contains(labels[i]) && cover[i] <= 0.4 && body.protectSoft[i] < 0.5 { exposed[i] = true }
         let limbs = limbMask(body)
         var skin = [Bool](repeating: false, count: n), bg = [Bool](repeating: false, count: n)
         for i in 0..<n where exposed[i] { if limbs[i] { skin[i] = true } else { bg[i] = true } }
@@ -91,13 +94,27 @@ enum TryOnCompositor {
             recolourFeet(&out, labels: labels, to: ref)
         }
 
-        // Protected pixels back from the photo, byte for byte.
-        for i in 0..<n where protected[i] {
-            out.px[i * 4] = body.image.px[i * 4]; out.px[i * 4 + 1] = body.image.px[i * 4 + 1]; out.px[i * 4 + 2] = body.image.px[i * 4 + 2]
-        }
+        // Protected pixels back from the photo: byte for byte inside, feathered at the edge.
+        restoreProtected(&out, body: body)
         for i in 0..<n { out.px[i * 4 + 3] = 255 }
         return Output(image: out, cover: cover, items: items.map { (id: $0.0, role: $0.1, alpha: $0.2) },
                       exposedSkin: skin, exposedBackground: bg, protected: protected)
+    }
+
+    /// Face / hair / hands / accessories from the photo through the soft matte (exact where it is 1).
+    static func restoreProtected(_ img: inout TryOnRaster, body: TryOnBodyModel) {
+        for i in 0..<(body.width * body.height) {
+            let a = body.protectSoft[i]
+            guard a > 0.01 else { continue }
+            if a >= 0.99 {
+                img.px[i * 4] = body.image.px[i * 4]; img.px[i * 4 + 1] = body.image.px[i * 4 + 1]
+                img.px[i * 4 + 2] = body.image.px[i * 4 + 2]
+            } else {
+                for c in 0..<3 {
+                    img.px[i * 4 + c] = UInt8(min(255, max(0, Float(body.image.px[i * 4 + c]) * a + Float(img.px[i * 4 + c]) * (1 - a))))
+                }
+            }
+        }
     }
 
     // MARK: - Placing pieces
@@ -162,7 +179,7 @@ enum TryOnCompositor {
         return r.cgImage()
     }
 
-    static func placeTop(_ body: TryOnBodyModel, _ g: TryOnGarmentSpec, layerScale: CGFloat) -> [Layer] {
+    static func placeTop(_ body: TryOnBodyModel, _ g: TryOnGarmentSpec, layerScale: CGFloat, sleeves: Bool = true) -> [Layer] {
         guard let shape = TryOnGarmentShape(g.image, maxSide: 640), let t = shape.top(),
               let base = TryOnRaster(g.image, width: shape.width, height: shape.height) else { return [] }
         let s = body.chestW * g.fitFactor * layerScale / t.tw
@@ -175,7 +192,7 @@ enum TryOnCompositor {
         if let torso = masked(shape, base, keep: { x, _ in CGFloat(x) >= x0 && CGFloat(x) <= x1 }) {
             layers.append(Layer(image: torso, transform: axisMap(g: gSh, b: bSh, u: body.u, v: body.v, sx: s, sy: sy)))
         }
-        for (left, sl) in t.sleeves {
+        for (left, sl) in (sleeves ? t.sleeves : [:]) {
             let (S, E, Wr) = body.arm(left)
             let sel: (Int) -> Bool = { x in left ? CGFloat(x) < t.left - 0.04 * t.tw : CGFloat(x) > t.right + 0.04 * t.tw }
             let Lg = max(1, TOGeo.dist(sl.far, sl.root))
@@ -294,9 +311,12 @@ enum TryOnCompositor {
             ctx.setLineWidth(rad * 1.5)
             ctx.strokeLineSegments(between: [Hj, K, K, A])
         }
-        // The neck, chin to the shoulder line (a high collar the new top doesn't have).
-        ctx.setLineWidth(max(2, 0.25 * body.shoulderW))
+        // The neck and collarbones, chin to the shoulder line: a scarf, a high collar or a coat's lapels the
+        // new top doesn't have become skin, not a smeared background fill (CI review, Nov 2026).
+        ctx.setLineWidth(max(2, 0.42 * body.shoulderW))
         ctx.strokeLineSegments(between: [body.pose.nose, body.shoMid])
+        ctx.setLineWidth(max(2, 0.16 * body.shoulderW))
+        ctx.strokeLineSegments(between: [body.pose.sL, body.pose.sR])
         let p = data.assumingMemoryBound(to: UInt8.self)
         var out = [Bool](repeating: false, count: W * H)
         for y in 0..<H { for x in 0..<W { out[y * W + x] = p[y * ctx.bytesPerRow + x] > 127 } }

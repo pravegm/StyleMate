@@ -36,6 +36,8 @@ final class TryOnQueue: ObservableObject {
 
     private struct Job { let key: String; let items: [WardrobeItem]; var priority: Priority }
     private var jobs: [Job] = []
+    /// Composite-only results per look this session (re-queued for the diffusion pass).
+    private var attempts: [String: Int] = [:]
     private var worker: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
     private let log = Logger(subsystem: "com.stylemates.StyleMate", category: "TryOn")
@@ -181,6 +183,20 @@ final class TryOnQueue: ObservableObject {
             await TryOnRenderer.render(body: body, garments: garments, harmonize: harmonize, seed: Self.seed(job.key))
         }.value
         switch outcome {
+        case .ready(let r) where !r.harmonized && harmonizeEnabled && TryOnHarmonizer.shared.isAvailable:
+            // Only finished (harmonised) try-ons are shown: a raw composite's fills read as glitches.
+            // Render again with the diffusion pass when the device allows it (twice at most).
+            attempts[job.key, default: 0] += 1
+            if attempts[job.key, default: 0] <= 2 {
+                set(job.key, .queued)
+                if !jobs.contains(where: { $0.key == job.key }) {
+                    jobs.append(Job(key: job.key, items: job.items, priority: .background))
+                }
+            } else {
+                TryOnStore.shared.storeRejected(job.key, reason: "the diffusion pass didn't run", harmonized: false)
+                set(job.key, .rejected)
+            }
+            perf.end(outcome: .rejected)
         case .ready(let r):
             var image = r.image
             if photo.source == .model, let c = TryOnBodyLibrary.cropBelowChin(image, pose: body.pose) { image = c }

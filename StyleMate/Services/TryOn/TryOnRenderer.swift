@@ -175,6 +175,7 @@ enum TryOnRenderer {
                 final.px[i * 4 + ch] = UInt8(min(255, max(0, comp * (1 - w) + v * w)))
             }
         }
+        TryOnCompositor.restoreProtected(&final, body: body)
         return final
     }
 }

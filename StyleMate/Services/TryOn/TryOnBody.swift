@@ -40,6 +40,9 @@ struct TryOnBodyModel {
     let pose: TryOnPose
     /// Parser label per working pixel.
     let labels: [UInt8]
+    /// Face / hair / hands / accessories as a soft matte (the parser grid upsampled bilinearly and
+    /// feathered ~1.5 px), so those edges blend instead of stair-stepping. 1 = copied byte for byte.
+    let protectSoft: [Float]
     var width: Int { image.width }
     var height: Int { image.height }
 
@@ -126,12 +129,15 @@ enum TryOnBodyAnalyzer {
             }
         }
         guard labels.contains(where: { $0 != TryOnLabel.background }) else { return .failure(.noPerson) }
+        let gridProtect = TryOnPlane(width: WardrobeML.gridW, height: WardrobeML.gridH,
+                                     v: parsed.labels.map { TryOnLabel.protected.contains($0) ? 1 : 0 })
+        let soft = gridProtect.resized(width: W, height: H).blurred(sigma: 1.5).v.map { min(1, max(0, ($0 - 0.15) / 0.7)) }
         // 4. Pose in working coordinates: Vision again on the crop (more pixels on the person), else the parser estimate.
         let pose: TryOnPose
         if let cg = raster.opaqueCGImage(), let p = detectPose(cg) { pose = arrange(p, source: "vision") }
         else if let p = poseFromParse(labels, width: W, height: H) { pose = p }
         else { return .failure(.notFullBody) }
-        return .success(TryOnBodyModel(image: raster, pose: pose, labels: labels))
+        return .success(TryOnBodyModel(image: raster, pose: pose, labels: labels, protectSoft: soft))
     }
 
     // MARK: - Vision

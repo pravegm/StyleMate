@@ -75,6 +75,20 @@ pipeline from CC0 photos, now `StyleMateTests/Fixtures/tryon/items`):
   506 s on the CI CPU, passed the gate (sim 0.60 / 0.76, ΔC 0.6 / 0.1, face unchanged).
 - See the CI `ci-report/_temp/report/tryon/` sheets for the Swift pipeline's own output.
 
+## Review fixes (Nov 2026, after the first CI / Duo sheets)
+
+- **Only finished try-ons are shown.** A look whose render ran without the diffusion pass is re-queued
+  for it (twice at most, then "pieces"); raw composites — flat skin fills, blurred background fills —
+  never reach a user (the DEBUG UI-test seed is the exception, it has no diffusion model).
+- **Soft occluder edges.** Face / hair / hands / accessories come back through a matte upsampled
+  bilinearly from the parser grid and feathered ~1.5 px (exact inside), instead of a nearest-neighbour
+  staircase.
+- **Neck / collarbones become skin** where a scarf, high collar or lapels are removed (a wider neck
+  capsule + the shoulder line), not a smeared background fill.
+- **Inner top's sleeves are hidden under an outer layer** (they stuck out beside the coat's sleeves).
+- CI sheets: `composite__<body>.jpg` = the gate's input (never shown as is); `shown__<body>__<outfit>.jpg`
+  = photo | composite | the finished try-on a user sees.
+
 ## Quality — honest status
 
 - **Good** on a body photo in fitted clothes (the leather-tunic + leggings fixture): tees, shirts,

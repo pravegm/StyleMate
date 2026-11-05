@@ -139,7 +139,8 @@ struct TryOnTests {
                 Self.report("\(b) / \(name): \(row["verdict"] ?? "") in \(String(format: "%.1f", secs))s")
                 rows.append(row)
             }
-            Self.saveSheet(b, body: body, images: images)
+            // Composites without the diffusion pass: the gate's input, never shown to a user as is.
+            Self.saveSheet("composite__" + b, body: body, images: images)
         }
         let data = try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: Self.reportDir.appendingPathComponent("report.json"))
@@ -180,39 +181,44 @@ struct TryOnTests {
 
     // MARK: - Full pipeline with the diffusion pass (Core ML on the simulator's CPU: slow)
 
-    @Test(.timeLimit(.minutes(30)))
+    @Test(.timeLimit(.minutes(50)))
     func harmonizedTryOn() async throws {
         guard WardrobeML.shared.isAvailable, TryOnHarmonizer.shared.isAvailable else {
             Issue.record("models missing"); return
         }
-        guard case .success(let body) = TryOnBodyAnalyzer.analyze(try Self.photo("pink_coat_boots")) else {
-            Issue.record("body analysis failed"); return
-        }
-        let garments = try ["navytee", "bluejeans"].map(Self.garment)
         let saved = TryOnRenderer.steps
-        TryOnRenderer.steps = 12   // CI budget: ~10 UNet steps on the CPU
+        TryOnRenderer.steps = 12   // CI budget: ~10 UNet steps on the CPU per look
         defer { TryOnRenderer.steps = saved }
-        let t = CFAbsoluteTimeGetCurrent()
-        let outcome = await TryOnRenderer.render(body: body, garments: garments, harmonize: true)
-        let secs = CFAbsoluteTimeGetCurrent() - t
-        let unetSteps = TryOnHarmonizer.shared.lastSteps
-        // iPhone estimate: ~1 s per SD 1.5 UNet step on the Neural Engine (Apple's ml-stable-diffusion
-        // benchmarks, same model class as the studio renders) at the app's 20-step schedule (~17 steps
-        // with the 0.85 max strength) + ~3 s for the composite, VAE and gate.
-        let iphoneEstimate = Double(Int(Double(20) * 0.85)) * 1.0 + 3
-        switch outcome {
-        case .ready(let r):
-            Self.saveSheet("harmonized__pink_coat_boots__tee_jeans", body: body, images: [r.composite, r.image].compactMap { $0 })
-            Self.report("harmonized: ready in \(String(format: "%.0f", secs))s on CI (\(unetSteps) UNet steps, harmonised=\(r.harmonized)); iPhone estimate ~\(Int(iphoneEstimate))s per outfit; report \(Self.json(r.report))")
-            #expect(r.report.faceChangedPixels == 0)
-            #expect(r.harmonized)
-        case .rejected(let rep, let comp):
-            if let comp { Self.saveSheet("harmonized__pink_coat_boots__tee_jeans__REJECTED", body: body, images: [comp]) }
-            Self.report("harmonized: rejected (\(rep.rejection ?? "")) in \(String(format: "%.0f", secs))s, \(unetSteps) UNet steps; \(Self.json(rep))")
-            #expect(rep.faceChangedPixels == 0)
-            #expect(rep.harmonized, "the diffusion pass should have run")
-        case .failed(let why):
-            Issue.record("harmonized try-on failed: \(why)")
+        // What a user sees: a coat-wearing body (lots to invent) and a fitted one with a dress (legs to invent).
+        for (b, keys, name) in [("pink_coat_boots", ["navytee", "bluejeans"], "tee_jeans"),
+                                ("street_leather_tunic", ["dress"], "dress")] {
+            guard case .success(let body) = TryOnBodyAnalyzer.analyze(try Self.photo(b)) else {
+                Issue.record("\(b): body analysis failed"); continue
+            }
+            let garments = try keys.map(Self.garment)
+            let t = CFAbsoluteTimeGetCurrent()
+            let outcome = await TryOnRenderer.render(body: body, garments: garments, harmonize: true)
+            let secs = CFAbsoluteTimeGetCurrent() - t
+            let unetSteps = TryOnHarmonizer.shared.lastSteps
+            // iPhone estimate: ~1 s per SD 1.5 UNet step on the Neural Engine (Apple's ml-stable-diffusion
+            // benchmarks, same model class as the studio renders) at the app's 20-step schedule (~17 steps
+            // with the 0.85 max strength) + ~3 s for the composite, VAE and gate.
+            let iphoneEstimate = Double(Int(Double(20) * 0.85)) * 1.0 + 3
+            switch outcome {
+            case .ready(let r):
+                // photo | composite (never shown) | the finished try-on (what the user sees)
+                Self.saveSheet("shown__\(b)__\(name)", body: body, images: [r.composite, r.image].compactMap { $0 })
+                Self.report("harmonized \(b) / \(name): ready in \(String(format: "%.0f", secs))s on CI (\(unetSteps) UNet steps, harmonised=\(r.harmonized)); iPhone estimate ~\(Int(iphoneEstimate))s per outfit; report \(Self.json(r.report))")
+                #expect(r.report.faceChangedPixels == 0)
+                #expect(r.harmonized)
+            case .rejected(let rep, let comp):
+                if let comp { Self.saveSheet("rejected__\(b)__\(name)", body: body, images: [comp]) }
+                Self.report("harmonized \(b) / \(name): rejected (\(rep.rejection ?? "")) in \(String(format: "%.0f", secs))s, \(unetSteps) UNet steps; \(Self.json(rep))")
+                #expect(rep.faceChangedPixels == 0)
+                #expect(rep.harmonized, "the diffusion pass should have run")
+            case .failed(let why):
+                Issue.record("harmonized try-on \(b) / \(name) failed: \(why)")
+            }
         }
     }
 
