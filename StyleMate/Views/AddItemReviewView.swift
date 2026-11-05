@@ -577,7 +577,7 @@ private struct ReviewItemCard: View {
                         Image(systemName: item.isSelected ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 24, weight: .semibold))
                             .symbolRenderingMode(.palette)
-                            .foregroundStyle(Color.white, item.isSelected ? DS.Colors.accent : Color.black.opacity(0.25))
+                            .foregroundStyle(item.isSelected ? DS.Colors.onAccent : Color.white, item.isSelected ? DS.Colors.accent : Color.black.opacity(0.25))
                             .shadow(color: .black.opacity(0.25), radius: 2, x: 0, y: 1)
                             .padding(8)
                     }
@@ -585,7 +585,7 @@ private struct ReviewItemCard: View {
                         if item.isDuplicate {
                             Label("Similar", systemImage: "square.on.square")
                                 .font(DS.Font.caption2.weight(.semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.black.opacity(0.85))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
                                 .background(DS.Colors.warning, in: Capsule(style: .continuous))

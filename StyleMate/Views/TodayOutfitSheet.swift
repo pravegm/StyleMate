@@ -96,7 +96,8 @@ struct TodayOutfitSheet: View {
                     }
                 }
             }
-            .background(DS.Colors.backgroundPrimary.ignoresSafeArea())
+            // Inside the safe area: the sheet itself paints the rest (presentationBackground).
+            .background(DS.Colors.backgroundPrimary)
             // First-generation coach tour (inside the stack: preferences don't cross it).
             .overlayPreferenceValue(CoachAnchorKey.self) { anchors in
                 GeometryReader { geo in
@@ -305,7 +306,7 @@ struct TodayOutfitSheet: View {
             boardFooter(inlineControls: inlineControls)
                 .padding(.bottom, DS.Spacing.sm)
         }
-        .background(StudioSurface())
+        .studioIsland()
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: DS.Radius.hero, style: .continuous)
@@ -436,7 +437,7 @@ struct TodayOutfitSheet: View {
                     } label: {
                         OutfitBoard(items: look.items, isThumbnail: true)
                             .aspectRatio(0.8, contentMode: .fit)
-                            .background(StudioSurface())
+                            .studioIsland()
                             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
@@ -759,7 +760,7 @@ struct TodayOutfitSheet: View {
         if let toastText {
             Label(toastText, systemImage: "checkmark.circle.fill")
                 .font(DS.Font.headline)
-                .foregroundStyle(.white)
+                .foregroundStyle(DS.Colors.onAccent)
                 .padding(.vertical, 14)
                 .padding(.horizontal, DS.Spacing.lg)
                 .background(DS.Colors.success, in: Capsule(style: .continuous))

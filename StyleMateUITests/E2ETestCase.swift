@@ -16,21 +16,35 @@ class E2ETestCase: XCTestCase {
     /// Number of items DebugLaunchSupport seeds.
     let seededItemCount = 26
 
+    /// Dark-mode subclasses return true: the simulator runs in dark appearance and every
+    /// screenshot is named `…-dark`, next to the light ones in the same artifact.
+    class var usesDarkAppearance: Bool { false }
+
+    /// "-dark" for the dark-mode pass, "" otherwise.
+    var appearanceSuffix: String { Self.usesDarkAppearance ? "-dark" : "" }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         step = 0
+        let dark = Self.usesDarkAppearance
+        MainActor.assumeIsolated {
+            XCUIDevice.shared.appearance = dark ? .dark : .light
+        }
     }
 
     override func tearDownWithError() throws {
         let failed = (testRun?.failureCount ?? 0) + (testRun?.unexpectedExceptionCount ?? 0) > 0
         // XCTest runs UI tests on the main thread; XCUIApplication is main-actor isolated.
         MainActor.assumeIsolated {
-            guard let app = self.app else { return }
-            if failed {
-                self.snap("FAILURE-final-state")
-                self.note("FAILURE-accessibility-tree", app.debugDescription)
+            if let app = self.app {
+                if failed {
+                    self.snap("FAILURE-final-state")
+                    self.note("FAILURE-accessibility-tree", app.debugDescription)
+                }
+                app.terminate()
             }
-            app.terminate()
+            // Leave the simulator in light mode for whatever runs next.
+            XCUIDevice.shared.appearance = .light
         }
     }
 
@@ -84,7 +98,7 @@ class E2ETestCase: XCTestCase {
     func snap(_ name: String) {
         step += 1
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        attachment.name = String(format: "%@-%02d-%@", shortTestName, step, name)
+        attachment.name = String(format: "%@-%02d-%@", shortTestName, step, name) + appearanceSuffix
         attachment.lifetime = .keepAlways
         add(attachment)
     }
@@ -92,7 +106,7 @@ class E2ETestCase: XCTestCase {
     /// Saves a text attachment (e.g. the buttons on screen) for debugging selectors.
     func note(_ name: String, _ text: String) {
         let attachment = XCTAttachment(string: text)
-        attachment.name = "\(shortTestName)-\(name).txt"
+        attachment.name = "\(shortTestName)-\(name)\(appearanceSuffix).txt"
         attachment.lifetime = .keepAlways
         add(attachment)
     }

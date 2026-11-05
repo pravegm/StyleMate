@@ -124,7 +124,7 @@ struct ScanRangePickerView: View {
                                 .foregroundColor(DS.Colors.textPrimary)
                             Text("Best results")
                                 .font(DS.Font.caption2)
-                                .foregroundColor(.white)
+                                .foregroundColor(DS.Colors.onAccent)
                                 .padding(.horizontal, DS.Spacing.xs)
                                 .padding(.vertical, 2)
                                 .background(DS.Colors.accent, in: Capsule())

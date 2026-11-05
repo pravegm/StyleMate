@@ -22,7 +22,7 @@ struct ClosetItemCell: View {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 22, weight: .semibold))
                             .symbolRenderingMode(.palette)
-                            .foregroundStyle(Color.white, isSelected ? DS.Colors.accent : Color.black.opacity(0.18))
+                            .foregroundStyle(isSelected ? DS.Colors.onAccent : Color.white, isSelected ? DS.Colors.accent : Color.black.opacity(0.18))
                             .shadow(color: .black.opacity(0.25), radius: 2, x: 0, y: 1)
                             .padding(6)
                             .transition(.scale.combined(with: .opacity))
@@ -282,7 +282,7 @@ struct ColorSwatchPicker: View {
                 if let index {
                     Text("\(index + 1)")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(DS.Colors.onAccent)
                         .frame(width: 16, height: 16)
                         .background(DS.Colors.accent, in: Circle())
                 }

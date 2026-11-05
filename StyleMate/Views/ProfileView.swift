@@ -98,11 +98,11 @@ struct ProfileView: View {
                                 if initials.isEmpty {
                                     Image(systemName: "person.fill")
                                         .font(.system(size: 30, weight: .semibold))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(DS.Colors.onAccent)
                                 } else {
                                     Text(initials)
                                         .font(.system(size: 28, weight: .bold, design: .rounded))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(DS.Colors.onAccent)
                                 }
                             }
                             .coachAnchor(CoachAnchor.profileHeader)

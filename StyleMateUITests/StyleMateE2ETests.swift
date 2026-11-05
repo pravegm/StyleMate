@@ -8,7 +8,7 @@ import UIKit
 ///    the gallery picker and analysed on-device (review screen with the extracted items).
 /// 2. "What should I wear today": 5 options, swap one piece, keep one.
 /// 3. Outfit log: the kept outfit (and a manually composed one) shows on today's date.
-final class StyleMateE2ETests: E2ETestCase {
+class StyleMateE2ETests: E2ETestCase {
 
     // MARK: - 1. Wardrobe
 

@@ -3,7 +3,7 @@ import XCTest
 /// First launch, no account: the onboarding flow and the "Try with sample photos" path,
 /// on a true fresh install (`-uiTestResetState` without the demo user, so AuthService creates
 /// the local profile itself). Every screen is snapped for the `e2e-screens` artifact.
-final class FirstRunE2ETests: E2ETestCase {
+class FirstRunE2ETests: E2ETestCase {
 
     @MainActor
     private func launchFresh() {

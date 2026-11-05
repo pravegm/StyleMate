@@ -240,7 +240,7 @@ private struct BoardPiece: View {
             if isKept {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DS.Colors.onAccent)
                     .frame(width: 24, height: 24)
                     .background(DS.Colors.accent, in: Circle())
                     .padding(6)
@@ -286,7 +286,7 @@ struct PieceActionButton: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(kind == .keep && isOn ? Color.white : DS.Colors.accent)
+                .foregroundStyle(kind == .keep && isOn ? DS.Colors.onAccent : DS.Colors.accent)
                 .frame(width: 44, height: 44)
                 .background {
                     if kind == .keep && isOn { Circle().fill(DS.Colors.accent) }
@@ -358,6 +358,17 @@ struct StudioSurface: View {
     }
 }
 
+extension View {
+    /// Draws this on the studio backdrop as a light "print" in any appearance: the
+    /// backdrop dims in dark mode, and everything on it (hint text, accent, glass
+    /// controls) uses the light palette so it stays legible on the light card.
+    func studioIsland() -> some View {
+        self
+            .environment(\.colorScheme, .light)
+            .background(StudioSurface())
+    }
+}
+
 // MARK: - 2 × 2 cutout collage (logged outfits)
 
 /// Up to four cutouts in a 2 × 2 grid on the studio backdrop, with "+N" when a
@@ -370,7 +381,6 @@ struct CutoutCollage: View {
         let shown = Array(paths.prefix(4))
         let extra = paths.count - shown.count
         ZStack(alignment: .bottomTrailing) {
-            StudioSurface()
             Grid(horizontalSpacing: 4, verticalSpacing: 4) {
                 if shown.count <= 2 {
                     GridRow {
@@ -398,6 +408,8 @@ struct CutoutCollage: View {
                     .padding(8)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .studioIsland()
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
