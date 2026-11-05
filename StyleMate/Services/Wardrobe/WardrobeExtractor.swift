@@ -254,6 +254,25 @@ enum WardrobeExtractor {
         var out: [Use] = []
         var foundNow = found
 
+        // Everything the full-body pass already assigned to a garment, on its grid.
+        let gw = CGFloat(WardrobeML.gridW)
+        var claimed = [UInt8](repeating: 0, count: WardrobeML.gridCount)
+        for inst in seg.instances { for i in 0..<claimed.count where inst.mask[i] != 0 { claimed[i] = 1 } }
+        /// Share of a close-up instance lying on pixels the full-body pass gave to another
+        /// garment (a coat's leather cuff re-read as a "handbag" in a hand close-up).
+        func claimedShare(_ inst: GarmentInstance, in z: Crop) -> Float {
+            var hit = 0, total = 0
+            let w = WardrobeML.gridW
+            for i in stride(from: 0, to: inst.mask.count, by: 3) where inst.mask[i] != 0 {
+                total += 1
+                let px = z.rect.minX + CGFloat(i % w) / gw * z.rect.width
+                let py = z.rect.minY + CGFloat(i / w) / gh * z.rect.height
+                let mx = Int((px - crop.rect.minX) / crop.rect.width * gw), my = Int((py - crop.rect.minY) / crop.rect.height * gh)
+                if mx >= 0, my >= 0, mx < w, my < WardrobeML.gridH, claimed[my * w + mx] != 0 { hit += 1 }
+            }
+            return total == 0 ? 0 : Float(hit) / Float(total)
+        }
+
         var zoomCrops: [String: Crop] = [:]
         func zoom(_ r0: CGRect, kinds: Set<GarmentKind>, label: String) -> Segmentation? {
             let wanted = kinds.subtracting(foundNow)
@@ -261,6 +280,13 @@ enum WardrobeExtractor {
                   let z = makeCrop(photo, rect: r0, minHeight: gh), let s = segment(z) else { return nil }
             for k in wanted {
                 guard let best = s.instances.filter({ $0.kind == k }).max(by: { $0.pixelCount < $1.pixelCount }) else { continue }
+                // Bags and watches only: shoes the full-body pass merged into black
+                // trousers are exactly what the feet close-up is for.
+                let share = [.bag, .jewelry].contains(k) ? claimedShare(best, in: z) : 0
+                guard share < 0.5 else {
+                    log("\(label) zoom: \(k.rawValue) is \(Int(share * 100))% another garment, skipped")
+                    continue
+                }
                 out.append(Use(inst: best, crop: z, pixels: s.pixels, zoomed: true))
                 foundNow.insert(k)
                 log("\(label) zoom found \(k.rawValue)")
