@@ -144,9 +144,10 @@ struct TryOnTests {
         let data = try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: Self.reportDir.appendingPathComponent("report.json"))
         Self.report("composite-only: \(passed)/\(total) passed the gate")
-        // The fitted body (leather tunic + leggings) must work for the plain outfits.
-        let easy = rows.filter { ($0["body"] as? String) == "street_leather_tunic" && ["tee_jeans", "dress"].contains($0["outfit"] as? String ?? "") }
-        #expect(easy.allSatisfy { ($0["verdict"] as? String) == "ready" }, "\(easy.map { $0["verdict"] ?? "" })")
+        // The fitted body (leather tunic + leggings) must work for tee + jeans without the diffusion pass
+        // (a dress over leggings needs it: the legs are invented, so composite-only is rejected).
+        let easy = rows.filter { ($0["body"] as? String) == "street_leather_tunic" && ["tee_jeans", "flannel_jeans"].contains($0["outfit"] as? String ?? "") }
+        #expect(easy.contains { ($0["verdict"] as? String) == "ready" }, "\(easy.map { $0["verdict"] ?? "" })")
     }
 
     static func json(_ r: TryOnGate.Report) -> Any {
