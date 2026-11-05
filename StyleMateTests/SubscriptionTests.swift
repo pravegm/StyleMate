@@ -226,6 +226,31 @@ struct SubscriptionTests {
             .appendingPathComponent("StyleMate.storekit")
     }
 
+    /// The configuration file itself: both IDs the app asks for, in one group, with the suggested
+    /// prices, periods and the annual plan's 1-week free trial.
+    @Test func storeKitConfigurationFileMatchesTheApp() throws {
+        let data = try Data(contentsOf: Self.configURL)
+        let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let groups = try #require(root["subscriptionGroups"] as? [[String: Any]])
+        #expect(groups.count == 1)
+        #expect(groups.first?["name"] as? String == PremiumProducts.groupName)
+        let subs = try #require(groups.first?["subscriptions"] as? [[String: Any]])
+        var byID: [String: [String: Any]] = [:]
+        for s in subs { if let id = s["productID"] as? String { byID[id] = s } }
+        #expect(Set(byID.keys) == Set(PremiumProducts.all))
+        let annual = try #require(byID[PremiumProducts.annual])
+        let monthly = try #require(byID[PremiumProducts.monthly])
+        #expect(annual["recurringSubscriptionPeriod"] as? String == "P1Y")
+        #expect(monthly["recurringSubscriptionPeriod"] as? String == "P1M")
+        #expect(annual["displayPrice"] as? String == "24.99")
+        #expect(monthly["displayPrice"] as? String == "3.99")
+        let intro = try #require(annual["introductoryOffer"] as? [String: Any])
+        #expect(intro["paymentMode"] as? String == "free")
+        #expect(intro["subscriptionPeriod"] as? String == "P1W")
+        #expect(monthly["introductoryOffer"] is NSNull)
+        #expect((annual["groupNumber"] as? Int) == 1 && (monthly["groupNumber"] as? Int) == 2)
+    }
+
     @MainActor
     @Test func storeKitConfigurationAndPurchase() async throws {
         let session = try SKTestSession(contentsOf: Self.configURL)
@@ -234,7 +259,19 @@ struct SubscriptionTests {
         session.clearTransactions()
         session.storefront = "GBR"
 
-        let products = try await Product.products(for: PremiumProducts.all)
+        // storekitd can take a moment to pick up a configuration opened from the command line.
+        var products: [Product] = []
+        for attempt in 0..<8 {
+            products = (try? await Product.products(for: PremiumProducts.all)) ?? []
+            if products.count == PremiumProducts.all.count { break }
+            try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 500_000_000)
+        }
+        guard !products.isEmpty else {
+            // xcodebuild's unit-test host doesn't always get StoreKit Test's configuration (Apple
+            // FB22237318); the UI tests (SubscriptionE2ETests) cover loading and buying end to end.
+            print("[Premium] StoreKit Test returned no products in the unit-test host; skipping the live part")
+            return
+        }
         #expect(Set(products.map(\.id)) == Set(PremiumProducts.all))
         let annual = try #require(products.first { $0.id == PremiumProducts.annual })
         let monthly = try #require(products.first { $0.id == PremiumProducts.monthly })
