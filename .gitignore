@@ -47,3 +47,8 @@ StyleMate/ML/Studio/
 scripts/.studio_work/
 /StudioModels.bundle/
 __pycache__/
+
+# Garment-model training outputs (downloaded artifacts, never committed)
+scripts/garment/.artifacts/
+*.pt
+*.npz
