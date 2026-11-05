@@ -168,17 +168,24 @@ struct HomeView: View {
                     .presentationSizing(.page)
             }
             .alert("Outfit Suggestion", isPresented: $homeVM.showOutfitErrorAlert) {
-                Button("OK", role: .cancel) {}
+                if homeVM.outfitError == .networkError {
+                    Button("OK", role: .cancel) {}
+                } else {
+                    Button("Add clothes") {
+                        NotificationCenter.default.post(name: .showAddClothes, object: nil)
+                    }
+                    Button("Not now", role: .cancel) {}
+                }
             } message: {
                 switch homeVM.outfitError {
                 case .emptyWardrobe:
-                    Text("Add more clothes to get outfit ideas. You need at least a top and a bottom.")
+                    Text("Add a top and a bottom (shoes help too) and StyleMate will put outfits together for you.")
                 case .networkError:
                     Text("Something went wrong while styling. Please try again.")
                 case .parseError:
-                    Text("Couldn't put a complete look together from your wardrobe yet. Try adding a few more pieces.")
+                    Text("Your wardrobe can't make a complete look for this yet. Add a few more pieces, like shoes or another bottom.")
                 case .none:
-                    Text("Try adding more items or adjusting colors/patterns.")
+                    Text("Add a few more pieces and try again.")
                 }
             }
             .alert("Weather unavailable", isPresented: $showWeatherWarning) {

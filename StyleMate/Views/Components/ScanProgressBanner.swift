@@ -4,8 +4,10 @@ struct ScanProgressBanner: View {
     @ObservedObject var scanService: PhotoScanService
     @Binding var showReview: Bool
     @EnvironmentObject var wardrobeViewModel: WardrobeViewModel
+    @EnvironmentObject var authService: AuthService
 
     @State private var autoDismissTask: Task<Void, Never>?
+    @State private var showSelfie = false
 
     var body: some View {
         Group {
@@ -233,7 +235,59 @@ struct ScanProgressBanner: View {
 
     // MARK: - Error State
 
+    /// The scan can't start without a selfie to recognise the person by.
+    private var needsSelfie: Bool {
+        if case .error(let message) = scanService.scanState {
+            return message.localizedCaseInsensitiveContains("selfie")
+        }
+        return false
+    }
+
+    @ViewBuilder
     private var errorBanner: some View {
+        if needsSelfie { selfieBanner } else { retryBanner }
+    }
+
+    private var selfieBanner: some View {
+        Button {
+            Haptics.light()
+            showSelfie = true
+        } label: {
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(DS.Colors.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Take a selfie so we can find you")
+                        .font(DS.Font.headline)
+                        .foregroundColor(DS.Colors.textPrimary)
+                    Text("StyleMate matches it to your photos, on your iPhone")
+                        .font(DS.Font.caption1)
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
+                Spacer(minLength: DS.Spacing.xs)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+            .padding(DS.Spacing.md)
+            .background(DS.Colors.backgroundCard)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            .dsCardShadow()
+        }
+        .buttonStyle(DSTapBounce())
+        .accessibilityHint("Opens the camera for a selfie")
+        .accessibilityIdentifier("scan.takeSelfie")
+        .sheet(isPresented: $showSelfie, onDismiss: {
+            // Try again with the new selfie (a cancelled sheet just shows the banner again).
+            Task { await scanService.retryScan(wardrobeViewModel: wardrobeViewModel) }
+        }) {
+            RetakeSelfieSheet()
+                .environmentObject(authService)
+        }
+    }
+
+    private var retryBanner: some View {
         Button {
             Haptics.light()
             Task {

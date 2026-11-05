@@ -656,7 +656,8 @@ struct StylePreferencesSheet: View {
 
 // MARK: - Retake Selfie Sheet
 
-private struct RetakeSelfieSheet: View {
+/// Also opened from Home's scan banner when the scan has no selfie to match.
+struct RetakeSelfieSheet: View {
     @EnvironmentObject var authService: AuthService
     @Environment(\.dismiss) private var dismiss
     @State private var selfieImage: UIImage?

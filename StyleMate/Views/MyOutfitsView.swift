@@ -284,6 +284,14 @@ struct OutfitCardView: View {
 
     private var items: [OutfitItem] { MyOutfitsView.items(of: outfit) }
 
+    /// Where a logged outfit came from: the stylist, the person's photos (auto-log),
+    /// or the manual composer.
+    static func badge(for source: String) -> (title: String, icon: String, tinted: Bool) {
+        if source == "photo" { return ("From your photos", "photo", true) }
+        if MyOutfitsViewModel.Source.isStyled(source) { return ("Styled for you", "wand.and.stars", true) }
+        return ("Manual", "hand.draw", false)
+    }
+
     private var summary: String {
         items.compactMap { $0.product }.map { ClosetText.displayProduct($0) }.joined(separator: " · ")
     }
@@ -298,14 +306,13 @@ struct OutfitCardView: View {
 
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                 if let source = outfit.source {
-                    let styled = MyOutfitsViewModel.Source.isStyled(source)
-                    Label(styled ? "Styled for you" : "Manual",
-                          systemImage: styled ? "wand.and.stars" : "hand.draw")
+                    let badge = Self.badge(for: source)
+                    Label(badge.title, systemImage: badge.icon)
                         .font(DS.Font.caption1)
-                        .foregroundStyle(styled ? DS.Colors.accent : DS.Colors.textSecondary)
+                        .foregroundStyle(badge.tinted ? DS.Colors.accent : DS.Colors.textSecondary)
                         .padding(.horizontal, DS.Spacing.xs)
                         .padding(.vertical, 3)
-                        .background(styled ? DS.Colors.accentSoft : DS.Colors.fill, in: Capsule())
+                        .background(badge.tinted ? DS.Colors.accentSoft : DS.Colors.fill, in: Capsule())
                 }
 
                 Text(summary)
