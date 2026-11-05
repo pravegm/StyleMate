@@ -160,8 +160,10 @@ struct TasteLearningTests {
         let before = frequency(b.navyTee, b.beigeChinos, taste: nil)
         let after = frequency(b.navyTee, b.beigeChinos, taste: woreFiveTimes(b.navyTee, b.beigeChinos))
         print("[TasteMeasure] navy tee + beige chinos: first \(before.first)→\(after.first), deck \(before.deck)→\(after.deck) of 40")
-        #expect(after.first > before.first, "first: \(before.first) → \(after.first) of 40")
-        #expect(after.deck > before.deck, "in the deck: \(before.deck) → \(after.deck) of 40")
+        // Measured on CI (run 42122333120, seeds 1–40): first 1 → 30, deck 12 → 35. The bars sit a
+        // little under that so a small re-weighting elsewhere doesn't trip them; a real regression would.
+        #expect(after.first >= before.first + 20, "first: \(before.first) → \(after.first) of 40")
+        #expect(after.deck >= 30, "in the deck: \(before.deck) → \(after.deck) of 40")
     }
 
     @Test("A habit the rules rate lower (a tee with smart trousers) still makes it into the deck")
@@ -169,7 +171,10 @@ struct TasteLearningTests {
         let before = frequency(b.navyTee, b.greyTrousers, taste: nil)
         let after = frequency(b.navyTee, b.greyTrousers, taste: woreFiveTimes(b.navyTee, b.greyTrousers))
         print("[TasteMeasure] navy tee + grey trousers: first \(before.first)→\(after.first), deck \(before.deck)→\(after.deck) of 40")
-        #expect(after.deck > before.deck, "in the deck: \(before.deck) → \(after.deck) of 40")
+        // Measured on CI (run 42122333120): first 0 → 4, deck 9 → 16. Trousers sit above the everyday
+        // band, so the first-pick window (1.2) rightly keeps this mostly out of option 1, while the
+        // deck window (2.0) brings it in. (With 1.2 everywhere, run 42119907439: deck only 6.)
+        #expect(after.deck >= before.deck + 5, "in the deck: \(before.deck) → \(after.deck) of 40")
         #expect(after.first >= before.first)
     }
 
