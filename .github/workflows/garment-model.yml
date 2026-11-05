@@ -124,6 +124,8 @@ jobs:
     if: always() && (needs.extract.result == 'success' || contains(github.event.head_commit.message, '[garment-head]'))
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    outputs:
+      stages: ${{ steps.src.outputs.stages }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -136,7 +138,8 @@ jobs:
         id: src
         run: |
           if [ "${{ needs.extract.result }}" = success ]; then echo "run=${{ github.run_id }}" >> "$GITHUB_OUTPUT"
-          else echo "run=$(python3 -c 'import json;print(json.load(open("scripts/garment/train_config.json"))["chunks_run"])')" >> "$GITHUB_OUTPUT"; fi
+          else echo "run=$(python3 scripts/garment/train_args.py chunks_run)" >> "$GITHUB_OUTPUT"; fi
+          echo "stages=$(python3 scripts/garment/train_args.py stages)" >> "$GITHUB_OUTPUT"
           sudo mkdir -p /mnt/chunks && sudo chown $USER /mnt/chunks
       - uses: actions/download-artifact@v4
         with: { name: garment-pca, run-id: '${{ steps.src.outputs.run }}', github-token: '${{ github.token }}' }
@@ -148,14 +151,71 @@ jobs:
           merge-multiple: true
           run-id: ${{ steps.src.outputs.run }}
           github-token: ${{ github.token }}
-      - name: Train
+      - name: Train (stage 1)
         run: |
           du -sh /mnt/chunks; ls /mnt/chunks
           mkdir -p out
-          ARGS=$(python3 -c 'import json;c=json.load(open("scripts/garment/train_config.json"));print(" ".join(f"--{k} {v}" for k,v in c["train"].items()))')
+          ARGS=$(python3 scripts/garment/train_args.py)
           echo "train args: $ARGS"
-          python -I scripts/garment/train.py --train '/mnt/chunks/train_*' '/mnt/chunks/coco_*' --val '/mnt/chunks/val_*' \
-            --pca pca.npz --out out/garment_head.pt $ARGS
+          python -I scripts/garment/train.py --train '/mnt/chunks/train_*' '/mnt/chunks/coco_*' --val '/mnt/chunks/val_*' --pca pca.npz --out out/garment_head.pt $ARGS 
+          cp pca.npz out/ && echo "${{ steps.src.outputs.run }}" > out/chunks_run.txt
+          sha256sum out/garment_head.pt | tee out/garment_head.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: garment-head-1
+          path: out
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: steps.src.outputs.stages == '1'
+        with:
+          name: garment-head
+          path: out
+          retention-days: 90
+
+  train2:
+    needs: [extract, train]
+    # Stage 2 of a schedule longer than one 6-hour job (train_config.json "stages": 2).
+    if: always() && needs.train.result == 'success' && needs.train.outputs.stages != '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Install
+        run: |
+          pip install -q torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -q $PIP_PKGS
+      - name: Which chunks
+        id: src
+        run: |
+          if [ "${{ needs.extract.result }}" = success ]; then echo "run=${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+          else echo "run=$(python3 scripts/garment/train_args.py chunks_run)" >> "$GITHUB_OUTPUT"; fi
+          echo "stages=$(python3 scripts/garment/train_args.py stages)" >> "$GITHUB_OUTPUT"
+          sudo mkdir -p /mnt/chunks && sudo chown $USER /mnt/chunks
+      - uses: actions/download-artifact@v4
+        with: { name: garment-pca, run-id: '${{ steps.src.outputs.run }}', github-token: '${{ github.token }}' }
+      - name: Download chunks
+        uses: actions/download-artifact@v4
+        with:
+          pattern: garment-chunk-*
+          path: /mnt/chunks
+          merge-multiple: true
+          run-id: ${{ steps.src.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Stage 1 result
+        uses: actions/download-artifact@v4
+        with:
+          name: garment-head-1
+          path: out
+      - name: Train (stage 2)
+        run: |
+          du -sh /mnt/chunks; ls /mnt/chunks
+          mkdir -p out
+          ARGS=$(python3 scripts/garment/train_args.py)
+          echo "train args: $ARGS"
+          python -I scripts/garment/train.py --train '/mnt/chunks/train_*' '/mnt/chunks/coco_*' --val '/mnt/chunks/val_*' --pca pca.npz --out out/garment_head.pt $ARGS --resume out/garment_head_last.pt
           cp pca.npz out/ && echo "${{ steps.src.outputs.run }}" > out/chunks_run.txt
           sha256sum out/garment_head.pt | tee out/garment_head.sha256
       - uses: actions/upload-artifact@v4

@@ -153,14 +153,18 @@ def main():
     ap.add_argument("--val", nargs="+", required=True)
     ap.add_argument("--pca", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--epochs", type=int, default=6)
-    ap.add_argument("--hours", type=float, default=4.5, help="stop (and keep the best) after this long")
+    ap.add_argument("--epochs", type=int, default=6, help="upper bound; the time budget usually ends training first")
+    ap.add_argument("--hours", type=float, default=4.5, help="this job's training time")
+    ap.add_argument("--budget_hours", type=float, default=0, help="the LR schedule's length over all stages (0 = --hours)")
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--mid", type=int, default=256)
     ap.add_argument("--workers", type=int, default=2)
-    ap.add_argument("--resume")
+    ap.add_argument("--eval_every", type=int, default=1000)
+    ap.add_argument("--resume", help="a previous stage's *_last.pt: continue its schedule")
+    ap.add_argument("--stages", type=int, default=1, help="(read by the workflow)")
     a = ap.parse_args()
+    import math
     torch.set_num_threads(max(1, (os.cpu_count() or 4) - a.workers))
     torch.manual_seed(0)
     tr_dirs = [d for p in a.train for d in glob.glob(p)]
@@ -170,59 +174,80 @@ def main():
     print(f"train {len(train)} samples from {len(tr_dirs)} chunks, val {len(val)}", flush=True)
     in_ch = train.feats[0].shape[-1]
     model = GarmentHead(in_ch, mid=a.mid)
+    opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=1e-4)
+    done_s, step, best, history = 0.0, 0, -1.0, []
     if a.resume:
-        model.load_state_dict(torch.load(a.resume, map_location="cpu")["state_dict"])
+        ck = torch.load(a.resume, map_location="cpu", weights_only=False)
+        model.load_state_dict(ck["state_dict"]); opt.load_state_dict(ck["opt"])
+        done_s, step, best, history = ck["done_s"], ck["step"], ck["best"], ck["history"]
+        torch.manual_seed(step)
+        print(f"resumed at step {step}, {done_s / 3600:.2f} h done, best {best:.4f}", flush=True)
     w, freq = class_weights(train)
     print("class freq", {NAMES[c]: round(float(freq[c]), 5) for c in range(NUM_CLASSES)}, flush=True)
     tl = torch.utils.data.DataLoader(train, batch_size=a.batch, shuffle=True, num_workers=a.workers, drop_last=True,
                                      persistent_workers=a.workers > 0)
     vl = torch.utils.data.DataLoader(val, batch_size=a.batch, shuffle=False, num_workers=a.workers)
-    opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=1e-4)
-    steps = a.epochs * len(tl)
-    import math
+    budget = (a.budget_hours or a.hours) * 3600
+    max_steps = a.epochs * len(tl)
 
     def set_lr(progress):
-        # Linear warm-up over the first 3%, then cosine to zero at the step OR time budget,
-        # whichever comes first, so a run cut short by the time limit still anneals.
+        # Linear warm-up over the first 3%, then cosine to zero at the end of the whole budget
+        # (all stages), so the run anneals properly even when it is cut into 6-hour jobs.
         f = min(1.0, progress / 0.03) * 0.5 * (1 + math.cos(math.pi * min(1.0, progress)))
         for g in opt.param_groups:
             g["lr"] = a.lr * max(f, 0.0)
         return a.lr * f
+
     part_pos = torch.tensor([8.0, 4.0, 4.0, 2.0]).view(1, -1, 1, 1)
-    t0 = time.time(); best = -1; step = 0; history = []
-    budget = a.hours * 3600
-    deadline = t0 + budget
-    model.train()
-    for ep in range(a.epochs):
-        run = 0.0
-        b = 0
-        for b, batch in enumerate(tl):
-            lr = set_lr(max(step / steps, (time.time() - t0) / budget))
-            loss = losses(model, batch, w, part_pos)
-            opt.zero_grad(set_to_none=True)
-            loss.backward()
-            opt.step(); step += 1
-            run += loss.item()
-            if b % 100 == 0:
-                el = time.time() - t0
-                print(f"ep {ep} step {b}/{len(tl)} loss {run / (b + 1):.4f} lr {lr:.2e} "
-                      f"{el / 60:.1f} min ({el / step:.2f}s/step)", flush=True)
-            if time.time() > deadline:
-                break
+    t0 = time.time()
+    stem = os.path.splitext(a.out)[0]
+
+    def progress():
+        return max(step / max_steps, (done_s + time.time() - t0) / budget)
+
+    def checkpoint(final):
+        nonlocal best
         m = evaluate(model, vl)
-        m.update(epoch=ep, train_loss=run / max(1, b + 1), minutes=(time.time() - t0) / 60)
+        m.update(step=step, hours=(done_s + time.time() - t0) / 3600)
         history.append(m)
-        print(f"VAL ep {ep}: miou {m['miou']:.4f} garments {m['miou_garments']:.4f} acc {m['pixel_acc']:.4f} "
-              f"parts {m['part_iou']} person {m['person_iou']}\n  {m['iou']}", flush=True)
+        print(f"VAL step {step}: miou {m['miou']:.4f} garments {m['miou_garments']:.4f} acc {m['pixel_acc']:.4f} "
+              f"parts {m['part_iou']} person {m['person_iou']}", flush=True)
+        print(f"  {m['iou']}", flush=True)
         if m["miou_garments"] > best:
             best = m["miou_garments"]
             torch.save({"state_dict": model.state_dict(), "in_ch": in_ch, "mid": a.mid, "pca": dict(np.load(a.pca)),
                         "layers": list(bb.LAYERS), "backbone": bb.BACKBONE, "val": m}, a.out)
             print(f"  saved best -> {a.out}", flush=True)
-        json.dump(history, open(os.path.splitext(a.out)[0] + "_history.json", "w"), indent=1)
-        if time.time() > deadline:
-            print("time budget reached", flush=True)
-            break
+        json.dump(history, open(stem + "_history.json", "w"), indent=1)
+        if final:
+            torch.save({"state_dict": model.state_dict(), "opt": opt.state_dict(), "done_s": done_s + time.time() - t0,
+                        "step": step, "best": best, "history": history}, stem + "_last.pt")
+
+    model.train()
+    run, n, ep = 0.0, 0, 0
+    stop = False
+    while not stop:
+        for batch in tl:
+            pr = progress()
+            if pr >= 1.0 or time.time() - t0 > a.hours * 3600:
+                stop = True
+                break
+            lr = set_lr(pr)
+            loss = losses(model, batch, w, part_pos)
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            opt.step(); step += 1
+            run += loss.item(); n += 1
+            if step % 100 == 0:
+                el = time.time() - t0
+                print(f"ep {ep} step {step} loss {run / n:.4f} lr {lr:.2e} {el / 60:.1f} min ({el / max(1, n):.2f}s/step) "
+                      f"progress {pr:.3f}", flush=True)
+                run, n = 0.0, 0
+            if step % a.eval_every == 0:
+                checkpoint(False)
+        ep += 1
+    print("time budget reached" if progress() < 1.0 else "schedule complete", flush=True)
+    checkpoint(True)
 
 
 if __name__ == "__main__":

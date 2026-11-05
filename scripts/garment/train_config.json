@@ -1,4 +1,4 @@
 {
   "chunks_run": 42010903178,
-  "train": {"epochs": 8, "hours": 0.3, "workers": 1, "batch": 16, "lr": 0.002}
+  "train": {"stages": 2, "hours": 4.7, "workers": 1, "batch": 16, "lr": 0.002, "eval_every": 1500, "epochs": 20}
 }
