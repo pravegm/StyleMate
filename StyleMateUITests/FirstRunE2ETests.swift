@@ -156,8 +156,13 @@ class FirstRunE2ETests: E2ETestCase {
         // Sign out: back to the welcome screen; the closet stays for the next sign-in.
         XCTAssertTrue(signOut.waitForExistence(timeout: 10))
         signOut.tap()
-        let confirm = app.buttons.matching(NSPredicate(format: "label == 'Sign Out'")).allElementsBoundByIndex.last
-        confirm?.tap()
+        // The confirmation dialog adds a second "Sign Out" button: wait for it, tap that one.
+        let signOutButtons = app.buttons.matching(NSPredicate(format: "label == 'Sign Out'"))
+        for _ in 0..<20 where signOutButtons.count < 2 {
+            _ = XCTWaiter.wait(for: [XCTestExpectation(description: "dialog")], timeout: 0.5)
+        }
+        snap("sign-out-confirm")
+        signOutButtons.allElementsBoundByIndex.last?.tap()
         XCTAssertTrue(button(id: "onboarding.getStarted", label: "Get Started").waitForExistence(timeout: 15),
                       "Signing out didn't return to the welcome screen")
         snap("signed-out")
