@@ -400,6 +400,8 @@ class WardrobeViewModel: ObservableObject {
         ItemEmbeddingStore.shared.remove(userItems.map(\.id))
         StudioQueue.shared.cancel()
         StudioStore.shared.remove(userItems.map(\.id))
+        // Pieces waiting for Premium (local only, never in iCloud): their files, embeddings, list.
+        LockedItemsStore.shared.forget(forUser: userId)
 
         // Is anyone else's wardrobe on this phone? If not, wipe the shared folders whole
         // (catches orphaned files too); otherwise delete only this user's files.

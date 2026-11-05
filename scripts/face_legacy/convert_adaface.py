@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# RESEARCH ONLY: not used by any build, never ship its output (see scripts/face_legacy/README.md).
 """
 Convert AdaFace IR-101 (R100) WebFace12M to Core ML (fp16) for StyleMate.
 

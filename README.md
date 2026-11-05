@@ -10,8 +10,8 @@ StyleMate finds the photos of *you* in your library, cuts out every garment and 
 
 - During onboarding you take a **three-frame selfie** (straight on, then a slight turn each way; `SelfieCameraService`). Each frame is checked on-device (one face, big enough, centred, lit, no sunglasses) before it's accepted.
 - Then **Find yourself** (`Services/Identity/`, `FindYourselfView`) looks through up to ~1,500 recent photos, embeds every usable face, groups faces of the same person (greedy centroid clustering), ranks the groups by similarity to your selfie and asks "Is this you?" with one tap to confirm. The confirmed faces become your reference **gallery**, so the scan recognises you across angles, lighting and years.
-- Faces are detected and 5-point-landmarked by the bundled **InsightFace SCRFD-10G** detector (Core ML), aligned to a canonical 112×112, and embedded with **AdaFace IR-101 (WebFace12M)** (bundled as `MobileFaceNet.mlpackage`, filename kept for history). Embeddings are tagged with the model version so an upgrade rebuilds the gallery.
-- Each library photo is matched by **cosine similarity** against the gallery with tiered confidence and a runner-up margin:
+- Faces are detected and 5-point-landmarked by the bundled **YuNet** detector (OpenCV Zoo, MIT; Core ML), aligned to the canonical ArcFace 112×112 template, and embedded with **SFace** (OpenCV Zoo, Apache-2.0; 128-d, flip-averaged). Large library photos get an extra pass over four overlapping tiles, so distant faces aren't missed. Every similarity bar lives in one profile (`FaceModelProfile`), calibrated on LFW; embeddings are tagged with the model version so a model change rebuilds the gallery. Both models are commercially usable; the earlier InsightFace SCRFD + AdaFace pair (non-commercial) is no longer built or shipped (`docs/MODEL-LICENSING.md`).
+- Each library photo is matched by **cosine similarity** against the gallery with tiered confidence and a runner-up margin. Auto-adding needs the gallery's consensus (the mean of the two best-matching gallery faces), so one odd gallery entry can never pull a stranger in; review needs one good match:
   - **confident** → analysed straight away (in a multi-person photo only *your* body is isolated via a person-instance mask, so other people's clothes are never extracted); very confident matches that also match your **selfie** (and clearly beat anyone else in the shot) **teach the gallery** a new angle of your face — learned faces are capped at half the gallery and never displace the selfie or faces you confirmed;
   - **probably you** → queued for an **"Is this you?"** review (home banner → `FaceReviewView`); confirming teaches the gallery and extracts those outfits;
   - anyone else → skipped.
@@ -66,16 +66,17 @@ The calendar also **fills itself** (`Services/Insights/WearLogSuggestions`): whe
 - **My Outfits**: week strip or month calendar of logged outfits.
 - **Large displays (iPhone Duo inner display)**: two panes via `FoldAwareSplit` (split exactly on the crease when half-open): the closet grid beside the item page; Today's Outfit's board beside the note, a Keep / Swap list and all five options; Home and Outfits in two columns. The cover display and other iPhones keep the phone layout.
 - **Dark mode**: every screen follows the system appearance. Product shots stay on a dimmed light "studio print" (closet tiles, outfit boards, item page), so dark garments stay visible; the mint accent carries dark text and no glow; cards keep a subtle rim instead of a shadow. The app icon has dark and tinted variants. CI's UI tests rerun the end-to-end flows in dark appearance (`-uiTestDarkMode`, DEBUG only) and save those screenshots with a `-dark` suffix.
-- **Profile**: about you (name, gender/age — optional), preferred styles, morning-outfit notification + time, cloud sync status, recognition tools, privacy policy, sample-clothes removal, tour replay, About (acknowledgements, diagnostics, version), data deletion (wardrobe, outfit log, selfie/face data, scan state, iCloud zone; then a fresh local profile).
+- **Profile**: about you (name, gender/age — optional), StyleMate Premium (plan, renewal date, Manage Subscription, Restore Purchases), preferred styles, morning-outfit notification + time, cloud sync status, recognition tools, privacy policy, sample-clothes removal, tour replay, About (acknowledgements, diagnostics, version), data deletion (wardrobe, outfit log, selfie/face data, scan state, iCloud zone; then a fresh local profile).
 - **About → Diagnostics** (`Views/Diagnostics/`, `Services/Diagnostics/`): phone facts (model, iOS, temperature, Low Power Mode, battery, memory, storage, Core ML compute devices incl. the Neural Engine), a **benchmark** on the 6 bundled sample photos (garment extraction cold + warm, face detect + embed, one studio render; 3 rounds, medians; peak memory; which device Core ML's compute plan puts each bundled model on), **live stats** from real use (`PerfLog`: rolling s/photo, photos checked, items found, studio renders kept / rejected / average time, kept in `Application Support/Diagnostics/`), an **iPhone Duo hinge check** (live angle, posture and fold; guided flat / ~90° / closed readings vs target), and a plain-text **Share report**. Nothing is sent anywhere unless the user shares the report. `PerfLog` also emits Instruments signposts (Points of Interest).
 - **About → Acknowledgements**: version, privacy policy, and every licence / attribution text in `StyleMate/Resources/Acknowledgements/` (one `ACK-<order>-<slug>.md` per component, listed automatically: Marqo-FashionSigLIP + SigLIP, Stable Diffusion 1.5 / DreamShaper 8 with the OpenRAIL-M use restrictions, Apple ml-stable-diffusion, MET Norway and Open-Meteo weather data).
+- **StyleMate Premium (subscription)**: every feature is free for the first **50 wardrobe items** (sample-photo items don't count); Premium, a StoreKit 2 auto-renewable subscription (group "StyleMate Premium": `com.stylemates.StyleMate.premium.annual` with a 1-week free trial, and `…premium.monthly`; prices always from StoreKit), makes the wardrobe unlimited. At the limit, camera / gallery adds open the paywall, a review batch that would cross 50 adds what fits and saves the rest, and the background scan keeps finding pieces but stores them **locked** (`Services/Subscription/LockedItemsStore`: on the phone only, not in the closet, outfits or iCloud) behind a "23 more pieces found — Unlock with Premium" card on Home and in the closet. Subscribing unlocks them at once; removing items lets the oldest locked ones fill the free slots; if Premium lapses nothing already in the closet is removed, only new additions past 50 wait. The paywall (`Views/Subscription/PaywallView`) shows the user's own cutouts, StoreKit prices / periods / trial (only when eligible), the auto-renew terms, Restore Purchases, Terms of Use (Apple's standard EULA) and the privacy policy; on the Duo's inner display it is a `FoldAwareSplit` (closet | plans). The entitlement comes from `Transaction.currentEntitlements` + the group's renewal status (trial, billing grace period, billing retry, refunds, Ask to Buy), with `Transaction.updates` heard from launch and a cached copy for offline / background launches. Profile shows the plan and renewal date with Manage Subscription and Restore. No server, no receipts sent anywhere, no analytics. App Store Connect setup: `docs/TESTFLIGHT.md` §6.
 - **Privacy policy**: `docs/privacy.html`, published at https://pravegm.github.io/StyleMate/privacy.html (GitHub Pages from `docs/`).
 - **CloudKit sync**: private database, custom `WardrobeZone`, per-item records with image assets. Incremental: a persisted server change token, metadata-only pulls, image assets fetched lazily off the main thread. The phone is the source of truth — local changes are queued in a per-user ledger (pending uploads + tombstones) and retried until iCloud confirms them, local edits win, and a local item is only removed when the server reports its deletion. Pulls restore every record in the zone whatever profile id uploaded it (the private database is the iCloud account's own), so a reinstall or a new iPhone — which gets a new local profile id — restores the whole wardrobe; "Delete Everything" blocks all pulls until iCloud confirms the zone deletion.
 
 ## Architecture
 
 - **Language / UI**: Swift, SwiftUI (UIKit interop for `ImagePicker` and camera capture). MVVM.
-- **On-device ML (Core ML)**: SCRFD-10G face detector, AdaFace IR-101 face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder, and the studio-render diffusion model (DreamShaper 8 img2img: text encoder, UNet, VAE encoder/decoder). Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
+- **On-device ML (Core ML)**: YuNet face detector, SFace face embedder, FASHN human parser, Fashionpedia garment labeler, Marqo-FashionSigLIP encoder, and the studio-render diffusion model (DreamShaper 8 img2img: text encoder, UNet, VAE encoder/decoder). Plus Apple Vision (person-instance masks, human detection) and, where available, Apple's on-device Foundation Models.
 - **Local persistence**: `UserDefaults` (wardrobe items per user, sync ledger), wardrobe images / thumbnails / outfit-history snapshots under `Application Support/wardrobe_images/`, the selfie under `Application Support/Selfie/`, the face gallery under `Application Support/FaceReference/` (with per-entry provenance: selfie / confirmed / learned), item embeddings under `Application Support/WardrobeEmbeddings/items.bin` (compact binary, written off the main thread, debounced), studio renders' bookkeeping under `Application Support/Studio/`, Core Data (outfit history, scoped per user; a damaged store is moved to `Application Support/CoreDataBackups/` instead of crashing). Personal files are excluded from iCloud Backup and use `completeUntilFirstUserAuthentication` file protection (`LocalStore`); older builds' `Documents/` files are moved there automatically.
 - **Cloud**: CloudKit private DB only (your own iCloud). No third-party AI services.
 - **Weather**: met.no primary with Open-Meteo fallback (no key).
@@ -83,6 +84,7 @@ The calendar also **fills itself** (`Services/Insights/WearLogSuggestions`): whe
 ```
 StyleMate/
 ├── Models/                      # WardrobeItem, Category (+ WardrobeViewModel), ProductType, OutfitType, User, Core Data model
+├── FaceModels/                  # git-ignored: FaceDetectYuNet / FaceEmbedSFace .mlpackage (scripts/build_face_models.sh)
 ├── ML/                          # git-ignored: GarmentParser / GarmentLabeler / FashionEncoder .mlpackage + FashionVocabulary.json;
 │                                #   Studio/StudioModels.bundle (compiled diffusion .mlmodelc + tokenizer)
 ├── Services/
@@ -90,7 +92,8 @@ StyleMate/
 │   ├── Studio/                  # StudioRenderer (on-device img2img product render)
 │   ├── Outfits/                 # OutfitEngine, StyleKnowledge, OutfitMood, StyleIntentParser, OnDeviceStylist
 │   ├── ImageAnalysisService     # thin entry point to the wardrobe pipeline
-│   ├── SCRFDDetector / FaceMatchingService   # face detection, alignment, AdaFace embeddings, identity resolution
+│   ├── FaceModelProfile / FaceDetector*      # face models' I/O contract + every similarity bar; YuNet (ships), SCRFD (licensed plug-in only)
+│   ├── FaceMatchingService      # alignment, SFace embeddings, gallery, identity resolution
 │   ├── Identity/                # "Find yourself": face clustering + ranking, library pass, selfie frame checks
 │   ├── PhotoScanService         # library scan, identity gate, "Is this you?" queue
 │   ├── DuplicateDetector        # visual + attribute duplicate matching
@@ -98,19 +101,21 @@ StyleMate/
 │   ├── Scan/                    # planner, First 40 ranking, ItemTrust, held items, sample library, background coordinator
 │   ├── Notifications/           # MorningLook (scheduler, store, forecast, tap router)
 │   ├── Insights/                # WearLogSuggestions ("Wore this on Tue?")
+│   ├── Subscription/            # PremiumStore (StoreKit 2), PremiumStatus, WardrobeAllowance (50 free), LockedItemsStore
 │   ├── Diagnostics/             # PerfLog (timing hooks + live stats), benchmark, device facts, compute plans, report, acknowledgements
 │   ├── AuthService (local profile), CloudKitService, PersistenceController, OnboardingManager
 │   ├── SelfieCameraService, WeatherService, LocationService
 ├── ViewModels/                  # HomeViewModel, MyOutfitsViewModel, FaceReferenceViewModel
 ├── Vendor/StableDiffusion/      # Apple ml-stable-diffusion Swift pipeline (MIT, vendored; see its README)
-├── Views/                       # Home, TodayOutfitSheet, MyWardrobe, ItemDetail, AddItem*, MyOutfits, Profile, Onboarding/, Components/
+├── Views/                       # Home, TodayOutfitSheet, MyWardrobe, ItemDetail, AddItem*, MyOutfits, Profile, Onboarding/, Components/,
+│                                #   Subscription/ (paywall, locked-pieces card, Profile's Premium section)
 ├── DesignSystem.swift
 └── StyleMateApp.swift
 ```
 
 ## Permissions
 
-Declared in `Info.plist`: **Photos** (wardrobe building and scan; `PHPhotoLibraryPreventAutomaticLimitedAccessAlert`, since the app offers "Select more photos" itself), **Camera** (selfie and item capture), **Location** (optional, weather only); **Notifications** are requested at run time (morning outfit, after the first saved outfit). `UIBackgroundModes` `processing` + `fetch`, and `BGTaskSchedulerPermittedIdentifiers` = `com.stylemates.StyleMate.photoscan` (overnight scan) and `com.stylemates.StyleMate.morninglook` (morning-look refresh). Entitlements: iCloud / CloudKit only (no sign-in). Core ML runs on CPU + Neural Engine only (no GPU, which iOS forbids in the background).
+Declared in `Info.plist`: **Photos** (wardrobe building and scan; `PHPhotoLibraryPreventAutomaticLimitedAccessAlert`, since the app offers "Select more photos" itself), **Camera** (selfie and item capture), **Location** (optional, weather only); **Notifications** are requested at run time (morning outfit, after the first saved outfit). `UIBackgroundModes` `processing` + `fetch`, and `BGTaskSchedulerPermittedIdentifiers` = `com.stylemates.StyleMate.photoscan` (overnight scan) and `com.stylemates.StyleMate.morninglook` (morning-look refresh). Entitlements: iCloud / CloudKit only (no sign-in); the Premium subscription uses StoreKit, which needs no entitlement (In-App Purchase is on for every App ID). Core ML runs on CPU + Neural Engine only (no GPU, which iOS forbids in the background).
 
 ## Setup
 
@@ -120,16 +125,18 @@ Nobody needs a local Mac build to work on StyleMate: **every branch push runs `.
 
 **End-to-end UI tests**: the `ui-tests` CI job drives the real app in the simulator with XCUITest (`StyleMateUITests/`). It covers the closet, "Style Me" (mood → 5 options → swap a piece → save → the look appears on today's date in the calendar), manual outfit logging, and a gallery import through the system photo picker into on-device extraction. DEBUG-only launch arguments (`-uiTestResetState`, `-uiTestDemoUser`, `-uiTestSkipOnboarding`, `-uiTestSeedWardrobe`, in `StyleMate/Debug/DebugLaunchSupport.swift`) sign in a demo user and seed a wardrobe. Screenshots of every step are uploaded as the `e2e-screens` artifact. The simulator build is ad-hoc signed so CloudKit's entitlements survive.
 
+**Subscriptions in tests**: `StyleMate.storekit` (repo root) defines the two Premium plans for StoreKit Test; the shared scheme (`StyleMate.xcodeproj/xcshareddata/xcschemes/StyleMate.xcscheme`) selects it for Run and Test, and the tests also open it with `SKTestSession`. `SubscriptionTests` covers the 50-item gate, locked items, the entitlement rules and a real StoreKit Test purchase; `SubscriptionE2ETests` (light and dark) seeds a closet at 50 with 23 locked pieces (`-uiTestSeedWardrobeCount 50 -uiTestSeedLocked 23`, DEBUG only), opens the paywall, buys the annual plan and checks the pieces unlock, and checks that a gallery add at the limit opens the paywall. `DuoScreensTests.test02_DuoPaywall` shoots the paywall on the Duo's cover, flat and half-open displays.
+
 To build on a Mac (Xcode 27+, iOS 18.4+ device or simulator):
 
 1. `git clone https://github.com/pravegm/StyleMate.git`
 2. Generate the git-ignored models (Python 3.11):
    ```bash
-   bash scripts/build_face_models.sh       # -> MobileFaceNet.mlpackage + SCRFD10G.mlpackage at the repo root
+   bash scripts/build_face_models.sh       # -> StyleMate/FaceModels/FaceDetectYuNet + FaceEmbedSFace .mlpackage
    bash scripts/build_wardrobe_models.sh   # -> StyleMate/ML/*.mlpackage + FashionVocabulary.json
    bash scripts/build_studio_models.sh     # -> StyleMate/ML/Studio/StudioModels.bundle (macOS + Xcode, 30-90 min)
    ```
-   The face embedder takes **BGR** input (handled in `createInputMultiArray`); see `scripts/convert_adaface.py`, `convert_scrfd.py` and `convert_wardrobe_models.py` (each parity-checks Core ML against PyTorch).
+   YuNet takes BGR raw 0–255, SFace RGB raw 0–255 (see `FaceModelProfile`); `scripts/convert_face_models.py` and `convert_wardrobe_models.py` parity-check Core ML against the originals. `scripts/check_face_models.sh` is the licence gate CI and TestFlight run on the built app.
 3. `open StyleMate.xcodeproj`, set your signing team, and run (a real device for the selfie camera).
 
 ### iPhone Duo
@@ -147,7 +154,7 @@ StyleMate runs natively full screen on the iPhone Duo's inner and cover displays
 
 ## Licensing note
 
-The bundled model weights come with their own licences, several of which are research / non-commercial (SCRFD, AdaFace's training data, the SegFormer-based parsers). The studio-render model (DreamShaper 8) is CreativeML OpenRAIL-M: commercial use is allowed, but its use restrictions must be passed on in the app's terms. They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
+The bundled model weights come with their own licences. The face models (YuNet MIT, SFace Apache-2.0) are commercially usable; the SegFormer-based garment parsers are still research / non-commercial. The studio-render model (DreamShaper 8) is CreativeML OpenRAIL-M: commercial use is allowed, but its use restrictions must be passed on in the app's terms. They must be cleared or replaced before a commercial release — see `docs/MODEL-LICENSING.md`.
 
 ## License
 

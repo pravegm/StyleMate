@@ -79,27 +79,27 @@ struct ReviewPick: Equatable {
 /// Pure clustering + ranking for the onboarding "Find yourself" step. No PhotoKit, no Core ML:
 /// everything here works on embeddings so it is unit-tested with synthetic vectors.
 ///
-/// AdaFace (SCRFD-aligned) calibration this is tuned against: same person 0.6–0.99 for similar
-/// shots, 0.30–0.55 across pose / light / sunglasses; different people ~0.03 (max ~0.18).
-/// Similarity to the normalized centroid of many same-person faces runs higher than pairwise
-/// similarity (roughly its square root), which is why centroid bars sit above pairwise ones.
+/// Every bar comes from the active face-model profile (`FaceModelProfile.active`), calibrated to
+/// the embedder's similarity scale (docs/MODEL-LICENSING.md §8). Similarity to the normalized
+/// centroid of many same-person faces runs higher than pairwise similarity (roughly its square
+/// root), which is why centroid bars sit above pairwise ones.
 enum FaceClustering {
     /// A face joins a cluster when its similarity to the cluster centroid reaches this.
-    static let linkThreshold: Float = 0.5
+    static let linkThreshold: Float = FaceModelProfile.active.clusterLink
     /// Clusters smaller than this are noise (one-off strangers) and are never offered.
     static let minClusterSize = 2
     /// With a selfie, a cluster must resemble it at least this much to be offered as "you".
-    /// Strangers' centroids sit near 0.05; the user's own cluster well above 0.3.
-    static let offerFloor: Float = 0.15
+    /// Strangers' centroids sit near 0; the user's own cluster well above it.
+    static let offerFloor: Float = FaceModelProfile.active.offerFloor
     /// Most "Is this you?" groups we'll offer before giving up.
     static let maxOffers = 3
     /// A member closer than this to its own cluster centroid is pre-checked.
-    static let preselectThreshold: Float = 0.40
+    static let preselectThreshold: Float = FaceModelProfile.active.preselect
     /// "Also you?" thresholds against the confirmed faces.
-    static let alsoYouClusterThreshold: Float = 0.40
-    static let alsoYouMemberThreshold: Float = 0.30
-    static let alsoYouSingleThreshold: Float = 0.45
-    static let alsoYouPreselect: Float = 0.50
+    static let alsoYouClusterThreshold: Float = FaceModelProfile.active.alsoYouCluster
+    static let alsoYouMemberThreshold: Float = FaceModelProfile.active.alsoYouMember
+    static let alsoYouSingleThreshold: Float = FaceModelProfile.active.alsoYouSingle
+    static let alsoYouPreselect: Float = FaceModelProfile.active.alsoYouPreselect
     /// Merge pass only considers the largest multi-face clusters (keeps it cheap on big libraries).
     private static let mergeCandidateLimit = 300
 
