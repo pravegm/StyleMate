@@ -1,6 +1,6 @@
 {
-  "comment": "The trained GarmentNet head that ships: the garment-head artifact of this garment-model.yml run (CI downloads it). sha256 is of garment_head.pt.",
-  "run_id": 42018691879,
-  "artifact": "garment-head",
-  "sha256": "813c804508666c31b0c8ab84dbe881d92b451e121c5b8bfab4767d11759b6ba4"
+  "comment": "The trained GarmentNet head that ships: this artifact of this garment-model.yml run (CI downloads it). sha256 is of garment_head.pt.",
+  "run_id": 42026153584,
+  "artifact": "garment-head-1",
+  "sha256": "a2d9f0b40a429e2814d7ca9632c135e380709005dc8fdf76faa0cb822c487288"
 }

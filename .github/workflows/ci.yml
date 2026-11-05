@@ -137,12 +137,14 @@ jobs:
       - name: Pinned garment head
         id: gpin
         if: steps.wcache.outputs.cache-hit != 'true'
-        run: echo "run=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json"))["run_id"])')" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "run=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json"))["run_id"])')" >> "$GITHUB_OUTPUT"
+          echo "artifact=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json")).get("artifact", "garment-head"))')" >> "$GITHUB_OUTPUT"
       - name: Download the garment head
         if: steps.wcache.outputs.cache-hit != 'true'
         uses: actions/download-artifact@v4
         with:
-          name: garment-head
+          name: ${{ steps.gpin.outputs.artifact }}
           path: scripts/garment/.artifacts
           run-id: ${{ steps.gpin.outputs.run }}
           github-token: ${{ github.token }}
