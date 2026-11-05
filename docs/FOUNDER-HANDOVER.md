@@ -81,8 +81,8 @@ background, and fastest when the phone is charging.
 - Real-device checks the simulator can't do: scan speed on a 10,000-photo library, render time on
   the Neural Engine, Duo hinge accuracy and the seated pose, the morning notification and
   background refresh.
-- New iPhone restore: making sure a fresh install on a new phone picks up the same wardrobe from
-  iCloud.
+- New iPhone restore: done. A fresh install signed into the same iCloud account restores the
+  wardrobe (items and photos; outfit history and face data stay on the old phone).
 - iCloud schema: TestFlight builds use Apple's "Production" iCloud environment, which needs the
-  app's data schema deployed once (steps in `docs/TESTFLIGHT.md` §5). Until then everything works,
+  app's data layout uploaded once (5 minutes, `docs/TESTFLIGHT.md` §5). Until then everything works,
   but the backup doesn't.

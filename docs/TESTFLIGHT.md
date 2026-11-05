@@ -41,11 +41,22 @@ On https://github.com/pravegm/StyleMate/settings/pages, under **Build and deploy
 live at https://pravegm.github.io/StyleMate/privacy.html, the link the app already uses. App Store
 Connect asks for the same link.
 
-### 5. iCloud backup in TestFlight (after the first build)
-TestFlight builds use the *Production* iCloud environment. After the first build has run once, go
-to https://icloud.developer.apple.com, choose the `iCloud.com.stylemates.StyleMate` container, open
-**Schema**, and press **Deploy Schema Changes…** to Production. Until then the app still works
-fully, but the wardrobe isn't backed up to iCloud.
+### 5. Switch on iCloud backup (about 5 minutes, once)
+TestFlight builds use Apple's *Production* iCloud environment, which needs the app's data layout
+("schema") uploaded once. Until you do this, the app works fully but the wardrobe isn't backed up.
+1. Go to https://icloud.developer.apple.com and sign in with the developer team's Apple ID. Choose
+   the container **iCloud.com.stylemates.StyleMate** (it appears after step 1 above).
+2. Open **Settings**, then **Tokens**. Next to **Management Tokens** press **+**, name it
+   `GitHub schema import`, create it, and copy the token. It is shown only once.
+3. On https://github.com/pravegm/StyleMate/settings/secrets/actions add a secret named
+   `CK_MANAGEMENT_TOKEN` with that token.
+4. Open https://github.com/pravegm/StyleMate/actions/workflows/cloudkit-schema.yml and press
+   **Run workflow**. Wait for the green tick. If it fails, the log shows why, and it can be fixed
+   from there.
+5. Back in the iCloud console, choose the **Development** environment, then **Schema → Record
+   Types**, and check that **WardrobeItem** is listed. Press **Deploy Schema Changes…** and confirm
+   the deployment to **Production**.
+6. Open StyleMate again. Backup starts on the next launch, including everything added before.
 
 ## Making a build (every time)
 1. Open https://github.com/pravegm/StyleMate/actions/workflows/testflight.yml.
