@@ -48,7 +48,13 @@ class FirstRunE2ETests: E2ETestCase {
             if !snappedProgress, counter.exists, counter.label.range(of: "^[1-9]", options: .regularExpression) != nil {
                 snap("sample-scan-progress"); snappedProgress = true
             }
-            if openCloset.exists { snap("sample-closet-ready"); openCloset.tap() }
+            // The ready screen hands off to Home by itself after 2.5 s, so "Open my closet" can
+            // leave between `.exists` and the tap; tap the snapshot's frame (snapshot() throws
+            // instead of failing the test) and let the next poll see Home.
+            if openCloset.exists, let f = try? openCloset.snapshot().frame, !f.isEmpty {
+                snap("sample-closet-ready")
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: f.midX, dy: f.midY)).tap()
+            }
             _ = XCTWaiter.wait(for: [XCTestExpectation(description: "poll")], timeout: 1)
         }
         XCTAssertTrue(tabs.waitForExistence(timeout: 10), "Never reached Home after the sample scan")
