@@ -281,6 +281,7 @@ struct OutfitCardView: View {
     var onEdit: () -> Void
     var onDelete: () -> Void
     @ScaledMetric(relativeTo: .body) private var collageHeight: CGFloat = 160
+    @EnvironmentObject private var wardrobeViewModel: WardrobeViewModel
 
     private var items: [OutfitItem] { MyOutfitsView.items(of: outfit) }
 
@@ -299,8 +300,12 @@ struct OutfitCardView: View {
     var body: some View {
         let pieces = items
         HStack(alignment: .top, spacing: DS.Spacing.md) {
-            CutoutCollage(paths: pieces.map { OutfitItem.displayImagePath(for: $0) },
-                          cornerRadius: DS.Radius.control)
+            // The look on you when its try-on is cached; the cutout collage otherwise.
+            TryOnCachedImage(items: pieces.compactMap { p in p.id.flatMap { id in wardrobeViewModel.items.first { $0.id == id } } },
+                             cornerRadius: DS.Radius.control) {
+                CutoutCollage(paths: pieces.map { OutfitItem.displayImagePath(for: $0) },
+                              cornerRadius: DS.Radius.control)
+            }
                 .frame(width: collageHeight, height: collageHeight)
                 .accessibilityHidden(true)
 

@@ -28,6 +28,8 @@ final class DiagnosticsBenchmark: ObservableObject {
         var face = true
         var studio = true
         var placements = true
+        /// One "On you" try-on (body = a sample photo, pieces = another sample's clothes); a note.
+        var tryOn = true
         /// Which models to plan (nil = all bundled).
         var placementFilter: ((String) -> Bool)? = nil
     }
@@ -111,6 +113,7 @@ final class DiagnosticsBenchmark: ObservableObject {
 
         // 1. Garment extraction.
         var studioSource: WardrobeExtractor.Item?
+        var tryOnPieces: [WardrobeExtractor.Item] = []
         if options.extraction, !samples.isEmpty {
             if !WardrobeExtractor.isAvailable { result.notes.append("Garment models are missing from this build.") }
             result.photos = samples.map { BenchmarkResult.PhotoTiming(name: Self.shortName($0.0)) }
@@ -129,6 +132,9 @@ final class DiagnosticsBenchmark: ObservableObject {
                         result.photos[i].items = items.count
                         if i == 0 { result.coldExtractionSeconds = seconds }
                         if studioSource == nil { studioSource = Self.studioCandidate(items) }
+                        if tryOnPieces.isEmpty, !sample.0.contains("pink_coat"),
+                           items.contains(where: { $0.kind == .innerTop || $0.kind == .outerLayer }),
+                           items.contains(where: { $0.kind == .lower }) { tryOnPieces = items }
                     }
                     advance()
                 }
@@ -158,6 +164,43 @@ final class DiagnosticsBenchmark: ObservableObject {
         // 3. Studio render.
         if options.studio, !isCancelled {
             await runStudio(source: studioSource, rounds: rounds, into: &result, weight: studioWeight, advance: advance)
+        }
+
+        // 3b. One try-on (timing note only).
+        if options.tryOn, !isCancelled, !tryOnPieces.isEmpty,
+           let body = samples.first(where: { $0.0.contains("pink_coat") })?.1.cgImage {
+            stage = "Dressing a sample photo (On you)"
+            let pieces = tryOnPieces
+            let note = await Task.detached(priority: .userInitiated) { () async -> String in
+                let t0 = DispatchTime.now().uptimeNanoseconds
+                guard case .success(let model) = TryOnBodyAnalyzer.analyze(body) else { return "On you: the sample body couldn't be analysed." }
+                let t1 = DispatchTime.now().uptimeNanoseconds
+                let garments = pieces.compactMap { item -> TryOnGarmentSpec? in
+                    guard let cg = item.cutout.cgImage else { return nil }
+                    let role: TryOnRole
+                    switch item.kind {
+                    case .innerTop: role = .top
+                    case .outerLayer: role = .outer
+                    case .onePiece: role = .onePiece
+                    case .lower: role = .bottom
+                    case .footwear: role = .shoes
+                    default: return nil
+                    }
+                    return TryOnGarmentSpec(role: role, product: item.attributes.product, image: cg)
+                }
+                let outcome = await TryOnRenderer.render(body: model, garments: garments, harmonize: true)
+                let t2 = DispatchTime.now().uptimeNanoseconds
+                let verdict: String
+                switch outcome {
+                case .ready(let r): verdict = r.harmonized ? "kept (with the diffusion pass)" : "kept (composite only)"
+                case .rejected(let rep, _): verdict = "shown as pieces (\(rep.rejection ?? ""))"
+                case .failed(let why): verdict = "failed (\(why))"
+                }
+                return String(format: "On you: body analysis %.1f s, try-on %.1f s, %@.",
+                              Double(t1 - t0) / 1e9, Double(t2 - t1) / 1e9, verdict)
+            }.value
+            result.notes.append(note)
+            TryOnHarmonizer.shared.unload()
         }
 
         // 4. Where each model runs.

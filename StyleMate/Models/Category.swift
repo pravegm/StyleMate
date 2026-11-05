@@ -419,6 +419,9 @@ class WardrobeViewModel: ObservableObject {
             try? fm.removeItem(at: LocalStore.applicationSupport.appendingPathComponent("WardrobeEmbeddings"))
         }
         WardrobeImageFileHelper.removeAllFromCache()
+        // Try-on: the body photo, its candidates and every render.
+        TryOnQueue.shared.pause()
+        TryOnBodyLibrary.shared.removeAll()
 
         // Outfit history (Core Data), scoped to this user (+ legacy unscoped rows).
         MyOutfitsViewModel.deleteOutfits(forUser: userId)
