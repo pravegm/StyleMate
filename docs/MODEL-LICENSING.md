@@ -117,11 +117,12 @@ outputs a per-pixel class on the 384x576 analysis grid (0 scene, 1–26 Fashionp
   after the merge copies it from the artifact into main's cache. The converted app model also stays in the
   `wardrobe-models-v2-*` cache. If both caches and the artifact were ever gone, retrain with `[garment-train]`
   (deterministic in code, not bit-identical). **Keep a private copy anyway** (`gh run download 42026153584 -n garment-head`).
-- **Status (5 Nov 2026, 22:00 UTC):** GarmentNet does not yet hold main's benchmark within 3 points on every metric. With the
-  stage-1 head (garment mIoU 0.345) the fusion reached recall 0.964, product 0.870, category 0.926, precision 0.885
-  (7 phantom items), colour 0.759 / 0.796, at 16 s per photo (main: 118–139 s). The final head above (0.388) is being
-  measured. Plan: `[garment-more]` (16,000 more Fashionpedia images, training continued from this head, Ubuntu runners
-  only) plus fusion tuning on the CI benchmark; main keeps the old models until a head passes.
+- **Measured (6 Nov 2026, CI run 42141881118: this branch + main's colour naming, gated on main's `labels/baseline.json`):**
+  precision 0.982, recall 0.982, category 1.000, product 0.909, colour 0.891 exact / 0.927 family, fragment rate 0.036,
+  15.4 s per photo on the CI simulator. Main with FASHN + SegFormer: precision 0.981, recall 0.946, category 0.962, product
+  0.887, colour 0.906 / 0.943 (after studio's colour work), fragments 0.111, ~110-139 s per photo. Every metric is within the
+  3-point gate; colour exact is 1.5 points lower. A further head trained on 16,000 more Fashionpedia images (run 42116538389)
+  was in progress at hand-over; pin it only if the benchmark improves.
 - **Conversion:** `scripts/convert_wardrobe_models.py` (via `scripts/build_wardrobe_models.sh`, CI `models` job): traced
   PyTorch → Core ML (iOS 17, fp16 compute, **int8 linear weight quantization**), plain-matmul attention (ANE-friendly), argmax and
   resize inside the model so the app reads a 221k-value class map instead of 6.9 M logits. Parity vs PyTorch fp32 on the
