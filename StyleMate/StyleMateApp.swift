@@ -105,6 +105,10 @@ struct RootView: View {
             .presentationDetents([.medium])
             // Regular width (Duo inner display): a sheet sized to its rows.
             .presentationSizing(.fitted)
+            // No grabber (one detent; swipe down or tap outside to dismiss). On the Duo it was centred on the fold
+            // when flat, and switching it with the display or the pose froze the fitted sheet at its old size:
+            // cover-wide and cut off on the inner display (Duo runs 42134099208, 42146510318, 04-add-sheet).
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $pickerItems, maxSelectionCount: 15, matching: .images)
@@ -327,10 +331,6 @@ private struct AddSourceSheet: View {
         // Top-aligned without a Spacer, so a fitted sheet is exactly its rows.
         .frame(maxHeight: .infinity, alignment: .top)
         .background(DS.Colors.backgroundPrimary)
-        // The grabber is centred on the sheet, so on the fold when the sheet is (open flat on the Duo). Hidden on
-        // the whole inner display, not just flat: switching it while folding left the half-open sheet short, its
-        // title cut off (Duo run 42134099208, 04-add-sheet-half). Tapping outside still dismisses it there.
-        .presentationDragIndicator(duo.isWideLayout ? .hidden : .visible)
         // x and width only (the fold runs top to bottom), so sliding up doesn't update it on every frame.
         .onGeometryChange(for: CGRect.self) { proxy in
             let r = proxy.frame(in: .global)
