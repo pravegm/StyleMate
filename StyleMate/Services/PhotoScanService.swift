@@ -1340,14 +1340,9 @@ class PhotoScanService: ObservableObject {
                                 }
                             }
                         }
-                        Task {
-                            try? await Task.sleep(nanoseconds: Self.thumbnailTimeout)
-                            if gate.claim() {
-                                if requestID != PHInvalidImageRequestID { manager.cancelImageRequest(requestID) }
-                                ScanTrace.shared.noteTimeout(.thumbnails)
-                                continuation.resume(returning: (index, nil))
-                            }
-                        }
+                        // VERIFICATION ONLY (branch verify/real-first-run-old-scan, never merge): the thumbnail
+                        // download without the 20 s limit 11ac3dc added, i.e. as in build 112.
+                        _ = requestID
                     }
                 }
             }
