@@ -25,3 +25,7 @@ final class StyleMateE2EDarkTests: StyleMateE2ETests {
 final class FirstRunE2EDarkTests: FirstRunE2ETests {
     override class var usesDarkAppearance: Bool { true }
 }
+
+final class TasteInsightsE2EDarkTests: TasteInsightsE2ETests {
+    override class var usesDarkAppearance: Bool { true }
+}

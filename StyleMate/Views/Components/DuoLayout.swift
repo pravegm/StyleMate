@@ -9,8 +9,10 @@ import SwiftUI
 //   orientation; it ignores the supported interface orientations. Folding resizes the scene in place (no
 //   relaunch), so @State, scroll positions and text survive as long as view identity does.
 // - The fold is a `.division` reserved region (GeometryProxy.reservedRegions). Active only while partly open;
-//   flat it is inactive (zero thick). "Keep each view entirely on one side of the division"; scrolling content
-//   doesn't have to avoid it. Hinge state comes from `onHingeChange` (`DeviceHinge.status`).
+//   flat it is inactive but still reported in place (`.includeInactive`: the same 40 pt band). "Keep each view
+//   entirely on one side of the division"; scrolling content doesn't have to avoid it. StyleMate keeps controls
+//   off it flat too: the two panels still meet there, so a button across it sits on the seam. Hinge state comes
+//   from `onHingeChange` (`DeviceHinge.status`).
 //
 // API
 // - `.duoLayoutReader()`: once, at the app root (StyleMateApp). Publishes `\.duoLayout` to everything below,
@@ -23,12 +25,16 @@ import SwiftUI
 //     duo.isHalfOpen     book or tabletop
 //     duo.creaseInGlobal the fold (active or not) in global coordinates, nil without one
 //     duo.crease(in:)    the ACTIVE fold in a view's coordinate space, given that view's global frame
+//     duo.foldBand(in:)  the fold to lay out around: the active one half-open, the inactive one flat
+//     duo.foldRunsThrough(_:) a top-to-bottom fold with part of the view on each side (a centred sheet, flat)
 // - `DuoCreaseReader { crease in ... }`: a GeometryReader that hands you the active fold in its own coordinates
 //   (nil when flat, closed, or not a Duo). Use it at the top of a full-screen view, not inside a ScrollView.
 // - `FoldAwareSplit(gutter: 24) { leading } trailing: { trailing }`: two panes side by side on a wide layout,
-//   stacked (a leading-aligned VStack) otherwise. Half-open in book pose the split is exactly at the crease: the
-//   leading pane ends `gutter / 2` before the fold band, the trailing one starts `gutter / 2` after it. Flat, it
-//   is a normal two-column split (`leadingFraction`, default 0.5) with a `gutter` gap. In tabletop pose with
+//   stacked (a leading-aligned VStack) otherwise. On the Duo's inner display, flat or half-open in book pose, the
+//   split is exactly at the fold: the leading pane ends `gutter / 2` before the fold band, the trailing one starts
+//   `gutter / 2` after it. Anywhere else (iPad, a pane the fold misses) it is a normal two-column split
+//   (`leadingFraction`, default 0.5) with a `gutter` gap; `requiresFold: true` stacks there instead (a sheet
+//   that is only split to clear the fold). With a fold running side to side (tabletop pose) and
 //   `axis: .vertical` (and a fixed height), the panes go above and below the fold instead. It is a `Layout`, not
 //   an if/else, so switching between one and two panes never rebuilds them (state survives a fold, a rotation
 //   or a move between the displays). Works inside a ScrollView (it only reads its own global x/y and width).
@@ -89,6 +95,22 @@ struct DuoLayoutState: Equatable {
     func crease(in frame: CGRect) -> CGRect? {
         guard isHalfOpen, let c = creaseInGlobal, c.intersects(frame.insetBy(dx: -1, dy: -1)) else { return nil }
         return c.offsetBy(dx: -frame.minX, dy: -frame.minY)
+    }
+
+    /// The fold to keep controls off, in the coordinate space of a view whose global frame is `frame`: the active
+    /// fold half-open, and the inactive one when open flat (reported in place, so a flat split lines up with the
+    /// hinge rather than the middle of the view). nil when closed, without a hinge, or when the fold misses that view.
+    func foldBand(in frame: CGRect) -> CGRect? {
+        guard isHalfOpen || posture == .flat, let c = creaseInGlobal,
+              c.intersects(frame.insetBy(dx: -1, dy: -1)) else { return nil }
+        return c.offsetBy(dx: -frame.minX, dy: -frame.minY)
+    }
+
+    /// A top-to-bottom fold runs through the view, with part of it on each side (a sheet centred on the fold
+    /// when flat), not just across its edge (a half-open sheet whose rounded corner reaches into the band).
+    func foldRunsThrough(_ frame: CGRect) -> Bool {
+        guard let b = foldBand(in: frame), b.height > b.width else { return false }
+        return b.minX > 0 && b.maxX < frame.width
     }
 }
 
@@ -253,15 +275,15 @@ struct DuoCreaseReader<Content: View>: View {
 
 // MARK: - Two panes
 
-/// Two panes split at the fold when half-open, a normal two-column split on any other wide layout, one stacked
-/// column on a compact one. See the API notes at the top of this file.
+/// Two panes split at the fold on the Duo's inner display (flat or half-open), a normal two-column split on any
+/// other wide layout, one stacked column on a compact one. See the API notes at the top of this file.
 struct FoldAwareSplit<Leading: View, Trailing: View>: View {
     enum Axis { case horizontal, vertical }
 
     /// `.horizontal`: side by side (book pose, flat, iPad). `.vertical`: above and below the fold in tabletop pose,
     /// for a container with a fixed height (falls back to side by side when not in tabletop pose).
     var axis: Axis = .horizontal
-    /// Gap between the panes; half-open it is added around the fold band (gutter / 2 each side).
+    /// Gap between the panes; at a fold it is added around the fold band (gutter / 2 each side).
     var gutter: CGFloat = 24
     /// Spacing between the two panes when stacked on a compact layout.
     var stackedSpacing: CGFloat = DS.Spacing.lg
@@ -269,6 +291,9 @@ struct FoldAwareSplit<Leading: View, Trailing: View>: View {
     var leadingFraction: CGFloat = 0.5
     /// The container must be at least this wide to split (a Split View window on the Duo is ~475 pt).
     var minimumWidth: CGFloat = 560
+    /// Split only when a top-to-bottom fold runs through the container (`foldRunsThrough`); stack otherwise (a
+    /// centred sheet whose rows only need two columns to clear the fold when the phone is open flat).
+    var requiresFold = false
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
@@ -276,13 +301,17 @@ struct FoldAwareSplit<Leading: View, Trailing: View>: View {
     @State private var frame = GlobalFrame()
 
     var body: some View {
-        let crease = duo.crease(in: frame.rect)
-        let tabletop = axis == .vertical && duo.posture == .tabletop && crease != nil
-        let split = tabletop || (duo.isWideLayout && frame.width >= minimumWidth)
+        let fold = duo.foldBand(in: frame.rect)
+        // A fold running side to side: tabletop pose (or the inner display held upright while flat).
+        let foldAcross = fold.map { $0.width > $0.height } ?? false
+        let tabletop = axis == .vertical && foldAcross
+        let foldDown = fold != nil && !foldAcross
+        let split = tabletop || (duo.isWideLayout && frame.width >= minimumWidth
+                                 && (!requiresFold || duo.foldRunsThrough(frame.rect)))
         let band: (CGFloat, CGFloat)?
-        if let c = crease, tabletop {
+        if let c = fold, tabletop {
             band = (c.minY, c.maxY)
-        } else if let c = crease, duo.posture == .book {
+        } else if let c = fold, foldDown {
             band = (c.minX, c.maxX)
         } else {
             band = nil
@@ -330,8 +359,15 @@ struct FoldPanesLayout: Layout {
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard isSplit, subviews.count == 2 else { return stackedSize(proposal: proposal, subviews: subviews) }
+        if vertical { return proposal.replacingUnspecifiedDimensions() }
+        guard proposal.width != nil else {
+            // Asked for its ideal width (a fitted sheet): the wider pane twice, plus the gap between them.
+            let pane = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+            let gap = fold.map { $0.1 - $0.0 + gutter } ?? gutter
+            return sizeThatFits(proposal: ProposedViewSize(width: pane * 2 + gap, height: proposal.height),
+                                subviews: subviews, cache: &cache)
+        }
         let full = proposal.replacingUnspecifiedDimensions()
-        if vertical { return full }
         let (a, b) = paneFrames(in: CGRect(origin: .zero, size: full))
         let ha = subviews[0].sizeThatFits(ProposedViewSize(width: a.width, height: proposal.height)).height
         let hb = subviews[1].sizeThatFits(ProposedViewSize(width: b.width, height: proposal.height)).height

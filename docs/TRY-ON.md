@@ -25,6 +25,12 @@ user has selected On you. `TryOnAvailability` stays the one switch. Quality work
   FASHN parser): composite-only passes the gate on 4/20 CI looks vs ~12/20 before (invented share
   0.12-0.21 on tee and coat looks vs the 0.09 limit). The harmonised pass hides it, and only harmonised
   looks are shown; TryOnTests reports the composite-only rate and asserts the harmonised look.
+- A **translucent sliver** beside the shoulder and hip of a slim piece (the dress look): the old outfit's
+  edge, half repainted by the diffusion pass.
+- *Fixed on feat/tryon-quality (merged 8eca4e0, runs 42128045859 / 42156002782)*: garment and fill now cross-fade on a soft coverage weight
+  (seam); a thin band around the old clothing's coarse outline is filled too (ghosts); the prompt says
+  "bare arms / bare legs" and the negative prompt "sleeves / leggings" when the new pieces leave them bare
+  (leftover sleeves).
 - Plus: garments are mapped, not draped; shoes are recoloured, not reshaped; bags, hats and jewelry are
   not drawn on the body.
 

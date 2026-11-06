@@ -60,6 +60,20 @@ class HomeViewModel: ObservableObject {
     /// the alternatives instead of bouncing between two.
     private var shuffleHistory: [String: Set<UUID>] = [:]
 
+    // MARK: Taste learning (on device; see Services/Outfits/TasteProfile)
+
+    /// The profile the current deck belongs to (what Wear / Keep / Swap / Skip teach).
+    private var tasteUserID: String?
+    private let taste = TasteStore.shared
+
+    /// The look just skipped, waiting for an optional "Not my style / Not today".
+    struct PendingSkip: Identifiable, Equatable {
+        let id = UUID()
+        let items: [WardrobeItem]
+        let occasion: OutfitType
+    }
+    @Published var pendingSkip: PendingSkip? = nil
+
     var isCustomDescriptionValid: Bool {
         guard let desc = customOutfitDescription else { return false }
         let trimmed = desc.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -134,7 +148,8 @@ class HomeViewModel: ObservableObject {
                              mood: OutfitMood?, modelHints: StyleHints? = nil) -> StylingContext {
         var hints = StyleIntentParser.parse(description)
         if let modelHints { hints = hints.merged(with: modelHints) }
-        return StylingContext(
+        if let id = user?.id, !id.isEmpty { tasteUserID = id }
+        var context = StylingContext(
             weather: weather,
             occasion: occasion,
             mood: mood,
@@ -144,6 +159,8 @@ class HomeViewModel: ObservableObject {
             now: Date(),
             useFahrenheit: displayFahrenheit
         )
+        context.taste = taste.profile(forUser: tasteUserID)
+        return context
     }
 
     /// The batch's context for edits, refreshed with the latest weather / log.
@@ -155,6 +172,7 @@ class HomeViewModel: ObservableObject {
         context.lastWorn = wearLog?.lastWornDates() ?? context.lastWorn
         context.useFahrenheit = displayFahrenheit
         context.now = Date()
+        context.taste = taste.profile(forUser: tasteUserID)   // what this deck has taught so far
         return context
     }
 
@@ -170,6 +188,7 @@ class HomeViewModel: ObservableObject {
             isLoading = true
             defer { isLoading = false }
 
+            settlePendingSkip()
             outfitError = nil
             savedCount = 0
             skippedCount = 0
@@ -292,6 +311,7 @@ class HomeViewModel: ObservableObject {
         let dayKey: Double          // startOfDay reference time — one hero per calendar day
         let itemIDs: [String]
         let explanation: String
+        var tasteNote: String? = nil
     }
 
     private var todayKey: Double {
@@ -317,9 +337,9 @@ class HomeViewModel: ObservableObject {
             }
             return
         }
-        // Don't surface a Today's Outfit until the wardrobe is rich enough to style
-        // from — below the threshold, hide it entirely.
-        guard wardrobe.count >= Self.minItemsForHero else { heroOutfit = nil; return }
+        // Don't surface a Today's Outfit until the wardrobe can make a whole look (a top
+        // and a bottom, or a dress, plus shoes): Home says what's missing instead.
+        guard wardrobe.count >= Self.minItemsForHero, OutfitReadiness.isReady(wardrobe) else { heroOutfit = nil; return }
         if heroOutfit != nil { return }
         if loadHeroFromCache(wardrobe: wardrobe) { return }
         // Wait until weather has resolved one way or another (loaded OR failed), so
@@ -336,13 +356,14 @@ class HomeViewModel: ObservableObject {
         let byID = Dictionary(wardrobe.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { a, _ in a })
         let items = cache.itemIDs.compactMap { byID[$0] }
         guard items.count == cache.itemIDs.count, !items.isEmpty else { return false }
-        heroOutfit = Outfit(items: items, explanation: cache.explanation)
+        heroOutfit = Outfit(items: items, explanation: cache.explanation, tasteNote: cache.tasteNote)
         return true
     }
 
     /// Force a fresh pick of the day (e.g. a "regenerate" tap).
     func generateHero(wardrobe: [WardrobeItem], user: User?) {
         guard !isGeneratingHero, wardrobe.count >= Self.minItemsForHero else { return }
+        guard OutfitReadiness.isReady(wardrobe) else { heroOutfit = nil; return }
         isGeneratingHero = true
         let type = selectedOutfitType ?? user?.preferredStyles.first ?? .everyday
         let context = makeContext(user: user, occasion: type, description: nil, mood: nil)
@@ -371,7 +392,8 @@ class HomeViewModel: ObservableObject {
     private func persistHero(_ outfit: Outfit) {
         let cache = HeroCache(dayKey: todayKey,
                               itemIDs: outfit.items.map { $0.id.uuidString },
-                              explanation: outfit.explanation)
+                              explanation: outfit.explanation,
+                              tasteNote: outfit.tasteNote)
         if let data = try? JSONEncoder().encode(cache) {
             UserDefaults.standard.set(data, forKey: Self.heroCacheKey)
         }
@@ -405,6 +427,7 @@ class HomeViewModel: ObservableObject {
     /// and save it.
     func openHeroInDeck(user: User? = nil) {
         guard let hero = heroOutfit else { return }
+        settlePendingSkip()
         savedCount = 0
         skippedCount = 0
         batchToken += 1
@@ -427,12 +450,60 @@ class HomeViewModel: ObservableObject {
     }
 
     func skipCurrentOutfit() {
+        settlePendingSkip()
+        if batchIndex < outfitBatch.count {
+            pendingSkip = PendingSkip(items: outfitBatch[batchIndex].items, occasion: tasteOccasion)
+        }
         skippedCount += 1
         advanceToNextOutfit()
     }
 
     func saveCurrentOutfit() {
         savedCount += 1
+        settlePendingSkip()
+        if batchIndex < outfitBatch.count { learn(.wore, look: outfitBatch[batchIndex].items) }
+    }
+
+    // MARK: - Taste learning
+
+    private var tasteOccasion: OutfitType { lastContext?.resolvedOccasion ?? selectedOutfitType ?? .everyday }
+
+    private func learn(_ signal: TasteSignal, look: [WardrobeItem], piece: WardrobeItem? = nil) {
+        taste.learn(signal, look: look, piece: piece, occasion: tasteOccasion, forUser: tasteUserID)
+    }
+
+    /// "Not my style" teaches; "Not today" doesn't.
+    func answerSkip(notMyStyle: Bool) {
+        guard let skip = pendingSkip else { return }
+        pendingSkip = nil
+        if notMyStyle {
+            taste.learn(.notMyStyle, look: skip.items, occasion: skip.occasion, forUser: tasteUserID)
+        }
+    }
+
+    /// The skip went unanswered (the next action, a timeout, the deck closing): a weak signal.
+    func settlePendingSkip() {
+        guard let skip = pendingSkip else { return }
+        pendingSkip = nil
+        taste.learn(.skipped, look: skip.items, occasion: skip.occasion, forUser: tasteUserID)
+    }
+
+    /// Keep (lock) on a piece teaches a little; un-keeping takes it back.
+    func noteKeep(_ item: WardrobeItem, kept: Bool) {
+        guard let look = todayOutfit else { return }
+        learn(kept ? .kept : .unkept, look: look.items, piece: item)
+    }
+
+    /// Home's "Wear today" on Today's look.
+    func noteWore(_ items: [WardrobeItem], user: User?) {
+        if let id = user?.id, !id.isEmpty { tasteUserID = id }
+        taste.learn(.wore, look: items, occasion: selectedOutfitType ?? user?.preferredStyles.first ?? .everyday,
+                    forUser: tasteUserID)
+    }
+
+    /// The other cards' notes, so an edited card doesn't repeat their phrases.
+    private var otherNotes: [String] {
+        outfitBatch.enumerated().filter { $0.offset != batchIndex }.map { $0.element.explanation }
     }
 
     private func replaceCurrent(with outfit: Outfit) {
@@ -455,13 +526,14 @@ class HomeViewModel: ObservableObject {
         var seen = shuffleHistory[key] ?? []
         seen.insert(itemToShuffle.id)
 
+        let avoiding = otherNotes
         var updated = engine.shuffle(itemToShuffle, in: current, wardrobe: wardrobe, context: context,
-                                     excluding: seen, seed: Self.freshSeed())
+                                     excluding: seen, avoiding: avoiding, seed: Self.freshSeed())
         if updated == nil && seen.count > 1 {
             // Every alternative has had a turn — start the loop again.
             seen = [itemToShuffle.id]
             updated = engine.shuffle(itemToShuffle, in: current, wardrobe: wardrobe, context: context,
-                                     excluding: seen, seed: Self.freshSeed())
+                                     excluding: seen, avoiding: avoiding, seed: Self.freshSeed())
         }
         guard let updated else {
             Haptics.warning()
@@ -471,6 +543,7 @@ class HomeViewModel: ObservableObject {
         let currentIDs = Set(current.items.map { $0.id })
         for item in updated.items where !currentIDs.contains(item.id) { seen.insert(item.id) }
         shuffleHistory[key] = seen
+        learn(.swappedOut, look: current.items, piece: itemToShuffle)
         replaceCurrent(with: updated)
         polishSingle(updated)
     }
@@ -487,7 +560,7 @@ class HomeViewModel: ObservableObject {
         let currentSignature = OutfitValidator.signature(of: current)
 
         guard case .success(let looks) = engine.suggest(from: wardrobe, context: context, locked: locked,
-                                                        count: 6, seed: Self.freshSeed()) else {
+                                                        count: 6, avoiding: otherNotes, seed: Self.freshSeed()) else {
             stylistNotice = "Add a few more pieces to restyle this look"
             return
         }
@@ -512,7 +585,8 @@ class HomeViewModel: ObservableObject {
         guard let current = todayOutfit else { return }
         let context = editingContext(user: user)
         guard let updated = engine.add(category: category, productType: productType, to: current,
-                                       wardrobe: wardrobe, context: context, seed: Self.freshSeed()) else {
+                                       wardrobe: wardrobe, context: context, avoiding: otherNotes,
+                                       seed: Self.freshSeed()) else {
             stylistNotice = "Couldn't find a \(productType.lowercased()) that works with this look"
             return
         }

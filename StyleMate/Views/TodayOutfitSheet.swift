@@ -42,6 +42,8 @@ struct TodayOutfitSheet: View {
     // edge tints and one haptic marks the threshold.
     @State private var dragX: CGFloat = 0
     @State private var pastThreshold = false
+    /// The header's global x span, to keep its title off the fold.
+    @State private var headerFrame: CGRect = .zero
     @State private var boardScale: CGFloat = 1
     @State private var boardOpacity: Double = 1
     @State private var isCommitting = false
@@ -172,7 +174,10 @@ struct TodayOutfitSheet: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: DS.Spacing.xs) {
+        // Open flat on the Duo the page sheet is centred on the fold, so a centred title sat on the seam: there
+        // it goes beside the close button instead.
+        let onFold = duo.foldRunsThrough(headerFrame)
+        return HStack(spacing: DS.Spacing.xs) {
             Button {
                 isPresented = false
             } label: {
@@ -186,7 +191,7 @@ struct TodayOutfitSheet: View {
             .accessibilityLabel("Close")
             .accessibilityIdentifier("outfit.close")
 
-            Spacer(minLength: 0)
+            if !onFold { Spacer(minLength: 0) }
 
             Group {
                 if homeVM.allOutfitsSeen || homeVM.outfitBatch.isEmpty {
@@ -195,7 +200,7 @@ struct TodayOutfitSheet: View {
                         .foregroundStyle(DS.Colors.textPrimary)
                         .accessibilityAddTraits(.isHeader)
                 } else {
-                    VStack(spacing: 5) {
+                    VStack(alignment: onFold ? .leading : .center, spacing: 5) {
                         Text(counterText)
                             .font(DS.Font.headline)
                             .foregroundStyle(DS.Colors.textPrimary)
@@ -212,11 +217,15 @@ struct TodayOutfitSheet: View {
             Spacer(minLength: 0)
 
             // Balances the close button so the title stays centred.
-            Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
+            if !onFold { Color.clear.frame(width: 44, height: 44).accessibilityHidden(true) }
         }
         .padding(.horizontal, DS.Spacing.md)
         .padding(.top, DS.Spacing.xs)
         .padding(.bottom, DS.Spacing.micro)
+        .onGeometryChange(for: CGRect.self) { proxy in
+            let r = proxy.frame(in: .global)
+            return CGRect(x: r.minX, y: 0, width: r.width, height: 1)   // x only: the fold runs top to bottom
+        } action: { headerFrame = $0 }
     }
 
     private var progressDots: some View {
@@ -267,8 +276,10 @@ struct TodayOutfitSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DS.Spacing.md) {
                         if onBody {
+                            // Compact, so the Keep / Swap list starts on screen above the action bar
+                            // (duo-crease: at 0.42 the list began hidden behind "Wear today").
                             boardCard(look, inlineControls: false, forcePieces: true)
-                                .frame(height: max(220, size.height * 0.42))
+                                .frame(height: max(180, size.height * 0.28))
                         }
                         noteCard(look, lineLimit: 4)
                         piecesList(look)
@@ -279,6 +290,14 @@ struct TodayOutfitSheet: View {
                 }
                 .scrollIndicators(.visible)
                 .scrollBounceBehavior(.basedOnSize)
+                // The last rows fade out above the pinned bar, so a cut-off row reads as "scroll for more".
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 28)
+                    }
+                }
                 // Pinned, so "Wear today" is never scrolled away or clipped.
                 stackedActionBar
             }
@@ -312,6 +331,9 @@ struct TodayOutfitSheet: View {
                     .contentTransition(.opacity)
                     .animation(.easeInOut(duration: 0.3), value: look.explanation)
             }
+
+            // What the user's own choices taught the stylist, when that shaped this look.
+            if let why = look.tasteNote { TasteReasonLine(text: why) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, DS.Spacing.md)
@@ -771,6 +793,7 @@ struct TodayOutfitSheet: View {
         withAnimation(DS.Motion.snappy) {
             if lockedItemIDs.contains(item.id) { lockedItemIDs.remove(item.id) } else { lockedItemIDs.insert(item.id) }
         }
+        homeVM.noteKeep(item, kept: lockedItemIDs.contains(item.id))   // taste learning
     }
 
     /// Swaps one piece; the selection follows the new piece so repeated taps
@@ -850,6 +873,9 @@ struct TodayOutfitSheet: View {
                 .zIndex(10)
                 .accessibilityIdentifier("outfit.toast")
         }
+
+        // After a skip: optional "Not my style / Not today" (taste learning).
+        SkipReasonPrompt(homeVM: homeVM, alignTrailing: duo.isWideLayout)
     }
 
     // MARK: - End of batch
