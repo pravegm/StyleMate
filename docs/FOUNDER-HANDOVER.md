@@ -135,6 +135,5 @@ Before App Store launch:
 
 `main` at b9d31e4 has everything merged. Full CI 42186482845 (unit, UI light + dark, Release with the
 licence gates) and the TestFlight archive check 42186576423 are green. The final iPhone Duo run
-42186505521 passed its first three screenshot tests and was cut off by a time limit during the
-fourth (sign-in); the limit is raised (83ffa9e) and the re-run is 42193809511. Every branch's own
-Duo run was green before it merged.
+42193809511 (after raising its time limit in 83ffa9e) passed all four screenshot tests, including
+the automatic "nothing on the fold" check; the frames were reviewed by hand.
