@@ -74,10 +74,11 @@ class TasteInsightsE2ETests: E2ETestCase {
         XCTAssertTrue(scrollUntilHittable(row, maxSwipes: 10), "No Wardrobe insights row in Profile")
         snap("profile-your-style")
         row.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["insights.summary"].waitForExistence(timeout: 15),
-                      "Wardrobe insights didn't open")
-        XCTAssertTrue(anyElement(NSPredicate(format: "label BEGINSWITH %@", "\(seededItemCount) pieces")).exists,
-                      "Insights don't count the seeded closet")
+        let summary = app.descendants(matching: .any)["insights.summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 15), "Wardrobe insights didn't open")
+        // The summary card itself: Home's "26 pieces" header also exists further down the tree.
+        XCTAssertTrue(summary.label.hasPrefix("\(seededItemCount) pieces"),
+                      "Insights don't count the seeded closet: '\(summary.label)'")
         snap("insights-top")
         app.swipeUp()
         snap("insights-middle")

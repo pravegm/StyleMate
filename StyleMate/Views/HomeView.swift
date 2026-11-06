@@ -552,7 +552,8 @@ struct HomeView: View {
     private var wardrobeSection: some View {
         if !wardrobeViewModel.items.isEmpty {
             VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                sectionHeader("Your Wardrobe", trailing: "\(wardrobeViewModel.items.count) items")
+                let pieces = wardrobeViewModel.items.count
+                sectionHeader("Your Wardrobe", trailing: "\(pieces) piece\(pieces == 1 ? "" : "s")")
 
                 let categoryCounts = Dictionary(grouping: wardrobeViewModel.items, by: { $0.category })
                     .map { (category: $0.key, items: $0.value, count: $0.value.count) }
@@ -664,7 +665,7 @@ private struct WardrobeCategoryCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
 
-            Text("\(count) item\(count == 1 ? "" : "s")")
+            Text("\(count) piece\(count == 1 ? "" : "s")")
                 .font(DS.Font.footnote)
                 .foregroundStyle(DS.Colors.textSecondary)
         }
