@@ -594,6 +594,21 @@ jobs:
           DB="$HOME/Library/Developer/CoreSimulator/Devices/$SIM/data/Media/PhotoData/Photos.sqlite"
           sqlite3 "$DB" "SELECT datetime(a.ZDATECREATED + 978307200, 'unixepoch'), b.ZORIGINALFILENAME FROM ZASSET a JOIN ZADDITIONALASSETATTRIBUTES b ON b.ZASSET = a.Z_PK ORDER BY a.ZDATECREATED DESC LIMIT 12;" || true
           sqlite3 "$DB" "SELECT COUNT(*) FROM ZASSET;" || true
+          # PhotoKit only lists an imported photo once Photos has finished processing it (run 42259283412: the
+          # app saw 1 of 267 photos a minute after addmedia). Open Photos to drive the import, then wait until
+          # the library settles (state columns per kind / visibility / completeness logged for diagnosis).
+          STATE="SELECT ZKINDSUBTYPE, ZVISIBILITYSTATE, ZTRASHEDSTATE, ZCOMPLETE, ZHIDDEN, COUNT(*) FROM ZASSET GROUP BY 1,2,3,4,5;"
+          sqlite3 "$DB" "$STATE" || true
+          xcrun simctl launch "$SIM" com.apple.mobileslideshow || true
+          for i in $(seq 1 36); do
+            n=$(sqlite3 "$DB" "SELECT COUNT(*) FROM ZASSET WHERE ZCOMPLETE = 1 AND ZTRASHEDSTATE = 0;" 2>/dev/null || echo x)
+            echo "complete: $n"
+            { [ "$n" = "x" ] || [ "$n" -ge 261 ]; } && break
+            sleep 5
+          done
+          sleep 15
+          xcrun simctl terminate "$SIM" com.apple.mobileslideshow || true
+          sqlite3 "$DB" "$STATE" || true
           xcodebuild test-without-building \
             -project StyleMate.xcodeproj -scheme StyleMate \
             -destination "id=$SIM" \
@@ -605,6 +620,7 @@ jobs:
           # The app's own console (-uiTestLogToFile): what the scan, Find yourself and the selfie check logged.
           DATA=$(xcrun simctl get_app_container "$SIM" "$BUNDLE" data 2>/dev/null) && cp "$DATA/Library/Caches/uitest-console.log" ui-real-app-console.log || true
           grep -E "\[FindYou\]|\[Identity\]|Auto-scan|\[UITest\]" ui-real-app-console.log | head -80 || true
+          sqlite3 "$DB" "$STATE" || true
           grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" ui-real-test.log
 
       - name: Export screenshots
