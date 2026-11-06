@@ -107,12 +107,13 @@ final class WardrobeML {
             // GarmentNet's 1/4-res collar line runs up the neck: under the face, a top is skin
             // (the try-on otherwise "invents" a neck where it removes the old top).
             if let f = face {
+                let gw = Self.gridW, gh = Self.gridH
                 let fw = f.2 - f.0, fh = f.3 - f.1
-                let x0 = max(0, f.0 - fw / 6), x1 = min(gridW, f.2 + fw / 6)
-                let y1 = min(gridH, f.3 + fh * 45 / 100)
+                let x0 = max(0, f.0 - fw / 6), x1 = min(gw, f.2 + fw / 6)
+                let y1 = min(gh, f.3 + fh * 45 / 100)
                 for y in max(0, f.1)..<y1 {
-                    for x in x0..<x1 where labels[y * gridW + x] == 3 || labels[y * gridW + x] == 4 {
-                        labels[y * gridW + x] = y < f.3 ? GarmentSegmenter.P.face.rawValue : GarmentSegmenter.P.torso.rawValue
+                    for x in x0..<x1 where labels[y * gw + x] == 3 || labels[y * gw + x] == 4 {
+                        labels[y * gw + x] = y < f.3 ? GarmentSegmenter.P.face.rawValue : GarmentSegmenter.P.torso.rawValue
                     }
                 }
             }
