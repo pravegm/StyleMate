@@ -56,14 +56,48 @@ final class ItemEmbeddingStore {
     /// Caller holds `lock`.
     private func loadIfNeeded() {
         guard !loaded else { return }
-        loaded = true
+        install(readFile())
+    }
+
+    /// The stored entries (`legacy`: read from the old JSON file). No lock needed.
+    private func readFile() -> (entries: [String: Entry], legacy: Bool)? {
         if let data = try? Data(contentsOf: fileURL), let decoded = Self.decode(data) {
-            entries = decoded
-        } else if let data = try? Data(contentsOf: legacyURL),
-                  let decoded = try? JSONDecoder().decode([String: Entry].self, from: data) {
-            entries = decoded
-            scheduleWrite()
+            return (decoded, false)
         }
+        if let data = try? Data(contentsOf: legacyURL),
+           let decoded = try? JSONDecoder().decode([String: Entry].self, from: data) {
+            return (decoded, true)
+        }
+        return nil
+    }
+
+    /// Caller holds `lock`.
+    private func install(_ read: (entries: [String: Entry], legacy: Bool)?) {
+        loaded = true
+        guard let read else { return }
+        entries = read.entries
+        if read.legacy { scheduleWrite() }
+    }
+
+    /// Reads and decodes the file in the background (a few MB for a big closet), so the first
+    /// duplicate check or wardrobe screen doesn't do it on the main thread. A read that comes
+    /// first still loads synchronously, as before.
+    func preload() {
+        io.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock(); let done = self.loaded; self.lock.unlock()
+            guard !done else { return }
+            let read = self.readFile()
+            self.lock.lock()
+            if !self.loaded { self.install(read) }   // a synchronous load may have won meanwhile
+            self.lock.unlock()
+        }
+    }
+
+    /// For tests.
+    var isLoaded: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return loaded
     }
 
     func embedding(for id: UUID) -> [Float]? {

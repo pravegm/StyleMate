@@ -908,8 +908,11 @@ class FaceMatchingService {
                 croppedToInstancesExtent: true
             )
             let maskedCI = CIImage(cvPixelBuffer: maskedBuffer)
-            let ctx = CIContext()
-            guard let maskedCG = ctx.createCGImage(maskedCI, from: maskedCI.extent) else { return nil }
+            // One shared context, software when the app isn't active (background scan: no GPU).
+            guard let maskedCG = CoreImageContext.current.createCGImage(maskedCI, from: maskedCI.extent) else {
+                CoreImageContext.noteFailure("person isolation")
+                return nil
+            }
             dlog("[FaceMatch] Person isolated: \(maskedCG.width)x\(maskedCG.height)")
             return UIImage(cgImage: maskedCG)
         } catch {

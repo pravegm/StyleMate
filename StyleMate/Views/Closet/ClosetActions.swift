@@ -27,12 +27,10 @@ enum ClosetActions {
                     WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
                 }
                 WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
-                // The original cutout a studio render was made from.
-                if let original = StudioStore.shared.originalCutout(for: item) {
-                    WardrobeImageFileHelper.deleteImage(at: original)
-                }
-                ItemEmbeddingStore.shared.remove(item.id)
             }
+            // The studio records too, with the original cutouts renders were made from.
+            StudioStore.shared.remove(doomed.map(\.id))
+            ItemEmbeddingStore.shared.remove(doomed.map(\.id))
         }
     }
 
@@ -53,7 +51,31 @@ struct ReplacementCutout {
     let featurePrint: [Float]?
     let quality: Float
 
+    /// `photo` may be a full-size camera image: it is brought to ≤ 2048 px with its orientation
+    /// baked in first (a 48 MP decode is ~190 MB, and `cgImage` ignores orientation), and the
+    /// whole extraction runs inside the shared `ExtractionGate`, like every other one.
     static func make(from photo: UIImage, category: Category, product: String) async -> ReplacementCutout? {
+        let photo = await Task.detached(priority: .userInitiated) {
+            autoreleasepool { ImageDownsampler.downsample(image: photo) }
+        }.value
+        await ExtractionGate.shared.acquire()
+        let found = await Self.cutout(from: photo, category: category, product: product)
+        await ExtractionGate.shared.release()
+        guard let made = found else { return nil }
+        let (image, pick) = made
+        let result: (String, String?)? = await Task.detached(priority: .userInitiated) {
+            guard let path = WardrobeImageFileHelper.saveImageAsPNG(image) else { return nil }
+            return (path, WardrobeImageFileHelper.saveThumbnail(image))
+        }.value
+        guard let result else { return nil }
+        return ReplacementCutout(imagePath: result.0, thumbnailPath: result.1,
+                                 featurePrint: pick?.featurePrint, quality: pick?.quality ?? 0)
+    }
+
+    /// The framed, transparent cutout of the item in an upright ≤ 2048 px photo, and the
+    /// segment it came from (nil when the subject was lifted off a plain product shot).
+    private static func cutout(from photo: UIImage, category: Category,
+                               product: String) async -> (UIImage, ImageAnalysisService.SegmentedItem?)? {
         let segments = await ImageAnalysisService.shared.analyzeAndSegment(image: photo, describe: false)
             .filter { $0.maskImage != nil }
         let wanted = ClosetSection.of(category: category, product: product)
@@ -65,22 +87,15 @@ struct ReplacementCutout {
             }.max { $0.quality < $1.quality }
             ?? (segments.count == 1 ? segments.first : nil)
 
-        let cutout: UIImage
-        if let pick, let mask = pick.maskImage {
-            cutout = mask
-        } else {
-            // Nothing recognisable (e.g. a flat product shot): lift the subject off
-            // its background and frame it like every other tile.
-            let lifted = await BackgroundRemovalService.shared.removeBackground(from: photo) ?? photo
-            cutout = ImageAnalysisService.shared.padToSquare(lifted)
-        }
-        let result: (String, String?)? = await Task.detached(priority: .userInitiated) {
-            guard let path = WardrobeImageFileHelper.saveImageAsPNG(cutout) else { return nil }
-            return (path, WardrobeImageFileHelper.saveThumbnail(cutout))
+        if let pick, let mask = pick.maskImage { return (mask, pick) }
+        // Nothing recognisable (e.g. a flat product shot): lift the subject off its
+        // background (transparent) and frame it like every other tile. No subject found:
+        // the photo itself, framed.
+        let lifted = await BackgroundRemovalService.shared.removeBackground(from: photo, onWhite: false) ?? photo
+        let framed = await Task.detached(priority: .userInitiated) {
+            ImageAnalysisService.shared.padToSquare(lifted)
         }.value
-        guard let result else { return nil }
-        return ReplacementCutout(imagePath: result.0, thumbnailPath: result.1,
-                                 featurePrint: pick?.featurePrint, quality: pick?.quality ?? 0)
+        return (framed, nil)
     }
 
     /// Deletes the files (used when an edit that replaced the photo is cancelled).

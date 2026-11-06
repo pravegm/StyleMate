@@ -22,8 +22,6 @@ enum GarmentCutout {
         let sourceSide: Float
     }
 
-    private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-
     /// `cropPixels`: `rgbaPixels(crop)`, computed once per photo by the caller.
     /// `photoInGrid`: where the real photo lies on the grid (the crop may be
     /// padded grey past the photo's edge; nothing outside it is ever garment).
@@ -125,8 +123,15 @@ enum GarmentCutout {
 
         let w = guide.width, h = guide.height
         var px = [UInt8](repeating: 0, count: w * h * 4)
-        ciContext.render(out, toBitmap: &px, rowBytes: w * 4,
-                         bounds: guideCI.extent, format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+        // Software when the app isn't active: a GPU render from the background scan comes back blank.
+        CoreImageContext.current.render(out, toBitmap: &px, rowBytes: w * 4,
+                                        bounds: guideCI.extent, format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+        // The grid mask has pixels in this box, so an all-zero render is a failed render, not an
+        // empty garment: report it (the scan retries the photo) rather than cut out nothing.
+        guard px.contains(where: { $0 != 0 }) else {
+            CoreImageContext.noteFailure("garment mask")
+            return nil
+        }
         var alpha = [UInt8](repeating: 0, count: w * h)
         for i in 0..<(w * h) {
             // Sharpen the soft upsampled edge a touch so fabric edges stay crisp.

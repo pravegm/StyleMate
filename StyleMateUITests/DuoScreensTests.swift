@@ -40,7 +40,8 @@ final class DuoScreensTests: E2ETestCase {
 
         // Closet grid.
         openTab("Wardrobe")
-        let count = anyElement(NSPredicate(format: "label BEGINSWITH %@", "\(seededItemCount) items"))
+        let count = anyElement(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                           "\(seededItemCount) pieces", "\(seededItemCount) items"))
         XCTAssertTrue(count.waitForExistence(timeout: 20), "Closet doesn't show the seeded items")
         shoot("02-closet")
 

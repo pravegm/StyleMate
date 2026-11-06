@@ -117,7 +117,7 @@ everything else works.
 - What to try: get the closet to 50 pieces (your own photos; sample clothes don't count) and let
   the scan keep going. Home shows "N more pieces found — Unlock with Premium". Tap it, pick
   Annual, **Start free trial**: the waiting pieces appear in the closet at once. Profile › StyleMate
-  Premium shows the plan and renewal date, **Manage Subscription** and **Restore Purchases**.
+  Premium shows the plan and renewal date, **Manage subscription** and **Restore Purchases**.
   Delete and reinstall the app, then **Restore Purchases**: Premium comes back.
 
 ## Making a build (every time)

@@ -55,8 +55,10 @@ struct ProfileView: View {
         return String(name.prefix(2)).uppercased()
     }
 
-    private var categoryCount: Int {
-        Set(wardrobeViewModel.items.map { $0.category }).count
+    /// The closet's shelves (as the closet and the tab bar's summary count them), not the
+    /// ten storage categories: one count everywhere.
+    private var shelfCount: Int {
+        ClosetEngine.counts(wardrobeViewModel.items).count
     }
 
     /// Debounced profile save: commits ~0.5s after the user stops editing, so we
@@ -126,8 +128,9 @@ struct ProfileView: View {
                             }
 
                             HStack(spacing: DS.Spacing.xl) {
-                                statBadge(value: "\(wardrobeViewModel.items.count)", label: "Items")
-                                statBadge(value: "\(categoryCount)", label: "Categories")
+                                statBadge(value: "\(wardrobeViewModel.items.count)",
+                                          label: wardrobeViewModel.items.count == 1 ? "Piece" : "Pieces")
+                                statBadge(value: "\(shelfCount)", label: shelfCount == 1 ? "Shelf" : "Shelves")
                             }
                             .padding(.top, DS.Spacing.xs)
                         }
@@ -175,7 +178,7 @@ struct ProfileView: View {
                             .font(DS.Font.caption2)
                     }
 
-                    Section("Style Preferences") {
+                    Section("Style preferences") {
                         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                             if !user.preferredStyles.isEmpty {
                                 ScrollView(.horizontal, showsIndicators: false) {
@@ -205,7 +208,7 @@ struct ProfileView: View {
                                 }
                             }) {
                                 HStack {
-                                    Text("Edit Preferences")
+                                    Text("Edit preferences")
                                         .foregroundColor(DS.Colors.accent)
                                     Spacer()
                                     Image(systemName: "chevron.right")
@@ -270,12 +273,12 @@ struct ProfileView: View {
                             .font(DS.Font.caption2)
                     }
 
-                    Section("iCloud Backup") {
+                    Section("iCloud backup") {
                         HStack {
                             Image(systemName: "icloud.fill")
                                 .foregroundColor(DS.Colors.accent)
                             VStack(alignment: .leading, spacing: DS.Spacing.micro) {
-                                Text("iCloud Sync")
+                                Text("iCloud sync")
                                     .font(DS.Font.body)
                                     .foregroundColor(DS.Colors.textPrimary)
                                 if let lastSync = cloudKitService.lastSyncDate {
@@ -292,7 +295,7 @@ struct ProfileView: View {
                             syncStatusIndicator
                         }
 
-                        Button("Backup Now") {
+                        Button("Back up now") {
                             Haptics.medium()
                             wardrobeViewModel.backupToCloud()
                         }
@@ -337,7 +340,7 @@ struct ProfileView: View {
                     } label: {
                         HStack(spacing: DS.Spacing.xs) {
                             Image(systemName: "face.smiling")
-                            Text("Retake Selfie")
+                            Text("Retake selfie")
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 12, weight: .semibold))
@@ -352,7 +355,7 @@ struct ProfileView: View {
                     } label: {
                         HStack(spacing: DS.Spacing.xs) {
                             Image(systemName: "person.crop.rectangle.stack")
-                            Text("Improve Recognition")
+                            Text("Improve recognition")
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 12, weight: .semibold))
@@ -442,7 +445,7 @@ struct ProfileView: View {
                     } label: {
                         HStack {
                             Image(systemName: "trash")
-                            Text("Empty My Wardrobe")
+                            Text("Empty my wardrobe")
                         }
                         .foregroundColor(DS.Colors.error)
                     }
@@ -457,7 +460,7 @@ struct ProfileView: View {
                     } label: {
                         HStack(spacing: DS.Spacing.xs) {
                             Image(systemName: "person.crop.circle.badge.xmark")
-                            Text("Delete Profile & All Data")
+                            Text("Delete profile & all data")
                         }
                         .font(DS.Font.body)
                         .foregroundColor(DS.Colors.error)
@@ -494,13 +497,12 @@ struct ProfileView: View {
             .alert("Are you sure you want to empty your wardrobe?", isPresented: $showEmptyConfirmation) {
                 Button("Cancel", role: .cancel) {}
                 Button("Empty", role: .destructive) {
-                    for item in wardrobeViewModel.items {
-                        wardrobeViewModel.deleteItemFromCloud(item)
-                        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-                        WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
-                        WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
-                    }
-                    wardrobeViewModel.items.removeAll()
+                    // The scan and studio renders stop first, so nothing lands right after.
+                    if PhotoScanService.shared.isWorking { PhotoScanService.shared.cancelScan() }
+                    StudioQueue.shared.cancel()
+                    // Same cleanup as deleting pieces: files, studio originals and records,
+                    // embeddings, iCloud.
+                    ClosetActions.remove(wardrobeViewModel.items, from: wardrobeViewModel)
                     LockedItemsStore.shared.removeAll()   // pieces waiting for Premium go too
                 }
             } message: {
@@ -556,9 +558,9 @@ struct ProfileView: View {
             } message: {
                 Text("StyleMate forgets what it learned from the looks you wore, kept, swapped and skipped. Your wardrobe and outfit log stay.")
             }
-            .alert("Delete Everything?", isPresented: $showDeleteProfileAlert) {
+            .alert("Delete everything?", isPresented: $showDeleteProfileAlert) {
                 Button("Cancel", role: .cancel) {}
-                Button("Delete Everything", role: .destructive) {
+                Button("Delete everything", role: .destructive) {
                     deleteProfile()
                 }
             } message: {
@@ -613,7 +615,7 @@ struct ProfileView: View {
         onboardingManager.reset(forUser: userId)
         authService.resetLocalProfile()
 
-        print("[StyleMate] Profile deleted for user: \(userId)")
+        dlog("[StyleMate] Profile deleted for user: \(userId)")
     }
 
     // MARK: - Your style
@@ -716,7 +718,7 @@ struct StylePreferencesSheet: View {
     var body: some View {
         NavigationView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Edit Style Preferences")
+                Text("Edit style preferences")
                     .font(DS.Font.title2)
                     .foregroundColor(DS.Colors.textPrimary)
                     .padding(.top, DS.Spacing.lg)
@@ -785,7 +787,7 @@ struct StylePreferencesSheet: View {
                 Spacer()
 
                 VStack(spacing: DS.Spacing.sm) {
-                    Button("Save My Style Preferences") {
+                    Button("Save my style preferences") {
                         if selectedStyles.count == maxStyles && isChanged {
                             Haptics.medium()
                             onApply()

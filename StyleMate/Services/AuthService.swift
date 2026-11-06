@@ -75,7 +75,7 @@ class AuthService: ObservableObject {
         defaults.set(user.id, forKey: localProfileIDKey)
         defaults.removeObject(forKey: legacyAuthUserIDKey)
         defaults.removeObject(forKey: legacyAuthProviderKey)
-        print("[StyleMate] Local profile: \(adopted != nil ? "kept existing user" : "created") \(user.id)")
+        dlog("[StyleMate] Local profile: \(adopted != nil ? "kept existing user" : "created") \(user.id)")
         return user
     }
 

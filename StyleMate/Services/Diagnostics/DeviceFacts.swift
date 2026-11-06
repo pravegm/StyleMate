@@ -256,6 +256,35 @@ enum DiagFormat {
         return String(format: "x %.0f, y %.0f, %.0f × %.0f pt", locale: posix, r.minX, r.minY, r.width, r.height)
     }
 
+    /// Plain words for a `DuoHingeState` raw value, for the screen ("fullyOpen" → "Fully open").
+    static func hingeWord(_ raw: String) -> String {
+        switch raw {
+        case "fullyOpen": return "Fully open"
+        case "partiallyOpen": return "Partly open"
+        case "closed": return "Closed"
+        case "unavailable": return "Not reported"
+        default: return raw
+        }
+    }
+
+    /// Plain words for a `DuoPosture` raw value.
+    static func postureWord(_ raw: String) -> String {
+        switch raw {
+        case "flat": return "Flat"
+        case "book": return "Book (fold top to bottom)"
+        case "tabletop": return "Tabletop (fold side to side)"
+        case "closed": return "Closed (cover display)"
+        case "noHinge": return "No hinge"
+        default: return raw
+        }
+    }
+
+    /// Where the fold runs and whether the layout uses it; the raw rect goes under Details.
+    static func foldWord(_ r: CGRect?, active: Bool) -> String {
+        guard let r else { return "None" }
+        return (r.height >= r.width ? "Top to bottom" : "Side to side") + (active ? ", in use" : ", not in use")
+    }
+
     static func date(_ d: Date) -> String {
         let f = DateFormatter()
         f.locale = posix

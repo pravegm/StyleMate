@@ -133,7 +133,7 @@ struct EditWardrobeItemView: View {
             .tint(DS.Colors.accent)
             .scrollContentBackground(.hidden)
             .background(DS.Colors.backgroundPrimary)
-            .navigationTitle("Edit Item")
+            .navigationTitle("Edit piece")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -145,9 +145,9 @@ struct EditWardrobeItemView: View {
                         .disabled(!canSave)
                 }
             }
-            .confirmationDialog("Replace Photo", isPresented: $showReplacePhotoSource) {
-                Button("Take Photo") { showReplaceCamera = true }
-                Button("Choose from Gallery") { showReplaceGallery = true }
+            .confirmationDialog("Replace photo", isPresented: $showReplacePhotoSource) {
+                Button("Take photo") { showReplaceCamera = true }
+                Button("Choose from gallery") { showReplaceGallery = true }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Use a photo of you wearing it, or of the item on its own.")
@@ -169,8 +169,9 @@ struct EditWardrobeItemView: View {
             .onChange(of: replaceGallerySelection) { items in
                 guard let first = items.first else { return }
                 Task {
+                    // Decoded straight to ≤ 2048 px, upright, off the main thread (never the full 48 MP bitmap).
                     if let data = try? await first.loadTransferable(type: Data.self),
-                       let img = UIImage(data: data) {
+                       let img = await Task.detached(priority: .userInitiated, operation: { ImageDownsampler.downsample(data: data) }).value {
                         processReplacementPhoto(img)
                     }
                     replaceGallerySelection = []

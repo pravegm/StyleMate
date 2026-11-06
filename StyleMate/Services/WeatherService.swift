@@ -58,7 +58,7 @@ class WeatherService {
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
-        print("[Weather] Fetching (open-meteo): \(urlString)")
+        dlog("[Weather] Fetching (open-meteo): \(urlString)")
 
         let maxAttempts = 3
         var lastError: Error = URLError(.badServerResponse)
@@ -119,7 +119,7 @@ class WeatherService {
         // MET Norway requires an identifying User-Agent or it returns 403.
         request.setValue("StyleMate/1.0 (github.com/pravegm/StyleMate)", forHTTPHeaderField: "User-Agent")
 
-        print("[Weather] Fetching (met.no): \(urlString)")
+        dlog("[Weather] Fetching (met.no): \(urlString)")
 
         let maxAttempts = 3
         var lastError: Error = URLError(.badServerResponse)

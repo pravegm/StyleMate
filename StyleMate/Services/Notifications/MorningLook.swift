@@ -244,15 +244,21 @@ final class MorningLookScheduler: ObservableObject {
     }
 
     private func handle(_ task: BGAppRefreshTask) {
+        let completion = BackgroundScanCoordinator.TaskCompletion(task)
         let work = Task { @MainActor in
             // Recompute the next look with a fresh forecast.
             if let first = Self.fireDates(after: Date(), hour: hour, minute: minute, count: 1).first {
                 MorningLookStore.remove(dayKey: MorningLookStore.dayKey(first))
             }
             await reschedule()
-            task.setTaskCompleted(success: true)
+            completion.complete(success: !Task.isCancelled)
         }
-        task.expirationHandler = { work.cancel() }
+        // Out of time: stop and tell iOS now. An expired task that is never completed counts
+        // against the app, and iOS then runs its refreshes less often.
+        task.expirationHandler = {
+            work.cancel()
+            completion.complete(success: false)
+        }
     }
 }
 

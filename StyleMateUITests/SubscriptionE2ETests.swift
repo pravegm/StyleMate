@@ -60,7 +60,8 @@ class SubscriptionE2ETests: E2ETestCase {
 
     @MainActor
     private func closetCount(_ n: Int) -> XCUIElement {
-        anyElement(NSPredicate(format: "label BEGINSWITH %@", "\(n) items"))
+        // "50 pieces · 6 shelves" (older UI: "50 items · …").
+        anyElement(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "\(n) pieces", "\(n) items"))
     }
 
     // MARK: - Locked pieces → paywall → annual → unlocked

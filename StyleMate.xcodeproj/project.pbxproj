@@ -422,8 +422,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = StyleMate/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "StyleMate uses your camera to capture clothing items and take a reference selfie for finding your outfit photos.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "This app uses your location to show local weather on the home screen.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to show local weather on the home screen.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "StyleMate uses your approximate location for the local weather, so today's outfits suit it. Only a rounded location (about 1 km) goes to the weather service.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -456,8 +455,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = StyleMate/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "StyleMate uses your camera to capture clothing items and take a reference selfie for finding your outfit photos.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "This app uses your location to show local weather on the home screen.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to show local weather on the home screen.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "StyleMate uses your approximate location for the local weather, so today's outfits suit it. Only a rounded location (about 1 km) goes to the weather service.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

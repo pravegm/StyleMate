@@ -71,7 +71,7 @@ struct ScanReviewView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            Text("Review Scanned Items")
+            Text("Review scanned pieces")
                 .font(DS.Font.title2)
                 .foregroundColor(DS.Colors.textPrimary)
 

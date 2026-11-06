@@ -127,8 +127,9 @@ final class BackgroundScanCoordinator {
         return progress.activeJob != nil || progress.coverageStart != nil
     }
 
-    /// Completes a background task exactly once (expiry and normal finish race).
-    private final class TaskCompletion: @unchecked Sendable {
+    /// Completes a background task exactly once (expiry and normal finish race). Also used
+    /// by the morning-look refresh.
+    final class TaskCompletion: @unchecked Sendable {
         private let task: BGTask
         private let lock = NSLock()
         private var done = false

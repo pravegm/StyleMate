@@ -113,6 +113,14 @@ class HomeViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Midnight (significant time change) or back from the background on a new day:
+        // yesterday's look goes, and Home asks for today's.
+        NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)
+            .merge(with: NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.dropStaleHero() }
+            .store(in: &cancellables)
+
         // Show last-known weather immediately so a transient open-meteo outage
         // doesn't blank the home screen while a fresh fetch is attempted.
         if let data = UserDefaults.standard.data(forKey: Self.weatherCacheKey),
@@ -286,7 +294,11 @@ class HomeViewModel: ObservableObject {
     // a form. Generated once per day when weather is ready, then cached (item IDs +
     // reason) so re-opening is instant and costs nothing.
 
-    @Published var heroOutfit: Outfit?
+    @Published var heroOutfit: Outfit? {
+        didSet { heroDayKey = heroOutfit == nil ? nil : todayKey }
+    }
+    /// The day `heroOutfit` was set for (`todayKey`).
+    private(set) var heroDayKey: Double?
     @Published var isGeneratingHero = false
 
     /// Home's "Today's look" shows as soon as the wardrobe can make an outfit
@@ -306,10 +318,17 @@ class HomeViewModel: ObservableObject {
         Calendar.current.startOfDay(for: Date()).timeIntervalSinceReferenceDate
     }
 
+    /// Clears a hero set on an earlier day (the app stayed in memory past midnight), so
+    /// Home's next `ensureHero` picks today's. `today`: tests.
+    func dropStaleHero(today: Double? = nil) {
+        if heroOutfit != nil, heroDayKey != (today ?? todayKey) { heroOutfit = nil }
+    }
+
     /// Loads today's cached hero (if any) and, if none exists yet, generates one —
     /// but only when we have enough wardrobe and a weather reading. Safe to call on
     /// every Home appear; it no-ops once a hero is set for the day.
     func ensureHero(wardrobe: [WardrobeItem], user: User?) {
+        dropStaleHero()
         // The morning notification promised a look today: show exactly that one.
         if let user, let morning = morningLook(for: Date(), wardrobe: wardrobe, userId: user.id) {
             if heroOutfit == nil {
@@ -617,7 +636,8 @@ class HomeViewModel: ObservableObject {
                     }
                 }
             } catch {
-                print("[Weather] fetchWeather failed: \(error)")
+                // localizedDescription only: a URLError's description carries the URL (coordinates).
+                print("[Weather] fetchWeather failed: \(error.localizedDescription)")
                 await MainActor.run {
                     self.weatherError = "Failed to fetch weather."
                     self.isWeatherLoading = false
