@@ -151,15 +151,22 @@ enum LibraryFaceScanner {
             }
         }
 
+        // Screenshots are skipped here, not in a fetch predicate: PhotoKit evaluated
+        // "(mediaSubtypes & screenshot) == 0" as true for almost nothing (RealFirstRunE2ETests: 1 of 267
+        // photos, so "Find yourself" never saw the user and said "We couldn't spot you yet"). The fetch
+        // result is lazy, so walking it newest first and stopping at the limit stays cheap.
         let opts = PHFetchOptions()
         opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        opts.predicate = NSPredicate(format: "(mediaSubtypes & %d) == 0", PHAssetMediaSubtype.photoScreenshot.rawValue)
-        opts.fetchLimit = max(0, limit - min(extraSelfies, selfieAssets.count))
+        let recentLimit = max(0, limit - min(extraSelfies, selfieAssets.count))
         var assets: [PHAsset] = []
         var seen = Set<String>()
-        PHAsset.fetchAssets(with: .image, options: opts).enumerateObjects { asset, _, _ in
+        var screenshots = 0
+        PHAsset.fetchAssets(with: .image, options: opts).enumerateObjects { asset, _, stop in
+            guard assets.count < recentLimit else { stop.pointee = true; return }
+            guard !asset.mediaSubtypes.contains(.photoScreenshot) else { screenshots += 1; return }
             if seen.insert(asset.localIdentifier).inserted { assets.append(asset) }
         }
+        dlog("[FindYou] \(assets.count) recent photos (\(screenshots) screenshots skipped), \(selfieAssets.count) in Selfies")
         for asset in selfieAssets where assets.count < limit {
             if seen.insert(asset.localIdentifier).inserted { assets.append(asset) }
         }
