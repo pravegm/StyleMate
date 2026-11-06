@@ -78,7 +78,8 @@ enum GarmentCutout {
 
         if let labels, let maxShare = skinGuard[instance.kind],
            let ref = skinReference(labels: labels, instance: instance, rgba: rgba, cw: cw, ch: ch) {
-            skinRejection(&buf, ref: ref, maxShare: maxShare, rgba: rgba, cw: cw, x0: x0, y0: y0, w: w, h: h)
+            skinRejection(&buf, ref: ref, maxShare: maxShare, pieces: skinPieces[instance.kind] ?? 1,
+                          rgba: rgba, cw: cw, x0: x0, y0: y0, w: w, h: h)
         }
         if holeBox != nil { pushPullFill(&buf, holes: holeMask, w: w, h: h) }
         decontaminateEdges(&buf, w: w, h: h)
@@ -95,7 +96,13 @@ enum GarmentCutout {
     /// Kinds whose cutouts pick up the wearer's skin, and the largest share of the item's alpha the
     /// rejection may remove: skin round an accessory is a minority of its outline, so a removal past
     /// this is an item the colour of the skin (tan boots, a rose-gold watch) and is left alone.
-    private static let skinGuard: [GarmentKind: Float] = [.eyewear: 0.6, .jewelry: 0.6, .headwear: 0.4, .footwear: 0.35]
+    /// Only sunglasses / glasses and watches / jewelry: on shoes and hats (tried in run 42186932046)
+    /// the shed ankle / face left ragged cutouts that were named and counted worse (product 0.855,
+    /// fragments 0.071 vs 0.909 / 0.036).
+    private static let skinGuard: [GarmentKind: Float] = [.eyewear: 0.6, .jewelry: 0.6]
+    /// Pieces an accessory may show after shedding (two lenses; one watch): the islands skin
+    /// removal leaves beyond these are dropped.
+    private static let skinPieces: [GarmentKind: Int] = [.eyewear: 2, .jewelry: 1]
 
     /// BT.601 Y, Cb, Cr of an 8-bit RGB pixel.
     private static func ycc(_ r: Float, _ g: Float, _ b: Float) -> (Float, Float, Float) {
@@ -135,8 +142,10 @@ enum GarmentCutout {
 
     /// Clears the item's pixels that are skin-like and within a small chroma distance of this
     /// wearer's skin (soft between 8 and 13 Cb/Cr units), unless that would remove more than
-    /// `maxShare` of the item (then it is the item's own colour, not skin).
-    private static func skinRejection(_ buf: inout [Float], ref: (cb: Float, cr: Float), maxShare: Float,
+    /// `maxShare` of the item (then it is the item's own colour, not skin). The result keeps its
+    /// `pieces` largest solid parts (specks of strap or frame between shed skin would read as a
+    /// fragmented item); if that leaves too little, the cutout is left as it was.
+    private static func skinRejection(_ buf: inout [Float], ref: (cb: Float, cr: Float), maxShare: Float, pieces: Int,
                                       rgba: [UInt8], cw: Int, x0: Int, y0: Int, w: Int, h: Int) {
         var keep = [Float](repeating: 1, count: w * h)
         var total: Float = 0, removed: Float = 0
@@ -156,6 +165,17 @@ enum GarmentCutout {
             }
         }
         guard total > 0, removed > 0, removed <= total * maxShare else { return }
+        // Solid parts after shedding; drop all but the largest `pieces`.
+        var solid = [UInt8](repeating: 0, count: w * h)
+        for bi in 0..<(w * h) where buf[bi * 4 + 3] * keep[bi] > 0.5 { solid[bi] = 1 }
+        let (comp, sizes) = GarmentSegmenter.components(solid, w: w, h: h)
+        let kept = Set(sizes.enumerated().sorted { $0.element > $1.element }.prefix(pieces).map { $0.offset + 1 })
+        var left: Float = 0
+        for bi in 0..<(w * h) {
+            if solid[bi] != 0, !kept.contains(comp[bi]) { keep[bi] = 0 }
+            left += buf[bi * 4 + 3] * keep[bi]
+        }
+        guard left >= total * (1 - maxShare) else { return }
         for bi in 0..<(w * h) where keep[bi] < 1 {
             for c in 0..<4 { buf[bi * 4 + c] *= keep[bi] }
         }
