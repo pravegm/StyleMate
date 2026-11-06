@@ -27,8 +27,11 @@ enum GarmentCutout {
     /// padded grey past the photo's edge; nothing outside it is ever garment).
     /// `fill`: fill occluded holes (off for patterned fabric and big holes,
     /// where a smooth fill shows as a blotch).
+    /// `labels`: the grid classes the instance came from. With them, small accessories, headwear and
+    /// shoes shed the wearer's skin that GarmentNet's 1/4-resolution outline takes with them (a face
+    /// round sunglasses, a wrist round a watch, an ankle above a sneaker): see `skinRejection`.
     static func render(crop: CGImage, cropPixels: [UInt8], instance: GarmentInstance,
-                       photoInGrid: CGRect? = nil, fill: Bool = true) -> Result? {
+                       photoInGrid: CGRect? = nil, fill: Bool = true, labels: [UInt8]? = nil) -> Result? {
         let gw = WardrobeML.gridW, gh = WardrobeML.gridH
         let cw = crop.width, ch = crop.height
         let sx = Double(cw) / Double(gw), sy = Double(ch) / Double(gh)
@@ -73,6 +76,10 @@ enum GarmentCutout {
             }
         }
 
+        if let labels, let maxShare = skinGuard[instance.kind],
+           let ref = skinReference(labels: labels, instance: instance, rgba: rgba, cw: cw, ch: ch) {
+            skinRejection(&buf, ref: ref, maxShare: maxShare, rgba: rgba, cw: cw, x0: x0, y0: y0, w: w, h: h)
+        }
         if holeBox != nil { pushPullFill(&buf, holes: holeMask, w: w, h: h) }
         decontaminateEdges(&buf, w: w, h: h)
 
@@ -81,6 +88,77 @@ enum GarmentCutout {
         let framed = frame(img)
         let side = Float(sqrt(Double(instance.pixelCount) * sx * sy))
         return Result(image: framed, sharpness: sharp, sourceSide: side)
+    }
+
+    // MARK: - Skin rejection
+
+    /// Kinds whose cutouts pick up the wearer's skin, and the largest share of the item's alpha the
+    /// rejection may remove: skin round an accessory is a minority of its outline, so a removal past
+    /// this is an item the colour of the skin (tan boots, a rose-gold watch) and is left alone.
+    private static let skinGuard: [GarmentKind: Float] = [.eyewear: 0.6, .jewelry: 0.6, .headwear: 0.4, .footwear: 0.35]
+
+    /// BT.601 Y, Cb, Cr of an 8-bit RGB pixel.
+    private static func ycc(_ r: Float, _ g: Float, _ b: Float) -> (Float, Float, Float) {
+        (0.299 * r + 0.587 * g + 0.114 * b,
+         128 - 0.168736 * r - 0.331264 * g + 0.5 * b,
+         128 + 0.5 * r - 0.418688 * g - 0.081312 * b)
+    }
+
+    /// The classic YCbCr skin box (all skin tones sit in it; so do some tans and browns).
+    private static func skinLike(_ y: Float, _ cb: Float, _ cr: Float) -> Bool {
+        y > 45 && y < 240 && cb > 77 && cb < 127 && cr > 133 && cr < 173
+    }
+
+    /// This wearer's skin chroma (median Cb, Cr) from the body cells round the item (GarmentNet's
+    /// "body" class is skin and hair; the skin box keeps the skin). Nil when too little is seen.
+    private static func skinReference(labels: [UInt8], instance: GarmentInstance, rgba: [UInt8],
+                                      cw: Int, ch: Int) -> (cb: Float, cr: Float)? {
+        let gw = WardrobeML.gridW, gh = WardrobeML.gridH
+        guard labels.count == gw * gh, instance.mask.count == gw * gh else { return nil }
+        let (bx0, by0, bx1, by1) = instance.box
+        let m = max(bx1 - bx0, by1 - by0) / 2 + 2
+        var cbs: [Float] = [], crs: [Float] = []
+        for gy in max(0, by0 - m)..<min(gh, by1 + m) {
+            for gx in max(0, bx0 - m)..<min(gw, bx1 + m) {
+                let i = gy * gw + gx
+                guard labels[i] == GarmentMap.body, instance.mask[i] == 0 else { continue }
+                let x = min(cw - 1, (2 * gx + 1) * cw / (2 * gw)), y = min(ch - 1, (2 * gy + 1) * ch / (2 * gh))
+                let o = (y * cw + x) * 4
+                let (l, cb, cr) = ycc(Float(rgba[o]), Float(rgba[o + 1]), Float(rgba[o + 2]))
+                if skinLike(l, cb, cr) { cbs.append(cb); crs.append(cr) }
+            }
+        }
+        guard cbs.count >= 20 else { return nil }
+        cbs.sort(); crs.sort()
+        return (cbs[cbs.count / 2], crs[crs.count / 2])
+    }
+
+    /// Clears the item's pixels that are skin-like and within a small chroma distance of this
+    /// wearer's skin (soft between 8 and 13 Cb/Cr units), unless that would remove more than
+    /// `maxShare` of the item (then it is the item's own colour, not skin).
+    private static func skinRejection(_ buf: inout [Float], ref: (cb: Float, cr: Float), maxShare: Float,
+                                      rgba: [UInt8], cw: Int, x0: Int, y0: Int, w: Int, h: Int) {
+        var keep = [Float](repeating: 1, count: w * h)
+        var total: Float = 0, removed: Float = 0
+        for y in 0..<h {
+            for x in 0..<w {
+                let bi = y * w + x
+                let a = buf[bi * 4 + 3]
+                guard a > 0 else { continue }
+                total += a
+                let si = ((y + y0) * cw + (x + x0)) * 4
+                let (l, cb, cr) = ycc(Float(rgba[si]), Float(rgba[si + 1]), Float(rgba[si + 2]))
+                guard skinLike(l, cb, cr) else { continue }
+                let d = ((cb - ref.cb) * (cb - ref.cb) + (cr - ref.cr) * (cr - ref.cr)).squareRoot()
+                let k = min(max((d - 8) / 5, 0), 1)
+                keep[bi] = k
+                removed += a * (1 - k)
+            }
+        }
+        guard total > 0, removed > 0, removed <= total * maxShare else { return }
+        for bi in 0..<(w * h) where keep[bi] < 1 {
+            for c in 0..<4 { buf[bi * 4 + c] *= keep[bi] }
+        }
     }
 
     // MARK: - Mask upsampling

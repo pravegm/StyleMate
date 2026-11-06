@@ -64,7 +64,7 @@ enum WardrobeExtractor {
         // 3 + 4.
         var items: [Item] = []
         for use in uses {
-            let inst = use.inst
+            var inst = use.inst
             // A small accessory GarmentNet is unsure of is the commonest phantom item (eyeglasses on
             // a face, clogs at a hem): skip it; a clearer photo will find it.
             // Shoes cut off by the bottom of the photo, and a sliver of trousers at the bottom edge,
@@ -80,6 +80,11 @@ enum WardrobeExtractor {
                 log("drop unsure \(inst.kind.rawValue) (p=\(String(format: "%.2f", inst.confidence)))")
                 continue
             }
+            // Glasses sit across the eyes: GarmentNet's coarse outline also takes the hair at the temples,
+            // which no colour test tells from dark lenses. Keep the band Vision's face box allows.
+            if inst.kind == .eyewear, let face = WardrobeML.faceBox(use.crop.image) {
+                inst = Self.eyeBand(inst, face: face)
+            }
             let truncated = isTruncated(inst, crop: use.crop)
             var context = FashionClassifier.Context()
             // An inner top under an open layer, or cut off by the frame, is only partly seen.
@@ -88,7 +93,8 @@ enum WardrobeExtractor {
             context.allowTie = inst.labelerClass == 17
             let tc = Date()
             guard let cut = autoreleasepool(invoking: {
-                      GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: inst, photoInGrid: use.crop.photoInGrid)
+                      GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: inst, photoInGrid: use.crop.photoInGrid,
+                                           labels: use.map?.classes)
                   }) else { continue }
             WardrobeML.shared.record("cutout", Date().timeIntervalSince(tc))
             let tk = Date()
@@ -98,7 +104,7 @@ enum WardrobeExtractor {
             context.segmenterClass = inst.labelerClass
             let core = inst.kind != .footwear ? nil : use.map.flatMap { GarmentSegmenter.interior(inst, map: $0) }.flatMap {
                 GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: $0,
-                                     photoInGrid: use.crop.photoInGrid, fill: false)?.image.cgImage
+                                     photoInGrid: use.crop.photoInGrid, fill: false, labels: use.map?.classes)?.image.cgImage
             }
             guard let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context,
                                                          colourSource: core),
@@ -131,7 +137,7 @@ enum WardrobeExtractor {
             let holeShare = Float(inst.holeCount) / Float(max(1, inst.pixelCount))
             if inst.holeCount > 0, attrs.pattern != .solid || holeShare > 0.10,
                let plain = GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: inst,
-                                                photoInGrid: use.crop.photoInGrid, fill: false) {
+                                                photoInGrid: use.crop.photoInGrid, fill: false, labels: use.map?.classes) {
                 image = plain.image
                 routeToGenerate = true
             }
@@ -149,6 +155,27 @@ enum WardrobeExtractor {
         log("extracted \(items.count) items in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s: " +
             items.map { "\($0.attributes.product)(\(String(format: "%.2f", $0.quality)))" }.joined(separator: ", "))
         return items
+    }
+
+    /// Eyewear limited to the eye band of the face box `f` (grid x0, y0, x1, y1): the box's width plus
+    /// 12% each side for the temples, from 10% above its top to 65% of its height. Unchanged when the
+    /// band would keep under half the mask (the glasses are elsewhere: pushed up, another face).
+    static func eyeBand(_ inst: GarmentInstance, face f: (Int, Int, Int, Int)) -> GarmentInstance {
+        let w = WardrobeML.gridW
+        let fw = f.2 - f.0, fh = f.3 - f.1
+        guard fw > 4, fh > 4 else { return inst }
+        let x0 = f.0 - fw * 12 / 100, x1 = f.2 + fw * 12 / 100
+        let y0 = f.1 - fh / 10, y1 = f.1 + fh * 65 / 100
+        var m = inst.mask, kept = 0, all = 0
+        for i in 0..<m.count where m[i] != 0 {
+            all += 1
+            let x = i % w, y = i / w
+            if x >= x0, x < x1, y >= y0, y < y1 { kept += 1 } else { m[i] = 0 }
+        }
+        guard kept * 2 >= all, kept > 0 else { return inst }
+        var out = inst
+        out.mask = m
+        return out
     }
 
     /// An instance with the crop (and its pixels) it was segmented in.
