@@ -13,7 +13,14 @@ existed in your account since 2025, so steps 1–3 are mostly complete:
 - The 4 repository secrets.
 
 The new builds are numbered from 104 upwards (run number + 100), so they always sort above the old
-ones. To re-check what App Store Connect holds, run
+ones. The first one to reach App Store Connect is build 112 (6 Nov 2026).
+
+**How signing works.** Each TestFlight run creates its own Apple Distribution certificate and an
+App Store profile ("StyleMate CI <run>") through the App Store Connect API, signs the app with them,
+uploads, then deletes the profile and revokes the certificate. Builds already uploaded are not
+affected. You may see "Apple Distribution: Praveg Maheshwari" certificates come and go on the
+developer site; that's this. (Xcode's automatic signing can't be used: for an app with iCloud it
+asks Apple for the iCloud container list, which Apple refuses to API keys.) To re-check what App Store Connect holds, run
 https://github.com/pravegm/StyleMate/actions/workflows/asc-check.yml.
 
 ## One-time setup

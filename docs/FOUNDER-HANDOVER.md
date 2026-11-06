@@ -83,16 +83,14 @@ app switches over with one setting.
 
 ## Your actions
 
-Before TestFlight (`docs/TESTFLIGHT.md`, about 30 minutes). Already done, checked 6 Nov: the App
-ID (with iCloud and Sign In with Apple), the App Store Connect record from 2025, and the 4 secrets.
-1. Check that the App ID's iCloud container `iCloud.com.stylemates.StyleMate` is ticked.
-2. (Done.)
-3. Turn on GitHub Pages (the privacy policy).
-4. Run the CloudKit schema workflow, then deploy the schema to Production (otherwise backup is off).
-5. For Premium: the Paid Apps agreement, bank and tax details, then the subscription group and its
-   two plans (§6). Purchases in TestFlight are free.
-6. Press **Run workflow** on the TestFlight action. The Release build was checked on 6 Nov
-   (run 42186576423): every model is inside and no test-only code ships.
+TestFlight (`docs/TESTFLIGHT.md`). Done on 6 Nov: the App ID (iCloud container, Sign In with
+Apple), the App Store Connect record from 2025, the 4 secrets, and build 112 uploaded. Left:
+1. Turn on GitHub Pages (the privacy policy; needed for the App Store listing, not TestFlight).
+2. Run the CloudKit schema workflow, then deploy the schema to Production (otherwise backup is off).
+3. For Premium: the Paid Apps agreement, bank and tax details, then the subscription group and its
+   two plans (§6). Purchases in TestFlight are free. Claude can create the group and plans through
+   Apple's API on your go-ahead.
+4. For each new build, press **Run workflow** on the TestFlight action.
 
 On your phones (about 20 minutes):
 - Profile → About → Diagnostics → **Run benchmark** (plugged in), the Duo hinge check, then **Share
