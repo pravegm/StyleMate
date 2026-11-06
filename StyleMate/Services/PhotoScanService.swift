@@ -697,6 +697,7 @@ class PhotoScanService: ObservableObject {
         }.value
         ScanTrace.shared.end(personSpan)
         let ranked = BurstPicker.ranked(signals)
+        dlog("[StyleMate] Auto-scan: \(thumbCGs.count)/\(members.count) thumbnails, \(ranked.count) with a person")
         guard !ranked.isEmpty else {
             result.failedIDs = thumbFailed
             return result
@@ -1195,8 +1196,10 @@ class PhotoScanService: ObservableObject {
                 requestID = PHInvalidImageRequestID
             } else {
                 requestID = manager.requestImage(for: asset, targetSize: CGSize(width: 320, height: 320),
-                                                 contentMode: .aspectFit, options: options) { image, _ in
+                                                 contentMode: .aspectFit, options: options) { image, info in
+                    if Self.morePending(image, info) { return }
                     guard gate.claim() else { return }
+                    Self.noteEmpty(image, info, "ranking")
                     Self.offMain {
                         continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true).cgImage })
                     }
@@ -1349,8 +1352,10 @@ class PhotoScanService: ObservableObject {
                             requestID = manager.requestImage(
                                 for: asset, targetSize: targetSize,
                                 contentMode: .aspectFit, options: options
-                            ) { image, _ in
+                            ) { image, info in
+                                if Self.morePending(image, info) { return }
                                 guard gate.claim() else { return }
+                                Self.noteEmpty(image, info, "thumbnail download")
                                 // Async results arrive on the main thread: redraw elsewhere.
                                 Self.offMain {
                                     let normalized = image.flatMap { Self.bakeOrientation($0, pixelScale: true) }   // 1x: no 3x screen-scale copies
@@ -1394,8 +1399,10 @@ class PhotoScanService: ObservableObject {
             if fault == .stall {
                 requestID = PHInvalidImageRequestID
             } else {
-                requestID = manager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { image, _ in
+                requestID = manager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { image, info in
+                    if Self.morePending(image, info) { return }
                     guard gate.claim() else { return }
+                    Self.noteEmpty(image, info, "local thumbnail")
                     Self.offMain {
                         continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true) })
                     }
@@ -1415,6 +1422,29 @@ class PhotoScanService: ObservableObject {
 
     /// Local-only (network off) requests answer from what's on the phone, normally within milliseconds.
     nonisolated static let localImageTimeout: UInt64 = 10_000_000_000
+
+    /// An empty interim callback (degraded, no image): PhotoKit calls again with the real result, so
+    /// don't settle the request on it.
+    private nonisolated static func morePending(_ image: UIImage?, _ info: [AnyHashable: Any]?) -> Bool {
+        image == nil && (info?[PHImageResultIsDegradedKey] as? Bool) == true
+    }
+
+    private static let emptyLogLock = NSLock()
+    nonisolated(unsafe) private static var emptyLogged = 0
+
+    /// Logs (DEBUG, first few only) why PhotoKit handed back no image: in iCloud, cancelled, an error.
+    private nonisolated static func noteEmpty(_ image: UIImage?, _ info: [AnyHashable: Any]?, _ what: String) {
+        guard image == nil || image?.cgImage == nil else { return }
+        emptyLogLock.lock()
+        emptyLogged += 1
+        let n = emptyLogged
+        emptyLogLock.unlock()
+        guard n <= 5 else { return }
+        let inCloud = (info?[PHImageResultIsInCloudKey] as? Bool) == true
+        let error = (info?[PHImageErrorKey] as? Error)?.localizedDescription ?? "-"
+        dlog("[StyleMate] Auto-scan: no \(what) (image \(image == nil ? "nil" : "without CGImage"), inCloud \(inCloud), "
+             + "degraded \((info?[PHImageResultIsDegradedKey] as? Bool) == true), error \(error))")
+    }
 
     /// How a DEBUG UI test wants PhotoKit to behave for this request (`ScanFaultInjection`,
     /// `-uiTestStallSomePhotos`: a library still syncing with iCloud). Always `.normal` in Release.
@@ -1523,8 +1553,9 @@ class PhotoScanService: ObservableObject {
     /// (otherwise the renderer uses the screen's 3x scale and the image balloons,
     /// and faces embed differently from the gallery faces).
     private nonisolated static func bakeOrientation(_ image: UIImage, pixelScale: Bool = false) -> UIImage {
-        guard image.imageOrientation != .up || (pixelScale && image.scale != 1),
-              image.cgImage != nil else { return image }
+        // An image without a CGImage (CIImage- or surface-backed) is drawn too: the scan needs `.cgImage`.
+        guard image.imageOrientation != .up || (pixelScale && image.scale != 1) || image.cgImage == nil,
+              image.size.width > 0, image.size.height > 0 else { return image }
         let format = UIGraphicsImageRendererFormat.default()
         if pixelScale { format.scale = 1 }
         let size = pixelScale
