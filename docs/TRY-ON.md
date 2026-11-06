@@ -21,6 +21,10 @@ user has selected On you. `TryOnAvailability` stays the one switch. Quality work
 - **Crossed legs** merge into one wide trouser block (legs are mapped per joint chain, not separated).
 - **CI arms come from the parser estimate**, not Vision: the simulator has no Vision body pose, so CI
   sheets show arms assumed by the sides; on a device Vision supplies the joints (to be checked there).
+- **More of each composite is repainted with GarmentNet** (the commercial segmenter that replaced the
+  FASHN parser): composite-only passes the gate on 4/20 CI looks vs ~12/20 before (invented share
+  0.12-0.21 on tee and coat looks vs the 0.09 limit). The harmonised pass hides it, and only harmonised
+  looks are shown; TryOnTests reports the composite-only rate and asserts the harmonised look.
 - A **translucent sliver** beside the shoulder and hip of a slim piece (the dress look): the old outfit's
   edge, half repainted by the diffusion pass.
 - *Fixed on feat/tryon-quality (merged 8eca4e0, runs 42128045859 / 42156002782)*: garment and fill now cross-fade on a soft coverage weight

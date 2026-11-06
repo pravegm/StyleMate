@@ -460,7 +460,7 @@ enum DiagnosticsDebugSeed {
         b.studio = [.init(seconds: 71, outcome: "kept"), .init(seconds: 48, outcome: "kept"), .init(seconds: 47, outcome: "rejected")]
         b.studioItem = "Trench Coats"
         b.peakMemoryBytes = 1_900_000_000
-        b.placements = [ModelPlacement(model: "GarmentParser", shares: ["Neural Engine": 0.97, "CPU": 0.03], operationCount: 812)]
+        b.placements = [ModelPlacement(model: "GarmentNet", shares: ["Neural Engine": 0.97, "CPU": 0.03], operationCount: 812)]
         b.notes = ["Sample numbers for UI screenshots (-uiTestSeedDiagnostics), not a real run."]
         DiagnosticsBenchmark.shared.replaceLast(with: b)
     }

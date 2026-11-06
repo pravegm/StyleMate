@@ -1,0 +1,291 @@
+name: Garment model
+
+# Trains StyleMate's garment segmenter from scratch on Fashionpedia (annotations CC BY 4.0)
+# over a frozen DINOv2 ViT-S/14 backbone (Apache-2.0). CPU only, on standard ubuntu runners:
+#
+#   pca      fit the per-layer PCA projection on 300 training images
+#   extract  16 parallel chunks + val: backbone features (int8, PCA-projected), crops, labels
+#   train    the head (scripts/garment/head.py) on the chunks, best checkpoint by val mIoU
+#
+# The trained head goes to the `garment-head` artifact (90 days) — never to git. ci.yml's
+# models job converts it to Core ML (scripts/convert_wardrobe_models.py) from the run pinned
+# in scripts/garment/model.json and keeps the result in the wardrobe-models cache.
+#
+# Runs on a push whose commit message contains [garment-train] (everything), [garment-more] (extract
+# MORE training images with the PCA of train_config.json's pca_run, skipping the first `skip` shuffled
+# images, then train on them plus chunks_run's chunks, starting from init_run's head) or [garment-head]
+# (train only, reusing the chunk artifacts of the run named in scripts/garment/train_config.json),
+# or by hand once this file is on main. Training settings: scripts/garment/train_config.json.
+
+on:
+  push:
+    paths:
+      - 'scripts/garment/**'
+      - '.github/workflows/garment-model.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: garment-model-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  FP: https://s3.amazonaws.com/ifashionist-dataset
+  CHUNKS: 16
+  MAX_IMAGES: 16000
+  COCO_IMAGES: 5000
+  PIP_PKGS: numpy<2 timm==1.0.11 huggingface_hub==0.26.2 safetensors==0.4.5 opencv-python-headless==4.10.0.84 pycocotools==2.0.8 pillow
+
+jobs:
+  pca:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[garment-train]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Install
+        run: |
+          pip install -q torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -q $PIP_PKGS
+      - name: Download Fashionpedia (train)
+        run: |
+          sudo mkdir -p /mnt/fp && sudo chown $USER /mnt/fp
+          curl -sSfL -o /mnt/fp/train.json $FP/annotations/instances_attributes_train2020.json
+          curl -sSfL -o /mnt/fp/train.zip $FP/images/train2020.zip
+          ls -la /mnt/fp
+      - name: Fit PCA
+        run: python -I scripts/garment/extract.py fit-pca --ann /mnt/fp/train.json --zip /mnt/fp/train.zip --prefix train/ --n 300 --dims 96,160 --out pca.npz
+      - uses: actions/upload-artifact@v4
+        with: { name: garment-pca, path: pca.npz, retention-days: 30 }
+
+  extract:
+    needs: pca
+    if: always() && (needs.pca.result == 'success' || contains(github.event.head_commit.message, '[garment-more]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        chunk: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, val, coco0, coco1]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Install
+        run: |
+          pip install -q torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -q $PIP_PKGS
+      - name: Mode
+        run: |
+          C="${{ matrix.chunk }}"
+          if [ "${{ needs.pca.result }}" = success ]; then
+            echo "PCA_RUN=${{ github.run_id }}" >> "$GITHUB_ENV"; echo "SKIP=0" >> "$GITHUB_ENV"
+          else
+            # [garment-more]: only new Fashionpedia training chunks; val and COCO come from chunks_run.
+            echo "PCA_RUN=$(python3 scripts/garment/train_args.py pca_run)" >> "$GITHUB_ENV"
+            echo "SKIP=$(python3 scripts/garment/train_args.py skip)" >> "$GITHUB_ENV"
+            if [ "$C" = val ] || [ "${C#coco}" != "$C" ]; then echo "NOTHING=1" >> "$GITHUB_ENV"; fi
+          fi
+      - uses: actions/download-artifact@v4
+        if: env.NOTHING != '1'
+        with: { name: garment-pca, run-id: '${{ env.PCA_RUN }}', github-token: '${{ github.token }}' }
+      - name: Download the data
+        if: env.NOTHING != '1'
+        run: |
+          sudo mkdir -p /mnt/fp /mnt/out && sudo chown $USER /mnt/fp /mnt/out
+          case "${{ matrix.chunk }}" in
+          val)
+            curl -sSfL -o /mnt/fp/ann.json $FP/annotations/instances_attributes_val2020.json
+            curl -sSfL -o /mnt/fp/img.zip $FP/images/val_test2020.zip ;;
+          coco*)
+            # COCO 2017 people: annotations CC BY 4.0; images under the Flickr terms (training only).
+            curl -sSfL -o /mnt/fp/coco_ann.zip http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+            unzip -q -j /mnt/fp/coco_ann.zip annotations/instances_train2017.json -d /mnt/fp
+            mv /mnt/fp/instances_train2017.json /mnt/fp/ann.json
+            curl -sSfL -o /mnt/fp/img.zip http://images.cocodataset.org/zips/train2017.zip ;;
+          *)
+            curl -sSfL -o /mnt/fp/ann.json $FP/annotations/instances_attributes_train2020.json
+            curl -sSfL -o /mnt/fp/img.zip $FP/images/train2020.zip ;;
+          esac
+          df -h /mnt
+      - name: Extract
+        if: env.NOTHING != '1'
+        run: |
+          C="${{ matrix.chunk }}"
+          if [ "$C" = val ]; then
+            python -I scripts/garment/extract.py extract --ann /mnt/fp/ann.json --zip /mnt/fp/img.zip --prefix test/ \
+              --chunk 0 --chunks 1 --closeups 0.5 --pca pca.npz --out /mnt/out/val_0
+          elif [ "${C#coco}" != "$C" ]; then
+            python -I scripts/garment/extract.py extract --dataset coco --ann /mnt/fp/ann.json --zip /mnt/fp/img.zip \
+              --prefix train2017/ --chunk ${C#coco} --chunks 2 --max $COCO_IMAGES --pca pca.npz --out /mnt/out/coco_${C#coco}
+          else
+            python -I scripts/garment/extract.py extract --ann /mnt/fp/ann.json --zip /mnt/fp/img.zip --prefix train/ \
+              --chunk ${{ matrix.chunk }} --chunks $CHUNKS --skip $SKIP --max $MAX_IMAGES --closeups 0.5 --pca pca.npz \
+              --out /mnt/out/train_${{ matrix.chunk }}
+          fi
+          du -sh /mnt/out/*
+      - uses: actions/upload-artifact@v4
+        if: env.NOTHING != '1'
+        with:
+          name: garment-chunk-${{ matrix.chunk }}
+          path: /mnt/out
+          retention-days: 7
+          compression-level: 0
+
+  train:
+    needs: extract
+    if: always() && (needs.extract.result == 'success' || contains(github.event.head_commit.message, '[garment-head]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    outputs:
+      stages: ${{ steps.src.outputs.stages }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Install
+        run: |
+          pip install -q torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -q $PIP_PKGS
+      - name: Which chunks
+        id: src
+        run: |
+          if [ "${{ needs.extract.result }}" = success ]; then echo "run=${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+          else echo "run=$(python3 scripts/garment/train_args.py chunks_run)" >> "$GITHUB_OUTPUT"; fi
+          echo "stages=$(python3 scripts/garment/train_args.py stages)" >> "$GITHUB_OUTPUT"
+          # The earlier extraction's chunks too ([garment-more]: this run's new chunks + chunks_run's).
+          if [ "${{ needs.extract.result }}" = success ] && [ "$(python3 scripts/garment/train_args.py pca_run)" != 0 ] \
+             && ${{ contains(github.event.head_commit.message, '[garment-more]') }}; then
+            echo "extra=$(python3 scripts/garment/train_args.py chunks_run)" >> "$GITHUB_OUTPUT"
+          else
+            echo "extra=$(python3 scripts/garment/train_args.py extra_chunks_run)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "init=$(python3 scripts/garment/train_args.py init_run)" >> "$GITHUB_OUTPUT"
+          P=$(python3 scripts/garment/train_args.py pca_run); [ "$P" = 0 ] && P=$(grep -o 'run=[0-9]*' "$GITHUB_OUTPUT" | head -1 | cut -d= -f2)
+          echo "pca=$P" >> "$GITHUB_OUTPUT"
+          sudo mkdir -p /mnt/chunks /mnt/chunks2 /mnt/init && sudo chown $USER /mnt/chunks /mnt/chunks2 /mnt/init
+      - uses: actions/download-artifact@v4
+        with: { name: garment-pca, run-id: '${{ steps.src.outputs.pca }}', github-token: '${{ github.token }}' }
+      - name: Download chunks
+        uses: actions/download-artifact@v4
+        with:
+          pattern: garment-chunk-*
+          path: /mnt/chunks
+          merge-multiple: true
+          run-id: ${{ steps.src.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Download the earlier chunks
+        if: steps.src.outputs.extra != '0'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: garment-chunk-*
+          path: /mnt/chunks2
+          merge-multiple: true
+          run-id: ${{ steps.src.outputs.extra }}
+          github-token: ${{ github.token }}
+      - name: Starting weights
+        if: steps.src.outputs.init != '0'
+        uses: actions/download-artifact@v4
+        with:
+          name: garment-head
+          path: /mnt/init
+          run-id: ${{ steps.src.outputs.init }}
+          github-token: ${{ github.token }}
+      - name: Train (stage 1)
+        run: |
+          INIT=""; [ -f /mnt/init/garment_head.pt ] && INIT="--init /mnt/init/garment_head.pt"
+          du -sh /mnt/chunks; ls /mnt/chunks
+          mkdir -p out
+          ARGS=$(python3 scripts/garment/train_args.py)
+          echo "train args: $ARGS"
+          python -I scripts/garment/train.py --train '/mnt/chunks/train_*' '/mnt/chunks/coco_*' '/mnt/chunks2/train_*' '/mnt/chunks2/coco_*' --val '/mnt/chunks/val_*' '/mnt/chunks2/val_*' --pca pca.npz --out out/garment_head.pt $ARGS $INIT
+          cp pca.npz out/ && echo "${{ steps.src.outputs.run }}" > out/chunks_run.txt
+          sha256sum out/garment_head.pt | tee out/garment_head.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: garment-head-1
+          path: out
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: steps.src.outputs.stages == '1'
+        with:
+          name: garment-head
+          path: out
+          retention-days: 90
+
+  train2:
+    needs: [extract, train]
+    # Stage 2 of a schedule longer than one 6-hour job (train_config.json "stages": 2).
+    if: always() && needs.train.result == 'success' && needs.train.outputs.stages != '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Install
+        run: |
+          pip install -q torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -q $PIP_PKGS
+      - name: Which chunks
+        id: src
+        run: |
+          if [ "${{ needs.extract.result }}" = success ]; then echo "run=${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+          else echo "run=$(python3 scripts/garment/train_args.py chunks_run)" >> "$GITHUB_OUTPUT"; fi
+          echo "stages=$(python3 scripts/garment/train_args.py stages)" >> "$GITHUB_OUTPUT"
+          # The earlier extraction's chunks too ([garment-more]: this run's new chunks + chunks_run's).
+          if [ "${{ needs.extract.result }}" = success ] && [ "$(python3 scripts/garment/train_args.py pca_run)" != 0 ] \
+             && ${{ contains(github.event.head_commit.message, '[garment-more]') }}; then
+            echo "extra=$(python3 scripts/garment/train_args.py chunks_run)" >> "$GITHUB_OUTPUT"
+          else
+            echo "extra=$(python3 scripts/garment/train_args.py extra_chunks_run)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "init=$(python3 scripts/garment/train_args.py init_run)" >> "$GITHUB_OUTPUT"
+          P=$(python3 scripts/garment/train_args.py pca_run); [ "$P" = 0 ] && P=$(grep -o 'run=[0-9]*' "$GITHUB_OUTPUT" | head -1 | cut -d= -f2)
+          echo "pca=$P" >> "$GITHUB_OUTPUT"
+          sudo mkdir -p /mnt/chunks /mnt/chunks2 /mnt/init && sudo chown $USER /mnt/chunks /mnt/chunks2 /mnt/init
+      - uses: actions/download-artifact@v4
+        with: { name: garment-pca, run-id: '${{ steps.src.outputs.pca }}', github-token: '${{ github.token }}' }
+      - name: Download chunks
+        uses: actions/download-artifact@v4
+        with:
+          pattern: garment-chunk-*
+          path: /mnt/chunks
+          merge-multiple: true
+          run-id: ${{ steps.src.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Download the earlier chunks
+        if: steps.src.outputs.extra != '0'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: garment-chunk-*
+          path: /mnt/chunks2
+          merge-multiple: true
+          run-id: ${{ steps.src.outputs.extra }}
+          github-token: ${{ github.token }}
+      - name: Stage 1 result
+        uses: actions/download-artifact@v4
+        with:
+          name: garment-head-1
+          path: out
+      - name: Train (stage 2)
+        run: |
+          du -sh /mnt/chunks; ls /mnt/chunks
+          mkdir -p out
+          ARGS=$(python3 scripts/garment/train_args.py)
+          echo "train args: $ARGS"
+          python -I scripts/garment/train.py --train '/mnt/chunks/train_*' '/mnt/chunks/coco_*' '/mnt/chunks2/train_*' '/mnt/chunks2/coco_*' --val '/mnt/chunks/val_*' '/mnt/chunks2/val_*' --pca pca.npz --out out/garment_head.pt $ARGS --resume out/garment_head_last.pt
+          cp pca.npz out/ && echo "${{ steps.src.outputs.run }}" > out/chunks_run.txt
+          sha256sum out/garment_head.pt | tee out/garment_head.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: garment-head
+          path: out
+          retention-days: 90

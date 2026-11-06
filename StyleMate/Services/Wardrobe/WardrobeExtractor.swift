@@ -4,10 +4,14 @@ import UIKit
 /// The on-device wardrobe pipeline: photo of the user → one clean cutout +
 /// attributes per garment and accessory they're wearing.
 ///
-///   1. Locate the person (parser pass on the whole photo) and crop to them at
-///      the parser's 2:3 portrait aspect, so the garments fill the analysis grid.
-///   2. Parse the crop (clothing vs body + coarse region) and label it (garment
-///      type), then fuse into per-item masks (`GarmentSegmenter`).
+///   1. Locate the person (GarmentNet pass on the whole photo) and crop to them at
+///      the grid's 2:3 portrait aspect, so the garments fill the analysis grid
+///      (the first pass is reused when the person already fills the photo).
+///   2. Segment the crop (garment class / body / scene per pixel) and group it into
+///      per-item masks (`GarmentSegmenter`).
+///   2b. Close-ups only where the full-body pass says a small item is likely
+///      (sunglasses, a hat, a watch, a bag, shoes) or a found one is too small to
+///      cut out cleanly; overlapping close-ups share one pass.
 ///   3. Cut each item out at full resolution with edge-aware masks and filled
 ///      occlusions (`GarmentCutout`).
 ///   4. Name it (`FashionClassifier`) and score how good this view of it is, so a
@@ -39,41 +43,67 @@ enum WardrobeExtractor {
         func log(_ s: String) { print("[Wardrobe] \(s)"); trace?(s) }
         guard isAvailable, let source = flatten(image) else { return [] }
         let t0 = Date()
+        _ = WardrobeML.shared.takeTiming()
 
-        // 1. Person crop.
-        guard let crop = personCrop(source) else {
+        // 1. Person crop (and, when the person fills the photo, its segmentation).
+        guard let found = personCrop(source) else {
             log("no person found")
             return []
         }
+        let (crop, reused) = found
 
-        // 2. Parse + label + fuse.
-        guard let seg = segment(crop) else { return [] }
+        // 2. Segment + group.
+        guard let seg = reused ?? segment(crop) else { return [] }
         let scene = SceneLight(photo: source)
 
-        // 2b. Close-ups of the head, hands and feet for small things the
-        // full-body pass missed (sunglasses, a cap, a watch, a bag, shoes).
-        var uses: [Use] = seg.instances.map { Use(inst: $0, crop: crop, pixels: seg.pixels, zoomed: false) }
-        uses += partZooms(seg: seg, crop: crop, photo: source, log: log)
+        // 2b. Close-ups where the full-body pass says a small item is likely.
+        var uses: [Use] = seg.instances.map { Use(inst: $0, crop: crop, pixels: seg.pixels, zoomed: false, map: seg.map) }
+        closeUps(&uses, seg: seg, crop: crop, photo: source, log: log)
         let hasOuter = uses.contains { $0.inst.kind == .outerLayer }
 
         // 3 + 4.
         var items: [Item] = []
-        for var use in uses {
-            // Small accessories cover only a few grid cells in a full-body crop;
-            // re-parse a tight crop around them for a crisp, accurate mask.
-            if !use.zoomed, needsZoom(use.inst), let z = zoomed(use.inst, in: crop, photo: source) { use = z }
+        for use in uses {
             let inst = use.inst
+            // A small accessory GarmentNet is unsure of is the commonest phantom item (eyeglasses on
+            // a face, clogs at a hem): skip it; a clearer photo will find it.
+            // Shoes cut off by the bottom of the photo, and a sliver of trousers at the bottom edge,
+            // are not usable wardrobe items (and the benchmark's photos don't count them as worn items).
+            let f = use.crop.photoInGrid
+            let atBottom = CGFloat(inst.box.3) >= f.maxY - 2
+            let sliver = Double(inst.box.3 - inst.box.1) < Double(f.height) * 0.12
+            if atBottom, inst.kind == .footwear || (inst.kind == .lower && sliver) {
+                log("drop cut-off \(inst.kind.rawValue)")
+                continue
+            }
+            if [.eyewear, .jewelry, .belt, .headwear, .bag, .footwear].contains(inst.kind), inst.confidence < 0.4 {
+                log("drop unsure \(inst.kind.rawValue) (p=\(String(format: "%.2f", inst.confidence)))")
+                continue
+            }
             let truncated = isTruncated(inst, crop: use.crop)
             var context = FashionClassifier.Context()
             // An inner top under an open layer, or cut off by the frame, is only partly seen.
             context.occluded = inst.kind == .innerTop && (truncated || hasOuter)
             context.parts = inst.partShares
             context.allowTie = inst.labelerClass == 17
+            let tc = Date()
             guard let cut = autoreleasepool(invoking: {
                       GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: inst, photoInGrid: use.crop.photoInGrid)
-                  }),
-                  let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context),
+                  }) else { continue }
+            WardrobeML.shared.record("cutout", Date().timeIntervalSince(tc))
+            let tk = Date()
+            // Colours: garments are measured on the whole cutout (sampling only the eroded interior,
+            // run 42128612821, lost the shaded edges that make a light-grey coat read grey); shoes on
+            // their confident interior, where a 1-px rim of pavement turned black sneakers Charcoal.
+            context.segmenterClass = inst.labelerClass
+            let core = inst.kind != .footwear ? nil : use.map.flatMap { GarmentSegmenter.interior(inst, map: $0) }.flatMap {
+                GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: $0,
+                                     photoInGrid: use.crop.photoInGrid, fill: false)?.image.cgImage
+            }
+            guard let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context,
+                                                         colourSource: core),
                   !blockedProducts.contains(attrs.product) else { continue }
+            WardrobeML.shared.record("classify", Date().timeIntervalSince(tk))
             // Too few source-photo pixels to make a decent wardrobe image
             // (sunglasses 40 px wide in a group shot): skip — a closer photo will catch it.
             let photoSide = cut.sourceSide / Float(use.crop.scale)
@@ -115,6 +145,7 @@ enum WardrobeExtractor {
                               box: photoBox(inst, crop: use.crop, photo: source)))
         }
         items = dedupeWithinPhoto(items)
+        log("timing: " + WardrobeML.shared.takeTiming())
         log("extracted \(items.count) items in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s: " +
             items.map { "\($0.attributes.product)(\(String(format: "%.2f", $0.quality)))" }.joined(separator: ", "))
         return items
@@ -126,6 +157,8 @@ enum WardrobeExtractor {
         var crop: Crop
         var pixels: [UInt8]
         var zoomed: Bool
+        /// The GarmentNet map the instance came from (colour sampling).
+        var map: GarmentMap? = nil
     }
 
     // MARK: - Person crop
@@ -144,29 +177,49 @@ enum WardrobeExtractor {
     private struct Segmentation {
         let instances: [GarmentInstance]
         let pixels: [UInt8]
-        /// Parser labels on the grid (padding outside the photo zeroed).
+        /// GarmentNet classes on the grid (padding outside the photo zeroed).
         let labels: [UInt8]
+        let map: GarmentMap
     }
 
     private static func segment(_ crop: Crop) -> Segmentation? {
-        let image = crop.image
-        guard let parserIn = resized(image, w: WardrobeML.gridW, h: WardrobeML.gridH),
-              let labelerIn = resized(image, w: 512, h: 512),
-              let parsed = WardrobeML.shared.parse(parserIn),
-              let logits = WardrobeML.shared.label(labelerIn),
-              let pixels = GarmentCutout.rgbaPixels(image) else { return nil }
+        guard let input = resized(crop.image, w: WardrobeML.inputW, h: WardrobeML.inputH),
+              let out = WardrobeML.shared.segment(input),
+              let pixels = GarmentCutout.rgbaPixels(crop.image) else { return nil }
+        return segmentation(out, crop: crop, pixels: pixels)
+    }
+
+    private static func segmentation(_ out: GarmentMap, crop: Crop, pixels: [UInt8]) -> Segmentation {
+        var map = out
+        let w = WardrobeML.gridW, h = WardrobeML.gridH, f = crop.photoInGrid
         // The grey padding past the photo's edge is never garment (it was
         // segmented as a grey bar on a white shirt, a block under white jeans).
-        var labels = parsed.labels
-        let w = WardrobeML.gridW, h = WardrobeML.gridH, f = crop.photoInGrid
         let x0 = max(0, Int(f.minX.rounded(.up))), y0 = max(0, Int(f.minY.rounded(.up)))
         let x1 = min(w, Int(f.maxX.rounded(.down))), y1 = min(h, Int(f.maxY.rounded(.down)))
         if x0 > 0 || y0 > 0 || x1 < w || y1 < h {
             for y in 0..<h {
-                for x in 0..<w where x < x0 || x >= x1 || y < y0 || y >= y1 { labels[y * w + x] = 0 }
+                for x in 0..<w where x < x0 || x >= x1 || y < y0 || y >= y1 { map.classes[y * w + x] = 0 }
             }
         }
-        return Segmentation(instances: GarmentSegmenter.segment(parser: labels, labelerLogits: logits), pixels: pixels, labels: labels)
+        let tf = Date()
+        let cw = crop.image.width, ch = crop.image.height
+        let colour: GarmentSegmenter.ColourOf = { idx in
+            guard !idx.isEmpty else { return nil }
+            var r: Float = 0, g: Float = 0, b: Float = 0, n: Float = 0
+            let step = max(1, idx.count / 4000)
+            var k = 0
+            while k < idx.count {
+                let i = idx[k]
+                let x = min(cw - 1, (i % w) * cw / w), y = min(ch - 1, (i / w) * ch / h)
+                let o = (y * cw + x) * 4
+                r += Float(pixels[o]); g += Float(pixels[o + 1]); b += Float(pixels[o + 2]); n += 1
+                k += step
+            }
+            return n > 0 ? (r / n / 255, g / n / 255, b / n / 255) : nil
+        }
+        let instances = GarmentSegmenter.segment(map, colour: colour)
+        WardrobeML.shared.record("fuse", Date().timeIntervalSince(tf))
+        return Segmentation(instances: instances, pixels: pixels, labels: map.classes, map: map)
     }
 
     /// Renders `r0` (photo pixels, grown to the grid's 2:3 aspect) as a crop.
@@ -190,18 +243,22 @@ enum WardrobeExtractor {
         return Crop(image: img, rect: r, scale: scale, photoInGrid: photoInGrid)
     }
 
-    private static func personCrop(_ photo: CGImage) -> Crop? {
+    /// The person's crop. When the person already fills the photo, the crop IS the
+    /// whole-photo pass, and its segmentation is returned too (one model run, not two).
+    private static func personCrop(_ photo: CGImage) -> (Crop, Segmentation?)? {
         let W = CGFloat(photo.width), H = CGFloat(photo.height)
-        let gw = CGFloat(WardrobeML.gridW), gh = CGFloat(WardrobeML.gridH)
-        // Letterbox the whole photo into the grid (aspect preserved) to find the person.
-        let k = min(gw / W, gh / H)
-        let dw = W * k, dh = H * k, ox = (gw - dw) / 2, oy = (gh - dh) / 2
-        guard let box = letterbox(photo, into: CGSize(width: gw, height: gh), rect: CGRect(x: ox, y: oy, width: dw, height: dh)),
-              let parsed = WardrobeML.shared.parse(box) else { return nil }
+        // The whole photo, grown to the grid's aspect and centred (grey padding).
+        guard let whole = makeCrop(photo, rect: CGRect(x: 0, y: 0, width: W, height: H)),
+              let input = resized(whole.image, w: WardrobeML.inputW, h: WardrobeML.inputH),
+              let out = WardrobeML.shared.segment(input) else { return nil }
 
-        // Largest connected person blob (non-background).
-        let w = WardrobeML.gridW, h = WardrobeML.gridH
-        let person = parsed.labels.map { $0 == 0 ? UInt8(0) : UInt8(1) }
+        // Largest connected person blob (garments + body), inside the photo.
+        let w = WardrobeML.gridW, h = WardrobeML.gridH, f = whole.photoInGrid
+        var person = [UInt8](repeating: 0, count: w * h)
+        for i in 0..<(w * h) where out.classes[i] != 0 {
+            let x = CGFloat(i % w), y = CGFloat(i / w)
+            if x >= f.minX, x < f.maxX, y >= f.minY, y < f.maxY { person[i] = 1 }
+        }
         let (comp, sizes) = GarmentSegmenter.components(person, w: w, h: h)
         guard let maxSize = sizes.max(), maxSize > w * h / 200, let id = sizes.firstIndex(of: maxSize).map({ $0 + 1 }) else { return nil }
         var x0 = w, y0 = h, x1 = 0, y1 = 0
@@ -210,13 +267,20 @@ enum WardrobeExtractor {
             x0 = min(x0, x); x1 = max(x1, x + 1); y0 = min(y0, y); y1 = max(y1, y + 1)
         }
         // Back to photo pixels, with a margin.
-        var r = CGRect(x: (CGFloat(x0) - ox) / k, y: (CGFloat(y0) - oy) / k,
-                       width: CGFloat(x1 - x0) / k, height: CGFloat(y1 - y0) / k)
+        var r = photoRect((x0, y0, x1, y1), in: whole)
         r = r.insetBy(dx: -r.width * 0.06, dy: -r.height * 0.04)
-        return makeCrop(photo, rect: r)
+        guard let crop = makeCrop(photo, rect: r) else { return nil }
+        // Nearly the whole frame anyway: keep the first pass (a slightly looser crop).
+        let inter = crop.rect.intersection(whole.rect)
+        let overlap = inter.isNull ? 0 : inter.width * inter.height / (whole.rect.width * whole.rect.height)
+        if overlap > 0.8, crop.rect.width * crop.rect.height > 0.8 * whole.rect.width * whole.rect.height,
+           let pixels = GarmentCutout.rgbaPixels(whole.image) {
+            return (whole, segmentation(out, crop: whole, pixels: pixels))
+        }
+        return (crop, nil)
     }
 
-    // MARK: - Zoom passes for small items
+    // MARK: - Close-ups for small items
 
     private static func needsZoom(_ inst: GarmentInstance) -> Bool {
         guard [GarmentKind.eyewear, .jewelry, .headwear, .belt].contains(inst.kind) else { return false }
@@ -232,38 +296,108 @@ enum WardrobeExtractor {
         return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
     }
 
-    /// Bounding box of the grid pixels whose parser label is in `classes`.
-    private static func labelBox(_ labels: [UInt8], _ classes: Set<UInt8>) -> (Int, Int, Int, Int, Int)? {
-        let w = WardrobeML.gridW
-        var x0 = Int.max, y0 = Int.max, x1 = 0, y1 = 0, n = 0
-        for (i, l) in labels.enumerated() where classes.contains(l) {
-            let x = i % w, y = i / w
-            x0 = min(x0, x); y0 = min(y0, y); x1 = max(x1, x + 1); y1 = max(y1, y + 1); n += 1
-        }
-        return n > 0 ? (x0, y0, x1, y1, n) : nil
+    /// A close-up to run: a photo rectangle, the kinds to look for, and the found
+    /// (too small) instances it should re-segment.
+    private struct Zoom {
+        var rect: CGRect
+        var wanted: Set<GarmentKind>
+        var replace: [Int]
+        var label: String
     }
 
-    /// Re-segments close-ups of the head (face + hair x2.2), each hand (x4) and
-    /// the feet (bottom 22% of the person) at full grid resolution and adds the
-    /// eyewear / headwear / bag / watch / footwear the full-body pass didn't
-    /// find. A head close-up without headwear also checks whether the "hair"
-    /// is a turban or headscarf.
-    private static func partZooms(seg: Segmentation, crop: Crop, photo: CGImage, log: (String) -> Void) -> [Use] {
-        typealias P = GarmentSegmenter.P
-        let gh = CGFloat(WardrobeML.gridH)
+    /// Cheap checks on the full-body pass decide which close-ups run:
+    /// - a found small accessory (sunglasses, watch, cap, belt) under 16% of the grid
+    ///   tall is re-segmented in a tight crop for a crisp mask;
+    /// - a missing item the low-res probabilities still point at (glasses / a hat in
+    ///   the head, a bag, a watch, shoes at the feet) gets a close-up around the evidence.
+    /// Overlapping close-ups (sunglasses and a cap) share one pass.
+    private static func closeUps(_ uses: inout [Use], seg: Segmentation, crop: Crop, photo: CGImage, log: (String) -> Void) {
+        let gw = CGFloat(WardrobeML.gridW), gh = CGFloat(WardrobeML.gridH)
+        let w = WardrobeML.gridW
         let found = Set(seg.instances.map { $0.kind })
-        var out: [Use] = []
-        var foundNow = found
+        let map = seg.map
+        var zooms: [Zoom] = []
 
-        // Everything the full-body pass already assigned to a garment, on its grid.
-        let gw = CGFloat(WardrobeML.gridW)
-        var claimed = [UInt8](repeating: 0, count: WardrobeML.gridCount)
-        for inst in seg.instances { for i in 0..<claimed.count where inst.mask[i] != 0 { claimed[i] = 1 } }
+        // Found but small: re-segment tightly (enough context for the head / wrist).
+        for (k, use) in uses.enumerated() where needsZoom(use.inst) {
+            let box = photoRect(use.inst.box, in: crop)
+            zooms.append(Zoom(rect: box.insetBy(dx: -box.width * 1.2, dy: -box.height * 1.6), wanted: [], replace: [k], label: "small \(use.inst.kind.rawValue)"))
+        }
+        // The person on the grid.
+        var px0 = w, py0 = WardrobeML.gridH, px1 = 0, py1 = 0
+        for (i, l) in seg.labels.enumerated() where l != 0 {
+            let x = i % w, y = i / w
+            px0 = min(px0, x); px1 = max(px1, x + 1); py0 = min(py0, y); py1 = max(py1, y + 1)
+        }
+        guard px1 > px0, py1 > py0 else { return }
+        let ph = py1 - py0
+        // Head: everything above the upper garments (or the top fifth of the person).
+        let headBottom = min(py1, max(py0 + ph / 8, GarmentSegmenter.upperTop(seg.labels) ?? (py0 + ph / 5)) + ph / 30)
+        let headZone = (px0, py0, px1, headBottom)
+        var headKinds: Set<GarmentKind> = []
+        if !found.contains(.eyewear), map.peak([14], in: headZone).p >= 0.15 { headKinds.insert(.eyewear) }
+        if !found.contains(.headwear), map.peak([15, 16], in: headZone).p >= 0.25 { headKinds.insert(.headwear) }
+        if !headKinds.isEmpty {
+            var hx0 = w, hy0 = WardrobeML.gridH, hx1 = 0, hy1 = 0
+            for y in headZone.1..<headZone.3 {
+                for x in headZone.0..<headZone.2 where seg.labels[y * w + x] != 0 {
+                    hx0 = min(hx0, x); hx1 = max(hx1, x + 1); hy0 = min(hy0, y); hy1 = max(hy1, y + 1)
+                }
+            }
+            if hx1 > hx0, hy1 > hy0 {
+                let r = photoRect((hx0, hy0, hx1, hy1), in: crop)
+                let side = max(r.width, r.height) * 2.2
+                zooms.append(Zoom(rect: CGRect(x: r.midX - side / 2, y: r.midY - side / 2, width: side, height: side),
+                                  wanted: headKinds, replace: [], label: "head"))
+            }
+        }
+        // Bag / watch anywhere on the person; shoes in the bottom quarter.
+        let personBox = (px0, py0, px1, py1)
+        let feetZone = (px0, py0 + ph * 3 / 4, px1, py1)
+        let evidence: [(GarmentKind, [Int], Float, (Int, Int, Int, Int), CGFloat, String)] = [
+            (.bag, [25], 0.35, personBox, 2.5, "bag"),
+            (.jewelry, [19], 0.2, personBox, 4, "wrist"),
+            (.footwear, [23, 24], 0.25, feetZone, 1.6, "feet")
+        ]
+        for (kind, classes, t, zone, grow, label) in evidence where !found.contains(kind) {
+            let pk = map.peak(classes, in: zone)
+            guard pk.p >= t, let b = map.blob(classes, threshold: t * 0.5, within: zone) else { continue }
+            var r = photoRect(b.box, in: crop)
+            let minSide = crop.rect.height * (kind == .footwear ? 0.18 : 0.12)
+            let side = max(max(r.width, r.height) * grow, minSide)
+            r = CGRect(x: r.midX - side / 2, y: r.midY - side / 2, width: side, height: side)
+            zooms.append(Zoom(rect: r, wanted: [kind], replace: [], label: "\(label) p=\(String(format: "%.2f", pk.p))"))
+        }
+
+        // Merge close-ups that mostly overlap.
+        var merged: [Zoom] = []
+        for z in zooms.sorted(by: { $0.rect.width * $0.rect.height > $1.rect.width * $1.rect.height }) {
+            if let j = merged.firstIndex(where: { m in
+                let i = m.rect.intersection(z.rect)
+                return !i.isNull && i.width * i.height >= 0.5 * min(z.rect.width * z.rect.height, m.rect.width * m.rect.height)
+                    && m.rect.union(z.rect).width * m.rect.union(z.rect).height <= 1.8 * max(m.rect.width * m.rect.height, z.rect.width * z.rect.height)
+            }) {
+                merged[j].rect = merged[j].rect.union(z.rect)
+                merged[j].wanted.formUnion(z.wanted)
+                merged[j].replace += z.replace
+                merged[j].label += " + " + z.label
+            } else {
+                merged.append(z)
+            }
+        }
+
+        // Everything the full-body pass already assigned to a garment, on its grid (built on first use).
+        var claimedMap: [UInt8]?
         /// Share of a close-up instance lying on pixels the full-body pass gave to another
-        /// garment (a coat's leather cuff re-read as a "handbag" in a hand close-up).
+        /// garment (a coat's leather cuff re-read as a "handbag" in a wrist close-up).
         func claimedShare(_ inst: GarmentInstance, in z: Crop) -> Float {
+            if claimedMap == nil {
+                var m = [UInt8](repeating: 0, count: WardrobeML.gridCount)
+                for other in seg.instances { for i in 0..<m.count where other.mask[i] != 0 { m[i] = 1 } }
+                claimedMap = m
+            }
+            let claimed = claimedMap ?? []
             var hit = 0, total = 0
-            let w = WardrobeML.gridW
             for i in stride(from: 0, to: inst.mask.count, by: 3) where inst.mask[i] != 0 {
                 total += 1
                 let px = z.rect.minX + CGFloat(i % w) / gw * z.rect.width
@@ -274,86 +408,50 @@ enum WardrobeExtractor {
             return total == 0 ? 0 : Float(hit) / Float(total)
         }
 
-        var zoomCrops: [String: Crop] = [:]
-        func zoom(_ r0: CGRect, kinds: Set<GarmentKind>, label: String) -> Segmentation? {
-            let wanted = kinds.subtracting(foundNow)
-            guard !wanted.isEmpty, r0.width > 4, r0.height > 4,
-                  let z = makeCrop(photo, rect: r0, minHeight: gh), let s = segment(z) else { return nil }
-            for k in wanted {
-                guard let best = s.instances.filter({ $0.kind == k }).max(by: { $0.pixelCount < $1.pixelCount }) else { continue }
+        var foundNow = found
+        for zoom in merged {
+            guard zoom.rect.width > 4, zoom.rect.height > 4,
+                  let z = makeCrop(photo, rect: zoom.rect, minHeight: gh), let s = segment(z) else { continue }
+            log("close-up [\(zoom.label)]: \(s.instances.map { $0.kind.rawValue }.joined(separator: ","))")
+            // Re-segmented small items: the same kind nearest to where the original is.
+            for k in zoom.replace {
+                let r = photoRect(uses[k].inst.box, in: crop)
+                let cx = (r.midX - z.rect.minX) / z.rect.width * gw, cy = (r.midY - z.rect.minY) / z.rect.height * gh
+                func distance(_ i: GarmentInstance) -> CGFloat {
+                    hypot(CGFloat(i.box.0 + i.box.2) / 2 - cx, CGFloat(i.box.1 + i.box.3) / 2 - cy)
+                }
+                if let m = s.instances.filter({ $0.kind == uses[k].inst.kind }).min(by: { distance($0) < distance($1) }) {
+                    uses[k] = Use(inst: m, crop: z, pixels: s.pixels, zoomed: true, map: s.map)
+                }
+            }
+            // The close-up is paid for: also take a small accessory it finds that nobody asked
+            // for (the watch beside a re-segmented belt), when the full-body pass had at least
+            // some evidence of it in the same place.
+            let zoneInCrop = (Int((z.rect.minX - crop.rect.minX) / crop.rect.width * gw),
+                              Int((z.rect.minY - crop.rect.minY) / crop.rect.height * gh),
+                              Int((z.rect.maxX - crop.rect.minX) / crop.rect.width * gw),
+                              Int((z.rect.maxY - crop.rect.minY) / crop.rect.height * gh))
+            let bonusClasses: [GarmentKind: [Int]] = [.eyewear: [14], .headwear: [15, 16], .jewelry: [19], .bag: [25], .belt: [20]]
+            var bonus: Set<GarmentKind> = []
+            for (kind, classes) in bonusClasses where !foundNow.contains(kind) && !zoom.wanted.contains(kind)
+                && s.instances.contains(where: { $0.kind == kind }) && map.peak(classes, in: zoneInCrop).p >= 0.1 {
+                bonus.insert(kind)
+            }
+            for kind in zoom.wanted.union(bonus).subtracting(foundNow) {
+                guard let best = s.instances.filter({ $0.kind == kind }).max(by: { $0.pixelCount < $1.pixelCount }) else { continue }
                 // Bags and watches only: shoes the full-body pass merged into black
                 // trousers are exactly what the feet close-up is for.
-                let share = [.bag, .jewelry].contains(k) ? claimedShare(best, in: z) : 0
+                let share = [.bag, .jewelry].contains(kind) ? claimedShare(best, in: z) : 0
                 guard share < 0.5 else {
-                    log("\(label) zoom: \(k.rawValue) is \(Int(share * 100))% another garment, skipped")
+                    log("close-up: \(kind.rawValue) is \(Int(share * 100))% another garment, skipped")
                     continue
                 }
-                out.append(Use(inst: best, crop: z, pixels: s.pixels, zoomed: true))
-                foundNow.insert(k)
-                log("\(label) zoom found \(k.rawValue)")
-            }
-            zoomCrops[label] = z
-            return s
-        }
-
-        // Head.
-        if let hb = labelBox(seg.labels, [P.face.rawValue, P.hair.rawValue, P.hat.rawValue, P.glasses.rawValue]), hb.4 > 40 {
-            let r = photoRect((hb.0, hb.1, hb.2, hb.3), in: crop)
-            let side = max(r.width, r.height) * 2.2
-            let head = CGRect(x: r.midX - side / 2, y: r.midY - side / 2, width: side, height: side)
-            if let s = zoom(head, kinds: [.eyewear, .headwear], label: "head"), !foundNow.contains(.headwear),
-               let z = zoomCrops["head"], let hair = GarmentSegmenter.instance(kind: .headwear, parserClass: .hair, labels: s.labels),
-               let cut = GarmentCutout.render(crop: z.image, cropPixels: s.pixels, instance: hair, photoInGrid: z.photoInGrid),
-               let cg = cut.image.cgImage, let input = FashionClassifier.onWhite(cg, side: 224),
-               let emb = WardrobeML.shared.embed(input), let vocab = WardrobeML.shared.vocabulary,
-               let best = vocab.best(in: "hair_check", for: emb), best.label != "Hair", best.margin > 0.02 {
-                out.append(Use(inst: hair, crop: z, pixels: s.pixels, zoomed: true))
-                foundNow.insert(.headwear)
-                log("head zoom: the hair is \(best.label) (+\(String(format: "%.3f", best.margin)))")
+                uses.append(Use(inst: best, crop: z, pixels: s.pixels, zoomed: true, map: s.map))
+                foundNow.insert(kind)
+                log("close-up found \(kind.rawValue)")
             }
         }
-        // Hands: bags and watches.
-        let (comp, sizes) = GarmentSegmenter.components(seg.labels.map { $0 == P.hands.rawValue ? UInt8(1) : UInt8(0) },
-                                                         w: WardrobeML.gridW, h: WardrobeML.gridH)
-        for (ci, size) in sizes.enumerated().sorted(by: { $0.element > $1.element }).prefix(2) where size >= 30 {
-            var x0 = Int.max, y0 = Int.max, x1 = 0, y1 = 0
-            for (i, c) in comp.enumerated() where c == ci + 1 {
-                let x = i % WardrobeML.gridW, y = i / WardrobeML.gridW
-                x0 = min(x0, x); y0 = min(y0, y); x1 = max(x1, x + 1); y1 = max(y1, y + 1)
-            }
-            let r = photoRect((x0, y0, x1, y1), in: crop)
-            let side = max(r.width, r.height) * 4
-            _ = zoom(CGRect(x: r.midX - side / 2, y: r.midY - side / 2, width: side, height: side),
-                     kinds: [.bag, .jewelry], label: "hand\(ci)")
-        }
-        // Feet.
-        let body = Set((1...17).map { UInt8($0) })
-        if let pb = labelBox(seg.labels, body) {
-            let top = pb.1 + Int(Double(pb.3 - pb.1) * 0.78)
-            let r = photoRect((pb.0, top, pb.2, pb.3), in: crop)
-            _ = zoom(r.insetBy(dx: -r.width * 0.15, dy: -r.height * 0.25), kinds: [.footwear], label: "feet")
-        }
-        return out
-    }
-
-    /// Re-segments a tight crop around a small item; returns the matching
-    /// instance in that crop (or nil to keep the original).
-    private static func zoomed(_ inst: GarmentInstance, in crop: Crop, photo: CGImage) -> Use? {
-        let gh = CGFloat(WardrobeML.gridH)
-        let box = photoRect(inst.box, in: crop)
-        // Enough context around it for the parser to recognise a head / wrist.
-        let r = box.insetBy(dx: -box.width * 1.2, dy: -box.height * 1.6)
-        guard r.width > 4, r.height > 4,
-              let z = makeCrop(photo, rect: r, minHeight: gh),
-              let seg = segment(z) else { return nil }
-        let gw = CGFloat(WardrobeML.gridW)
-        func distance(_ i: GarmentInstance) -> CGFloat {
-            let cx = CGFloat(i.box.0 + i.box.2) / 2, cy = CGFloat(i.box.1 + i.box.3) / 2
-            return hypot(cx - gw / 2, cy - gh / 2)
-        }
-        guard let m = seg.instances.filter({ $0.kind == inst.kind }).min(by: { distance($0) < distance($1) })
-        else { return nil }
-        return Use(inst: m, crop: z, pixels: seg.pixels, zoomed: true)
+        log("close-ups: \(merged.count) run (\(zooms.count) wanted)")
     }
 
     // MARK: - Quality
@@ -398,10 +496,15 @@ enum WardrobeExtractor {
     /// differently; merge same-product results from one photo (keep the larger).
     private static func dedupeWithinPhoto(_ items: [Item]) -> [Item] {
         var out: [Item] = []
+        let upper: Set<GarmentKind> = [.innerTop, .outerLayer, .onePiece]
         for it in items {
             if let j = out.firstIndex(where: { o in
-                o.attributes.category == it.attributes.category &&
-                cosine(o.attributes.embedding, it.attributes.embedding) > 0.92
+                (o.attributes.category == it.attributes.category &&
+                 cosine(o.attributes.embedding, it.attributes.embedding) > 0.92)
+                // Two pieces of one upper garment GarmentNet split by class (a coat and its
+                // "vest" hem) look alike to FashionSigLIP whatever they were named.
+                || (upper.contains(o.kind) && upper.contains(it.kind) && o.box.intersects(it.box)
+                    && cosine(o.attributes.embedding, it.attributes.embedding) > 0.88)
             }) {
                 if it.quality > out[j].quality { out[j] = it }
             } else {

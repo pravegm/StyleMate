@@ -8,7 +8,7 @@ import Foundation
 /// Generic: it finds every compiled model (`.mlmodelc`) in the app bundle, including inside resource bundles
 /// (StudioModels.bundle), so a model swap needs no change here.
 struct ModelPlacement: Codable, Equatable {
-    /// File name without `.mlmodelc` (e.g. "GarmentParser", "StudioModels/Unet").
+    /// File name without `.mlmodelc` (e.g. "GarmentNet", "StudioModels/Unet").
     var model: String
     /// Share of the estimated cost per device name ("Neural Engine", "CPU", "GPU"), 0...1.
     var shares: [String: Double]

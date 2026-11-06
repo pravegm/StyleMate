@@ -135,7 +135,7 @@ struct DiagnosticsTests {
                     .init(seconds: 48, outcome: "kept"), .init(seconds: 50, outcome: "rejected")]
         b.studioItem = "Trench Coats"
         b.peakMemoryBytes = 1_932_735_283
-        b.placements = [ModelPlacement(model: "GarmentParser", shares: ["Neural Engine": 0.97, "CPU": 0.03], operationCount: 812),
+        b.placements = [ModelPlacement(model: "GarmentNet", shares: ["Neural Engine": 0.97, "CPU": 0.03], operationCount: 812),
                         ModelPlacement(model: "Broken", shares: [:], operationCount: 0, error: "load failed")]
         b.notes = ["Stopped by you."]
         return b
@@ -172,7 +172,7 @@ struct DiagnosticsTests {
         #expect(lines.contains("Studio photo (median): 50.0 s per item (3 runs, Trench Coats)"))
         #expect(lines.contains("  - run 1: 1 min 10 s, kept; drawing 39.0 s for 3 images × 13 steps (1.0 s per step per image); model load 20.0 s"))
         #expect(lines.contains("Peak app memory: 1.8 GB"))
-        #expect(lines.contains("  - GarmentParser: Neural Engine 97%, CPU 3% (812 ops)"))
+        #expect(lines.contains("  - GarmentNet: Neural Engine 97%, CPU 3% (812 ops)"))
         #expect(lines.contains("  - Broken: unknown (load failed) (0 ops)"))
         #expect(lines.contains("Note: Stopped by you."))
         #expect(lines.contains("Photos searched for clothes: 2; typical 4.5 s per photo (last 2), average 4.5 s, slowest 5.0 s"))

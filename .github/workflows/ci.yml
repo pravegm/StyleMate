@@ -2,9 +2,10 @@ name: CI
 
 # Builds StyleMate on GitHub's Apple-silicon macOS runner and runs the test suite on an iOS simulator.
 #
-# The on-device models (face detector + embedder, garment parser/labeler, fashion encoder) are
+# The on-device models (face detector + embedder, GarmentNet garment segmenter, fashion encoder) are
 # git-ignored (large, licence-restricted weights), so the first job regenerates them from the public
-# checkpoints (scripts/build_face_models.sh, scripts/build_wardrobe_models.sh) and keeps them in the
+# checkpoints (scripts/build_face_models.sh, scripts/build_wardrobe_models.sh; GarmentNet's head from the
+# garment-model.yml run pinned in scripts/garment/model.json) and keeps them in the
 # Actions cache (never in a public artifact or release). Later runs restore them in seconds; feature
 # branches restore main's cache.
 #
@@ -24,7 +25,12 @@ name: CI
 on:
   push:
     branches: ['**']
-    paths-ignore: ['docs/**', '**/*.md']
+    # Docs-only pushes, and pushes that only retune garment-model training (garment-model.yml), need no app build.
+    # (only the garment files that feed the app's model — model.json, export.py, head.py, backbone.py —
+    # are part of the wardrobe cache key; the rest is training code that runs in garment-model.yml).
+    paths-ignore: ['docs/**', '**/*.md', 'scripts/garment/train_config.json', 'scripts/garment/train.py',
+                   'scripts/garment/train_args.py', 'scripts/garment/extract.py', 'scripts/garment/fashionpedia.py',
+                   '.github/workflows/garment-model.yml']
   pull_request:
     paths-ignore: ['docs/**', '**/*.md']
   workflow_dispatch:
@@ -96,6 +102,16 @@ jobs:
           echo "studio=$studio" >> "$GITHUB_OUTPUT"
           echo "unit_tests=$tests" >> "$GITHUB_OUTPUT"
           echo "UI tests: $ui | studio renders: $studio | unit tests: ${tests:-all}"
+      - name: Pinned garment head
+        id: gpin
+        run: echo "sha=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json"))["sha256"])')" >> "$GITHUB_OUTPUT"
+      # Touch the cached garment head (~4 MB) on every run so it is never evicted: it is the only
+      # copy once the training run's artifact expires.
+      - name: Keep the garment head cached
+        uses: actions/cache/restore@v4
+        with:
+          path: scripts/garment/.artifacts
+          key: garment-head-${{ steps.gpin.outputs.sha }}
       - name: Are the model caches there?
         id: models
         env:
@@ -103,7 +119,7 @@ jobs:
           REPO: ${{ github.repository }}
           REF: ${{ github.ref }}
           FACE_KEY: face-models-v2-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_face_models.py') }}
-          WARDROBE_KEY: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          WARDROBE_KEY: wardrobe-models-v2-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json', 'scripts/garment/model.json', 'scripts/garment/export.py', 'scripts/garment/head.py', 'scripts/garment/backbone.py') }}
           STUDIO_KEY: studio-models-v1-${{ hashFiles('scripts/build_studio_models.sh', 'scripts/convert_studio_model.py') }}
         run: |
           # A run can restore its own branch's caches and main's. Any doubt (API error) means build.
@@ -121,6 +137,9 @@ jobs:
     if: needs.plan.outputs.build_models == 'true'
     runs-on: xcode-27
     timeout-minutes: 100
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - name: Restore face models
@@ -137,7 +156,34 @@ jobs:
         uses: actions/cache@v4
         with:
           path: StyleMate/ML
-          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          key: wardrobe-models-v2-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json', 'scripts/garment/model.json', 'scripts/garment/export.py', 'scripts/garment/head.py', 'scripts/garment/backbone.py') }}
+      # GarmentNet's trained head is StyleMate's own model (DINOv2 backbone + a head trained on
+      # Fashionpedia/COCO by garment-model.yml). It lives only in that run's `garment-head` artifact;
+      # scripts/garment/model.json pins the run and the file's sha256.
+      - name: Pinned garment head
+        id: gpin
+        if: steps.wcache.outputs.cache-hit != 'true'
+        run: |
+          echo "run=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json"))["run_id"])')" >> "$GITHUB_OUTPUT"
+          echo "artifact=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json")).get("artifact", "garment-head"))')" >> "$GITHUB_OUTPUT"
+          echo "sha=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json"))["sha256"])')" >> "$GITHUB_OUTPUT"
+      # The head is kept in the Actions cache by its sha256 (the plan job touches it on every run, so
+      # it is never evicted); the training run's artifact (90 days) is only the first source.
+      - name: Restore the garment head
+        id: hcache
+        if: steps.wcache.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: scripts/garment/.artifacts
+          key: garment-head-${{ steps.gpin.outputs.sha }}
+      - name: Download the garment head
+        if: steps.wcache.outputs.cache-hit != 'true' && steps.hcache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.gpin.outputs.artifact }}
+          path: scripts/garment/.artifacts
+          run-id: ${{ steps.gpin.outputs.run }}
+          github-token: ${{ github.token }}
       - name: Build wardrobe models
         if: steps.wcache.outputs.cache-hit != 'true'
         run: bash scripts/build_wardrobe_models.sh
@@ -146,10 +192,13 @@ jobs:
           du -sh StyleMate/FaceModels/* StyleMate/ML/*
           test -f StyleMate/FaceModels/FaceDetectYuNet.mlpackage/Manifest.json
           test -f StyleMate/FaceModels/FaceEmbedSFace.mlpackage/Manifest.json
-          test -f StyleMate/ML/GarmentParser.mlpackage/Manifest.json
-          test -f StyleMate/ML/GarmentLabeler.mlpackage/Manifest.json
+          test -f StyleMate/ML/GarmentNet.mlpackage/Manifest.json
           test -f StyleMate/ML/FashionEncoder.mlpackage/Manifest.json
           test -f StyleMate/ML/FashionVocabulary.json
+          # The non-commercial FASHN / Fashionpedia-SegFormer models must never be bundled again.
+          for m in GarmentParser GarmentLabeler; do
+            if [ -e "StyleMate/ML/$m.mlpackage" ]; then echo "::error::$m (non-commercial) is in StyleMate/ML"; exit 1; fi
+          done
       # Studio-render diffusion model (SD 1.5-class img2img / text2img, ~1 GB). Cached at the repo root,
       # NOT under StyleMate/ML, so a wardrobe-cache miss can never sweep it into the wardrobe cache.
       - name: Restore studio models
@@ -190,7 +239,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: StyleMate/ML
-          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          key: wardrobe-models-v2-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json', 'scripts/garment/model.json', 'scripts/garment/export.py', 'scripts/garment/head.py', 'scripts/garment/backbone.py') }}
           fail-on-cache-miss: true
       - name: Restore studio models
         uses: actions/cache/restore@v4
@@ -339,7 +388,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: StyleMate/ML
-          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          key: wardrobe-models-v2-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json', 'scripts/garment/model.json', 'scripts/garment/export.py', 'scripts/garment/head.py', 'scripts/garment/backbone.py') }}
           fail-on-cache-miss: true
       - name: Restore studio models
         uses: actions/cache/restore@v4
@@ -427,7 +476,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: StyleMate/ML
-          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          key: wardrobe-models-v2-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json', 'scripts/garment/model.json', 'scripts/garment/export.py', 'scripts/garment/head.py', 'scripts/garment/backbone.py') }}
           fail-on-cache-miss: true
 
       - name: Select Xcode
@@ -566,7 +615,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: StyleMate/ML
-          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          key: wardrobe-models-v2-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json', 'scripts/garment/model.json', 'scripts/garment/export.py', 'scripts/garment/head.py', 'scripts/garment/backbone.py') }}
           fail-on-cache-miss: true
       - name: Select Xcode
         run: |
@@ -605,6 +654,14 @@ jobs:
             echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1
           fi
           echo "No test hooks in $BIN"
+      - name: Only commercially licensed garment models in the app
+        run: |
+          APP=$(find "$RUNNER_TEMP/dd-release/Build/Products" -maxdepth 2 -name StyleMate.app -type d | head -1)
+          ls "$APP" | grep -E "mlmodelc|Vocabulary" || true
+          test -d "$APP/GarmentNet.mlmodelc" || { echo "::error::GarmentNet missing from the Release app"; exit 1; }
+          for m in GarmentParser GarmentLabeler; do
+            if [ -e "$APP/$m.mlmodelc" ]; then echo "::error::$m (non-commercial) is in the Release app"; exit 1; fi
+          done
       - name: Upload log
         if: always()
         uses: actions/upload-artifact@v4
@@ -635,7 +692,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: StyleMate/ML
-          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          key: wardrobe-models-v2-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json', 'scripts/garment/model.json', 'scripts/garment/export.py', 'scripts/garment/head.py', 'scripts/garment/backbone.py') }}
           fail-on-cache-miss: true
       - name: Select Xcode
         run: |

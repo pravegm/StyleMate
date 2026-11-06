@@ -67,7 +67,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: StyleMate/ML
-          key: wardrobe-models-v1-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json') }}
+          key: wardrobe-models-v2-${{ hashFiles('scripts/build_wardrobe_models.sh', 'scripts/convert_wardrobe_models.py', 'scripts/fashion_vocabulary.json', 'scripts/garment/model.json', 'scripts/garment/export.py', 'scripts/garment/head.py', 'scripts/garment/backbone.py') }}
           fail-on-cache-miss: true
       - name: Restore studio models
         id: studio
@@ -129,8 +129,12 @@ jobs:
           [ "$BUILT" = "${{ github.run_number }}" ] || { echo "::error::CFBundleVersion is $BUILT, not ${{ github.run_number }}"; exit 1; }
           # Every on-device model must be inside the app.
           bash scripts/check_face_models.sh "$APP"
-          for m in GarmentParser.mlmodelc GarmentLabeler.mlmodelc FashionEncoder.mlmodelc FashionVocabulary.json; do
+          for m in GarmentNet.mlmodelc FashionEncoder.mlmodelc FashionVocabulary.json; do
             test -e "$APP/$m" || { echo "::error::$m missing from the app"; exit 1; }
+          done
+          # The non-commercial FASHN / Fashionpedia-SegFormer garment models must not ship.
+          for m in GarmentParser.mlmodelc GarmentLabeler.mlmodelc; do
+            if [ -e "$APP/$m" ]; then echo "::error::$m (non-commercial) is in the app"; exit 1; fi
           done
           if [ -d StyleMate/ML/Studio ]; then test -d "$APP/StudioModels.bundle" || { echo "::error::StudioModels.bundle missing"; exit 1; }; fi
           # DEBUG-only test hooks must not ship.

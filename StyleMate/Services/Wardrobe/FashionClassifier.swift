@@ -31,6 +31,8 @@ enum FashionClassifier {
         /// Neckwear the segmenter confirmed as a tie (narrow strip below the collar);
         /// otherwise "Ties" / "Bowties" are not on offer.
         var allowTie = true
+        /// GarmentNet's Fashionpedia class for the item (5 jacket, 10 coat...), 0 if unknown.
+        var segmenterClass = 0
         static let none = Context()
     }
 
@@ -50,7 +52,10 @@ enum FashionClassifier {
 
     private static let upperGroups: [(GarmentKind, String)] = [(.innerTop, "upper_inner"), (.outerLayer, "upper_outer"), (.onePiece, "onepiece")]
 
-    static func classify(_ cutout: UIImage, kind: GarmentKind, scene: SceneLight = .neutral, context: Context = .none) -> Attributes? {
+    /// `colourSource`: where to measure colours, if not the cutout itself (the extractor passes the
+    /// garment's confident interior, so edge bleed, skin and background never tint the name).
+    static func classify(_ cutout: UIImage, kind: GarmentKind, scene: SceneLight = .neutral, context: Context = .none,
+                         colourSource: CGImage? = nil) -> Attributes? {
         guard let cg = cutout.cgImage else { return nil }
         let ml = WardrobeML.shared
         guard let vocab = ml.vocabulary, let input = onWhite(cg, side: 224),
@@ -80,6 +85,10 @@ enum FashionClassifier {
                 }
             }
             for (l, p) in priors where scored[l] != nil { scored[l]! += p }
+            // GarmentNet saw a jacket / coat / cape: a soft knit one is still outerwear, not a cardigan.
+            if [5, 10, 13].contains(context.segmenterClass) {
+                for l in scored.keys where l.hasPrefix("Outerwear|") { scored[l]! += 0.015 }
+            }
             if let best = scored.max(by: { $0.value < $1.value }) { resolvedKind = owner[best.key] ?? kind }
         } else if let group = kind.vocabularyGroup {
             scored = vocab.scores(in: group, for: emb)
@@ -103,7 +112,7 @@ enum FashionClassifier {
            m.margin > 0.004 {
             material = m.label
         }
-        var clusters = ColorNamer.clusters(cg, scene: scene)
+        var clusters = ColorNamer.clusters(colourSource ?? cg, scene: scene)
         // A light-grey coat in sunlight measures as white (its lit side is as bright
         // as a white shirt's in shade): ask the encoder, which sees the heather
         // texture and the contrast against the white backdrop.

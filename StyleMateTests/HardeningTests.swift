@@ -333,19 +333,20 @@ struct HardeningTests {
         #expect(!FileManager.default.fileExists(atPath: UncertainItemsStore.fileURL(forUser: user).path))
     }
 
-    /// P0-2 (interim, until feat/garment-commercial replaces the segmenters): the two SegFormer models
-    /// ship with the NVIDIA licence text (its §3.1), and Fashionpedia is credited (CC BY 4.0).
-    @Test func garmentSegmentersAreCredited() throws {
+    /// P0-2: the garment segmenter is GarmentNet (DINOv2 Apache-2.0 backbone + StyleMate's head trained
+    /// on Fashionpedia and COCO, CC BY 4.0). Its credits ship with the Apache text and both CC BY
+    /// attributions, and nothing non-commercial (FASHN, the SegFormer labeler) is credited or bundled.
+    @Test func garmentSegmenterIsCredited() throws {
         let all = Acknowledgement.all()
-        for slug in ["fashn-human-parser", "segformer-fashionpedia"] {
-            let ack = try #require(all.first { $0.id.contains(slug) }, "no acknowledgement for \(slug)")
-            #expect(ack.licence == "NVIDIA Source Code License for SegFormer")
-            #expect(ack.body.contains("3.3 Use Limitation"))
-        }
-        let data = try #require(all.first { $0.id.contains("fashionpedia-dataset") })
-        #expect(data.body.contains("creativecommons.org/licenses/by/4.0"))
-        // Shown after every other component.
-        #expect(all.suffix(3).map(\.id).allSatisfy { $0.hasPrefix("ACK-9") })
+        let ack = try #require(all.first { $0.id.contains("garmentnet") }, "no acknowledgement for GarmentNet")
+        #expect((ack.licence ?? "").contains("Apache License 2.0"))
+        #expect(ack.body.contains("DINOv2"))
+        #expect(ack.body.contains("TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION"))
+        #expect(ack.body.contains("Fashionpedia") && ack.body.contains("COCO"))
+        #expect(ack.body.contains("creativecommons.org/licenses/by/4.0"))
+        #expect(!all.contains { $0.id.contains("fashn") || $0.id.contains("segformer") })
+        #expect(Bundle.main.url(forResource: "GarmentParser", withExtension: "mlmodelc") == nil)
+        #expect(Bundle.main.url(forResource: "GarmentLabeler", withExtension: "mlmodelc") == nil)
     }
 
     /// D6: Diagnostics speaks words; the raw values are behind Details.

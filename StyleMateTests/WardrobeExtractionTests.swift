@@ -35,7 +35,7 @@ struct WardrobeExtractionTests {
     }
 
     @Test func modelsAreBundled() {
-        #expect(WardrobeExtractor.isAvailable, "GarmentParser / GarmentLabeler / FashionEncoder / vocabulary missing")
+        #expect(WardrobeExtractor.isAvailable, "GarmentNet / FashionEncoder / vocabulary missing")
     }
 
     /// (fixture, products/categories that must be found)
