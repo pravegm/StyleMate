@@ -30,7 +30,12 @@ final class DuoScreensTests: E2ETestCase {
     @MainActor
     func test01_DuoScreens() throws {
         guard bridgeURL != nil else { throw XCTSkip("DUO_BRIDGE_URL not set: not on the Duo CI") }
-        launchToHome()
+        // A seeded try-on body (DEBUG `-uiTestSeedTryOn`), so the deck shows On you | Pieces.
+        app = makeApp()
+        app.launchArguments.append("-uiTestSeedTryOn")
+        app.launch()
+        dismissSpringboardAlertIfPresent()
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 60) || tabButton("Home").exists, "No main tab UI")
         _ = waitForAny([text("Your Wardrobe"), text("Style for an occasion")], timeout: 20)
         shoot("01-home")
 
@@ -64,7 +69,16 @@ final class DuoScreensTests: E2ETestCase {
         // Today's Outfit deck.
         openTab("Home")
         if openOutfitDeck() {
+            // On you (cover: the toggle; inner display: on you | pieces side by side).
+            let onYou = app.buttons["tryon.toggle.onYou"]
+            if onYou.waitForExistence(timeout: 20) { onYou.tap() }
+            _ = waitForAny([app.buttons["tryon.image"], app.descendants(matching: .any)["tryon.rejected"]], timeout: 300)
             shoot("05-outfit-deck")
+            let pieces = app.buttons["tryon.toggle.pieces"]
+            if pieces.exists {
+                pieces.tap()
+                shoot("05b-outfit-deck-pieces")
+            }
             finishDeck()
         }
 

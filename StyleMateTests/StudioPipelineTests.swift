@@ -55,9 +55,106 @@ struct StudioPipelineTests {
         }
         if case .generate = plan(.innerTop).mode {} else { Issue.record("tops should be generated") }
         if case .generate = plan(.outerLayer).mode {} else { Issue.record("jackets should be generated") }
-        if case .refine = plan(.lower).mode {} else { Issue.record("trousers should be refined") }
-        if case .refine = plan(.footwear).mode {} else { Issue.record("shoes should be refined") }
+        // Without a cutout to draw a template from, bottoms and shoes are refined.
+        if case .refine = plan(.lower).mode {} else { Issue.record("trousers without a template should be refined") }
+        if case .refine = plan(.footwear).mode {} else { Issue.record("shoes without a template should be refined") }
         if case .generate = plan(.lower, truncated: true).mode {} else { Issue.record("cut-off items should be generated") }
+    }
+
+    @Test func shoesHatsAndTrousersGetProductTemplates() throws {
+        let cut = Self.square(r: 40, g: 40, b: 44)
+        let cases: [(String, GarmentKind, StyleMate.Category, StudioTemplate.Shape)] = [
+            ("Sneakers", .footwear, .footwear, .sneaker), ("Boots", .footwear, .footwear, .boot),
+            ("Chelsea Boots", .footwear, .footwear, .chelsea), ("Ankle Boots", .footwear, .footwear, .chelsea),
+            ("Heels", .footwear, .footwear, .heel), ("Sandals", .footwear, .footwear, .sandal),
+            ("Sun Hats", .headwear, .accessories, .wideBrim),
+            ("Fedoras", .headwear, .accessories, .wideBrim), ("Beanies", .headwear, .accessories, .beanie),
+            ("Bucket Hats", .headwear, .accessories, .bucket),
+            ("Chinos", .lower, .bottoms, .trousers), ("Jeans", .lower, .bottoms, .trousers),
+            ("Wide-Leg Pants", .lower, .bottoms, .wideTrousers), ("Joggers", .lower, .bottoms, .joggers),
+            ("Leggings", .lower, .bottoms, .leggings)]
+        for (product, kind, category, shape) in cases {
+            #expect(StudioTemplate.shape(product: product, kind: kind, sleeve: nil) == shape, "\(product)")
+            let plan = StudioPlan.make(product: product, category: category, colors: ["Black"], pattern: .solid,
+                                       material: "Leather", sleeve: nil, neckline: nil, details: nil,
+                                       kind: kind, truncated: false, cutout: cut)
+            #expect(plan.template != nil, "\(product) should get a template")
+            if case .generate = plan.mode {} else { Issue.record("\(product) should be generated from its template") }
+            #expect(StudioPlan.estimatedTokens(plan.prompt) <= StudioPlan.maxPromptTokens, "\(plan.prompt)")
+            #expect(plan.prompt.contains("isolated product photo"), "\(plan.prompt)")
+            #expect(StudioTemplate.parts(shape) != nil)
+        }
+        #expect(StudioTemplate.shape(product: "Jeans", kind: .lower, sleeve: nil, fit: .slim) == .slimTrousers)
+        let shoe = StudioPlan.make(product: "Sneakers", category: .footwear, colors: ["White"], pattern: .solid, material: "Leather",
+                                   sleeve: nil, neckline: nil, details: nil, kind: .footwear, truncated: false, cutout: cut)
+        #expect(shoe.prompt.hasPrefix("white leather sneaker, plain unbranded, single shoe, side view"), "\(shoe.prompt)")
+        #expect(shoe.negativePrompt.hasPrefix("pair, two shoes") && !shoe.negativePrompt.contains("single shoe"))
+        #expect(shoe.templateStrength == 0.70)
+        // No product pose for these: refined from the cutout, as before.
+        // Low shoes drew pairs and caps grew invented crests from their templates (CI, Nov 2026).
+        for (product, kind) in [("Turbans", GarmentKind.headwear), ("Shorts", .lower), ("Skirts", .lower), ("Dhoti", .lower),
+                                ("Loafers", .footwear), ("Oxford Shoes", .footwear), ("Flats", .footwear),
+                                ("Baseball Caps", .headwear), ("Visors", .headwear)] {
+            #expect(StudioTemplate.shape(product: product, kind: kind, sleeve: nil) == nil, "\(product)")
+            let plan = StudioPlan.make(product: product, category: .bottoms, colors: ["Blue"], pattern: .solid, material: nil,
+                                       sleeve: nil, neckline: nil, details: nil, kind: kind, truncated: false, cutout: cut)
+            if case .refine = plan.mode {} else { Issue.record("\(product) should be refined") }
+        }
+    }
+
+    @Test func productTemplatesDrawTheItemsOwnColours() throws {
+        // A black upper with a white sole band at the bottom of the cutout.
+        let n = 256
+        var px = [UInt8](repeating: 0, count: n * n * 4)
+        for y in 60..<200 {
+            for x in 30..<226 {
+                let o = (y * n + x) * 4
+                let sole = y >= 176
+                px[o] = sole ? 245 : 20; px[o + 1] = sole ? 245 : 20; px[o + 2] = sole ? 240 : 24; px[o + 3] = 255
+            }
+        }
+        let ctx = CGContext(data: &px, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                            space: CGColorSpaceCreateDeviceRGB(),
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+        let cutout = ctx.makeImage()!
+        let sole = StudioTemplate.soleColour(cutout, fabric: (20 / 255, 20 / 255, 24 / 255))
+        #expect(sole.0 > 0.85 && sole.1 > 0.85, "white sole expected, got \(sole)")
+        let t = try #require(StudioTemplate.render(cutout: cutout, shape: .sneaker, solid: true))
+        let tp = try #require(GarmentCutout.rgbaPixels(t))
+        func at(_ x: CGFloat, _ y: CGFloat) -> (Int, Int, Int) {
+            let o = (Int(y * CGFloat(t.height)) * t.width + Int(x * CGFloat(t.width))) * 4
+            return (Int(tp[o]), Int(tp[o + 1]), Int(tp[o + 2]))
+        }
+        #expect(at(0.02, 0.02).0 > 245, "white background")
+        #expect(at(0.40, 0.55).0 < 80, "black upper, got \(at(0.40, 0.55))")
+        #expect(at(0.50, 0.655).0 > 170, "light sole, got \(at(0.50, 0.655))")
+    }
+
+    @Test func renderCheckVocabularyIsBundled() throws {
+        try #require(WardrobeExtractor.isAvailable, "needs the bundled vocabulary")
+        let vocab = try #require(WardrobeML.shared.vocabulary)
+        let e = [Float](repeating: 0.036, count: 768)
+        for (group, labels) in [("neutral_tone", ["White", "Silver"]), ("render_logo", ["Logo", "Plain"]),
+                                ("shoe_count", ["Pair", "Single"]), ("footwear_height", ["Boot", "Low"])] {
+            let s = vocab.scores(in: group, for: e)
+            #expect(labels.allSatisfy { s[$0] != nil }, "\(group): \(s.keys.sorted())")
+        }
+    }
+
+    @Test func lightGreyIsNotWhite() {
+        typealias C = (name: String, lab: (Float, Float, Float), share: Float, first: Bool)
+        let sunlitGreyCoat: [C] = [("White", (83, 1, -3), 0.78, true), ("Black", (24, 1, -3), 0.13, false)]
+        // The encoder reads it as more light grey than white: Silver.
+        let grey = ColorNamer.resolveLightNeutral(sunlitGreyCoat, tone: ["White": 0.081, "Silver": 0.096])
+        #expect(grey.map { $0.name } == ["Silver", "Black"])
+        // A white shirt stays White; so does anything without the vocabulary group.
+        #expect(ColorNamer.resolveLightNeutral(sunlitGreyCoat, tone: ["White": 0.104, "Silver": 0.050]).first?.name == "White")
+        #expect(ColorNamer.resolveLightNeutral(sunlitGreyCoat, tone: [:]).first?.name == "White")
+        // Only near-neutral light main colours are re-read (not a pale pink, not a dark grey).
+        let pink: [C] = [("Pink", (75, 18, 2), 0.9, true)]
+        #expect(ColorNamer.resolveLightNeutral(pink, tone: ["White": 0.0, "Silver": 0.1]).first?.name == "Pink")
+        let tinted: [C] = [("White", (80, 10, 9), 0.9, true)]
+        #expect(ColorNamer.resolveLightNeutral(tinted, tone: ["White": 0.0, "Silver": 0.1]).first?.name == "White")
     }
 
     @Test func whiteKeyIsolatesTheProduct() throws {
@@ -67,6 +164,28 @@ struct StudioPipelineTests {
         let px = try #require(GarmentCutout.rgbaPixels(cut.image))
         #expect(px[(256 * 512 + 256) * 4 + 3] > 200, "centre should be opaque")
         #expect(px[(10 * 512 + 10) * 4 + 3] < 20, "corner should be transparent")
+    }
+
+    @Test func productShotThatChangedColourIsRejected() throws {
+        try #require(WardrobeExtractor.isAvailable, "needs the bundled FashionEncoder")
+        let black = try #require(StudioPipeline.isolateProduct(Self.square(r: 20, g: 20, b: 24))).image
+        let emb = try #require(FashionClassifier.onWhite(black, side: 224).flatMap { WardrobeML.shared.embed($0) })
+        let made = StudioPlan.make(product: "Sneakers", category: .footwear, colors: ["Black"], pattern: .solid, material: "Knit",
+                                   sleeve: nil, neckline: nil, details: nil, kind: .footwear, truncated: false, cutout: black)
+        #expect(made.productShot && made.template != nil && made.templateShape == .sneaker)
+        // Without the template core: the test "renders" are squares smaller than the sneaker
+        // silhouette, so the core would keep white background inside it (a white panel).
+        let plan = StudioPlan(mode: made.mode, prompt: made.prompt, negativePrompt: made.negativePrompt, candidates: 1,
+                              productLabel: made.productLabel, isSolid: true, template: made.template,
+                              templateStrength: made.templateStrength, productShot: true)
+        // A mid-grey "shoe" for a black one.
+        let c = try #require(StudioPipeline.evaluate(Self.square(r: 150, g: 150, b: 150), reference: ColorStats(black),
+                                                     embedding: emb, plan: plan, minSimilarity: 0))
+        #expect(c.rejection?.hasPrefix("colour drift") == true, "\(c.rejection ?? "accepted") ΔL \(c.colourDriftL)")
+        // The same colour passes that check.
+        let same = try #require(StudioPipeline.evaluate(Self.square(r: 22, g: 22, b: 26), reference: ColorStats(black),
+                                                        embedding: emb, plan: plan, minSimilarity: 0))
+        #expect(same.rejection?.hasPrefix("colour drift") != true, "\(same.rejection ?? "")")
     }
 
     @Test func colourMatchingMovesTowardTheRealGarment() throws {

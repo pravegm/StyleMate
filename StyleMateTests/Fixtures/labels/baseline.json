@@ -20,9 +20,9 @@
   },
   "metrics": {
     "category_acc": 0.962,
-    "color_family_acc": 0.868,
-    "color_name_precision": 0.798,
-    "color_primary_acc": 0.83,
+    "color_family_acc": 0.943,
+    "color_name_precision": 0.807,
+    "color_primary_acc": 0.906,
     "core_found": 53,
     "core_items": 56,
     "dup_diff_at_visualMaybe": 0.117,
@@ -45,5 +45,5 @@
     "seconds_per_photo": 107.4,
     "sleeve_acc": 1
   },
-  "source": "CI run 41944389493, feat/ml-quality @8830657 (green); before: run 41902431164"
+  "source": "CI run 41944389493, feat/ml-quality @8830657 (green); colours from CI run 42020274224, feat/studio-coverage @db39e29 (light grey vs white); before: run 41902431164"
 }

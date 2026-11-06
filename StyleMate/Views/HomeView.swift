@@ -373,6 +373,7 @@ struct HomeView: View {
                     homeVM.openHeroInDeck(user: authService.user)
                 }
             } label: {
+                // Pieces only while On you is in Beta (`TryOnLookThumbnail` shows the look on you beside them).
                 OutfitBoard(items: items, isThumbnail: true, padding: DS.Spacing.sm)
                     .frame(height: heroBoardHeight)
                     .frame(maxWidth: .infinity)

@@ -24,3 +24,16 @@ The following are CC0 Unsplash photos mirrored on Wikimedia Commons ("(Unsplash)
 | jeans_white_shirt_halfbody.jpg | https://commons.wikimedia.org/wiki/File:Skinny_Jeans_(Unsplash).jpg |
 | ripped_jeans_belt_watch.jpg | https://commons.wikimedia.org/wiki/File:Urban_Street_Clothes_(Unsplash).jpg |
 | denim_shirt_small_fullbody.jpg | https://commons.wikimedia.org/wiki/File:Woman_in_ripped_jeans_(Unsplash).jpg |
+
+## Studio coverage cutouts (`studio/`)
+
+Item cutouts used by `StudioCoverageTests` (see `studio/studio_manifest.json`). Cutouts from the
+photos above are the app's own extraction output (CI run 41971150297). The others were cut offline
+with the FASHN human parser from these CC0 1.0 Unsplash photos mirrored on Wikimedia Commons:
+
+| Cutout | Source |
+|---|---|
+| studio_white_sneakers.png, studio_chinos.png | https://commons.wikimedia.org/wiki/File:Men%27s_Fall_Fashion_(Unsplash).jpg |
+| studio_oxfords.png | https://commons.wikimedia.org/wiki/File:Baggy_trousers_(Unsplash).jpg |
+| studio_boat_shoes.png | https://commons.wikimedia.org/wiki/File:Boat_shoes_and_jeans_(Unsplash).jpg |
+| studio_black_trousers.png | https://commons.wikimedia.org/wiki/File:Man_carrying_skateboard_(Unsplash).jpg |
