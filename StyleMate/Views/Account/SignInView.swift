@@ -52,12 +52,14 @@ struct SignInView: View {
                 }
                 .scrollIndicators(.hidden)
                 .safeAreaInset(edge: .bottom) {
+                    // An opaque tray, so the reasons scrolling underneath never show through the button.
                     signInPanel
                         .padding(.horizontal, DS.Spacing.screenH)
                         .padding(.top, DS.Spacing.sm)
                         .padding(.bottom, DS.Spacing.sm)
                         .frame(maxWidth: 560)
                         .frame(maxWidth: .infinity)
+                        .background(.bar)
                 }
             }
             if let onBack {
