@@ -242,14 +242,6 @@ struct StudioPlan {
     }
 
     private static func singular(_ product: String) -> String {
-        let keep: Set<String> = ["Jeans", "Trousers", "Chinos", "Shorts", "Leggings", "Joggers", "Sweatpants",
-                                 "Cargo Pants", "Wide-Leg Pants", "Linen Pants", "Palazzo Pants", "Capris",
-                                 "Culottes", "Sunglasses", "Eyeglasses", "Sneakers", "Boots", "Sandals", "Heels",
-                                 "Loafers", "Flats", "Slides", "Mules", "Clogs", "Slippers", "Espadrilles",
-                                 "Ankle Boots", "Chelsea Boots", "Oxford Shoes", "Formal Shoes", "Platform Shoes"]
-        if keep.contains(product) { return product }
-        for suffix in ["sses", "ches", "shes", "xes"] where product.hasSuffix(suffix) { return String(product.dropLast(2)) }
-        if product.hasSuffix("s") && !product.hasSuffix("ss") { return String(product.dropLast()) }
-        return product
+        ProductNoun.singular(product, keepingPairs: true)
     }
 }

@@ -127,43 +127,19 @@ enum ClosetText {
             .map { singular(String($0)) }
     }
 
-    /// Words that stay plural for a single item ("a pair of jeans").
-    private static let pluralOnly: Set<String> = [
-        "jeans", "shorts", "trousers", "sunglasses", "eyeglasses", "glasses", "chinos", "capris",
-        "culottes", "slides", "flats", "heels", "leggings", "pants", "sweatpants", "joggers",
-        "boxers", "briefs", "overalls", "dungarees", "tights", "trunks", "suspenders", "espadrilles"
-    ]
-
-    /// Singular display form of a product name: "Watches" → "Watch", "Dresses" →
-    /// "Dress", "T-Shirts" → "T-Shirt", but "Jeans" and "Yoga Pants" stay.
-    /// (`WardrobeItem.displayProduct` just drops a trailing "s", giving "Watche".)
+    /// Singular display form of a product name: "Watches" → "Watch", "Scarves" → "Scarf",
+    /// but "Jeans" and "Yoga Pants" stay (`ProductNoun`).
     static func displayProduct(_ product: String) -> String {
-        let trimmed = product.trimmingCharacters(in: .whitespaces)
-        guard let last = trimmed.split(separator: " ").last.map(String.init) else { return trimmed }
-        let lower = last.lowercased()
-        if pluralOnly.contains(lower) || !lower.hasSuffix("s") || lower.hasSuffix("ss") || last.count <= 3 {
-            return trimmed
-        }
-        let drop = ["ches", "shes", "sses", "xes"].contains { lower.hasSuffix($0) } ? 2 : 1
-        return String(trimmed.dropLast(drop))
+        ProductNoun.singular(product)
     }
 
-    /// `item.name` with its product word in the proper singular form.
+    /// `item.name`, whose product word is already singular (`WardrobeItem.displayProduct`).
     static func displayName(_ item: WardrobeItem) -> String {
-        let name = item.name
-        let rough = item.displayProduct
-        let good = displayProduct(item.product)
-        guard rough != good, name.hasSuffix(rough) else { return name }
-        return String(name.dropLast(rough.count)) + good
+        item.name
     }
 
     static func singular(_ w: String) -> String {
-        guard w.count > 3 else { return w }
-        for suffix in ["ches", "shes", "sses", "xes"] where w.hasSuffix(suffix) {
-            return String(w.dropLast(2))
-        }
-        if w.hasSuffix("s") && !w.hasSuffix("ss") { return String(w.dropLast()) }
-        return w
+        ProductNoun.singularWord(w)
     }
 }
 

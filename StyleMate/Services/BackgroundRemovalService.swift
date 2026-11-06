@@ -59,12 +59,16 @@ enum BodyZone {
 
 class BackgroundRemovalService {
     static let shared = BackgroundRemovalService()
-    private let ciContext = CIContext()
     private init() {}
 
     /// Removes the background from an image, keeping only foreground subjects (people, clothing).
-    /// Returns the subject on a white background, or nil if processing fails.
-    func removeBackground(from image: UIImage) async -> UIImage? {
+    /// Returns the subject on a white background (`onWhite`) or on transparency, or nil if
+    /// processing fails. The image's orientation is honoured.
+    func removeBackground(from image: UIImage, onWhite: Bool = true) async -> UIImage? {
+        // `cgImage` is the unrotated sensor pixels: bake the orientation in first (same size).
+        let px = ImageDownsampler.pixelSize(of: image)
+        let image = image.imageOrientation == .up ? image
+            : ImageDownsampler.downsample(image: image, maxPixels: max(px.width, px.height))
         guard let cgImage = image.cgImage else { return nil }
 
         return await withCheckedContinuation { continuation in
@@ -87,16 +91,16 @@ class BackgroundRemovalService {
                 let maskCIImage = CIImage(cvPixelBuffer: mask)
                 let originalCIImage = CIImage(cgImage: cgImage)
 
-                let whiteBackground = CIImage(color: .white)
+                let background = CIImage(color: onWhite ? .white : .clear)
                     .cropped(to: originalCIImage.extent)
 
                 let filter = CIFilter.blendWithMask()
                 filter.inputImage = originalCIImage
                 filter.maskImage = maskCIImage
-                filter.backgroundImage = whiteBackground
+                filter.backgroundImage = background
 
                 guard let outputCIImage = filter.outputImage,
-                      let outputCGImage = self.ciContext.createCGImage(outputCIImage, from: outputCIImage.extent) else {
+                      let outputCGImage = CoreImageContext.current.createCGImage(outputCIImage, from: outputCIImage.extent) else {
                     continuation.resume(returning: nil)
                     return
                 }

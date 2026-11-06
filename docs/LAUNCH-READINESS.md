@@ -29,6 +29,20 @@ reports problems; it does not change those files.
 4. **No sample or demo path for App Review.** The reviewer's empty library means an empty app.
 5. **The iPad is still targeted** (`TARGETED_DEVICE_FAMILY = "1,2"`), and the app is about 420 MB (§4).
 
+## Device checks for the founder (feat/hardening, 5 Nov 2026)
+
+CI can't run an app in the background or on a real Neural Engine, so these need a real iPhone (TestFlight build):
+
+1. **Overnight scan finds clothes (P1-4).** iOS doesn't let a backgrounded app use the GPU. Core Image renders now use a software context whenever the app isn't active (`CoreImageContext`), and a render that still comes back empty leaves the photo to be scanned again.
+   - Take 10+ new photos of yourself wearing different outfits, including a few with other people in them.
+   - Open StyleMate once, then plug the phone in, lock it and leave it overnight on Wi-Fi.
+   - Next morning, before opening anything else: new pieces from those photos should be in the closet, including from the group photos (only your clothes).
+   - If nothing was added: Profile › About › Diagnostics › Share report, and send it.
+2. **Replace photo (P1-6).** Edit a piece › Replace photo › Take photo. Try one of you wearing it and one of the item flat on a bed: both come out upright, the flat one on a transparent background (no white box in dark mode).
+3. **Today's look after midnight (E14).** Leave the app open on Home past midnight (or change the date in Settings): back in the app, Today's look is a new one.
+4. **Location prompt (R1).** On a fresh install the weather prompt shows "Precise: Off" and the new purpose text.
+5. **iPhone in landscape (D7).** Turn the phone sideways on each tab: nothing is cut off or unreachable. On the Duo, book pose still splits at the fold.
+
 ## 0. Top blockers in priority order (original audit @ f843e59)
 
 1. **Model licences (legal).** Three of the five bundled models (SCRFD, FASHN, the Fashionpedia
@@ -103,7 +117,7 @@ Current `StyleMate/Info.plist`, plus `INFOPLIST_KEY_*` build settings in `projec
 3. **Photos:** "StyleMate scans your photo library to automatically find and catalog your clothing items. Face matching happens entirely on your device." This is good. A stronger version:
    > StyleMate looks through your photos to find outfits you've worn and adds those clothes to your wardrobe. It recognises you with face matching that runs only on this iPhone. Your photos and face data are never sent to StyleMate or any AI service.
    - Keep the second sentence only once Gemini is gone.
-4. **Location:**
+4. **Location:** **done on feat/hardening (5 Nov 2026):** the Always key is gone, `NSLocationDefaultAccuracyReduced` is set, `LocationService` asks for kilometre accuracy and backs off its `.locationUnknown` retries (1–16 s, then reports), and the purpose string reads "StyleMate uses your approximate location for the local weather, so today's outfits suit it. Only a rounded location (about 1 km) goes to the weather service." The coordinates were already rounded to 2 decimals. Original notes:
    - Keep `NSLocationWhenInUseUsageDescription` (build setting: "This app uses your location to show local weather on the home screen."). Better:
      > StyleMate uses your approximate location to get today's weather, so outfit ideas suit it.
    - **Remove `NSLocationAlwaysAndWhenInUseUsageDescription`.** `LocationService` only calls `requestWhenInUseAuthorization`.
@@ -118,6 +132,7 @@ Current `StyleMate/Info.plist`, plus `INFOPLIST_KEY_*` build settings in `projec
    - `TARGETED_DEVICE_FAMILY = "1,2"` makes it an iPad app. That means iPad screenshots are required, and reviewers will test on iPad.
    - iPhone landscape orientations are enabled too.
    - Unless the iPad and landscape layouts are designed and tested, set `TARGETED_DEVICE_FAMILY = 1` and portrait-only for 1.0.
+   - **Decision (feat/hardening, 5 Nov 2026): landscape stays on.** The iPad is gone (`TARGETED_DEVICE_FAMILY = 1`). Portrait-only is not possible for the iPhone Duo: its inner display is used sideways in book pose (the Duo simulator reports a 951 × 669 pt window), and Info.plist can't tell the Duo from other iPhones. A runtime lock would wait for the first `onHingeChange` (after the first layout, and only on iOS 27.1+), so the Duo would launch rotated. Regular iPhones in landscape get the same `FoldAwareSplit` wide layouts the Duo CI screenshots; `LandscapeE2ETests` walks the four tabs sideways on the iPhone 17 Pro and checks the tab bar stays reachable (screenshots in `e2e-screens`). First run (CI 42127164766): it passes, and the four tabs lay out as two panes with nothing cut off; the floating tab bar covers the bottom quarter of the 402 pt height, over scrolling content, so landscape is cramped but usable. Revisit if testers use it.
 8. `CFBundleDisplayName`: not set, so it falls back to "StyleMate". Fine.
 9. Google Sign-In keys (`GIDClientID`, URL scheme): remove them if Google Sign-In is dropped (recommended).
 
@@ -137,7 +152,7 @@ Current `StyleMate/Info.plist`, plus `INFOPLIST_KEY_*` build settings in `projec
   - No marketing, advertising or data mining (quote 5.1.2(vi)).
   - No sharing.
 - **Retention and deletion:**
-  - Data stays until the user deletes it: Profile → Delete Profile & All Data, or deleting the app.
+  - Data stays until the user deletes it: Profile → Delete profile & all data, or deleting the app.
   - Faces of other people are discarded after matching, unless the user confirms them as themselves in "Is this you?".
 - **Third parties:**
   - Weather providers (met.no, Open-Meteo) receive approximate coordinates.
@@ -147,7 +162,7 @@ Current `StyleMate/Info.plist`, plus `INFOPLIST_KEY_*` build settings in `projec
 
 ### 3.2 Review Notes template (2.3.1(a))
 
-> StyleMate builds a wardrobe from the user's photo library. During onboarding the user takes a selfie. StyleMate computes a face template from it **on the device**, using a bundled Core ML model, and compares it with faces in the user's photos to find pictures of the user. It then extracts the clothing in those photos into the wardrobe. No photo, face image or face template ever leaves the device. Nothing is sent to us or to any third party, and face data is never used for advertising, marketing or data mining. Wardrobe items sync only to the user's own iCloud private database. To try it without your own photos, tap "Try with sample photos" on the first screen. A screen recording of the full flow with a real library is attached. Users can delete all data in Profile → Delete Profile & All Data.
+> StyleMate builds a wardrobe from the user's photo library. During onboarding the user takes a selfie. StyleMate computes a face template from it **on the device**, using a bundled Core ML model, and compares it with faces in the user's photos to find pictures of the user. It then extracts the clothing in those photos into the wardrobe. No photo, face image or face template ever leaves the device. Nothing is sent to us or to any third party, and face data is never used for advertising, marketing or data mining. Wardrobe items sync only to the user's own iCloud private database. To try it without your own photos, tap "Try with sample photos" on the first screen. A screen recording of the full flow with a real library is attached. Users can delete all data in Profile → Delete profile & all data.
 
 ### 3.3 Biometric privacy law (needs counsel)
 
@@ -233,9 +248,10 @@ Cheap mitigations:
 `StyleMate/PrivacyInfo.xcprivacy` (added on this branch):
 
 - **`NSPrivacyTracking` = false, no tracking domains.** There are no ad, analytics or attribution SDKs.
-- **`NSPrivacyAccessedAPITypes`:** only `NSPrivacyAccessedAPICategoryUserDefaults` with reason **CA92.1** (app-only defaults; no app group).
+- **`NSPrivacyAccessedAPITypes`:** `NSPrivacyAccessedAPICategoryUserDefaults` with reason **CA92.1** (app-only defaults; no app group), and **`NSPrivacyAccessedAPICategoryDiskSpace` with reason 85F4.1** (feat/hardening, 5 Nov 2026).
   - The app's own code calls `UserDefaults.standard` in about 15 files.
-  - No file-timestamp APIs (`attributesOfItem`, `creationDateKey` and similar), no disk space, no `systemUptime` / `mach_absolute_time`, no active keyboards.
+  - Disk space: `DeviceFacts.freeDisk` reads `volumeAvailableCapacityForImportantUsageKey` for Diagnostics' "Free storage" row. 85F4.1 allows showing it to the user but not sending it off the phone, so the shareable diagnostics report leaves it out.
+  - No file-timestamp APIs (`attributesOfItem`, `creationDateKey` and similar), no `systemUptime` / `mach_absolute_time` / `CACurrentMediaTime`, no active keyboards (re-checked 5 Nov 2026).
   - `PHAsset.creationDate` in fetch predicates is a Photos property, not a required-reason API.
   - Re-check after code changes:
     `rg "attributesOfItem|DateKey|systemUptime|mach_absolute_time|volumeAvailableCapacity|statfs|activeInputModes" StyleMate`

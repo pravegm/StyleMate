@@ -222,9 +222,19 @@ struct DiagnosticsView: View {
         DiagCard(title: "iPhone Duo hinge", icon: "rectangle.portrait.split.2x1") {
             let r = currentReading
             DiagRow("Angle now", DiagFormat.degrees(r.angle))
-            DiagRow("Hinge", r.status)
-            DiagRow("Pose", r.posture)
-            DiagRow("Fold", r.crease == nil ? "none" : DiagFormat.rect(r.crease) + (r.creaseActive ? " (active)" : ""))
+            DiagRow("Hinge", DiagFormat.hingeWord(r.status))
+            DiagRow("Pose", DiagFormat.postureWord(r.posture))
+            DiagRow("Fold", DiagFormat.foldWord(r.crease, active: r.creaseActive))
+            if r.crease != nil {
+                // The raw values (what the report carries) for whoever is debugging the layout.
+                DisclosureGroup("Details") {
+                    DiagRow("Fold area", DiagFormat.rect(r.crease))
+                    DiagRow("Reported as", "\(r.status), \(r.posture)")
+                }
+                .font(DS.Font.subheadline)
+                .foregroundStyle(DS.Colors.textSecondary)
+                .accessibilityIdentifier("diagnostics.hinge.details")
+            }
             Divider()
             Text("Guided check: do each step, then tap Record. The phone's reading is about 5° accurate.")
                 .font(DS.Font.footnote)
@@ -350,7 +360,8 @@ private struct HingeStepRow: View {
                 .foregroundStyle(DS.Colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let r = result {
-                Text("Read \(DiagFormat.degrees(r.reading.angle)), \(r.reading.status), \(r.reading.posture). \(r.verdict)")
+                Text("Read \(DiagFormat.degrees(r.reading.angle)), \(DiagFormat.hingeWord(r.reading.status).lowercased()), "
+                     + "\(DiagFormat.postureWord(r.reading.posture).lowercased()). \(r.verdict)")
                     .font(DS.Font.footnote.weight(.medium))
                     .foregroundStyle(r.asExpected ? DS.Colors.success : DS.Colors.warning)
                     .fixedSize(horizontal: false, vertical: true)

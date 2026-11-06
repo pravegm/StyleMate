@@ -14,6 +14,8 @@
 		<string>fetch</string>
 		<string>processing</string>
 	</array>
+	<key>NSLocationDefaultAccuracyReduced</key>
+	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>StyleMate uses your camera to capture clothing items and take a reference selfie for finding your outfit photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
