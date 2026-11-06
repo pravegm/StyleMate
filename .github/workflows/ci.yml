@@ -602,6 +602,9 @@ jobs:
             -parallel-testing-enabled NO \
             -resultBundlePath "$RUNNER_TEMP/ui-real.xcresult" \
             2>&1 | tee ui-real-test.log | grep -E "✔|✘|Test .*(passed|failed|skipped)|error:|\[UITest\]|\*\* TEST" || true
+          # The app's own console (-uiTestLogToFile): what the scan, Find yourself and the selfie check logged.
+          DATA=$(xcrun simctl get_app_container "$SIM" "$BUNDLE" data 2>/dev/null) && cp "$DATA/Library/Caches/uitest-console.log" ui-real-app-console.log || true
+          grep -E "\[FindYou\]|\[Identity\]|Auto-scan|\[UITest\]" ui-real-app-console.log | head -80 || true
           grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" ui-real-test.log
 
       - name: Export screenshots
@@ -649,7 +652,7 @@ jobs:
                       shutil.copy(os.path.join(raw, f), out)
           print(f"Exported {seen} attachments")
           PY
-          cp ui-build.log ui-test.log ui-real-test.log ui-library-manifest.txt "$OUT"/ 2>/dev/null || true
+          cp ui-build.log ui-test.log ui-real-test.log ui-real-app-console.log ui-library-manifest.txt "$OUT"/ 2>/dev/null || true
           ls -la "$OUT"
 
       - name: Upload screenshots
@@ -715,7 +718,7 @@ jobs:
         run: |
           BIN=$(find "$RUNNER_TEMP/dd-release/Build/Products" -path "*Release-iphoneos/StyleMate.app/StyleMate" -type f | head -1)
           [ -n "$BIN" ] || { echo "::error::Release binary not found"; exit 1; }
-          if strings "$BIN" | grep -E "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestDemoUser|uiTestSelfieFixture|uiTestStallSomePhotos|Continue as test user"; then
+          if strings "$BIN" | grep -E "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestDemoUser|uiTestSelfieFixture|uiTestStallSomePhotos|uiTestLogToFile|Continue as test user"; then
             echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1
           fi
           echo "No test hooks in $BIN"

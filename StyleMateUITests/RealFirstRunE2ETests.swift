@@ -93,6 +93,11 @@ class RealFirstRunE2ETests: E2ETestCase {
         XCTAssertTrue(settled, "With location denied the weather row shows neither 'Location required' nor Retry (\(weatherRowText()))")
         XCTAssertFalse(weatherLoading().exists, "Still 'Loading weather…' with location denied")
         snap("home-location-denied")
+        // Denied is a state, not an error to retry: say so and offer Settings, never a raw CoreLocation error.
+        XCTAssertTrue(anyElement(NSPredicate(format: "label == 'Location required'")).exists,
+                      "Location denied, but the weather row doesn't say 'Location required' (\(weatherRowText()))")
+        XCTAssertFalse(anyElement(NSPredicate(format: "label CONTAINS 'kCLErrorDomain'")).exists,
+                       "The weather row shows a raw CoreLocation error (\(weatherRowText()))")
     }
 
     // MARK: - Launch
@@ -103,7 +108,7 @@ class RealFirstRunE2ETests: E2ETestCase {
         // A fresh install: no answer to any prompt yet (CI also resets the app's privacy settings).
         app.resetAuthorizationStatus(for: .photos)
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["-uiTestResetState", "-uiTestFakeAppleSignIn",
+        app.launchArguments = ["-uiTestResetState", "-uiTestFakeAppleSignIn", "-uiTestLogToFile",
                                "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
         self.app = app
         app.launch()

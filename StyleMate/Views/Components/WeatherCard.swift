@@ -41,9 +41,13 @@ struct WeatherInlineRow: View {
                     Text("Location required")
                         .font(DS.Font.subheadline)
                         .foregroundColor(DS.Colors.textSecondary)
-                    Button("Grant", action: onRequest)
-                        .font(DS.Font.caption1)
-                        .foregroundColor(DS.Colors.accent)
+                    // Denied: only Settings can change it (asking again shows no prompt).
+                    Button("Grant") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                    .font(DS.Font.caption1)
+                    .foregroundColor(DS.Colors.accent)
+                    .accessibilityIdentifier("home.weather.grant")
                 }
             } else if let weather = weather, let tempC = temperatureC, let tempF = temperatureF {
                 HStack(spacing: DS.Spacing.sm) {

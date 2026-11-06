@@ -41,6 +41,8 @@ enum DebugLaunchSupport {
         /// `-uiTestSeedTaste`: a learned taste profile (the seeded closet's colour pairings worn
         /// often), so the deck shows its "Picked because…" line.
         static let seedTaste = "-uiTestSeedTaste"
+        /// `-uiTestLogToFile`: the app's console also goes to Library/Caches/uitest-console.log (CI collects it).
+        static let logToFile = "-uiTestLogToFile"
     }
 
     /// The fake Apple user ids (any string works: Apple's are opaque).
@@ -79,6 +81,7 @@ enum DebugLaunchSupport {
 
     private static func apply() -> (user: User, account: Account)? {
         let args = arguments
+        if args.contains(Argument.logToFile) { logConsoleToFile() }
         if args.contains(Argument.resetState) { resetState() }
         guard args.contains(Argument.demoUser) else { return nil }
 
@@ -103,6 +106,20 @@ enum DebugLaunchSupport {
         let account = Account(appleUserID: demoAppleUserID, profileID: user.id, isTestAccount: true)
         UserDefaults.standard.set(user.id, forKey: AuthService.profileKey(for: account.uuid))
         return (user, account)
+    }
+
+    // MARK: - Console
+
+    /// `-uiTestLogToFile`: the app's stdout/stderr (every `print` / `dlog`) also goes to
+    /// `Library/Caches/uitest-console.log` in the app's data container, which CI copies out after the
+    /// test (`simctl get_app_container … data`): XCUITest doesn't keep the app's console.
+    private static func logConsoleToFile() {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        let path = caches.appendingPathComponent("uitest-console.log").path
+        guard freopen(path, "a", stdout) != nil else { return }
+        _ = freopen(path, "a", stderr)
+        setvbuf(stdout, nil, _IOLBF, 0)
+        print("\n===== [UITest] launch \(Date()) \(arguments.filter { $0.hasPrefix("-uiTest") }) =====")
     }
 
     // MARK: - Reset

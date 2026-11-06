@@ -150,7 +150,7 @@ jobs:
           done
           if [ -d StyleMate/ML/Studio ]; then test -d "$APP/StudioModels.bundle" || { echo "::error::StudioModels.bundle missing"; exit 1; }; fi
           # DEBUG-only test hooks must not ship.
-          if strings "$APP/StyleMate" | grep -qE "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestSelfieFixture|uiTestStallSomePhotos|Continue as test user"; then echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1; fi
+          if strings "$APP/StyleMate" | grep -qE "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestSelfieFixture|uiTestStallSomePhotos|uiTestLogToFile|Continue as test user"; then echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1; fi
 
       - name: Make this run's certificate and App Store profile
         # Manual signing: Xcode's automatic signing lists the team's iCloud containers, which Apple

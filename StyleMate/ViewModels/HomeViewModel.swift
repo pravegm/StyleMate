@@ -99,9 +99,16 @@ class HomeViewModel: ObservableObject {
         locationService.$locationError
             .receive(on: DispatchQueue.main)
             .sink { [weak self] error in
-                if let error = error {
-                    self?.weatherError = "Unable to get location: \(error.localizedDescription)"
-                    self?.isWeatherLoading = false
+                guard let self, let error else { return }
+                self.isWeatherLoading = false
+                if error.code == .denied {
+                    // Not a failure to retry: Home shows "Location required" with a way to Settings.
+                    // (It showed "Unable to get location: The operation couldn't be completed.
+                    // (kCLErrorDomain error 1.)" with a Retry that could never work.)
+                    self.weatherError = nil
+                    self.locationStatus = self.locationService.authorizationStatus == .restricted ? .restricted : .denied
+                } else {
+                    self.weatherError = "Couldn't get your location."
                 }
             }
             .store(in: &cancellables)
