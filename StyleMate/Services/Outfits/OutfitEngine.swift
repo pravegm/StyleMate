@@ -14,7 +14,12 @@ import Foundation
 //      colour harmony, pattern mixing, mood, preferences, request hints, recency.
 //   5. Pick five *different* looks with greedy MMR (score minus overlap with the
 //      looks already chosen), then finish each with 0–2 accessories and a short
-//      stylist note assembled from the scoring reasons.
+//      stylist note assembled from the scoring reasons (no phrase repeats within
+//      a deck).
+//   6. Taste (`TasteProfile`, learned on the device from Wear / Keep / Swap / Skip)
+//      is one bounded term next to the recency penalty. It may only *promote* a
+//      look whose taste-free score is already within `tasteWindow` of the best, so
+//      learning reorders good looks but never surfaces one the stylist rates worse.
 //
 // Randomness is a seeded SplitMix64 jitter, so "Generate more" gives fresh looks
 // while a fixed seed reproduces the same five (tests).
@@ -36,6 +41,15 @@ struct OutfitEngine {
         var mood = 1.0
         var recency = 1.0
         var preference = 0.3
+        /// Learned taste (colour pairings, pieces, formality per occasion), capped at ±`tasteCap`.
+        var taste = 1.0
+        var tasteCap = 2.0
+        /// Taste can lift the *first* look only if its taste-free score is within this of the best one…
+        var tasteWindow = 1.2
+        /// …and options 2–5 only within this: wide enough for a habit the rules rate a little lower
+        /// (a tee with smart trousers on an everyday plan), too narrow for a look that's wrong for
+        /// the weather (bare legs on a cool day alone cost 2, open shoes 1.8 more).
+        var tasteDeckWindow = 2.0
         /// MMR penalty per unit of overlap with an already-chosen look.
         var variety = 1.5
         /// Max per-item random nudge; 0 makes the engine fully greedy.
@@ -51,13 +65,16 @@ struct OutfitEngine {
     // MARK: Suggest
 
     /// Up to `count` distinct, complete looks (fewer only if the wardrobe truly
-    /// can't make more). Locked items appear in every look.
+    /// can't make more). Locked items appear in every look. `avoiding`: notes already on
+    /// screen (the rest of the deck), so a restyled card doesn't repeat their phrases.
     func suggest(from wardrobe: [WardrobeItem],
                  context: StylingContext,
                  locked: [WardrobeItem] = [],
                  count: Int = 5,
+                 avoiding: [String] = [],
                  seed: UInt64) -> Result<[Outfit], Failure> {
         let pass = StylingPass(wardrobe: wardrobe, extra: locked, context: context, weights: weights, seed: seed)
+        pass.avoidPhrases(in: avoiding)
         guard pass.canDress else { return .failure(.emptyWardrobe) }
         let lockedProfiles = locked.compactMap { pass.profile(for: $0) }
         let candidates = pass.candidates(locked: lockedProfiles)
@@ -79,8 +96,10 @@ struct OutfitEngine {
                  wardrobe: [WardrobeItem],
                  context: StylingContext,
                  excluding: Set<UUID> = [],
+                 avoiding: [String] = [],
                  seed: UInt64) -> Outfit? {
         let pass = StylingPass(wardrobe: wardrobe, extra: outfit.items, context: context, weights: weights, seed: seed)
+        pass.avoidPhrases(in: avoiding)
         guard let target = pass.profile(for: item) else { return nil }
         let current = outfit.items.compactMap { pass.profile(for: $0) }
         guard let items = pass.shuffled(target, in: current, excluding: excluding) else { return nil }
@@ -96,8 +115,10 @@ struct OutfitEngine {
              to outfit: Outfit,
              wardrobe: [WardrobeItem],
              context: StylingContext,
+             avoiding: [String] = [],
              seed: UInt64) -> Outfit? {
         let pass = StylingPass(wardrobe: wardrobe, extra: outfit.items, context: context, weights: weights, seed: seed)
+        pass.avoidPhrases(in: avoiding)
         let current = outfit.items.compactMap { pass.profile(for: $0) }
         guard let items = pass.adding(category: category, productType: productType, to: current) else { return nil }
         return pass.outfit(from: items, variant: seed)
@@ -128,6 +149,8 @@ struct StylingContext {
     var lastWorn: [UUID: Date]
     var now: Date
     var useFahrenheit: Bool
+    /// What this person's own choices have taught the stylist (nil: nothing yet, or tests).
+    var taste: TasteProfile? = nil
 
     init(temperatureC: Double?,
          condition: String? = nil,
@@ -268,18 +291,37 @@ extension OutfitType {
     }
 
     /// Closing note for explanations.
-    var stylistPhrase: String {
+    var stylistPhrase: String { stylistPhrases[0] }
+
+    /// Closing notes for the occasion; a deck uses each at most once.
+    var stylistPhrases: [String] {
         switch self {
-        case .everyday: return "an easy everyday win"
-        case .formal: return "sharp enough for a formal occasion"
-        case .date: return "date-night ready"
-        case .sports: return "built to move"
-        case .party: return "made for a night out"
-        case .business: return "office-ready without trying too hard"
-        case .loungewear: return "comfort first, still put together"
-        case .vacation: return "holiday-easy"
-        case .ethnic: return "festive and polished"
-        case .streetwear: return "with easy street edge"
+        case .everyday: return ["an easy everyday win", "made for an ordinary day, done well", "everyday, but not boring"]
+        case .formal: return ["sharp enough for a formal occasion", "ready for the formal part of the day", "dressed for the occasion"]
+        case .date: return ["date-night ready", "made for a table for two", "easy to feel good in tonight"]
+        case .sports: return ["built to move", "ready to work up a sweat", "nothing in the way of the workout"]
+        case .party: return ["made for a night out", "ready when the music starts", "party-ready without the effort"]
+        case .business: return ["office-ready without trying too hard", "smart enough for the meeting", "work-ready, still comfortable"]
+        case .loungewear: return ["comfort first, still put together", "made for staying in", "soft enough for the sofa"]
+        case .vacation: return ["holiday-easy", "packed for a day off", "made for exploring"]
+        case .ethnic: return ["festive and polished", "ready for the celebration", "dressed for the occasion, traditionally"]
+        case .streetwear: return ["with easy street edge", "city-ready", "low-key, with attitude"]
+        }
+    }
+
+    /// What the occasion is called in a "Picked because…" line ("you usually dress up a little for work").
+    var tasteNoun: String {
+        switch self {
+        case .everyday: return "everyday"
+        case .formal: return "formal events"
+        case .date: return "date nights"
+        case .sports: return "workouts"
+        case .party: return "parties"
+        case .business: return "work"
+        case .loungewear: return "staying in"
+        case .vacation: return "holidays"
+        case .ethnic: return "festive days"
+        case .streetwear: return "streetwear days"
         }
     }
 
@@ -295,14 +337,33 @@ extension OutfitType {
 extension OutfitMood {
     /// The mood's closing note in the occasion's register: a confident
     /// Everyday Casual look isn't "built to own the room".
-    func closer(for occasion: OutfitType) -> String {
-        guard occasion.isCasualRegister else { return closer }
+    func closer(for occasion: OutfitType) -> String { closers(for: occasion)[0] }
+
+    /// Three or four closing notes in the occasion's register; a deck uses each at most once.
+    func closers(for occasion: OutfitType) -> [String] {
+        if occasion.isCasualRegister {
+            switch self {
+            case .confident: return ["easy, with a little swagger", "relaxed, but sure of itself",
+                                     "low-key, high confidence", "casual, with some backbone"]
+            case .polished: return ["neat without trying too hard", "tidy, never stiff", "casual, but properly finished"]
+            case .bold: return ["a little louder than usual", "casual with a kick", "an everyday look, turned up a notch"]
+            case .romantic: return ["soft and easy", "pretty, in an off-duty way", "soft touches, zero fuss"]
+            case .cozy: return ["soft, warm textures all the way", "snug and easy", "made for a slow day"]
+            case .relaxed: return ["easy and unfussy", "throw-on-and-go easy", "comfortable, still put together"]
+            case .playful: return ["with a little fun in the mix", "fun without trying", "a bit of play in an easy look"]
+            case .minimal: return ["pared-back and clean", "simple, in the best way", "clean and quiet"]
+            }
+        }
         switch self {
-        case .confident: return "easy, with a little swagger"
-        case .polished: return "neat without trying too hard"
-        case .bold: return "a little louder than usual"
-        case .romantic: return "soft and easy"
-        case .cozy, .relaxed, .playful, .minimal: return closer
+        case .confident: return ["built to own the room", "walks in like it means it",
+                                 "sure of itself from collar to shoes", "quietly commanding"]
+        case .polished: return ["clean lines, nothing out of place", "sharp from top to toe", "neat, precise, finished"]
+        case .bold: return ["turned up, on purpose", "made to be noticed", "loud in the right places"]
+        case .romantic: return ["soft and a little romantic", "a soft, pretty finish", "gentle and a little dreamy"]
+        case .cozy: return ["soft, warm textures all the way", "warm without losing the shape", "comfort you can dress up"]
+        case .relaxed: return ["easy and unfussy", "relaxed, but still pulled together", "nothing fussy, nothing forced"]
+        case .playful: return ["with a little fun in the mix", "a wink of fun in a dressier look", "dressed up, not stiff"]
+        case .minimal: return ["pared-back and clean", "nothing extra, nothing missing", "quiet and precise"]
         }
     }
 }
@@ -361,14 +422,24 @@ private final class StylingPass {
 
     struct Candidate {
         let items: [ItemProfile]
-        let score: Double
+        /// Everything but taste (jitter included).
+        let base: Double
+        /// The bounded taste term.
+        let taste: Double
+        /// What selection ranks by: base + taste (see `diverseSelection` for the windows).
+        var score: Double
+        /// The same for the first pick, with the narrower window.
+        var firstScore: Double
         let palette: PaletteAnalysis
         let signature: String
         let idSet: Set<UUID>
 
-        init(items: [ItemProfile], score: Double, palette: PaletteAnalysis) {
+        init(items: [ItemProfile], base: Double, taste: Double, palette: PaletteAnalysis) {
             self.items = items
-            self.score = score
+            self.base = base
+            self.taste = taste
+            self.score = base + taste
+            self.firstScore = base + taste
             self.palette = palette
             // Same rule as OutfitValidator: accessories don't make a look different.
             let core = items.filter { $0.isClothing }.map { $0.id.uuidString }.sorted()
@@ -378,8 +449,23 @@ private final class StylingPass {
     }
 
     struct Evaluation {
+        /// base + taste.
         let score: Double
+        let base: Double
+        let taste: Double
         let palette: PaletteAnalysis
+    }
+
+    /// The learned-taste term for a look, and its strongest positive reason.
+    struct TasteFit {
+        var score: Double
+        var reason: TasteReason?
+    }
+
+    enum TasteReason {
+        case pair(first: String, second: String)
+        case item(ItemProfile)
+        case formality(OutfitType, dressier: Bool)
     }
 
     let context: StylingContext
@@ -398,6 +484,9 @@ private final class StylingPass {
     private var wantedColors: [ColorSwatch] = []
     private var wantedColorAvailable = false
     private var wantedProductAvailable = false
+    /// Note phrases already used in this deck (or on screen): never repeated.
+    private var usedPhrases = Set<String>()
+    private var avoidedText = ""
 
     init(wardrobe: [WardrobeItem], extra: [WardrobeItem], context: StylingContext, weights: Weights, seed: UInt64) {
         self.context = context
@@ -509,8 +598,10 @@ private final class StylingPass {
         }
     }
 
+    /// Pool order: the garment's own score, plus its learned affinity so a favourite
+    /// makes the shortlist (the look-level taste term is applied in `evaluate`).
     private func rank(_ a: ItemProfile, _ b: ItemProfile) -> Bool {
-        let ua = unary(a), ub = unary(b)
+        let ua = unary(a) + itemTaste(a), ub = unary(b) + itemTaste(b)
         return ua != ub ? ua > ub : a.order < b.order
     }
 
@@ -699,6 +790,80 @@ private final class StylingPass {
         return base * slotFactor
     }
 
+    // MARK: Taste
+
+    /// Evidence (±6) → a soft −1…1, so the first few signals count most.
+    private func squash(_ evidence: Double) -> Double { tanh(evidence / 3) }
+
+    private func itemTaste(_ p: ItemProfile) -> Double {
+        guard let e = context.taste?.items[p.id.uuidString] else { return 0 }
+        return squash(e) * (p.isClothing ? 0.35 : 0.15)
+    }
+
+    /// Learned taste for a look: its pieces, its colour pairings and how dressed-up it is
+    /// for this occasion, capped at ±`tasteCap`. The reason is the strongest positive part
+    /// backed by real evidence (about two worn looks), for the deck's "Picked because…".
+    func tasteFit(_ items: [ItemProfile]) -> TasteFit {
+        guard let taste = context.taste, weights.taste > 0 else { return TasteFit(score: 0, reason: nil) }
+        var total = 0.0
+        var best: (value: Double, reason: TasteReason)? = nil
+        func consider(_ value: Double, _ reason: TasteReason) {
+            if value > (best?.value ?? 0.12) { best = (value, reason) }
+        }
+
+        for p in items {
+            guard let e = taste.items[p.id.uuidString] else { continue }
+            let v = itemTaste(p)
+            total += v
+            if p.isClothing && e >= 2 { consider(v, .item(p)) }
+        }
+
+        let pieces = TasteProfile.pairingPieces(items).sorted { $0.slot < $1.slot }
+        for key in TasteProfile.pairKeys(items) {
+            guard let e = taste.pairs[key] else { continue }
+            let v = squash(e) * 0.45
+            total += v
+            guard e >= 2 else { continue }
+            let names = key.split(separator: "|").map(String.init)
+            guard names.count == 2 else { continue }
+            // Say it in the look's order: the upper garment's colour first ("navy with grey").
+            let first = pieces.first { $0.lead?.name == names[0] || $0.lead?.name == names[1] }?.lead?.name ?? names[0]
+            let second = first == names[0] ? names[1] : names[0]
+            consider(v + 0.01, .pair(first: first, second: second))
+        }
+
+        let occasion = context.resolvedOccasion
+        if let sample = taste.formality[occasion.rawValue], sample.weight >= 2,
+           let mean = TasteProfile.lookFormality(items) {
+            // What they wear for this occasion, but never outside the occasion's own band.
+            let preferred = min(target.upperBound, max(target.lowerBound, sample.mean))
+            let confidence = min(1, sample.weight / 5)
+            let v = (0.6 * (1 - min(1, abs(mean - preferred) / 0.6)) - 0.3) * confidence
+            total += v
+            let mid = (target.lowerBound + target.upperBound) / 2
+            if abs(preferred - mid) >= 0.3 { consider(v, .formality(occasion, dressier: preferred > mid)) }
+        }
+
+        let cap = weights.tasteCap
+        let score = min(cap, max(-cap, total)) * weights.taste
+        return TasteFit(score: score, reason: score > 0.2 ? best?.reason : nil)
+    }
+
+    /// "Picked because you often wear navy with grey".
+    func tasteNote(_ reason: TasteReason) -> String {
+        switch reason {
+        case let .pair(first, second):
+            let a = TasteProfile.spokenColour(first), b = TasteProfile.spokenColour(second)
+            return a == b ? "Picked because you often wear \(a) on \(a)" : "Picked because you often wear \(a) with \(b)"
+        case let .item(p):
+            return "Picked because you often reach for your \(StyleVocabulary.describe(p))"
+        case let .formality(occasion, dressier):
+            return dressier
+                ? "Picked because you usually dress up a little for \(occasion.tasteNoun)"
+                : "Picked because you usually keep \(occasion.tasteNoun) relaxed"
+        }
+    }
+
     // MARK: Look scores
 
     func evaluate(_ items: [ItemProfile], complete: Bool) -> Evaluation {
@@ -714,7 +879,8 @@ private final class StylingPass {
         if complete {
             score += (layeringScore(items) + warmthScore(clothes)) * weights.weather
         }
-        return Evaluation(score: score, palette: palette)
+        let taste = tasteFit(items).score
+        return Evaluation(score: score + taste, base: score, taste: taste, palette: palette)
     }
 
     func analyzePalette(_ items: [ItemProfile]) -> PaletteAnalysis {
@@ -1028,7 +1194,8 @@ private final class StylingPass {
                     for o in outers {
                         let items = core + s + m + o
                         let e = evaluate(items, complete: true)
-                        result.append(Candidate(items: items, score: e.score + lookJitter(items), palette: e.palette))
+                        result.append(Candidate(items: items, base: e.base + lookJitter(items), taste: e.taste,
+                                                palette: e.palette))
                     }
                 }
             }
@@ -1060,8 +1227,24 @@ private final class StylingPass {
     /// score − variety × overlap(with looks already chosen). First pass caps any
     /// garment at two looks (shoes at three); the second relaxes caps for small
     /// wardrobes. Identical cores are never repeated.
+    ///
+    /// Taste can only lift a look whose taste-free score is within a window of the best
+    /// one (`tasteWindow` for the first pick, `tasteDeckWindow` for the rest); below that it
+    /// can only push down. So a learned favourite reorders the good looks and can bring a
+    /// habit into the deck, but never puts a look the stylist rates clearly worse (wrong for
+    /// the weather or the occasion) on top.
     func diverseSelection(_ candidates: [Candidate], count: Int) -> [Candidate] {
-        var pool = candidates.sorted { $0.score != $1.score ? $0.score > $1.score : $0.signature < $1.signature }
+        let bestBase = candidates.map { $0.base }.max() ?? 0
+        func lifted(_ c: Candidate, window: Double) -> Double {
+            c.base + (c.base >= bestBase - window ? c.taste : min(0, c.taste))
+        }
+        let ranked = candidates.map { c -> Candidate in
+            var c = c
+            c.score = lifted(c, window: weights.tasteDeckWindow)
+            c.firstScore = lifted(c, window: weights.tasteWindow)
+            return c
+        }
+        var pool = ranked.sorted { $0.score != $1.score ? $0.score > $1.score : $0.signature < $1.signature }
         if pool.count > 900 { pool = Array(pool.prefix(900)) }
         var chosen: [Candidate] = []
         var signatures = Set<String>()
@@ -1074,7 +1257,7 @@ private final class StylingPass {
                 for (i, c) in pool.enumerated() {
                     if signatures.contains(c.signature) { continue }
                     if strict && violatesCaps(c, usage) { continue }
-                    let value = c.score - weights.variety * overlap(c, chosen)
+                    let value = chosen.isEmpty ? c.firstScore : c.score - weights.variety * overlap(c, chosen)
                     if value > bestValue {
                         bestValue = value
                         bestIndex = i
@@ -1108,7 +1291,8 @@ private final class StylingPass {
         let palette = analyzePalette(items)
         let text = explain(items, palette: palette, variant: variant)
         let ordered = items.sorted { $0.slot != $1.slot ? $0.slot < $1.slot : $0.order < $1.order }
-        return Outfit(items: ordered.map { $0.item }, explanation: text)
+        let why = tasteFit(items).reason.map { tasteNote($0) }
+        return Outfit(items: ordered.map { $0.item }, explanation: text, tasteNote: why)
     }
 
     /// 0–2 finishing pieces that genuinely add something: a belt only with belt
@@ -1223,11 +1407,22 @@ private final class StylingPass {
         }
         guard !options.isEmpty else { return nil }
 
+        return bestOption(options.map { o in
+            (items: repaired(outfit.map { $0.id == target.id ? o : $0 }),
+             jitter: jitter(UInt64(truncatingIfNeeded: o.order), salt: 11) * 0.8)
+        })
+    }
+
+    /// The best of several finished looks (each with its jitter), with the same taste window as
+    /// `diverseSelection`: a favourite can't win a swap it would otherwise clearly lose.
+    private func bestOption(_ options: [(items: [ItemProfile], jitter: Double)]) -> [ItemProfile]? {
+        let scored = options.map { ($0.items, evaluate($0.items, complete: true), $0.jitter) }
+        let bestBase = scored.map { $0.1.base + $0.2 }.max() ?? 0
         var bestItems: [ItemProfile]? = nil
         var bestScore = -Double.infinity
-        for o in options {
-            let items = repaired(outfit.map { $0.id == target.id ? o : $0 })
-            let score = evaluate(items, complete: true).score + jitter(UInt64(truncatingIfNeeded: o.order), salt: 11) * 0.8
+        for (items, e, j) in scored {
+            let base = e.base + j
+            let score = base + (base >= bestBase - weights.tasteWindow ? e.taste : min(0, e.taste))
             if score > bestScore {
                 bestScore = score
                 bestItems = items
@@ -1241,18 +1436,9 @@ private final class StylingPass {
         let wanted = productType.lowercased()
         let options = all.filter { $0.item.category == category && $0.productKey == wanted && !ids.contains($0.id) }
         guard !options.isEmpty else { return nil }
-
-        var bestItems: [ItemProfile]? = nil
-        var bestScore = -Double.infinity
-        for o in options {
-            let items = merge(o, into: outfit)
-            let score = evaluate(items, complete: true).score + jitter(UInt64(truncatingIfNeeded: o.order), salt: 13) * 0.5
-            if score > bestScore {
-                bestScore = score
-                bestItems = items
-            }
-        }
-        return bestItems
+        return bestOption(options.map { o in
+            (items: merge(o, into: outfit), jitter: jitter(UInt64(truncatingIfNeeded: o.order), salt: 13) * 0.5)
+        })
     }
 
     private func merge(_ new: ItemProfile, into outfit: [ItemProfile]) -> [ItemProfile] {
@@ -1297,6 +1483,31 @@ private final class StylingPass {
         return text
     }
 
+    // MARK: Phrase variety
+
+    /// Notes already showing elsewhere (the rest of the deck): their phrases count as used.
+    func avoidPhrases(in notes: [String]) {
+        avoidedText = notes.joined(separator: " ").lowercased()
+    }
+
+    private func isUsed(_ phrase: String) -> Bool {
+        usedPhrases.contains(phrase) || (!avoidedText.isEmpty && avoidedText.contains(phrase.lowercased()))
+    }
+
+    /// A random phrase this deck hasn't used yet (marked used), or nil when all have been.
+    private func fresh(_ options: [String], rng: inout SeededGenerator) -> String? {
+        let open = options.filter { !isUsed($0) }
+        guard !open.isEmpty else { return nil }
+        let pick = rng.choose(open)
+        usedPhrases.insert(pick)
+        return pick
+    }
+
+    /// Like `fresh`, but a colour story is never left out: repeat only when every option is used.
+    private func pick(_ options: [String], rng: inout SeededGenerator) -> String {
+        fresh(options, rng: &rng) ?? rng.choose(options)
+    }
+
     private func formattedTemperature(_ t: Double) -> String {
         context.useFahrenheit ? "\(Int((t * 9 / 5 + 32).rounded()))°F" : "\(Int(t.rounded()))°C"
     }
@@ -1322,23 +1533,35 @@ private final class StylingPass {
         let and = (!fromRequest ? conditionPhrase : nil).map { " and \($0)" } ?? ""
         let hasLayer = items.contains { $0.slot == .outerwear || $0.slot == .midLayer }
 
-        if context.isRaining, items.contains(where: { ($0.slot == .outerwear && $0.isWaterResistant) || $0.isBoot }) {
-            return rng.choose(["Rain-ready for \(label)\(and)", "Rain-proofed for \(label)"])
+        if context.isRaining, items.contains(where: { ($0.slot == .outerwear && $0.isWaterResistant) || $0.isBoot }),
+           let rain = fresh(["Rain-ready for \(label)\(and)", "Rain-proofed for \(label)",
+                             "Wet-weather ready for \(label)", "Puddle-proof for \(label)"], rng: &rng) {
+            return rain
         }
+        // Five leads per band, so a deck of five never says the same thing twice; once
+        // they're used up (a sixth restyle) the note starts with the colour story instead.
+        let options: [String]
         switch band {
         case .hot:
-            return rng.choose(["Kept it breezy for \(label)", "Light and airy for \(label)\(and)", "Nothing heavy for \(label)"])
+            options = ["Kept it breezy for \(label)", "Light and airy for \(label)\(and)", "Nothing heavy for \(label)",
+                       "Barely-there layers for \(label)", "Cool and easy for \(label)\(and)"]
         case .warm:
-            return rng.choose(["Easy, light pieces for \(label)\(and)", "Breathable picks for \(label)"])
+            options = ["Easy, light pieces for \(label)\(and)", "Breathable picks for \(label)",
+                       "Light fabrics for \(label)\(and)", "Nothing too warm for \(label)", "Warm-weather easy for \(label)"]
         case .mild:
-            return hasLayer
-                ? rng.choose(["A light layer for \(label)\(and)", "Just-right layering for \(label)"])
-                : rng.choose(["Easy pieces for \(label)\(and)", "Just right for \(label)\(and)"])
+            options = hasLayer
+                ? ["A light layer for \(label)\(and)", "Just-right layering for \(label)", "One easy layer for \(label)\(and)",
+                   "Layered lightly for \(label)", "A layer to take off later, for \(label)"]
+                : ["Easy pieces for \(label)\(and)", "Just right for \(label)\(and)", "No layers needed for \(label)",
+                   "Comfortable for \(label)\(and)", "Spot on for \(label)"]
         case .cool:
-            return rng.choose(["Light layers for \(label)\(and)", "Layered up for \(label)"])
+            options = ["Light layers for \(label)\(and)", "Layered up for \(label)", "A warmer mix for \(label)\(and)",
+                       "Snug enough for \(label)", "Layers that work for \(label)"]
         case .cold, .freezing:
-            return rng.choose(["Bundled up for \(label)\(and)", "Warm layers for \(label)"])
+            options = ["Bundled up for \(label)\(and)", "Warm layers for \(label)", "Wrapped up for \(label)\(and)",
+                       "Built for \(label)", "Cold-proofed for \(label)"]
         }
+        return fresh(options, rng: &rng)
     }
 
     private func colourStory(_ items: [ItemProfile], palette: PaletteAnalysis, rng: inout SeededGenerator) -> String {
@@ -1370,36 +1593,52 @@ private final class StylingPass {
         case .neutral:
             let a = outer ?? mid ?? base ?? first
             if let b = (a.id == base?.id ? (bottom ?? shoes) : base) ?? bottom {
-                return rng.choose([
+                return pick([
                     "the \(d(a)) and \(d(b)) keep it clean and neutral",
                     "an all-neutral mix anchored by the \(d(a))",
                     "neutral on neutral, the \(d(a)) with the \(d(b))"
-                ])
+                ], rng: &rng)
             }
             return "an all-neutral look built on the \(d(a))"
         case .tonal:
             let carrier = palette.accentItems.first(where: { $0.isClothing }) ?? first
-            let name = carrier.lead?.name ?? "colour"
-            return rng.choose(["head-to-toe \(name) keeps it tonal", "tonal \(name) from the \(d(carrier)) down"])
+            let name = carrier.lead.map { StyleVocabulary.spokenColour($0.name) } ?? "colour"
+            return pick(["head-to-toe \(name) keeps it tonal", "tonal \(name) from the \(d(carrier)) down"], rng: &rng)
         case .singleAccent:
             let accent = palette.accentItems.first(where: { $0.isClothing }) ?? palette.accentItems.first ?? first
-            if let partner = clothes.first(where: { $0.id != accent.id && $0.isNeutral && $0.slot != .footwear })
-                ?? clothes.first(where: { $0.id != accent.id }) {
-                return rng.choose([
+            let others = clothes.filter { $0.id != accent.id }
+            // "Pops against" needs a real contrast: never a light-blue shirt against blue jeans.
+            let contrast = others.filter { !StyleVocabulary.sameColourFamily(accent, $0) }
+            func against(_ partner: ItemProfile) -> String {
+                pick([
                     "the \(d(accent)) \(v(accent, "pops", "pop")) against the \(d(partner))",
                     "the \(d(accent)) \(v(accent, "does", "do")) the talking, the \(d(partner)) \(v(partner, "keeps", "keep")) it grounded",
                     "one hit of colour, the \(d(accent)), with the \(d(partner))"
-                ])
+                ], rng: &rng)
             }
+            if let partner = contrast.first(where: { $0.isNeutral && $0.slot != .footwear })
+                ?? contrast.first(where: { $0.slot != .footwear }) {
+                return against(partner)
+            }
+            if let partner = others.first(where: { $0.slot != .footwear }) {
+                return pick([
+                    "the \(d(accent)) and \(d(partner)) stay in one colour family",
+                    "tone on tone, the \(d(accent)) with the \(d(partner))",
+                    "the \(d(accent)) with the \(d(partner)), an easy tonal pairing"
+                ], rng: &rng)
+            }
+            if let shoes = contrast.first { return against(shoes) }
             return "the \(d(accent)) \(v(accent, "brings", "bring")) the colour"
         case .analogous, .complementary:
             let accents = palette.accentItems.filter { $0.isClothing }
             let a = accents.first ?? first
             let b = accents.dropFirst().first ?? clothes.first(where: { $0.id != a.id }) ?? a
             if palette.kind == .analogous {
-                return rng.choose(["the \(d(a)) \(v(a, "flows", "flow")) into the \(d(b))", "neighbouring shades, \(d(a)) and \(d(b))"])
+                return pick(["the \(d(a)) \(v(a, "flows", "flow")) into the \(d(b))", "neighbouring shades, \(d(a)) and \(d(b))"],
+                            rng: &rng)
             }
-            return rng.choose(["the \(d(a)) \(v(a, "plays", "play")) off the \(d(b))", "\(d(a)) and \(d(b)) for a confident contrast"])
+            return pick(["the \(d(a)) \(v(a, "plays", "play")) off the \(d(b))", "\(d(a)) and \(d(b)) for a confident contrast"],
+                        rng: &rng)
         case .triadic, .clashing, .busy:
             let lead = palette.accentItems.first(where: { $0.isClothing }) ?? first
             return "a confident colour mix led by the \(d(lead))"
@@ -1408,19 +1647,22 @@ private final class StylingPass {
 
     private func closingNote(_ items: [ItemProfile], rng: inout SeededGenerator) -> String? {
         let clothes = items.filter { $0.isClothing }
-        if let wanted = context.hints.preferredColors.first, clothes.contains(where: { matchesWantedColor($0) }) {
-            return "with the \(wanted) you asked for"
+        if let wanted = context.hints.preferredColors.first, clothes.contains(where: { matchesWantedColor($0) }),
+           let note = fresh(["with the \(wanted) you asked for", "\(wanted), as you asked", "and the \(wanted) you wanted"],
+                            rng: &rng) {
+            return note
         }
-        var options: [String] = []
-        if let mood = moods.first { options.append(mood.closer(for: context.resolvedOccasion)) }
-        if context.occasionWasStated { options.append(context.resolvedOccasion.stylistPhrase) }
+        // Mostly the mood's closer, sometimes the occasion's or the recency note. Every
+        // phrase at most once per deck; when they're all used the note simply ends.
+        let mood = moods.first.map { $0.closers(for: context.resolvedOccasion) } ?? []
+        var other: [String] = []
+        if context.occasionWasStated { other += context.resolvedOccasion.stylistPhrases }
         if !context.lastWorn.isEmpty,
            clothes.allSatisfy({ (daysSinceWorn($0) ?? 99) > 7 }) {
-            options.append("none of it worn in the last week")
+            other += ["none of it worn in the last week", "nothing here worn this week"]
         }
-        guard let first = options.first else { return nil }
-        if options.count > 1 && rng.unit() >= 0.7 { return options[1] }
-        return first
+        if !other.isEmpty && (mood.isEmpty || rng.unit() >= 0.7), let note = fresh(other, rng: &rng) { return note }
+        return fresh(mood, rng: &rng) ?? fresh(other, rng: &rng)
     }
 }
 
@@ -1482,6 +1724,21 @@ enum StyleVocabulary {
     static func describe(_ item: WardrobeItem) -> String {
         if let p = ItemProfile(item, order: 0) { return describe(p) }
         return item.displayProduct.lowercased()
+    }
+
+    /// A canonical colour name as the notes say it ("gray" → "grey", the notes' British voice).
+    static func spokenColour(_ name: String) -> String {
+        name == "gray" ? "grey" : name
+    }
+
+    /// Two garments read as one colour family: the same colour name, or hues within 40°
+    /// (light blue, blue, denim and navy are all blues). Black, white and grey have no hue,
+    /// so they contrast with any colour.
+    static func sameColourFamily(_ a: ItemProfile, _ b: ItemProfile) -> Bool {
+        guard let x = a.lead, let y = b.lead else { return false }
+        if x.name == y.name { return true }
+        guard let hx = x.hue, let hy = y.hue else { return false }
+        return StylePalette.hueDistance(hx, hy) <= 40
     }
 
     static func capitalizedFirst(_ s: String) -> String {

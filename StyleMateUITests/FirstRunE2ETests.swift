@@ -45,7 +45,10 @@ class FirstRunE2ETests: E2ETestCase {
         var snappedProgress = false
         let deadline = Date().addingTimeInterval(240)
         while Date() < deadline, !tabs.exists {
-            if !snappedProgress, counter.exists, counter.label.range(of: "^[1-9]", options: .regularExpression) != nil {
+            // The counter leaves with the scan screen, so read it from a snapshot (which throws)
+            // rather than `.label` (which fails the test if it went between `.exists` and the read).
+            if !snappedProgress, let label = try? counter.snapshot().label,
+               label.range(of: "^[1-9]", options: .regularExpression) != nil {
                 snap("sample-scan-progress"); snappedProgress = true
             }
             // The ready screen hands off to Home by itself after 2.5 s, so "Open my closet" can

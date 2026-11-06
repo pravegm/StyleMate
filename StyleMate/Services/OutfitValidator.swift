@@ -111,7 +111,7 @@ enum OutfitValidator {
         }
         guard hasBody || !requireUpper else { return nil }
 
-        return Outfit(items: items, explanation: outfit.explanation)
+        return Outfit(items: items, explanation: outfit.explanation, tasteNote: outfit.tasteNote)
     }
 
     /// Keep at most one bottom / footwear / one-piece / mid-layer / outerwear.

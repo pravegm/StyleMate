@@ -101,6 +101,12 @@ class MyOutfitsViewModel: ObservableObject {
         save()
         fetchAllOutfits()
         lastLoggedDate = normalizedDate
+        // Taste learning: an outfit put together by hand (or confirmed from a photo) is a wear too.
+        // The stylist's own looks are taught by the deck (HomeViewModel), so they aren't counted twice;
+        // a planned (future) day isn't worn yet. No occasion is known, so no formality is learned.
+        if source != Source.stylist, normalizedDate <= Calendar.current.startOfDay(for: Date()) {
+            TasteStore.shared.learn(.wore, look: items, occasion: nil, forUser: userID ?? Self.sessionUserID())
+        }
     }
 
     func deleteOutfit(_ outfit: DatedOutfit) {

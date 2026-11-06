@@ -27,6 +27,9 @@ struct ProfileView: View {
     @State private var syncRotation: Double = 0
     @State private var didSeedFields = false
     @State private var profileSaveTask: Task<Void, Never>?
+    @State private var showResetTaste = false
+    /// Choices the stylist has learned from (Services/Outfits/TasteProfile).
+    @State private var tasteEvents = 0
     let genderOptions = ["", "Male", "Female"]
 
     private let maxStyles = 6
@@ -214,6 +217,24 @@ struct ProfileView: View {
                             }
                         }
 
+                    }
+
+                    Section {
+                        insightsRow
+
+                        Button(role: .destructive) {
+                            showResetTaste = true
+                        } label: {
+                            Label("Reset style learning", systemImage: "arrow.counterclockwise")
+                                .foregroundColor(tasteEvents == 0 ? DS.Colors.textTertiary : DS.Colors.error)
+                        }
+                        .disabled(tasteEvents == 0)
+                        .accessibilityIdentifier("profile.resetTaste")
+                    } header: {
+                        Text("Your style")
+                    } footer: {
+                        Text(tasteFooter)
+                            .font(DS.Font.caption2)
                     }
 
                     Section {
@@ -453,6 +474,7 @@ struct ProfileView: View {
                 iCloudAvailable = await CloudKitService.shared.checkAccountStatus()
             }
             .onAppear {
+                tasteEvents = TasteStore.shared.events(forUser: authService.user?.id)
                 guard !didSeedFields, let user = authService.user else { return }
                 editName = user.name
                 editGender = user.gender ?? ""
@@ -526,6 +548,16 @@ struct ProfileView: View {
                     FaceReferenceBuilderView(userId: userId, isPresented: $showReferenceBuilder)
                 }
             }
+            .alert("Reset style learning?", isPresented: $showResetTaste) {
+                Button("Cancel", role: .cancel) {}
+                Button("Reset", role: .destructive) {
+                    if let id = authService.user?.id { TasteStore.shared.reset(forUser: id) }
+                    tasteEvents = 0
+                    Haptics.success()
+                }
+            } message: {
+                Text("StyleMate forgets what it learned from the looks you wore, kept, swapped and skipped. Your wardrobe and outfit log stay.")
+            }
             .alert("Delete everything?", isPresented: $showDeleteProfileAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete everything", role: .destructive) {
@@ -561,6 +593,7 @@ struct ProfileView: View {
         UncertainItemsStore.shared.forget(forUser: userId)
         WearLogSuggestions.shared.forget(forUser: userId)
         MorningLookStore.forgetAll()
+        TasteStore.shared.reset(forUser: userId)
 
         let keysToRemove = [
             "hasCompletedOnboarding_\(userId)",
@@ -583,6 +616,47 @@ struct ProfileView: View {
         authService.resetLocalProfile()
 
         dlog("[StyleMate] Profile deleted for user: \(userId)")
+    }
+
+    // MARK: - Your style
+
+    /// Wardrobe insights: open to everyone today; behind the paywall when
+    /// `InsightsAvailability` says so (a one-line switch).
+    @ViewBuilder
+    private var insightsRow: some View {
+        if InsightsAvailability.isAvailable {
+            NavigationLink {
+                WardrobeInsightsView()
+            } label: {
+                Label("Wardrobe insights", systemImage: "chart.bar.xaxis")
+            }
+            .accessibilityIdentifier("profile.insights")
+        } else {
+            Button {
+                Haptics.light()
+                PaywallCenter.shared.present(.profile)
+            } label: {
+                HStack {
+                    Label("Wardrobe insights", systemImage: "chart.bar.xaxis")
+                        .foregroundColor(DS.Colors.textPrimary)
+                    Spacer()
+                    Text("Premium")
+                        .font(DS.Font.caption1.weight(.semibold))
+                        .foregroundStyle(DS.Colors.accent)
+                        .padding(.horizontal, DS.Spacing.xs)
+                        .padding(.vertical, 3)
+                        .background(DS.Colors.accentSoft, in: Capsule(style: .continuous))
+                }
+            }
+            .accessibilityIdentifier("profile.insights")
+        }
+    }
+
+    private var tasteFooter: String {
+        let learned = tasteEvents == 0
+            ? "Nothing learned yet."
+            : "Learned from \(tasteEvents) choice\(tasteEvents == 1 ? "" : "s") so far."
+        return "Outfits adapt to what you wear, keep, swap and skip. \(learned) It stays on this iPhone and fades over time."
     }
 
     // MARK: - Stat Badge
