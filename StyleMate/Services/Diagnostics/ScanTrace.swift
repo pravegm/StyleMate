@@ -51,6 +51,8 @@ final class ScanTrace: @unchecked Sendable {
         var lastProgress: Date?
         /// Loads the scan stopped waiting for (time limit hit), per step. Those photos are retried later.
         var timeouts: [Step: Int] = [:]
+        /// How the scan works on this phone ("Person check: Vision"), in the order set.
+        var notes: [(key: String, value: String)] = []
         var isEmpty: Bool { active.isEmpty && stats.isEmpty && timeouts.isEmpty }
     }
 
@@ -60,6 +62,7 @@ final class ScanTrace: @unchecked Sendable {
     private var stats: [Step: Stat] = [:]
     private var lastProgress: Date?
     private var timeouts: [Step: Int] = [:]
+    private var notes: [(key: String, value: String)] = []
 
     func begin(_ step: Step, at now: Date = Date()) -> Span {
         lock.lock(); defer { lock.unlock() }
@@ -92,10 +95,16 @@ final class ScanTrace: @unchecked Sendable {
         timeouts[step, default: 0] += 1
     }
 
+    /// A fact about how the scan runs here (set once, e.g. which person check works). Kept across `reset()`.
+    func setNote(_ key: String, _ value: String) {
+        lock.lock(); defer { lock.unlock() }
+        if let i = notes.firstIndex(where: { $0.key == key }) { notes[i].value = value } else { notes.append((key, value)) }
+    }
+
     var snapshot: Snapshot {
         lock.lock(); defer { lock.unlock() }
         let active = open.values.sorted { $0.1 < $1.1 }.map { (step: $0.0, since: $0.1) }
-        return Snapshot(active: active, stats: stats, lastProgress: lastProgress, timeouts: timeouts)
+        return Snapshot(active: active, stats: stats, lastProgress: lastProgress, timeouts: timeouts, notes: notes)
     }
 
     func reset() {
@@ -128,6 +137,7 @@ final class ScanTrace: @unchecked Sendable {
             guard let n = snap.timeouts[step], n > 0 else { continue }
             out.append("Gave up waiting (\(step.label)): \(n) photo\(n == 1 ? "" : "s"), retried on a later scan")
         }
+        for note in snap.notes { out.append("\(note.key): \(note.value)") }
         return out
     }
 }

@@ -47,9 +47,9 @@ class RealFirstRunE2ETests: E2ETestCase {
 
         findYourself()
         watchOnboardingScan()
-        watchHome()
+        let bannerItems = watchHome()
         checkCloset()
-        checkDiagnostics()
+        checkDiagnostics(bannerItems: bannerItems)
     }
 
     // MARK: - 2. Photos and location denied
@@ -264,7 +264,7 @@ class RealFirstRunE2ETests: E2ETestCase {
     /// never saw), checks the weather never spins for good, and follows the scan banner to the end,
     /// failing if "N of M photos" stands still for 3 minutes.
     @MainActor
-    private func watchHome() {
+    private func watchHome() -> Int {
         let homeAt = Date()
         let progress = anyElement(NSPredicate(format: "identifier == 'scanBanner.progress'"))
         let itemsLine = anyElement(NSPredicate(format: "identifier == 'scanBanner.items'"))
@@ -339,6 +339,12 @@ class RealFirstRunE2ETests: E2ETestCase {
             if !scanDone, sawBanner, !progress.exists, maxScanned > 0, maxScanned >= total, total > 0 {
                 scanDone = true   // the completed banner came and went between two polls
             }
+            if !scanDone, !sawBanner, now.timeIntervalSince(homeAt) > 60 {
+                // No banner at all: the scan ended before Home (onboarding hands over when it ends).
+                // Live stats (checkDiagnostics) then tells whether it did any work.
+                note("home-scan-banner", "No scan banner on Home within 60 s: the scan had already finished")
+                scanDone = true
+            }
 
             if !scanDone, now.timeIntervalSince(lastMove) > maxStall {
                 note("stuck-banner", "\(lastProgress)\n\(itemsLine.exists ? itemsLine.label : "")")
@@ -347,15 +353,15 @@ class RealFirstRunE2ETests: E2ETestCase {
                 note("stuck-diagnostics", visibleTexts())
                 snap("home-scan-stuck-diagnostics")
                 XCTFail("The scan stood still at '\(lastProgress)' for \(Int(maxStall)) s (see stuck-diagnostics.txt)")
-                return
+                return items
             }
             pause(2)
         }
         note("home-scan", "last banner: \(lastProgress)\nmax scanned: \(maxScanned) of \(total)\nitems: \(items)")
         XCTAssertTrue(weatherChecked, "Never got to check the weather row")
         XCTAssertTrue(scanDone, "The scan didn't finish within 16 min of Home (last: '\(lastProgress)', \(items) items)")
-        XCTAssertGreaterThan(maxScanned, 0, "The banner never counted a photo")
-        XCTAssertGreaterThan(items, 0, "The scan finished without adding anything from the user's photos")
+        if sawBanner { XCTAssertGreaterThan(maxScanned, 0, "The banner never counted a photo") }
+        return items
     }
 
     /// The closet holds what the scan found.
@@ -370,13 +376,22 @@ class RealFirstRunE2ETests: E2ETestCase {
     /// Diagnostics › Live stats measured real face checks; Photo scan shows each step's timings and that it
     /// gave up waiting on the stuck photos instead of sitting on them.
     @MainActor
-    private func checkDiagnostics() {
+    private func checkDiagnostics(bannerItems: Int) {
         openDiagnostics()
         let live = anyElement(NSPredicate(format: "label CONTAINS 'Live stats'"))
         XCTAssertTrue(live.waitForExistence(timeout: 15), "No Live stats card")
         pause(2.5)   // the screen refreshes its numbers every 2 s
         let texts = visibleTexts()
         note("diagnostics", texts)
+        // Live stats' "Items found" counts what the scan extracted, banner or not.
+        let lines = texts.components(separatedBy: "\n")
+        var liveItems = 0
+        for (i, line) in lines.enumerated() where line.hasPrefix("Items found") {
+            let value = line.contains(",") ? line : (i + 1 < lines.count ? lines[i + 1] : "")
+            liveItems = max(liveItems, Self.firstNumber(in: value) ?? 0)
+        }
+        XCTAssertGreaterThan(max(bannerItems, liveItems), 0,
+                             "The scan added nothing from the user's photos (banner: \(bannerItems), Live stats: \(liveItems))")
         XCTAssertFalse(anyElement(NSPredicate(format: "label BEGINSWITH 'Nothing measured yet'")).exists,
                        "Live stats still says 'Nothing measured yet' after a scan")
         XCTAssertTrue(anyElement(NSPredicate(format: "label == 'Photos checked for your face'")).exists, "Live stats has no face checks")

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 import Vision
 
 /// Cheap checks on a library thumbnail (~640 px) before the full photo is
@@ -46,6 +47,30 @@ enum ThumbnailAnalyzer {
     /// scan then looked at thousands of photos, ran not one face check and added nothing
     /// ("Live stats: Nothing measured yet", RealFirstRunE2ETests). Callers fall back to the face detector.
     static func people(in image: CGImage) -> [VNHumanObservation]? {
+        guard visionFindsPeople else { return nil }
+        return visionPeople(in: image)
+    }
+
+    /// Does Vision's body detector work here at all? Checked once, on the bundled sample photos (each has a
+    /// person in full view). On the iOS simulator it returns no one, instantly and without an error, so an
+    /// error check alone wasn't enough (RealFirstRunE2ETests: "Looking for a person: 261×, average 0.00 s").
+    /// Shown in Diagnostics › Photo scan.
+    static let visionFindsPeople: Bool = {
+        let samples = SampleLibrary.photoURLs().prefix(3).compactMap { url -> CGImage? in
+            guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                         kCGImageSourceThumbnailMaxPixelSize: 640,
+                                         kCGImageSourceCreateThumbnailWithTransform: true]
+            return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+        }
+        guard !samples.isEmpty else { return true }   // nothing to check against: trust Vision
+        let works = samples.contains { !(visionPeople(in: $0) ?? []).isEmpty }
+        ScanTrace.shared.setNote("Person check", works ? "Vision" : "face detector (Vision found nobody in the sample photos)")
+        dlog("[Scan] Vision person detection self-check: \(works ? "ok" : "finds nobody, using the face detector")")
+        return works
+    }()
+
+    private static func visionPeople(in image: CGImage) -> [VNHumanObservation]? {
         let humans = VNDetectHumanRectanglesRequest()
         humans.upperBodyOnly = false
         do {

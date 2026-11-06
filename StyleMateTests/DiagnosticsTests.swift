@@ -210,6 +210,11 @@ struct DiagnosticsTests {
         #expect(lines.contains("Gave up waiting (Loading the full photo (may download from iCloud)): 1 photo, retried on a later scan"))
         trace.reset()
         #expect(trace.snapshot.isEmpty)
+        trace.setNote("Person check", "Vision")
+        trace.setNote("Person check", "face detector")
+        trace.reset()   // notes describe the phone, not one scan: they stay
+        #expect(ScanTrace.describe(trace.snapshot).contains("Person check: face detector"))
+        #expect(trace.snapshot.notes.count == 1)
     }
 
     @Test func reportWithNothingYet() {
