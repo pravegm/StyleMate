@@ -303,9 +303,14 @@ struct SubscriptionTests {
         session.storefront = "GBR"
 
         // storekitd can take a moment to pick up a configuration opened from the command line.
+        // Every StoreKit call has a deadline: in the unit-test host storekitd sometimes never
+        // answers (FB22237318), and an unanswered `products` or `purchase()` held the whole unit
+        // job until its 2-hour limit (CI 42242630254, three times on 6 Nov).
         var products: [Product] = []
         for attempt in 0..<8 {
-            products = (try? await Product.products(for: PremiumProducts.all)) ?? []
+            products = await GarmentDescriber.withTimeout(seconds: 20) {
+                try? await Product.products(for: PremiumProducts.all)
+            } ?? []
             if products.count == PremiumProducts.all.count { break }
             try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 500_000_000)
         }
@@ -327,11 +332,16 @@ struct SubscriptionTests {
         #expect(annual.price == Decimal(string: "24.99"))
         #expect(monthly.price == Decimal(string: "3.99"))
         #expect(annual.pricePerPeriodText.hasSuffix("per year"))
-        let eligible = await annual.subscription?.isEligibleForIntroOffer ?? false
+        let eligible = await GarmentDescriber.withTimeout(seconds: 20) {
+            await annual.subscription?.isEligibleForIntroOffer
+        } ?? false
         #expect(eligible)
 
         // Buy the annual plan: a verified, unrevoked entitlement with the free trial.
-        let result = try await annual.purchase()
+        guard let result = await GarmentDescriber.withTimeout(seconds: 60, { try? await annual.purchase() }) else {
+            print("[Premium] StoreKit Test didn't answer the purchase in the unit-test host; skipping the live part")
+            return
+        }
         guard case .success(let verification) = result, case .verified(let transaction) = verification else {
             Issue.record("Annual purchase didn't succeed: \(result)")
             return
@@ -339,13 +349,16 @@ struct SubscriptionTests {
         await transaction.finish()
         #expect(transaction.productID == PremiumProducts.annual)
         #expect(transaction.offer?.type == .introductory)
-        var entitlements: [PremiumStatus.Entitlement] = []
-        for await r in Transaction.currentEntitlements {
-            if case .verified(let t) = r {
-                entitlements.append(.init(productID: t.productID, expirationDate: t.expirationDate,
-                                          revocationDate: t.revocationDate, isUpgraded: t.isUpgraded))
+        let entitlements: [PremiumStatus.Entitlement] = await GarmentDescriber.withTimeout(seconds: 30) {
+            var found: [PremiumStatus.Entitlement] = []
+            for await r in Transaction.currentEntitlements {
+                if case .verified(let t) = r {
+                    found.append(.init(productID: t.productID, expirationDate: t.expirationDate,
+                                       revocationDate: t.revocationDate, isUpgraded: t.isUpgraded))
+                }
             }
-        }
+            return found
+        } ?? []
         #expect(PremiumStatus.resolve(entitlements: entitlements, renewal: nil).isPremium())
         session.clearTransactions()
     }
