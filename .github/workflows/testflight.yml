@@ -176,6 +176,7 @@ jobs:
             # Every API request Xcode made, with its status (URLs only).
             [ -n "$LOGS" ] && grep -rhoE "got status code [0-9]+ to a [A-Z]+ request to URL: [^ ]+" "$LOGS" | cut -c1-260 | uniq
             [ -n "$LOGS" ] && grep -rhE -A3 "status code 4[0-9][0-9]" "$LOGS" | cut -c1-400 | head -40
+            [ -n "$LOGS" ] && ls "$LOGS" && grep -rhiE "https://[a-z0-9.]*apple\.com/[^ ]*|40[13]|unauthori|NOT_AUTHORIZED|capabilit|container|entitlement" "$LOGS" | cut -c1-300 | grep -viE "bearer|authorization:" | uniq | head -120
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/ipa" && cd "$RUNNER_TEMP/ipa" && unzip -q "$RUNNER_TEMP"/local/*.ipa
