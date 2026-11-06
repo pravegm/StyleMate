@@ -19,7 +19,9 @@ class StyleMateE2ETests: E2ETestCase {
         snap("home")
 
         openTab("Wardrobe")
-        let count = anyElement(NSPredicate(format: "label BEGINSWITH %@", "\(seededItemCount) items"))
+        // "26 pieces · 5 shelves" (older UI: "26 items · …").
+        let count = anyElement(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                           "\(seededItemCount) pieces", "\(seededItemCount) items"))
         XCTAssertTrue(count.waitForExistence(timeout: 20), "Closet doesn't report the \(seededItemCount) seeded items")
         let anyTee = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'closet.item.' OR label ENDSWITH 'T-Shirt'")).firstMatch
         XCTAssertTrue(anyTee.waitForExistence(timeout: 10), "Closet grid shows no seeded items")
