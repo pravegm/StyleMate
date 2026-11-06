@@ -42,33 +42,37 @@ enum ThumbnailAnalyzer {
 
     /// People Vision found (confidence > 0.5), or nil when its request couldn't run at all.
     ///
-    /// The request can fail (it does on the iOS simulator; a device short of memory or with the Neural
-    /// Engine busy can too). Before, `try?` turned that into "nobody in this photo" for every photo: the
-    /// scan then looked at thousands of photos, ran not one face check and added nothing
-    /// ("Live stats: Nothing measured yet", RealFirstRunE2ETests). Callers fall back to the face detector.
+    /// The request can fail (a device short of memory or with the Neural Engine busy). Before, `try?`
+    /// turned that into "nobody in this photo" for every photo: the scan then looked at thousands of
+    /// photos, ran not one face check and added nothing ("Live stats: Nothing measured yet"). Callers fall
+    /// back to the face detector. In the iOS simulator Vision's body detector isn't usable at all (its
+    /// pixel buffers fail with -6680 and the request never returns: RealFirstRunE2ETests hung on it), so
+    /// there the face detector is the person check; Diagnostics › Photo scan says which one ran.
     static func people(in image: CGImage) -> [VNHumanObservation]? {
-        guard visionFindsPeople else { return nil }
-        return visionPeople(in: image)
+        #if targetEnvironment(simulator)
+        notePersonCheck("face detector (simulator)")
+        return nil
+        #else
+        guard let found = visionPeople(in: image) else {
+            notePersonCheck("face detector (Vision's body detector failed)")
+            return nil
+        }
+        notePersonCheck("Vision")
+        return found
+        #endif
     }
 
-    /// Does Vision's body detector work here at all? Checked once, on the bundled sample photos (each has a
-    /// person in full view). On the iOS simulator it returns no one, instantly and without an error, so an
-    /// error check alone wasn't enough (RealFirstRunE2ETests: "Looking for a person: 261×, average 0.00 s").
-    /// Shown in Diagnostics › Photo scan.
-    static let visionFindsPeople: Bool = {
-        let samples = SampleLibrary.photoURLs().prefix(3).compactMap { url -> CGImage? in
-            guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-            let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                                         kCGImageSourceThumbnailMaxPixelSize: 640,
-                                         kCGImageSourceCreateThumbnailWithTransform: true]
-            return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
-        }
-        guard !samples.isEmpty else { return true }   // nothing to check against: trust Vision
-        let works = samples.contains { !(visionPeople(in: $0) ?? []).isEmpty }
-        ScanTrace.shared.setNote("Person check", works ? "Vision" : "face detector (Vision found nobody in the sample photos)")
-        dlog("[Scan] Vision person detection self-check: \(works ? "ok" : "finds nobody, using the face detector")")
-        return works
-    }()
+    private static let noteLock = NSLock()
+    nonisolated(unsafe) private static var lastNote: String?
+
+    /// Shown in Diagnostics › Photo scan ("Person check: Vision").
+    private static func notePersonCheck(_ how: String) {
+        noteLock.lock()
+        let changed = lastNote != how
+        lastNote = how
+        noteLock.unlock()
+        if changed { ScanTrace.shared.setNote("Person check", how) }
+    }
 
     private static func visionPeople(in image: CGImage) -> [VNHumanObservation]? {
         let humans = VNDetectHumanRectanglesRequest()
