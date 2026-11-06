@@ -1,33 +1,34 @@
 # Getting StyleMate onto your iPhones (TestFlight)
 
 Builds are made in the cloud by `.github/workflows/testflight.yml`, so no Mac is needed. You do
-three one-time things, then every new build is one button press.
+a few one-time things, then every new build is one button press.
 
-## One-time setup (about 15 minutes)
+**Already done (checked 6 Nov 2026 with the read-only `asc-check.yml` workflow).** StyleMate has
+existed in your account since 2025, so steps 1–3 are mostly complete:
+- App ID `com.stylemates.StyleMate` (team KZN5G7M9J3) has Sign In with Apple and iCloud, plus
+  In-App Purchase, Push Notifications and WeatherKit, which are harmless and can stay.
+- App record **StyleMate** (Apple ID 6746056410, SKU `com.stylemates.StyleMate`, English (U.K.)),
+  version 1.0 "Prepare for Submission", builds 1–9 from 2025–26 (all expired), and an
+  **Internal testers** TestFlight group.
+- The 4 repository secrets.
 
-### 1. Register the app's ID (developer.apple.com)
-1. Go to https://developer.apple.com/account/resources/identifiers/list and sign in.
-2. Press the blue **+**, choose **App IDs**, then **Continue**. Choose **App**, then **Continue**.
-3. **Description**: `StyleMate`. **Bundle ID**: choose *Explicit* and type `com.stylemates.StyleMate`.
-4. Under **Capabilities**, tick **iCloud** (choose "Include CloudKit support") **and Sign In with
-   Apple** (leave it as a primary App ID). Sign in with Apple is how people get into StyleMate: their
-   closet, outfits, free pieces and Premium belong to their account. Without this tick the
-   TestFlight workflow stops with "Sign in with Apple entitlement missing".
-5. Press **Continue**, then **Register**.
-6. Open the new ID again. Next to iCloud, press **Edit** (or **Configure**), press **+** to add a
-   container named `iCloud.com.stylemates.StyleMate`, tick it, and press **Save**.
+The new builds are numbered from 104 upwards (run number + 100), so they always sort above the old
+ones. To re-check what App Store Connect holds, run
+https://github.com/pravegm/StyleMate/actions/workflows/asc-check.yml.
 
-If it says the bundle ID is already taken, it was registered earlier under your account. That's
-fine: just make sure iCloud and Sign In with Apple are both ticked. If the ID already exists without
-Sign In with Apple, open it, tick it, press **Save** and confirm; nothing else changes.
+## One-time setup
 
-### 2. Create the app in App Store Connect
-1. Go to https://appstoreconnect.apple.com, then **Apps**, the **+** button, and **New App**.
-2. **Platform**: iOS. **Name**: `StyleMate` (any available name works; you can change it later).
-   **Primary language**: English (U.K.). **Bundle ID**: pick `com.stylemates.StyleMate`. **SKU**: `stylemate`.
-3. Press **Create**.
+### 1. Check the iCloud container (developer.apple.com, 2 minutes)
+Apple's API can't show which iCloud container the App ID uses, so check it by hand:
+1. Go to https://developer.apple.com/account/resources/identifiers/list and open
+   **com.stylemates.StyleMate**.
+2. Next to **iCloud**, press **Edit** (or **Configure**). Make sure `iCloud.com.stylemates.StyleMate`
+   is ticked. If it isn't listed, press **+**, add it, tick it, and press **Save**.
 
-### 3. Give GitHub the same signing key your other apps use
+### 2. App Store Connect app record
+Done: it already exists (see above). Nothing to do.
+
+### 3. Give GitHub the same signing key your other apps use (done)
 On https://github.com/pravegm/StyleMate/settings/secrets/actions press **New repository secret**
 four times. Use the same values you entered for Squish, Brim and the other Duo games:
 
@@ -135,7 +136,7 @@ everything else works.
 1. Open https://github.com/pravegm/StyleMate/actions/workflows/testflight.yml.
 2. Press **Run workflow**, then the green **Run workflow** button. You can type a note about what to test.
 3. After about 30–45 minutes the run turns green. App Store Connect then takes 10–30 minutes to process the build.
-4. In App Store Connect › StyleMate › **TestFlight**, add yourself under **Internal Testing** (first time only).
+4. In App Store Connect › StyleMate › **TestFlight** › **Internal testers** (the group already exists), check you're listed and that the new build is added to the group (first time only).
 5. Install **TestFlight** from the App Store on your iPhone 17 Pro and your iPhone Duo, and install StyleMate there.
 
 ## What to test

@@ -83,9 +83,10 @@ app switches over with one setting.
 
 ## Your actions
 
-Before TestFlight (`docs/TESTFLIGHT.md`, about 30 minutes):
-1. Register `com.stylemates.StyleMate` with **iCloud** and **Sign In with Apple** ticked.
-2. Create the App Store Connect record; add the 4 repository secrets (same as the Duo games).
+Before TestFlight (`docs/TESTFLIGHT.md`, about 30 minutes). Already done, checked 6 Nov: the App
+ID (with iCloud and Sign In with Apple), the App Store Connect record from 2025, and the 4 secrets.
+1. Check that the App ID's iCloud container `iCloud.com.stylemates.StyleMate` is ticked.
+2. (Done.)
 3. Turn on GitHub Pages (the privacy policy).
 4. Run the CloudKit schema workflow, then deploy the schema to Production (otherwise backup is off).
 5. For Premium: the Paid Apps agreement, bank and tax details, then the subscription group and its
