@@ -59,6 +59,13 @@ class SelfieCameraService: NSObject, ObservableObject {
     private var requiredFaceDuration: TimeInterval { step == .front ? 1.2 : 0.7 }
 
     func configure() {
+        #if DEBUG
+        // UI tests (`-uiTestSelfieFixture`): the simulator has no camera; frames come from a fixture.
+        if DebugSelfieFeed.isActive {
+            DebugSelfieFeed.start(feeding: self)
+            return
+        }
+        #endif
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             setupSession()
@@ -390,6 +397,23 @@ extension SelfieCameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
 }
+
+#if DEBUG
+// MARK: - UI-test capture (DebugSelfieFeed)
+
+extension SelfieCameraService {
+    /// Ready for the next frame: not checking one, not finished.
+    var debugCanCapture: Bool { captureState != .captured && captureState != .denied && !isChecking && !isCapturing }
+
+    /// `image` arrives as if the front camera had just taken it (already cropped to the oval): the same
+    /// frame check, step logic and confirmation as a real capture.
+    func debugCapture(_ image: UIImage) {
+        guard debugCanCapture else { return }
+        isCapturing = true
+        handleCaptured(image)
+    }
+}
+#endif
 
 // MARK: - Photo Capture
 

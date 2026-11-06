@@ -16,7 +16,12 @@
 - **The Mac runners are shared by every branch, so spend them deliberately.** A
   feature-branch push runs unit tests + the Release compile only (~45 min). Commit
   message tags: `[tests: StyleMateTests/TryOnTests, ...]` runs only those unit tests
-  (minutes, not 45); `[ui]` or `[full]` adds the UI tests + `e2e-screens`; `[studio]`
+  (minutes, not 45); `[ui]` or `[full]` adds the UI tests + `e2e-screens` (the job ends
+  with `RealFirstRunE2ETests`, ~15 min: nothing pre-granted, the selfie from a fixture face,
+  a ~260-photo library to scan with a few stuck "iCloud" photos; keep it green, it is the
+  only test of the real first run); `[ui-only: RealFirstRunE2ETests, FirstRunE2ETests]`
+  runs the UI job with only those classes (iterate on one UI test without the ~27 min
+  suite); `[studio]`
   (or `[full]`) adds the three studio-coverage render shards (3 Macs, ~45 min);
   `[skip ci]` runs nothing. Docs-only pushes don't run — nor does a push that is only
   an empty commit (e.g. a bare `[full]` tag commit): for that, dispatch instead with

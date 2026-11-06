@@ -232,6 +232,7 @@ struct DiagnosticsView: View {
                     .font(DS.Font.subheadline)
             }
         }
+        .accessibilityIdentifier("diagnostics.live")
     }
 
     // MARK: Duo hinge

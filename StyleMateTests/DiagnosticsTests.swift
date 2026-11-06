@@ -198,6 +198,20 @@ struct DiagnosticsTests {
         #expect(trace.snapshot.stats[.thumbnails]?.count == 1)
     }
 
+    @Test func scanTraceCountsLoadsItGaveUpOn() {
+        let trace = ScanTrace()
+        #expect(trace.snapshot.isEmpty)
+        trace.noteTimeout(.thumbnails)
+        #expect(!trace.snapshot.isEmpty)
+        trace.noteTimeout(.thumbnails)
+        trace.noteTimeout(.fullPhoto)
+        let lines = ScanTrace.describe(trace.snapshot)
+        #expect(lines.contains("Gave up waiting (Loading thumbnails): 2 photos, retried on a later scan"))
+        #expect(lines.contains("Gave up waiting (Loading the full photo (may download from iCloud)): 1 photo, retried on a later scan"))
+        trace.reset()
+        #expect(trace.snapshot.isEmpty)
+    }
+
     @Test func reportWithNothingYet() {
         let text = DiagnosticsReport.make(facts: Self.sampleFacts(), benchmark: nil, live: PerfSnapshot(),
                                           hingeAvailable: false, hinge: [], liveHinge: nil)

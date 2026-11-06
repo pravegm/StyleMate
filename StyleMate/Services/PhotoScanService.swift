@@ -1181,6 +1181,8 @@ class PhotoScanService: ObservableObject {
     /// A small (~320 px) local thumbnail for ranking. No network: an iCloud-only
     /// photo without a local preview just isn't ranked (it's still scanned later).
     private nonisolated static func rankingThumbnail(_ asset: PHAsset, manager: PHImageManager) async -> CGImage? {
+        let fault = debugFault(asset, .local)
+        if fault == .empty { return nil }
         let options = PHImageRequestOptions()
         options.deliveryMode = .fastFormat
         options.resizeMode = .fast
@@ -1188,11 +1190,25 @@ class PhotoScanService: ObservableObject {
         options.isSynchronous = false
         let gate = ResumeGate()
         return await withCheckedContinuation { continuation in
-            manager.requestImage(for: asset, targetSize: CGSize(width: 320, height: 320),
-                                 contentMode: .aspectFit, options: options) { image, _ in
-                guard gate.claim() else { return }
-                Self.offMain {
-                    continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true).cgImage })
+            let requestID: PHImageRequestID
+            if fault == .stall {
+                requestID = PHInvalidImageRequestID
+            } else {
+                requestID = manager.requestImage(for: asset, targetSize: CGSize(width: 320, height: 320),
+                                                 contentMode: .aspectFit, options: options) { image, _ in
+                    guard gate.claim() else { return }
+                    Self.offMain {
+                        continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true).cgImage })
+                    }
+                }
+            }
+            // One unanswered request would hold the whole ranking batch (and the scan behind it).
+            Task {
+                try? await Task.sleep(nanoseconds: Self.localImageTimeout)
+                if gate.claim() {
+                    if requestID != PHInvalidImageRequestID { manager.cancelImageRequest(requestID) }
+                    ScanTrace.shared.noteTimeout(.ranking)
+                    continuation.resume(returning: nil)
                 }
             }
         }
@@ -1323,23 +1339,30 @@ class PhotoScanService: ObservableObject {
                     if let local = await Self.localThumbnail(asset, manager: manager, targetSize: targetSize) {
                         return (index, local)
                     }
+                    let fault = Self.debugFault(asset, .downloadThumbnail)
                     return await withCheckedContinuation { continuation in
                         let gate = ResumeGate()
-                        let requestID = manager.requestImage(
-                            for: asset, targetSize: targetSize,
-                            contentMode: .aspectFit, options: options
-                        ) { image, _ in
-                            guard gate.claim() else { return }
-                            // Async results arrive on the main thread: redraw elsewhere.
-                            Self.offMain {
-                                let normalized = image.flatMap { Self.bakeOrientation($0, pixelScale: true) }   // 1x: no 3x screen-scale copies
-                                continuation.resume(returning: (index, normalized))
+                        let requestID: PHImageRequestID
+                        if fault == .stall {
+                            requestID = PHInvalidImageRequestID   // DEBUG fault: a download that never calls back
+                        } else {
+                            requestID = manager.requestImage(
+                                for: asset, targetSize: targetSize,
+                                contentMode: .aspectFit, options: options
+                            ) { image, _ in
+                                guard gate.claim() else { return }
+                                // Async results arrive on the main thread: redraw elsewhere.
+                                Self.offMain {
+                                    let normalized = image.flatMap { Self.bakeOrientation($0, pixelScale: true) }   // 1x: no 3x screen-scale copies
+                                    continuation.resume(returning: (index, normalized))
+                                }
                             }
                         }
                         Task {
                             try? await Task.sleep(nanoseconds: Self.thumbnailTimeout)
                             if gate.claim() {
-                                manager.cancelImageRequest(requestID)
+                                if requestID != PHInvalidImageRequestID { manager.cancelImageRequest(requestID) }
+                                ScanTrace.shared.noteTimeout(.thumbnails)
                                 continuation.resume(returning: (index, nil))
                             }
                         }
@@ -1358,6 +1381,8 @@ class PhotoScanService: ObservableObject {
     /// The scan thumbnail from what's on the phone only (nil when Photos would have to download it).
     private nonisolated static func localThumbnail(_ asset: PHAsset, manager: PHImageManager,
                                                    targetSize: CGSize) async -> UIImage? {
+        let fault = debugFault(asset, .local)
+        if fault == .empty { return nil }
         let options = PHImageRequestOptions()
         options.deliveryMode = .fastFormat
         options.resizeMode = .fast
@@ -1365,13 +1390,54 @@ class PhotoScanService: ObservableObject {
         options.isSynchronous = false
         let gate = ResumeGate()
         return await withCheckedContinuation { continuation in
-            manager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { image, _ in
-                guard gate.claim() else { return }
-                Self.offMain {
-                    continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true) })
+            let requestID: PHImageRequestID
+            if fault == .stall {
+                requestID = PHInvalidImageRequestID
+            } else {
+                requestID = manager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { image, _ in
+                    guard gate.claim() else { return }
+                    Self.offMain {
+                        continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true) })
+                    }
+                }
+            }
+            // Network off answers at once from the phone; a limit anyway, so no PhotoKit request is waited on forever.
+            Task {
+                try? await Task.sleep(nanoseconds: Self.localImageTimeout)
+                if gate.claim() {
+                    if requestID != PHInvalidImageRequestID { manager.cancelImageRequest(requestID) }
+                    ScanTrace.shared.noteTimeout(.thumbnails)
+                    continuation.resume(returning: nil)
                 }
             }
         }
+    }
+
+    /// Local-only (network off) requests answer from what's on the phone, normally within milliseconds.
+    nonisolated static let localImageTimeout: UInt64 = 10_000_000_000
+
+    /// How a DEBUG UI test wants PhotoKit to behave for this request (`ScanFaultInjection`,
+    /// `-uiTestStallSomePhotos`: a library still syncing with iCloud). Always `.normal` in Release.
+    private enum DebugRequest { case local, downloadThumbnail, fullPhoto }
+    private enum DebugFault { case normal, empty, stall }
+
+    private nonisolated static func debugFault(_ asset: PHAsset, _ request: DebugRequest) -> DebugFault {
+        #if DEBUG
+        guard ScanFaultInjection.isActive else { return .normal }
+        let hook: ScanFaultInjection.Request
+        switch request {
+        case .local: hook = .local
+        case .downloadThumbnail: hook = .downloadThumbnail
+        case .fullPhoto: hook = .fullPhoto
+        }
+        switch ScanFaultInjection.outcome(for: asset, hook) {
+        case .normal: return .normal
+        case .empty: return .empty
+        case .stall: return .stall
+        }
+        #else
+        return .normal
+        #endif
     }
 
     /// Loads the photo at up to 2048px with EXIF orientation baked into the pixels.
@@ -1402,20 +1468,27 @@ class PhotoScanService: ObservableObject {
 
         let manager = PHImageManager.default()
         let gate = ResumeGate()
+        let fault = Self.debugFault(asset, .fullPhoto)
         return await withCheckedContinuation { (continuation: CheckedContinuation<UIImage?, Never>) in
-            let requestID = manager.requestImage(for: asset, targetSize: target,
+            let requestID: PHImageRequestID
+            if fault == .stall {
+                requestID = PHInvalidImageRequestID   // DEBUG fault: an iCloud download that never finishes
+            } else {
+                requestID = manager.requestImage(for: asset, targetSize: target,
                                                  contentMode: .aspectFit, options: options) { image, info in
-                if (info?[PHImageResultIsDegradedKey] as? Bool) == true { return }
-                // Off the main thread: a rotated 2048 px photo is a full redraw.
-                Self.offMain {
-                    let baked: UIImage? = autoreleasepool { image.map { Self.bakeOrientation($0, pixelScale: true) } }
-                    if gate.claim() { continuation.resume(returning: baked) }
+                    if (info?[PHImageResultIsDegradedKey] as? Bool) == true { return }
+                    // Off the main thread: a rotated 2048 px photo is a full redraw.
+                    Self.offMain {
+                        let baked: UIImage? = autoreleasepool { image.map { Self.bakeOrientation($0, pixelScale: true) } }
+                        if gate.claim() { continuation.resume(returning: baked) }
+                    }
                 }
             }
             Task {
                 try? await Task.sleep(nanoseconds: 45_000_000_000)
                 if gate.claim() {
-                    manager.cancelImageRequest(requestID)
+                    if requestID != PHInvalidImageRequestID { manager.cancelImageRequest(requestID) }
+                    ScanTrace.shared.noteTimeout(.fullPhoto)
                     dlog("[StyleMate] Auto-scan: full image timed out (iCloud download?) for \(asset.localIdentifier)")
                     continuation.resume(returning: nil)
                 }

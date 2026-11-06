@@ -92,6 +92,7 @@ struct ScanProgressBanner: View {
                 Text(scanService.progressDetail)
                     .font(DS.Font.caption1)
                     .foregroundColor(DS.Colors.textSecondary)
+                    .accessibilityIdentifier("scanBanner.progress")
 
                 HStack(spacing: DS.Spacing.xs) {
                     ProgressView(
@@ -108,6 +109,7 @@ struct ScanProgressBanner: View {
                 Text("Added \(scanService.itemsFound) items to your wardrobe")
                     .font(DS.Font.subheadline)
                     .foregroundColor(DS.Colors.textSecondary)
+                    .accessibilityIdentifier("scanBanner.items")
             }
 
             Spacer(minLength: DS.Spacing.xs)
@@ -190,6 +192,7 @@ struct ScanProgressBanner: View {
         .dsCardShadow()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Scan complete. Added \(scanService.scanAddedItemIDs.count) items to your wardrobe.")
+        .accessibilityIdentifier("scanBanner.completed")
         .onAppear {
             autoDismissTask?.cancel()
             autoDismissTask = Task {
@@ -217,6 +220,7 @@ struct ScanProgressBanner: View {
                              : "Scan complete. No new items found.")
                 .font(DS.Font.subheadline)
                 .foregroundColor(DS.Colors.textSecondary)
+                .accessibilityIdentifier("scanBanner.completedEmpty")
         }
         .padding(.vertical, DS.Spacing.sm)
         .padding(.horizontal, DS.Spacing.md)

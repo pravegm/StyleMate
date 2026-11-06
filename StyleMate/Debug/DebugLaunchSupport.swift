@@ -17,6 +17,10 @@ import CoreData
 ///                            transparent PNG cutouts drawn on the fly.
 /// - `-uiTestFakeAppleSignIn` the sign-in screen also shows "Continue as test user", which signs in a
 ///                            fixed fake Apple ID (the CI simulator can't do real Sign in with Apple).
+/// - `-uiTestSelfieFixture`   the selfie step "captures" a face from a bundled sample photo (the
+///                            simulator has no camera): `DebugSelfieFeed`.
+/// - `-uiTestStallSomePhotos` photos named `…_stallthumb…` / `…_stallfull…` behave like iCloud
+///                            downloads that never finish: `ScanFaultInjection`.
 ///
 /// The demo user is a fake signed-in account (no Apple credential check, nothing in the Keychain).
 ///
@@ -117,6 +121,8 @@ enum DebugLaunchSupport {
             }
         }
         try? fm.removeItem(at: MorningLookStore.folder)
+        PerfStore.shared.reset()   // Diagnostics › Live stats: a fresh install has measured nothing
+        ScanTrace.shared.reset()
 
         let context = PersistenceController.shared.container.viewContext
         for entity in ["OutfitItem", "DatedOutfit"] {

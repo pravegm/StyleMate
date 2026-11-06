@@ -49,7 +49,9 @@ final class ScanTrace: @unchecked Sendable {
         var active: [(step: Step, since: Date)] = []
         var stats: [Step: Stat] = [:]
         var lastProgress: Date?
-        var isEmpty: Bool { active.isEmpty && stats.isEmpty }
+        /// Loads the scan stopped waiting for (time limit hit), per step. Those photos are retried later.
+        var timeouts: [Step: Int] = [:]
+        var isEmpty: Bool { active.isEmpty && stats.isEmpty && timeouts.isEmpty }
     }
 
     private let lock = NSLock()
@@ -57,6 +59,7 @@ final class ScanTrace: @unchecked Sendable {
     private var open: [Int: (Step, Date)] = [:]
     private var stats: [Step: Stat] = [:]
     private var lastProgress: Date?
+    private var timeouts: [Step: Int] = [:]
 
     func begin(_ step: Step, at now: Date = Date()) -> Span {
         lock.lock(); defer { lock.unlock() }
@@ -83,10 +86,16 @@ final class ScanTrace: @unchecked Sendable {
         lastProgress = now
     }
 
+    /// A load in `step` hit its time limit (e.g. a thumbnail stuck behind iCloud): the scan moved on.
+    func noteTimeout(_ step: Step) {
+        lock.lock(); defer { lock.unlock() }
+        timeouts[step, default: 0] += 1
+    }
+
     var snapshot: Snapshot {
         lock.lock(); defer { lock.unlock() }
         let active = open.values.sorted { $0.1 < $1.1 }.map { (step: $0.0, since: $0.1) }
-        return Snapshot(active: active, stats: stats, lastProgress: lastProgress)
+        return Snapshot(active: active, stats: stats, lastProgress: lastProgress, timeouts: timeouts)
     }
 
     func reset() {
@@ -94,6 +103,7 @@ final class ScanTrace: @unchecked Sendable {
         open.removeAll()
         stats.removeAll()
         lastProgress = nil
+        timeouts.removeAll()
     }
 
     /// Plain-text lines for the report and the Diagnostics card.
@@ -113,6 +123,10 @@ final class ScanTrace: @unchecked Sendable {
             guard let s = snap.stats[step], s.count > 0 else { continue }
             out.append("\(step.label): \(s.count)×, average \(DiagFormat.seconds(s.totalSeconds / Double(s.count))), "
                        + "slowest \(DiagFormat.seconds(s.maxSeconds)), last \(DiagFormat.seconds(s.lastSeconds))")
+        }
+        for step in Step.allCases {
+            guard let n = snap.timeouts[step], n > 0 else { continue }
+            out.append("Gave up waiting (\(step.label)): \(n) photo\(n == 1 ? "" : "s"), retried on a later scan")
         }
         return out
     }

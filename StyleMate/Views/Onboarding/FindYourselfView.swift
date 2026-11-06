@@ -95,6 +95,8 @@ struct FindYourselfView: View {
                     .animation(DS.Motion.snappy, value: vm.scannedCount)
             }
             .padding(.horizontal, DS.Spacing.xl)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("findYourself.scanning")
 
             ProgressView(value: vm.progress)
                 .progressViewStyle(.linear)
@@ -203,6 +205,7 @@ struct FindYourselfView: View {
                 }
                 .font(DS.Font.footnote.weight(.semibold))
                 .foregroundStyle(DS.Colors.accent)
+                .accessibilityIdentifier("findYourself.selectAll")
             }
             .padding(.top, DS.Spacing.micro)
         }
@@ -249,6 +252,7 @@ struct FindYourselfView: View {
             }
             .buttonStyle(DSPrimaryButton(isDisabled: vm.selectedCount == 0))
             .disabled(vm.selectedCount == 0)
+            .accessibilityIdentifier("findYourself.confirm")
 
             Button {
                 Haptics.light()
@@ -259,6 +263,7 @@ struct FindYourselfView: View {
                     .frame(height: 40)
             }
             .buttonStyle(DSTertiaryButton())
+            .accessibilityIdentifier("findYourself.reject")
         }
         .padding(.horizontal, DS.Spacing.screenH)
         .padding(.top, DS.Spacing.sm)
@@ -326,6 +331,7 @@ struct FindYourselfView: View {
                 }
             }
             .buttonStyle(DSPrimaryButton())
+            .accessibilityIdentifier("findYourself.done")
             .padding(.horizontal, DS.Spacing.lg)
             .padding(.bottom, DS.Spacing.lg)
         }
@@ -411,6 +417,7 @@ private struct FaceCell: View {
                 .animation(DS.Motion.press, value: candidate.isSelected)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("findYourself.face")
         .accessibilityLabel(candidate.isSelected ? "Photo of you, selected" : "Photo, not selected")
         .accessibilityHint("Double-tap to toggle")
     }

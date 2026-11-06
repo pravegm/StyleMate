@@ -16,7 +16,8 @@ name: CI
 #   - main and pull requests: everything.
 #   - feature-branch push: unit tests + Release compile. Add `[ui]` (or `[full]`) to the commit message
 #     for the UI tests and screenshots, `[tests: StyleMateTests/TryOnTests, ...]` to run only those
-#     unit tests, `[skip ci]` for no run at all. Docs-only pushes don't run (and don't cancel a run).
+#     unit tests, `[ui-only: RealFirstRunE2ETests, ...]` for the UI job with only those classes (no `[ui]`
+#     needed), `[skip ci]` for no run at all. Docs-only pushes don't run (and don't cancel a run).
 #   - Run workflow (dispatch): the `unit_tests` and `ui_tests` inputs do the same.
 #   - Studio coverage renders (3 Macs, ~45 min): only with `[studio]` or `[full]` in the commit message
 #     (any branch, main included) or the dispatch input `studio`.
@@ -69,6 +70,7 @@ jobs:
       ui: ${{ steps.tier.outputs.ui }}
       studio: ${{ steps.tier.outputs.studio }}
       unit_tests: ${{ steps.tier.outputs.unit_tests }}
+      ui_only: ${{ steps.tier.outputs.ui_only }}
     steps:
       - uses: actions/checkout@v4
       - name: Pick the jobs
@@ -81,7 +83,7 @@ jobs:
           STUDIO_INPUT: ${{ inputs.studio }}
           TESTS_INPUT: ${{ inputs.unit_tests }}
         run: |
-          ui=false; studio=false; tests=""
+          ui=false; studio=false; tests=""; uionly=""
           if [ "$REF" = "refs/heads/main" ] || [ "$EVENT" = "pull_request" ]; then
             ui=true
           elif [ "$EVENT" = "workflow_dispatch" ]; then
@@ -95,13 +97,18 @@ jobs:
           if [ "$REF" != "refs/heads/main" ] && [ "$EVENT" = "push" ]; then
             case "$MSG" in *"[ui]"*|*"[full]"*) ui=true;; esac
             tests=$(printf '%s' "$MSG" | sed -n 's/.*\[tests:\([^]]*\)\].*/\1/p' | head -1)
+            # `[ui-only: RealFirstRunE2ETests, FirstRunE2ETests]`: the UI job with only these classes.
+            uionly=$(printf '%s' "$MSG" | sed -n 's/.*\[ui-only:\([^]]*\)\].*/\1/p' | head -1)
+            if [ -n "$uionly" ]; then ui=true; fi
           fi
           # Test identifiers only (StyleMateTests/Suite/test), so nothing else reaches xcodebuild.
           tests=$(printf '%s' "$tests" | tr -cd 'A-Za-z0-9_/,.' )
+          uionly=$(printf '%s' "$uionly" | tr -cd 'A-Za-z0-9_/,.' )
           echo "ui=$ui" >> "$GITHUB_OUTPUT"
           echo "studio=$studio" >> "$GITHUB_OUTPUT"
           echo "unit_tests=$tests" >> "$GITHUB_OUTPUT"
-          echo "UI tests: $ui | studio renders: $studio | unit tests: ${tests:-all}"
+          echo "ui_only=$uionly" >> "$GITHUB_OUTPUT"
+          echo "UI tests: $ui (${uionly:-all classes}) | studio renders: $studio | unit tests: ${tests:-all}"
       - name: Pinned garment head
         id: gpin
         run: echo "sha=$(python3 -c 'import json;print(json.load(open("scripts/garment/model.json"))["sha256"])')" >> "$GITHUB_OUTPUT"
@@ -534,57 +541,114 @@ jobs:
           xcrun simctl addmedia "$SIM" StyleMateUITests/Fixtures/street_coat_boots.jpg
 
       - name: UI tests
+        env:
+          UI_ONLY: ${{ needs.plan.outputs.ui_only }}
         run: |
           set -o pipefail
+          # A branch commit's `[ui-only: ClassA, ClassB]` runs only those classes (the real first run has its own step).
+          ONLY="-only-testing:StyleMateUITests"
+          if [ -n "$UI_ONLY" ]; then
+            ONLY=""
+            IFS=',' read -ra T <<< "$UI_ONLY"
+            for t in "${T[@]}"; do
+              case "$t" in ""|*RealFirstRunE2ETests*) ;; *) ONLY="$ONLY -only-testing:StyleMateUITests/${t#StyleMateUITests/}";; esac
+            done
+            [ -n "$ONLY" ] || { echo "[ui-only: $UI_ONLY]: no other UI tests this run"; exit 0; }
+          fi
+          echo "UI tests: $ONLY"
           xcodebuild test-without-building \
             -project StyleMate.xcodeproj -scheme StyleMate \
             -destination "id=$SIM" \
             -derivedDataPath "$RUNNER_TEMP/dd" \
-            -only-testing:StyleMateUITests \
+            $ONLY \
+            -skip-testing:StyleMateUITests/RealFirstRunE2ETests \
             -parallel-testing-enabled NO \
             -resultBundlePath "$RUNNER_TEMP/ui.xcresult" \
             2>&1 | tee ui-test.log | grep -E "✔|✘|Test .*(passed|failed|skipped)|error:|\[UITest\]|\*\* TEST" || true
           grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" ui-test.log
 
+      # The first run as a new user lives it (RealFirstRunE2ETests): nothing pre-granted (the test answers the
+      # real photo / location prompts), the selfie from a fixture face (-uiTestSelfieFixture), and a ~260-photo
+      # library to scan: 8 photos of that person, the other fixtures as strangers, filler with nobody in it, a
+      # few of them stuck like iCloud downloads (-uiTestStallSomePhotos). Last, so the other tests keep their
+      # one-photo library and pre-granted permissions. Runs even when the step above failed.
+      - name: Real first run (fresh permissions, selfie, library scan)
+        if: ${{ !cancelled() }}
+        env:
+          UI_ONLY: ${{ needs.plan.outputs.ui_only }}
+        run: |
+          set -o pipefail
+          if [ -n "$UI_ONLY" ] && ! printf '%s' "$UI_ONLY" | grep -q RealFirstRunE2ETests; then
+            echo "[ui-only: $UI_ONLY]: not this run"; exit 0
+          fi
+          APP=$(ls -d "$RUNNER_TEMP"/dd/Build/Products/Debug-iphonesimulator/StyleMate.app)
+          BUNDLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
+          LIB="$RUNNER_TEMP/ui-library"
+          xcrun swiftc -swift-version 5 -O -o "$RUNNER_TEMP/make-ui-library" scripts/ui_test_library.swift
+          "$RUNNER_TEMP/make-ui-library" StyleMateTests/Fixtures/photos "$LIB" 240
+          cp "$LIB/MANIFEST.txt" ui-library-manifest.txt
+          xcrun simctl addmedia "$SIM" "$LIB"/*.jpg
+          xcrun simctl privacy "$SIM" reset all "$BUNDLE" || true
+          # How Photos imported them: the dates drive the scan's grouping, the original names the stall hook.
+          DB="$HOME/Library/Developer/CoreSimulator/Devices/$SIM/data/Media/PhotoData/Photos.sqlite"
+          sqlite3 "$DB" "SELECT datetime(a.ZDATECREATED + 978307200, 'unixepoch'), b.ZORIGINALFILENAME FROM ZASSET a JOIN ZADDITIONALASSETATTRIBUTES b ON b.ZASSET = a.Z_PK ORDER BY a.ZDATECREATED DESC LIMIT 12;" || true
+          sqlite3 "$DB" "SELECT COUNT(*) FROM ZASSET;" || true
+          xcodebuild test-without-building \
+            -project StyleMate.xcodeproj -scheme StyleMate \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            -only-testing:StyleMateUITests/RealFirstRunE2ETests \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/ui-real.xcresult" \
+            2>&1 | tee ui-real-test.log | grep -E "✔|✘|Test .*(passed|failed|skipped)|error:|\[UITest\]|\*\* TEST" || true
+          grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" ui-real-test.log
+
       - name: Export screenshots
         if: always()
         run: |
           OUT="$RUNNER_TEMP/e2e-screens"
-          RAW="$RUNNER_TEMP/attachments-raw"
-          mkdir -p "$OUT" "$RAW"
-          [ -d "$RUNNER_TEMP/ui.xcresult" ] || { echo "No result bundle"; exit 0; }
-          xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui.xcresult" --output-path "$RAW" || true
-          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/ui.xcresult" > "$OUT/test-summary.json" || true
-          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/ui.xcresult" > "$OUT/test-results.json" || true
+          mkdir -p "$OUT"
+          RAWS=""
+          for B in ui ui-real; do
+            [ -d "$RUNNER_TEMP/$B.xcresult" ] || { echo "No $B result bundle"; continue; }
+            RAW="$RUNNER_TEMP/attachments-raw-$B"
+            mkdir -p "$RAW"
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/$B.xcresult" --output-path "$RAW" || true
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/$B.xcresult" > "$OUT/$B-test-summary.json" || true
+            xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/$B.xcresult" > "$OUT/$B-test-results.json" || true
+            RAWS="$RAWS $RAW"
+          done
+          [ -n "$RAWS" ] || exit 0
           # Name files after the attachment names the tests give them ("test02_...-03-option-1-of-5").
-          python3 - "$RAW" "$OUT" <<'PY'
+          python3 - "$OUT" $RAWS <<'PY'
           import json, os, re, shutil, sys
-          raw, out = sys.argv[1], sys.argv[2]
-          manifest = os.path.join(raw, "manifest.json")
-          entries = json.load(open(manifest)) if os.path.exists(manifest) else []
+          out, raws = sys.argv[1], sys.argv[2:]
           seen = 0
-          for test in entries:
-              for a in test.get("attachments", []):
-                  src = os.path.join(raw, a.get("exportedFileName", ""))
-                  if not os.path.isfile(src):
-                      continue
-                  name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
-                  if name.startswith("Debug description"):                      # XCTest query-debug noise
-                      continue
-                  stem, ext = os.path.splitext(name)
-                  stem = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", stem)        # drop xcresult's _0_<UUID>
-                  stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-")
-                  dst = os.path.join(out, stem + (ext or os.path.splitext(src)[1]))
-                  if os.path.exists(dst):
-                      dst = os.path.join(out, f"{stem}-{seen}{ext}")
-                  shutil.copy(src, dst)
-                  seen += 1
-          if not entries:                                                       # unknown layout: copy as-is
-              for f in os.listdir(raw):
-                  shutil.copy(os.path.join(raw, f), out)
+          for raw in raws:
+              manifest = os.path.join(raw, "manifest.json")
+              entries = json.load(open(manifest)) if os.path.exists(manifest) else []
+              for test in entries:
+                  for a in test.get("attachments", []):
+                      src = os.path.join(raw, a.get("exportedFileName", ""))
+                      if not os.path.isfile(src):
+                          continue
+                      name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                      if name.startswith("Debug description"):                      # XCTest query-debug noise
+                          continue
+                      stem, ext = os.path.splitext(name)
+                      stem = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", stem)        # drop xcresult's _0_<UUID>
+                      stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-")
+                      dst = os.path.join(out, stem + (ext or os.path.splitext(src)[1]))
+                      if os.path.exists(dst):
+                          dst = os.path.join(out, f"{stem}-{seen}{ext}")
+                      shutil.copy(src, dst)
+                      seen += 1
+              if not entries:                                                       # unknown layout: copy as-is
+                  for f in os.listdir(raw):
+                      shutil.copy(os.path.join(raw, f), out)
           print(f"Exported {seen} attachments")
           PY
-          cp ui-build.log ui-test.log "$OUT"/ 2>/dev/null || true
+          cp ui-build.log ui-test.log ui-real-test.log ui-library-manifest.txt "$OUT"/ 2>/dev/null || true
           ls -la "$OUT"
 
       - name: Upload screenshots
@@ -650,7 +714,7 @@ jobs:
         run: |
           BIN=$(find "$RUNNER_TEMP/dd-release/Build/Products" -path "*Release-iphoneos/StyleMate.app/StyleMate" -type f | head -1)
           [ -n "$BIN" ] || { echo "::error::Release binary not found"; exit 1; }
-          if strings "$BIN" | grep -E "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestDemoUser|Continue as test user"; then
+          if strings "$BIN" | grep -E "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestDemoUser|uiTestSelfieFixture|uiTestStallSomePhotos|Continue as test user"; then
             echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1
           fi
           echo "No test hooks in $BIN"
