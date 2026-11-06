@@ -172,11 +172,16 @@ jobs:
             # distribution logs (no keys are written to either).
             tail -60 export-local.log
             LOGS=$(grep -oE "/[^ ]+\.xcdistributionlogs" export-local.log | head -1)
-            [ -n "$LOGS" ] && grep -rhiE "error|fail|denied|forbidden|agreement|status code|NSLocalizedDescription" "$LOGS" | grep -v "^\s*$" | sort -u | head -80
-            # Every API request Xcode made, with its status (URLs only).
-            [ -n "$LOGS" ] && grep -rhoE "got status code [0-9]+ to a [A-Z]+ request to URL: [^ ]+" "$LOGS" | cut -c1-260 | uniq
-            [ -n "$LOGS" ] && grep -rhE -A3 "status code 4[0-9][0-9]" "$LOGS" | cut -c1-400 | head -40
-            [ -n "$LOGS" ] && ls "$LOGS" && grep -rhiE "https://[a-z0-9.]*apple\.com/[^ ]*|40[13]|unauthori|NOT_AUTHORIZED|capabilit|container|entitlement" "$LOGS" | cut -c1-300 | grep -viE "bearer|authorization:" | uniq | head -120
+            if [ -n "$LOGS" ]; then
+              ls "$LOGS" || true
+              # The 60 lines of Xcode's detailed log leading up to the first failure.
+              V=$(ls "$LOGS"/*verbose* 2>/dev/null | head -1)
+              if [ -n "$V" ]; then
+                N=$(grep -n -m1 -iE "Authentication failed|status code 40" "$V" | cut -d: -f1 || true)
+                [ -n "$N" ] && sed -n "$(( N > 60 ? N - 60 : 1 )),$(( N + 10 ))p" "$V" | cut -c1-300 | grep -viE "bearer|authorization:" || true
+              fi
+              grep -rhiE "https://[a-z0-9.]*apple\.com/[^ ]*" "$LOGS" | grep -oE "(GET|POST|PATCH|DELETE)?[^\"]{0,40}https://[a-z0-9.]*apple\.com/[^ ?\"]*" | sort | uniq -c | head -40 || true
+            fi
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/ipa" && cd "$RUNNER_TEMP/ipa" && unzip -q "$RUNNER_TEMP"/local/*.ipa
