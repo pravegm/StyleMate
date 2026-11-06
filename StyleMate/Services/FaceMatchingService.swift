@@ -644,11 +644,8 @@ class FaceMatchingService {
     /// Counts people (bodies) in a photo, so a bystander whose face isn't visible
     /// (back turned) still makes the photo "multi-person".
     func countPeople(in cgImage: CGImage) -> Int {
-        let request = VNDetectHumanRectanglesRequest()
-        request.upperBodyOnly = false
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([request])
-        return (request.results ?? []).filter { $0.confidence > 0.5 }.count
+        // Vision can fail outright (simulator, memory pressure): count faces then, never "nobody".
+        ThumbnailAnalyzer.people(in: cgImage)?.count ?? ThumbnailAnalyzer.fallbackFaces(in: cgImage).count
     }
 
     /// Decides, for an uploaded photo, which image to actually analyze:
@@ -1226,11 +1223,7 @@ class FaceMatchingService {
     }
 
     func photoContainsAnyPerson(_ cgImage: CGImage) -> Bool {
-        let request = VNDetectHumanRectanglesRequest()
-        request.upperBodyOnly = false
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([request])
-        return (request.results ?? []).contains { $0.confidence > 0.5 }
+        ThumbnailAnalyzer.hasPerson(cgImage)
     }
 
     // MARK: - Public State
