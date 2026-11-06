@@ -15,7 +15,19 @@ jobs:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
+      - name: Paywall screenshot from the latest green CI run (for App Review)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success -L 1 --json databaseId --jq '.[0].databaseId')
+          gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n e2e-screens -D "$RUNNER_TEMP/screens" || true
+          SHOT=$(ls "$RUNNER_TEMP"/screens/*LockedPiecesUnlockWithAnnualPlan-03-paywall.png 2>/dev/null | head -1)
+          echo "Using ${SHOT:-no screenshot} from CI run $RUN"
+          echo "REVIEW_SCREENSHOT=$SHOT" >> "$GITHUB_ENV"
       - run: pip install --quiet "pyjwt[crypto]==2.9.0"
       - run: python3 scripts/asc_subscriptions.py

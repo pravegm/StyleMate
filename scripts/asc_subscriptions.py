@@ -189,6 +189,34 @@ for plan in PLANS:
             added += 1
         print(f"  1-week free trial: added in {added} territories ({len(offered)} already had it)")
 
+# Review screenshot (Apple shows "Missing Metadata" until each plan has one): the paywall from
+# the latest green CI run, passed in as REVIEW_SCREENSHOT.
+shot = os.environ.get("REVIEW_SCREENSHOT")
+if shot and os.path.exists(shot):
+    import hashlib
+    data = open(shot, "rb").read()
+    subs_now, _ = get_all(f"/v1/subscriptionGroups/{group['id']}/subscriptions", limit=50)
+    for s in subs_now:
+        sid = s["id"]
+        if call("GET", f"/v1/subscriptions/{sid}/appStoreReviewScreenshot", ok_missing=True).get("data"):
+            print(f"{s['attributes']['name']}: review screenshot already there")
+            continue
+        res = post("subscriptionAppStoreReviewScreenshots",
+                   {"fileName": "paywall.png", "fileSize": len(data)},
+                   {"subscription": rel("subscriptions", sid)})
+        for op in res["attributes"]["uploadOperations"]:
+            chunk = data[op["offset"]:op["offset"] + op["length"]]
+            req = urllib.request.Request(op["url"], data=chunk, method=op["method"],
+                                         headers={h["name"]: h["value"] for h in op.get("requestHeaders", [])})
+            with urllib.request.urlopen(req):
+                pass
+        call("PATCH", f"/v1/subscriptionAppStoreReviewScreenshots/{res['id']}", {"data": {
+            "type": "subscriptionAppStoreReviewScreenshots", "id": res["id"],
+            "attributes": {"uploaded": True, "sourceFileChecksum": hashlib.md5(data).hexdigest()}}})
+        print(f"{s['attributes']['name']}: review screenshot uploaded")
+elif shot:
+    print(f"No review screenshot at {shot}")
+
 # Final state.
 subs, _ = get_all(f"/v1/subscriptionGroups/{group['id']}/subscriptions", limit=50)
 lines = ["## StyleMate Premium in App Store Connect", ""]
