@@ -1,155 +1,139 @@
 # StyleMate: where things stand (founder handover)
 
-Plain-language summary of the unsupervised rebuild (4–5 Nov 2026). Technical detail lives in
-`docs/PROJECT-LOG.md`, the reviews in `docs/reviews/`, and launch/legal detail in
-`docs/LAUNCH-READINESS.md` and `docs/MODEL-LICENSING.md`.
+Plain-language summary as of 6 Nov 2026, after the overnight run. Technical detail lives in
+`docs/PROJECT-LOG.md`, reviews in `docs/reviews/`, launch and legal detail in
+`docs/LAUNCH-READINESS.md` and `docs/MODEL-LICENSING.md`, and the setup steps in `docs/TESTFLIGHT.md`.
 
 ## What the app does now
 
-Everything runs **on the iPhone**. No API keys and no servers. People sign in with Apple (your
-decision, 5 Nov): it's the only way in, and StyleMate gets a private ID and the first name, never
-the email. The only thing that leaves the phone is the user's own iCloud backup.
+Everything runs **on the iPhone**: no API keys and no StyleMate server. What leaves the phone is the
+user's own iCloud backup, Apple's sign-in and payments, and a rounded (~1 km) location for the weather.
 
-1. **First run (about 1 minute to something useful)**: welcome, Sign in with Apple, a 3-frame selfie, photo access,
-   then "Find yourself": the app groups the faces in your library and asks "Is this you?". You tap
-   your face once.
-2. **Digital wardrobe, built automatically**: the scan looks for photos of *you* (face matching:
-   SCRFD + AdaFace), separates you from other people, and cuts out every garment and accessory
-   (FASHN human parser + Fashionpedia labeler, hidden parts filled in). Each piece is named by
-   Marqo-FashionSigLIP ("Olive pique polo", "Black Chelsea boots") and its colours are read off the
-   photo. It starts with the "First 40": your 40 best recent outfit photos, so the closet fills
-   within a minute. Then it works through the rest in the background. When it isn't sure, a piece
-   waits behind a "We weren't sure about 2 items" card instead of cluttering the closet.
-3. **Lifelike product photos**: a background "studio" queue redraws each cutout as a clean
-   product shot, using an on-device image model (Stable Diffusion 1.5, converted for Apple's Neural
-   Engine). Every render is checked against your real garment, and colours are matched back to it;
-   a render that doesn't look like your item is thrown away and the cutout stays. "From your photo"
-   on the item page always shows the original. *Status: jackets and shirts look like real product
-   photos; bottoms are still being tuned (see "Still open").*
-4. **"What should I wear today?"**: 5 complete outfits from your closet, using today's weather
-   (location rounded to roughly 1 km), the occasion, your mood (8 moods) and any typed request
-   ("something for an outdoor wedding"). Every piece can be swapped or locked, and options can be
-   skipped. An optional 7:30 am notification shows the morning's look with a picture.
-5. **Calendar**: "Wear today" logs the outfit to the date. New photos of you wearing closet pieces
-   prompt "Wore this on Tue? Log it".
-6. **iPhone Duo**: the app runs natively on both screens. Open flat, the main screens split at the
-   fold (closet | item, outfit board | pieces, calendar | day). Nothing sits across the crease.
-   Half-open in book pose, the split follows the hinge. On the closed cover screen it's the normal
-   iPhone layout. Your place is kept when you fold and unfold.
-7. **Dark mode**: every screen follows the phone's light/dark setting. Clothes sit on a soft light
-   "studio" card even in dark mode, so black garments stay visible.
-8. **Try with sample photos**: 6 bundled sample photos let anyone (including Apple's reviewer)
-   see a full wardrobe without their own photos. Samples are removed with one tap.
-9. **StyleMate Premium (how it makes money)**: everything is free for the first 50 pieces in the
-   wardrobe, per account across all their iPhones (sample clothes don't count; two phones can't
-   make it 100). Premium belongs to the account too: the purchase is tied to it. Premium, monthly or yearly through Apple, makes it
-   unlimited. When the closet is full, the photo scan keeps finding pieces and keeps them waiting:
-   Home says "23 more pieces found — Unlock with Premium", and subscribing puts them all in the
-   closet at once. Adding by camera or gallery at 50 opens the plans instead. Nobody ever loses a
-   piece: if Premium ends, everything already in the closet stays, only new pieces wait again.
-   Prices are set by you in App Store Connect (suggested £3.99 a month, £24.99 a year with a
-   1-week free trial); the app shows whatever Apple returns. There is no StyleMate server, and
-   Apple handles all payments. *Status: built and tested with Apple's StoreKit Test on the
-   simulator; real (free, sandbox) purchases need the App Store Connect setup below first.*
-10. **Your account**: Profile › Account has Sign Out (the closet stays on the phone for next time)
-   and Delete Account. Delete Account removes the wardrobe, calendar, face data and the account's
-   iCloud backup. Apple also wants the sign-in "token" revoked, which needs a small server we
-   don't have. The delete screen shows people how to stop it in Settings instead. Whether to add
-   that server is your call (`docs/LAUNCH-READINESS.md`, top). Testers who used a build without
-   sign-in keep their closet: the first account to sign in on that phone takes it over.
+1. **Sign in with Apple, then the first run.** Welcome → Sign in with Apple (the only way in; name
+   only, never email) → a 3-frame selfie → photo access → "Find yourself" (tap your face once) → the
+   first scan. Skip the selfie and you land on Home with a card offering a selfie or the sample photos.
+2. **Digital wardrobe, built automatically.** The scan finds photos of *you* (face models YuNet +
+   SFace), separates you from other people, and cuts out every garment and accessory with
+   StyleMate's own garment model, **GarmentNet**. Each piece is named ("Olive pique polo", "Black
+   Chelsea boots") and its colours are read off the photo. Pieces it isn't sure about wait in "We
+   weren't sure" instead of cluttering the closet. "Your closet is ready: N pieces" notifications
+   arrive at 10, 25 and 50 pieces (only if notifications are already allowed).
+3. **Product photos.** A background studio redraws cutouts as catalogue shots on the phone: jackets,
+   shirts, tees, coats, dresses, jeans and all trousers, sneakers, boots, heels and sandals, wide-brim
+   hats and beanies. Every render is checked against your real piece; one that doesn't match, has an
+   invented logo, or shows a pair of shoes is thrown away and the clean cutout stays. Caps and low
+   shoes (loafers, oxfords, boat shoes) keep their cutout. Light-grey coats are named "Silver".
+4. **"What should I wear today?"** 5 outfits from your closet for today's weather, occasion and mood,
+   with stylist notes that don't repeat. It **learns your taste** on the phone from Wear, Keep, Swap
+   and Skip ("Not my style / Not today") and says why ("Picked because you often wear navy with
+   grey"); Profile → Your style → Reset clears it. Until the closet can make an outfit, Home says
+   what's missing.
+5. **Outfit on you (Beta).** Today's Outfit opens on "Pieces"; "On you · BETA" draws the outfit on
+   your own full-length photo. Good on straight, arms-down photos; weak on crossed legs and leaning
+   poses (known limits in `docs/TRY-ON.md`).
+6. **Wardrobe insights** (Profile → Your style): share of the closet worn, most and never worn,
+   colour balance, pieces per shelf, look-alikes. Free for now; one switch (`InsightsAvailability`)
+   makes it Premium.
+7. **Calendar**: "Wear today" logs the outfit; new photos of you prompt "Wore this on Tue?".
+8. **iPhone Duo**: both screens, natively. Open flat or half-open, screens split either side of the
+   fold and nothing sits on it; an automatic test now fails the build if any control lands on the
+   fold. Closed, the cover screen is the normal iPhone layout.
+9. **Dark mode** everywhere; **sample photos** let anyone (including Apple's reviewer) try it.
+10. **StyleMate Premium.** The first 50 pieces per account are free (samples don't count), then
+    monthly or yearly through Apple. The count is per account across all its phones: if two phones go
+    over 50 together, the 50 oldest stay free and the rest wait for Premium, the same on every phone.
+    Nothing already in the closet is ever removed. Restore, Terms and Privacy are always visible on
+    the paywall.
 
-How it was checked: every change runs through GitHub Actions on a Mac. Each push runs the full unit-test
-suite, including real-model extraction on 13 real photos, face matching, outfit engine,
-reliability and the studio render with a parity check against the reference implementation.
-UI tests then walk every flow on an iPhone simulator, and a dedicated workflow screenshots every
-screen on an iPhone Duo simulator, flat, half-open and closed.
+## How good the wardrobe is now (measured on every push)
 
-## Getting it on your phones
+13 real street photos, 56 hand-labelled garments. The build fails if any number drops more than 3
+points below the baseline.
 
-Follow `docs/TESTFLIGHT.md` (about 15 minutes, once). In short:
-1. Register the bundle ID `com.stylemates.StyleMate` with **iCloud and Sign In with Apple**, and
-   create the App Store Connect record. If the ID already exists, open it and tick Sign In with
-   Apple; without it the TestFlight build stops.
-2. Add the 4 repository secrets you already use for the Duo games.
-3. Turn on GitHub Pages (publishes the privacy policy).
-4. Press **Run workflow** on the TestFlight action. Install from TestFlight on the iPhone 17 Pro
-   and the Duo.
-5. Run the iCloud schema step again (`docs/TESTFLIGHT.md` §5): this build adds four fields that
-   keep the free pieces the same on every phone. Until then TestFlight builds work but don't back up.
-6. For Premium: accept the **Paid Apps agreement** (with bank and tax details) and create the
-   subscription group with its two plans, exactly as in `docs/TESTFLIGHT.md` §6 (about 30
-   minutes). Buying in TestFlight is free.
+| | Start of the rebuild | Old non-commercial models | Now (GarmentNet, ours) |
+|---|---|---|---|
+| Garments found | 82% | 95% | 98% |
+| Right category | – | 96% | 100% |
+| Right product ("polo", "Chelsea boot") | 76% | 89% | 91% |
+| Right exact colour | 74% | 91%* | 89% |
+| Wrong garments added | 0 | ~1 in 50 | ~1 in 56 |
+| Seconds per photo (cloud test Mac) | – | ~120 | ~10 |
 
-Install on Wi-Fi: the on-device models make the app large (about 1.3 GB). The Release build was
-checked on 5 Nov: every model is inside the app and no test-only code ships (run 41959627949).
+\* With the "Silver" colour fix that landed alongside.
 
-**What to try first**: grant photo access to your full library (not "Selected photos") and let
-the first scan run with the phone unlocked for a few minutes. Studio photos keep arriving in the
-background, and fastest when the phone is charging.
+## Licences: the launch blocker is cleared
 
-**Then send us the numbers (10 minutes, once per phone)**: plugged in, open Profile → About →
-Diagnostics, press **Run benchmark**, do the **hinge check** on the Duo, and press **Share report**.
-It tells us how fast the AI really is on your iPhones (the cloud test Mac has no Neural Engine). The
-report contains timings and phone facts only. The licence credits the models need are under Profile →
-About → Acknowledgements.
+Every bundled model may now be used in a paid app:
 
-## Decisions only you can make (before App Store launch, not before TestFlight)
-
-1. **Model licences: the one real launch blocker.** Three of the bundled models are licensed for
-   non-commercial use only: the face detector (InsightFace SCRFD), and both garment segmenters
-   (NVIDIA SegFormer licence). The face recogniser (AdaFace) was trained on research-only data.
-   TestFlight testing is fine; selling the app is not. Options, in `docs/MODEL-LICENSING.md` §5:
-   email InsightFace for a commercial licence (address in the doc), retrain the garment segmenter
-   on a commercial-friendly backbone (about one engineer-week plus ~$50–300 of GPU time), or use the
-   weaker free face models. Have a lawyer look at face data rules (BIPA, GDPR Art. 9) before launch.
-2. **Which developer account.** Apple flagged several Duo games from the same account for 4.3
-   "spam" recently. Space StyleMate's submission away from any new game submission.
-3. **App Store listing**: a draft name, subtitle, keywords, description and screenshot plan are in
-   `docs/APP-STORE-LISTING.md`.
-4. **Premium prices and trial**: the suggestion is £3.99 a month and £24.99 a year (about 48%
-   cheaper) with a 1-week free trial on the yearly plan. You can change prices in App Store
-   Connect at any time without a new build. The 50-piece free limit is in the app
-   (`WardrobeAllowance.freeItemLimit`); changing it needs a build. Subscriptions need the Paid
-   Apps agreement and banking/tax details (`docs/TESTFLIGHT.md` §6).
-
-## How good the wardrobe is now (measured)
-
-On 13 real street photos with 56 hand-labelled garments, run on every push:
-
-| | Before the rebuild | Now |
+| Job | Model | Licence |
 |---|---|---|
-| Garments found | 82% | 95% |
-| Right product ("polo", "Chelsea boot") | 76% | 89% |
-| Right main colour | 74% | 91% |
-| Wrong garments added | 0 | about 1 in 50 |
+| Faces | YuNet + SFace (OpenCV Zoo) | MIT, Apache-2.0 |
+| Garments | GarmentNet: our own head on Meta's DINOv2, trained on Fashionpedia + COCO | Apache-2.0; data CC BY 4.0 |
+| Naming | Marqo-FashionSigLIP | Apache-2.0 |
+| Product photos, outfit on you | Stable Diffusion 1.5 (dreamshaper-8) | OpenRAIL-M |
 
-The test fails if any of these drops by more than 3 points, so quality can't quietly slip.
-Last fully green run of everything on `main` (light and dark): CI 41966469571 (commit 8db91ff);
-iPhone Duo screenshots: Duo 41966483488.
+The build refuses to ship if any old non-commercial model comes back, and the old models are deleted
+from the build caches. Credits are in Profile → About → Acknowledgements.
 
-## Still open (being worked on, or next)
+Trade-off: the free face models are a step below the old research ones. Ordinary photos match about
+as well (~98% at the same strict bar), but sunglasses and tiny faces are harder, so more of your
+photos go to "Is this you?" instead of being added automatically. To get the stronger face models
+back, a draft email to InsightFace for a commercial licence is in `docs/MODEL-LICENSING.md` §9; the
+app switches over with one setting.
 
-- Studio renders: sneakers, boots, heels and sandals (one shoe from the side), wide-brim hats, beanies and every pair of trousers now render as
-  catalogue photos too, from product templates; 13 of 13 test items were accepted in CI (Nov 2026),
-  and light-grey coats in sun are now named light grey (Silver). Still weak: the render follows the
-  item's name and colour, so a misnamed item gets the wrong style (oxfords named "Loafers" became a
-  maroon tassel loafer; a cream sun hat measured Gray/Brown became a taupe fedora). Shoe and hat renders
-  with an invented brand mark, and pairs, are now rejected (the cutout stays). Loafers, oxfords,
-  flats, boat shoes and caps keep their cleaned-up cutout: their renders drew a pair or invented a
-  crest too often to trust. Heels and sandals have templates but no test photo yet.
-- Scan speed: on the cloud test Mac each photo takes about 2 minutes (it looks again at the head,
-  hands and feet to find small accessories). The iPhone's Neural Engine should be several times
-  faster, but this has not been measured on a real phone yet.
-- After a restore to a new iPhone, items keep the picture they showed (studio photo or cutout), but
-  the "From your photo" original stays on the old phone. The new phone may also redraw some studio
-  photos once in the background. Harmless, but it wastes battery; fix by syncing the original too.
-- On the Duo's closed cover screen, the outfit picker shows a black dot top right. That's the
-  cover camera, which the system draws when a full-screen card is open; nothing is hidden behind it.
-- Real-device checks the simulator can't do: scan speed on a 10,000-photo library, render time on
-  the Neural Engine, Duo hinge accuracy and the seated pose, the morning notification and
-  background refresh.
-- New iPhone restore: done. A fresh install signed into the same iCloud account restores the
-  wardrobe (items and photos; outfit history and face data stay on the old phone).
-- iCloud schema: TestFlight builds use Apple's "Production" iCloud environment, which needs the
-  app's data layout uploaded once (5 minutes, `docs/TESTFLIGHT.md` §5). Until then everything works,
-  but the backup doesn't.
+## Your actions
+
+Before TestFlight (`docs/TESTFLIGHT.md`, about 30 minutes):
+1. Register `com.stylemates.StyleMate` with **iCloud** and **Sign In with Apple** ticked.
+2. Create the App Store Connect record; add the 4 repository secrets (same as the Duo games).
+3. Turn on GitHub Pages (the privacy policy).
+4. Run the CloudKit schema workflow, then deploy the schema to Production (otherwise backup is off).
+5. For Premium: the Paid Apps agreement, bank and tax details, then the subscription group and its
+   two plans (§6). Purchases in TestFlight are free.
+6. Press **Run workflow** on the TestFlight action. The Release build was checked on 6 Nov
+   (run 42186576423): every model is inside and no test-only code ships.
+
+On your phones (about 20 minutes):
+- Profile → About → Diagnostics → **Run benchmark** (plugged in), the Duo hinge check, then **Share
+  report**.
+- Sign in with Apple for real (the simulator can only use a test stand-in), one test purchase, and
+  Delete Account.
+- The device-only checks in `docs/LAUNCH-READINESS.md`: overnight background scan, Replace photo,
+  the midnight refresh of Today's look, the location prompt ("Precise: Off"), landscape.
+- Run **Improve Recognition** once after updating: the new face models rebuild your face set.
+
+Before App Store launch:
+- A lawyer's view on face data (BIPA, GDPR Art. 9) and on the face models' research training data.
+- Account deletion: the app deletes everything and shows how to stop Apple sign-in in Settings.
+  Apple prefers the app to revoke the sign-in itself, which needs a tiny server holding your sign-in
+  key. Optional; see `docs/LAUNCH-READINESS.md`.
+- Space the submission away from new Duo-game submissions (4.3 risk on the account).
+- Prices: suggested £3.99/month and £24.99/year with a 1-week trial; changeable at any time in App
+  Store Connect.
+
+## Still open
+
+- **Outfit on you is Beta.** Seams and leftovers of the old outfit show on some photos, crossed legs
+  merge, and a translucent sliver can appear beside slim pieces. With GarmentNet more of each first
+  draft is repainted; only the polished (checked) image is ever shown.
+- **Accessory cutouts** (sunglasses, watch) can carry a little skin until the product photo replaces
+  them. A fix limited to eyewear and jewellery is on `feat/garment-cutouts`: it keeps product naming
+  and fragments level, but on its latest run one colour slipped below the bar, so it is not merged.
+- **Fragmented pieces**: a coat crossed by a bag or scarf can come out in parts. Sending heavily
+  broken pieces to the product-photo studio would fix it, but changes what gets rendered; your call.
+- **Product photos follow the item's name and colour**, so a misnamed item gets the wrong style; heels
+  and sandals have templates but no test photo yet.
+- **Real-device numbers are still estimates**: scan speed, render time on the Neural Engine, try-on
+  time (~20 s per outfit expected), Duo hinge accuracy. The Diagnostics report gives us the real ones.
+- After a restore to a new iPhone the "From your photo" original stays on the old phone.
+- On the Duo's closed cover screen the system draws the cover camera as a black dot when a
+  full-screen card is open; nothing is hidden behind it.
+- A longer-trained garment model was tried and did not beat the shipped one; the shipped one stays.
+
+## Proof
+
+`main` at b9d31e4 has everything merged. Full CI 42186482845 (unit, UI light + dark, Release with the
+licence gates) and the TestFlight archive check 42186576423 are green. The final iPhone Duo run
+42186505521 passed its first three screenshot tests and was cut off by a time limit during the
+fourth (sign-in); the limit is raised (83ffa9e) and the re-run is 42193809511. Every branch's own
+Duo run was green before it merged.
