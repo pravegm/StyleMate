@@ -167,7 +167,14 @@ jobs:
             -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             2>&1 | tee export-local.log | grep -E "error:|EXPORT" || true
-          grep -q "\*\* EXPORT SUCCEEDED \*\*" export-local.log
+          if ! grep -q "\*\* EXPORT SUCCEEDED \*\*" export-local.log; then
+            # Show why signing failed: the tail of xcodebuild's output and the errors in Xcode's
+            # distribution logs (no keys are written to either).
+            tail -60 export-local.log
+            LOGS=$(grep -oE "/[^ ]+\.xcdistributionlogs" export-local.log | head -1)
+            [ -n "$LOGS" ] && grep -rhiE "error|fail|denied|forbidden|agreement|status code|NSLocalizedDescription" "$LOGS" | grep -v "^\s*$" | sort -u | head -80
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/ipa" && cd "$RUNNER_TEMP/ipa" && unzip -q "$RUNNER_TEMP"/local/*.ipa
           APP=$(ls -d "$RUNNER_TEMP"/ipa/Payload/*.app)
           codesign -dvv "$APP" 2>&1 | grep -E "Authority|TeamIdentifier" || true
