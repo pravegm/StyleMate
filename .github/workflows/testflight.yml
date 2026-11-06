@@ -173,6 +173,9 @@ jobs:
             tail -60 export-local.log
             LOGS=$(grep -oE "/[^ ]+\.xcdistributionlogs" export-local.log | head -1)
             [ -n "$LOGS" ] && grep -rhiE "error|fail|denied|forbidden|agreement|status code|NSLocalizedDescription" "$LOGS" | grep -v "^\s*$" | sort -u | head -80
+            # Every API request Xcode made, with its status (URLs only).
+            [ -n "$LOGS" ] && grep -rhoE "got status code [0-9]+ to a [A-Z]+ request to URL: [^ ]+" "$LOGS" | cut -c1-260 | uniq
+            [ -n "$LOGS" ] && grep -rhE -A3 "status code 4[0-9][0-9]" "$LOGS" | cut -c1-400 | head -40
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/ipa" && cd "$RUNNER_TEMP/ipa" && unzip -q "$RUNNER_TEMP"/local/*.ipa
