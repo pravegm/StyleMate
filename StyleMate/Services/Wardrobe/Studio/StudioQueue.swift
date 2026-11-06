@@ -16,7 +16,8 @@ final class StudioStore {
 
     /// Bump to re-render every item after a pipeline change.
     /// 2: stricter render gate, new prompts, UUID seeds (Nov 2026).
-    static let version = 2
+    /// 3: product templates for shoes, hats and all trousers (Nov 2026).
+    static let version = 3
 
     private let lock = NSLock()
     private var entries: [String: Entry] = [:]
@@ -244,15 +245,20 @@ final class StudioQueue: ObservableObject {
                                    pattern: item.pattern, material: item.material, sleeve: item.sleeveLength,
                                    neckline: item.neckline, details: item.details, kind: kind,
                                    truncated: embeddingStore.truncated(for: item.id) ?? false, cutout: cutout.cgImage,
-                                   embedding: embeddingStore.embedding(for: item.id))
+                                   embedding: embeddingStore.embedding(for: item.id), fit: item.fit)
         let embedding: [Float]? = embeddingStore.embedding(for: item.id)
         let seed = Self.seed(for: item.id)
         let perf = PerfLog.begin(.studioRender)
-        let outcome: StudioPipeline.Outcome = await Task.detached(priority: .utility) {
-            let emb = embedding ?? cutout.cgImage.flatMap { FashionClassifier.onWhite($0, side: 224) }.flatMap { WardrobeML.shared.embed($0) }
-            guard let emb else { return StudioPipeline.Outcome.failed }
-            return StudioPipeline.studioOutcome(cutout: cutout, embedding: emb, plan: plan, seedBase: seed)
-        }.value
+        // A render blocks its thread for 40–60 s (the renderer's queue.sync), so it runs on a
+        // GCD thread, not a Swift-concurrency one: holding a cooperative-pool thread that long
+        // starves every other task (the pool has one thread per core).
+        let outcome: StudioPipeline.Outcome = await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .utility).async {
+                let emb = embedding ?? cutout.cgImage.flatMap { FashionClassifier.onWhite($0, side: 224) }.flatMap { WardrobeML.shared.embed($0) }
+                guard let emb else { cont.resume(returning: StudioPipeline.Outcome.failed); return }
+                cont.resume(returning: StudioPipeline.studioOutcome(cutout: cutout, embedding: emb, plan: plan, seedBase: seed))
+            }
+        }
         perf.end(outcome: PerfLog.Outcome(outcome))
 
         switch outcome {

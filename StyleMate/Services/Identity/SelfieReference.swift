@@ -1,6 +1,6 @@
 import UIKit
 
-/// Runs identity work (SCRFD + AdaFace through `FaceMatchingService`) one job at a time, off the
+/// Runs identity work (face detection + embedding through `FaceMatchingService`) one job at a time, off the
 /// main thread. The face service keeps its gallery in plain arrays, so the onboarding flow never
 /// lets two of its own jobs touch it at once.
 actor IdentityWorker {
@@ -106,12 +106,14 @@ enum SelfieReferenceStore {
     // MARK: Identity (call on IdentityWorker)
 
     /// Embeddings of a frame upright and mirrored. Front-camera frames are mirrored while most
-    /// library photos aren't, and AdaFace isn't mirror-invariant, so both go in.
+    /// library photos aren't. With a flip-averaged embedder (SFace profile) one embedding is
+    /// already mirror-invariant, so the mirrored copy is skipped.
     static func embeddingsBothWays(_ image: UIImage) -> [[Float]] {
         guard let cg = LibraryFaceScanner.uprightCGImage(image) else { return [] }
         var out: [[Float]] = []
         if let e = FaceMatchingService.shared.evaluateFaceForReference(in: cg)?.embedding { out.append(e) }
-        if let flipped = mirrored(cg), let e = FaceMatchingService.shared.evaluateFaceForReference(in: flipped)?.embedding {
+        if !FaceModelProfile.active.flipAverage,
+           let flipped = mirrored(cg), let e = FaceMatchingService.shared.evaluateFaceForReference(in: flipped)?.embedding {
             out.append(e)
         }
         return out
@@ -177,7 +179,7 @@ enum SelfieFrameChecker {
         }
         let W = CGFloat(cg.width), H = CGFloat(cg.height)
         // Ignore tiny faces far behind the user (posters, passers-by).
-        let faces = SCRFDDetector.shared.detect(in: cg).filter { $0.boxPixels.width >= W * 0.08 }
+        let faces = FaceDetector.shared.detect(in: cg).filter { $0.boxPixels.width >= W * 0.08 }
         guard let face = faces.max(by: { $0.boxPixels.width * $0.boxPixels.height < $1.boxPixels.width * $1.boxPixels.height }) else {
             return SelfieFrameResult(issue: .noFace, embedding: nil, yaw: nil)
         }

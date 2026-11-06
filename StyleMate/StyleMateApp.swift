@@ -196,6 +196,9 @@ struct RootView: View {
         .onAppear {
             hasPhotoAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan
             if let id = authService.user?.id { activateProfile(id) }
+            #if DEBUG
+            TryOnDebugSeed.applyIfNeeded()   // UI tests only (-uiTestSeedTryOn)
+            #endif
         }
         // Apple may have revoked the sign-in (Settings › Sign in with Apple › Stop Using).
         .task { await authService.verifyCredential() }

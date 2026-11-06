@@ -520,7 +520,7 @@ struct OnboardingSelfieView: View {
                         UIApplication.shared.open(url)
                     }
                 } label: {
-                    Text("Open Settings")
+                    Text("Open settings")
                 }
                 .buttonStyle(DSPrimaryButton())
 

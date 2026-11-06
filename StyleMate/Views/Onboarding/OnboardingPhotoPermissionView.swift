@@ -155,7 +155,7 @@ struct OnboardingPhotoPermissionView: View {
                     Haptics.medium()
                     openSettings()
                 } label: {
-                    Text("Open Settings")
+                    Text("Open settings")
                 }
                 .buttonStyle(DSPrimaryButton())
 

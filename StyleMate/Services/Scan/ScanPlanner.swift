@@ -346,6 +346,23 @@ extension ScanProgress {
         return false
     }
 
+    /// "Is this you?" questions kept at most. Each holds an embedding and the whole list is
+    /// rewritten at every checkpoint; nobody answers thousands. Past it the least likely go.
+    static let maxPendingReviews = 200
+
+    /// Queues an "Is this you?" question (once per photo), keeping the `maxPendingReviews`
+    /// most similar to the user.
+    mutating func queueReview(_ review: PendingFaceReview) {
+        var pending = pendingReviews ?? []
+        guard !pending.contains(where: { $0.assetId == review.assetId }) else { return }
+        pending.append(review)
+        if pending.count > Self.maxPendingReviews,
+           let weakest = pending.indices.min(by: { pending[$0].similarity < pending[$1].similarity }) {
+            pending.remove(at: weakest)
+        }
+        pendingReviews = pending
+    }
+
     /// Starts `job`, or keeps the unfinished one if it's the same range (so a
     /// restart of the same scan resumes instead of restarting its counters).
     /// Returns the job now active.

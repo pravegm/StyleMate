@@ -77,6 +77,10 @@ class WardrobeViewModel: ObservableObject {
 
     private(set) var currentUserEmail: String = ""
     private var suspendSaving = false
+    /// Stored entries this build can't read (an unknown category or pattern, a missing key),
+    /// as their raw JSON. They aren't shown, but every save writes them back unchanged, so a
+    /// newer build (or a fix) still finds them. Never dropped.
+    private(set) var unreadableEntries: [Data] = []
 
     /// The UserDefaults key a user's wardrobe is stored under. Apple ids / emails contain
     /// dots, so the raw id is NOT the key — anything that deletes or reads the wardrobe
@@ -85,14 +89,22 @@ class WardrobeViewModel: ObservableObject {
         "wardrobe_\(userId.replacingOccurrences(of: "@", with: "_").replacingOccurrences(of: ".", with: "_"))"
     }
 
+    /// Where a wardrobe blob that isn't a JSON array at all is copied before anything can
+    /// overwrite it.
+    static func unreadableBackupKey(for userId: String) -> String { storageKey(for: userId) + "_unreadable" }
 
     static func lockedKey(for userId: String) -> String { "locked" + storageKey(for: userId) }
     static func metaKey(for userId: String) -> String { "itemMeta_" + storageKey(for: userId) }
 
+    /// Loading never writes the closet: it is only rewritten by a real change, so a build that
+    /// can't read part of it can't shrink it. (The first load with the account-level free tier
+    /// writes its bookkeeping, under separate keys.)
     func load(forUser email: String) {
+        let stored = WardrobeViewModel.loadStored(forUser: email)
+        suspendSaving = true
         currentUserEmail = email
         ledger = SyncLedger.load(userKey: WardrobeViewModel.storageKey(for: email))
-        let loaded = WardrobeViewModel.loadItems(forUser: email)
+        let loaded = stored.items
         let savedMeta = WardrobeViewModel.loadMeta(forUser: email)
         var meta = savedMeta ?? [:]
         if savedMeta == nil {
@@ -100,17 +112,24 @@ class WardrobeViewModel: ObservableObject {
             for item in loaded { meta[item.id] = .legacy }
         }
         var locked = WardrobeViewModel.loadLocked(forUser: email)
+        var importedOld = false
         for imported in LegacyLockedImport.take(forUser: email) where !locked.contains(where: { $0.item.id == imported.item.id }) {
             locked.append(imported)
+            importedOld = true
         }
         for entry in locked where meta[entry.item.id] == nil { meta[entry.item.id] = entry.meta }
-        suspendSaving = true
         self.meta = meta
+        unreadableEntries = stored.unreadable
         items = loaded
         lockedItems = locked.map { $0.item }
         suspendSaving = false
         assignMissingMeta()
-        save(forUser: email)
+        // Only the one-time free-tier bookkeeping is written here, never the closet itself.
+        if savedMeta == nil || importedOld { saveBookkeeping(forUser: email) }
+        if !stored.unreadable.isEmpty {
+            dlog("[Wardrobe] Kept \(stored.unreadable.count) stored items this build can't read")
+        }
+        ItemEmbeddingStore.shared.preload()
     }
 
     private static func loadMeta(forUser email: String) -> [UUID: ItemMeta]? {
@@ -168,22 +187,54 @@ class WardrobeViewModel: ObservableObject {
 
     /// Decodes a user's stored wardrobe (empty when there is none).
     static func loadItems(forUser email: String) -> [WardrobeItem] {
-        guard let data = UserDefaults.standard.data(forKey: storageKey(for: email)),
-              let decoded = try? JSONDecoder().decode([WardrobeItemCodable].self, from: data) else {
-            return []
-        }
-        // Sanitize on load: clears garment fields wrongly attached to accessories/footwear
-        // in older data. The didSet re-saves the cleaned set, so this self-heals once.
-        return decoded.compactMap { $0.toWardrobeItem()?.sanitizedAttributes() }
+        loadStored(forUser: email).items
     }
+
+    static func loadStored(forUser email: String) -> WardrobeStorage.Decoded {
+        flushSaves()   // a save still queued would make this read stale
+        guard let data = UserDefaults.standard.data(forKey: storageKey(for: email)) else {
+            return WardrobeStorage.Decoded(items: [], unreadable: [], isArray: true)
+        }
+        let decoded = WardrobeStorage.decode(data)
+        if !decoded.isArray, UserDefaults.standard.data(forKey: unreadableBackupKey(for: email)) == nil {
+            UserDefaults.standard.set(data, forKey: unreadableBackupKey(for: email))
+            dlog("[Wardrobe] Stored wardrobe unreadable; backed it up before any save")
+        }
+        return decoded
+    }
+
+    // Saves are encoded and written off the main thread, in order, on one serial queue (the
+    // whole wardrobe was re-encoded on main on every change). A burst of changes — a scan
+    // adding pieces one by one — writes only the newest snapshot: older queued ones skip.
+    private static let saveQueue = DispatchQueue(label: "com.stylemates.StyleMate.wardrobeSave", qos: .utility)
+    private static let saveLock = NSLock()
+    private static var saveTickets: [String: Int] = [:]   // newest ticket per storage key (saveLock)
+    private static var lastTicket = 0
 
     func save(forUser email: String) {
         guard !email.isEmpty else { return }
         let key = WardrobeViewModel.storageKey(for: email)
-        let codableItems = items.map { WardrobeItemCodable(from: $0) }
-        if let data = try? JSONEncoder().encode(codableItems) {
-            UserDefaults.standard.set(data, forKey: key)
+        let snapshot = items, kept = unreadableEntries
+        WardrobeViewModel.saveLock.lock()
+        WardrobeViewModel.lastTicket += 1
+        let ticket = WardrobeViewModel.lastTicket
+        WardrobeViewModel.saveTickets[key] = ticket
+        WardrobeViewModel.saveLock.unlock()
+        WardrobeViewModel.saveQueue.async {
+            WardrobeViewModel.saveLock.lock()
+            let newest = WardrobeViewModel.saveTickets[key] == ticket
+            WardrobeViewModel.saveLock.unlock()
+            guard newest else { return }
+            if let data = WardrobeStorage.encode(snapshot, keeping: kept) {
+                UserDefaults.standard.set(data, forKey: key)
+            }
         }
+        saveBookkeeping(forUser: email)
+    }
+
+    /// The waiting pieces and the free-tier bookkeeping (small; written straight away).
+    private func saveBookkeeping(forUser email: String) {
+        guard !email.isEmpty else { return }
         if let data = try? JSONEncoder().encode(lockedItems.map { WardrobeItemCodable(from: $0) }) {
             UserDefaults.standard.set(data, forKey: WardrobeViewModel.lockedKey(for: email))
         }
@@ -195,6 +246,9 @@ class WardrobeViewModel: ObservableObject {
         }
     }
 
+    /// Waits until every queued save is written. Never call it on the save queue.
+    static func flushSaves() { saveQueue.sync {} }
+
     func clear() {
         flushTask?.cancel()
         flushTask = nil
@@ -205,6 +259,7 @@ class WardrobeViewModel: ObservableObject {
         allowanceNotice = nil
         suspendSaving = false
         currentUserEmail = ""
+        unreadableEntries = []
         ledger = SyncLedger()
     }
 
@@ -629,9 +684,11 @@ class WardrobeViewModel: ObservableObject {
         let zone = includingCloud ? CloudKitService.shared.currentZoneName : ""
 
         if currentUserEmail == userId { clear() }
+        WardrobeViewModel.flushSaves()   // or a queued save would write the wardrobe back
         UserDefaults.standard.removeObject(forKey: key)
         UserDefaults.standard.removeObject(forKey: WardrobeViewModel.lockedKey(for: userId))
         UserDefaults.standard.removeObject(forKey: WardrobeViewModel.metaKey(for: userId))
+        UserDefaults.standard.removeObject(forKey: WardrobeViewModel.unreadableBackupKey(for: userId))
         for legacy in ["wardrobe_\(userId)", "wardrobeData_\(userId)"] {
             UserDefaults.standard.removeObject(forKey: legacy)
         }
@@ -666,6 +723,9 @@ class WardrobeViewModel: ObservableObject {
             try? fm.removeItem(at: LocalStore.applicationSupport.appendingPathComponent("WardrobeEmbeddings"))
         }
         WardrobeImageFileHelper.removeAllFromCache()
+        // Try-on: the body photo, its candidates and every render.
+        TryOnQueue.shared.pause()
+        TryOnBodyLibrary.shared.removeAll()
 
         // Outfit history (Core Data), scoped to this user (+ legacy unscoped rows).
         MyOutfitsViewModel.deleteOutfits(forUser: userId)
@@ -811,8 +871,9 @@ struct WardrobeItemCodable: Codable {
         id = try container.decode(String.self, forKey: .id)
         category = try container.decode(String.self, forKey: .category)
         product = try container.decode(String.self, forKey: .product)
-        colors = try container.decode([String].self, forKey: .colors)
-        brand = try container.decode(String.self, forKey: .brand)
+        // Colours and brand are optional detail: an entry without them is still the user's piece.
+        colors = try container.decodeIfPresent([String].self, forKey: .colors) ?? []
+        brand = try container.decodeIfPresent(String.self, forKey: .brand) ?? ""
         pattern = try container.decode(String.self, forKey: .pattern)
         imagePath = try container.decode(String.self, forKey: .imagePath)
         croppedImagePath = try container.decodeIfPresent(String.self, forKey: .croppedImagePath)
@@ -846,4 +907,50 @@ struct WardrobeItemCodable: Codable {
             details: details
         )
     }
-} 
+}
+
+/// How a wardrobe is read from and written to its UserDefaults blob (a JSON array of
+/// `WardrobeItemCodable`). Reading is per entry: one entry this build can't read (a key
+/// missing, a category or pattern it doesn't know) no longer empties the whole closet, and
+/// its raw JSON is handed back so the next save keeps it.
+enum WardrobeStorage {
+    struct Decoded {
+        var items: [WardrobeItem]
+        /// Raw JSON of each entry that couldn't be read, in stored order.
+        var unreadable: [Data]
+        /// False when the blob isn't a JSON array at all (nothing could be read).
+        var isArray: Bool
+    }
+
+    static func decode(_ data: Data) -> Decoded {
+        guard let entries = (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) as? [Any] else {
+            return Decoded(items: [], unreadable: [], isArray: false)
+        }
+        let decoder = JSONDecoder()
+        var items: [WardrobeItem] = []
+        var unreadable: [Data] = []
+        for entry in entries {
+            guard let raw = try? JSONSerialization.data(withJSONObject: entry, options: [.fragmentsAllowed]) else { continue }
+            // Sanitize on load: clears garment fields wrongly attached to accessories/footwear
+            // in older data. Loading doesn't save, so the cleaned copy is written by the next change.
+            if let stored = try? decoder.decode(WardrobeItemCodable.self, from: raw),
+               let item = stored.toWardrobeItem()?.sanitizedAttributes() {
+                items.append(item)
+            } else {
+                unreadable.append(raw)
+            }
+        }
+        return Decoded(items: items, unreadable: unreadable, isArray: true)
+    }
+
+    /// The items, followed by the kept unreadable entries exactly as they were read.
+    static func encode(_ items: [WardrobeItem], keeping unreadable: [Data] = []) -> Data? {
+        guard let data = try? JSONEncoder().encode(items.map { WardrobeItemCodable(from: $0) }) else { return nil }
+        guard !unreadable.isEmpty else { return data }
+        guard var all = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else { return nil }
+        for raw in unreadable {
+            if let entry = try? JSONSerialization.jsonObject(with: raw, options: [.fragmentsAllowed]) { all.append(entry) }
+        }
+        return try? JSONSerialization.data(withJSONObject: all)
+    }
+}

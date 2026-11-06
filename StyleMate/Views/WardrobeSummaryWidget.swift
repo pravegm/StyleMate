@@ -9,7 +9,7 @@ struct WardrobeSummaryWidget: View {
             HStack(spacing: DS.Spacing.xs) {
                 Image(systemName: "hanger")
                     .foregroundColor(DS.Colors.textTertiary)
-                Text("Your wardrobe is empty — add your first item!")
+                Text("Your wardrobe is empty — add your first piece!")
                     .font(DS.Font.subheadline)
                     .foregroundColor(DS.Colors.textSecondary)
             }
@@ -17,7 +17,7 @@ struct WardrobeSummaryWidget: View {
             HStack(spacing: DS.Spacing.xs) {
                 Image(systemName: "tshirt")
                     .foregroundColor(DS.Colors.accent)
-                Text("\(items.count) item\(items.count == 1 ? "" : "s") in your wardrobe")
+                Text("\(items.count) \(items.count == 1 ? "piece" : "pieces") in your wardrobe")
                     .font(DS.Font.subheadline)
                     .foregroundColor(DS.Colors.textSecondary)
                 Spacer()

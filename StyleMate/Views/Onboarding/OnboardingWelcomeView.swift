@@ -199,7 +199,7 @@ struct OnboardingWelcomeView: View {
             onAdvance()
         } label: {
             HStack(spacing: DS.Spacing.xs) {
-                Text("Get Started")
+                Text("Get started")
                 Image(systemName: "arrow.right")
             }
         }

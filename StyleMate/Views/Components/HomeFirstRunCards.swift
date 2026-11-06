@@ -333,8 +333,12 @@ struct WearLogPromptCard: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(DS.Colors.textTertiary)
-                            .frame(width: 28, height: 28)
+                            .frame(width: 44, height: 44)   // the minimum tap target
+                            .contentShape(Rectangle())
                     }
+                    // The glyph stays where the 28 pt button had it.
+                    .padding(.top, -8)
+                    .padding(.trailing, -8)
                     .accessibilityLabel("Not this time")
                 }
                 HStack(spacing: DS.Spacing.xs) {

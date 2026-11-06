@@ -36,9 +36,16 @@ final class UncertainItemsStore: ObservableObject {
     /// Oldest items (and their images) are dropped beyond this.
     static let maxHeld = 40
 
+    /// Writes are serialized so an older snapshot can never overwrite a newer one (detached
+    /// Tasks run in no particular order).
+    nonisolated private static let writer = DispatchQueue(label: "com.stylemates.StyleMate.uncertainItems", qos: .utility)
+
     private init() {}
 
-    private static func fileURL(forUser userId: String) -> URL {
+    /// Waits for pending writes (tests, profile deletion).
+    nonisolated static func flushWrites() { writer.sync {} }
+
+    static func fileURL(forUser userId: String) -> URL {
         LocalStore.directory("ScanProgress").appendingPathComponent("uncertain_\(userId).json")
     }
 
@@ -56,7 +63,7 @@ final class UncertainItemsStore: ObservableObject {
         guard !userId.isEmpty else { return }
         let url = Self.fileURL(forUser: userId)
         let snapshot = items
-        Task.detached(priority: .utility) {
+        Self.writer.async {
             if let data = try? JSONEncoder().encode(snapshot) { LocalStore.write(data, to: url) }
         }
     }
@@ -102,7 +109,9 @@ final class UncertainItemsStore: ObservableObject {
     /// Profile deletion.
     func forget(forUser userId: String) {
         if self.userId == userId { dismissAll() }
-        try? FileManager.default.removeItem(at: Self.fileURL(forUser: userId))
+        // After the queued save (dismissAll's), or that save would write the file back.
+        let url = Self.fileURL(forUser: userId)
+        Self.writer.async { try? FileManager.default.removeItem(at: url) }
         if self.userId == userId { self.userId = "" }
     }
 

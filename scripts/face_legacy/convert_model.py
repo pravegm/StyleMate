@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# RESEARCH ONLY: not used by any build, never ship its output (see scripts/face_legacy/README.md).
 """
 Convert InsightFace MobileFaceNet (w600k_mbf.onnx) to CoreML (.mlpackage).
 

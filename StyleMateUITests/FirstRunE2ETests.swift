@@ -62,7 +62,13 @@ class FirstRunE2ETests: E2ETestCase {
             if !snappedProgress, counter.exists, counter.label.range(of: "^[1-9]", options: .regularExpression) != nil {
                 snap("sample-scan-progress"); snappedProgress = true
             }
-            if openCloset.exists { snap("sample-closet-ready"); openCloset.tap() }
+            // The ready screen hands off to Home by itself after 2.5 s, so "Open my closet" can
+            // leave between `.exists` and the tap; tap the snapshot's frame (snapshot() throws
+            // instead of failing the test) and let the next poll see Home.
+            if openCloset.exists, let f = try? openCloset.snapshot().frame, !f.isEmpty {
+                snap("sample-closet-ready")
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: f.midX, dy: f.midY)).tap()
+            }
             _ = XCTWaiter.wait(for: [XCTestExpectation(description: "poll")], timeout: 1)
         }
         XCTAssertTrue(tabs.waitForExistence(timeout: 10), "Never reached Home after the sample scan")
@@ -113,16 +119,17 @@ class FirstRunE2ETests: E2ETestCase {
         let deadline = Date().addingTimeInterval(300)
         while Date() < deadline, !tabs.exists {
             dismissSpringboardAlertIfPresent()
-            for step in steps where step.element.exists && step.element.isHittable {
+            for step in steps where step.element.exists {
                 // The flow can advance on its own between the check and the tap (the selfie
-                // step moves on by itself without a camera), and an element tap whose query
-                // no longer matches fails the test. Capture the frame now, tap that point.
-                let frame = step.element.frame
+                // step moves on by itself without a camera), and an element query that no longer
+                // matches fails the test — `.isHittable` and `.frame` included. Capture the frame
+                // with `snapshot()`, which throws instead, and tap that point; when the step has
+                // already gone, the next poll picks up whatever screen came next.
+                guard let frame = try? step.element.snapshot().frame else { break }
+                guard !frame.isEmpty, app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { continue }
                 snapOnce(step.key)
-                if !frame.isEmpty {
-                    app.coordinate(withNormalizedOffset: .zero)
-                        .withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
-                }
+                app.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
                 break
             }
             if anyElement(NSPredicate(format: "identifier == 'onboarding.scanCounter'")).exists { snapOnce("scanning") }
