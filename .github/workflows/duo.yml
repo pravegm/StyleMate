@@ -32,7 +32,8 @@ concurrency:
 jobs:
   duo:
     runs-on: xcode-27
-    timeout-minutes: 120
+    # 120 -> 160: the screenshot step grew to four tests (screens, paywall, taste, sign-in).
+    timeout-minutes: 160
     env:
       XCODE_APP: /Applications/Xcode_27.1.app
       RUNTIME_ID: com.apple.CoreSimulator.SimRuntime.iOS-27-1
@@ -155,7 +156,8 @@ jobs:
           xcrun simctl location "$UDID" set 51.5072,-0.1276 || true
 
       - name: Duo screenshots (UI test + hinge bridge)
-        timeout-minutes: 50
+        # 50 -> 85: test01-03 alone took 45 min on 6 Nov, so the sign-in test (test04) was cut off.
+        timeout-minutes: 85
         env:
           UDID: ${{ steps.sim.outputs.udid }}
           HALF_ANGLE: ${{ inputs.half_angle || '110' }}
@@ -168,7 +170,7 @@ jobs:
           curl -s "http://127.0.0.1:8765/hinge?angle=0"; echo
           set -o pipefail
           TEST_RUNNER_DUO_BRIDGE_URL=http://127.0.0.1:8765 \
-          gtimeout 2700 xcodebuild test-without-building \
+          gtimeout 4800 xcodebuild test-without-building \
             -project StyleMate.xcodeproj -scheme StyleMate \
             -destination "id=$UDID" \
             -derivedDataPath "$RUNNER_TEMP/dd" \
