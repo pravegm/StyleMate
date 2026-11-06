@@ -42,6 +42,8 @@ struct TodayOutfitSheet: View {
     // edge tints and one haptic marks the threshold.
     @State private var dragX: CGFloat = 0
     @State private var pastThreshold = false
+    /// The header's global x span, to keep its title off the fold.
+    @State private var headerFrame: CGRect = .zero
     @State private var boardScale: CGFloat = 1
     @State private var boardOpacity: Double = 1
     @State private var isCommitting = false
@@ -172,7 +174,10 @@ struct TodayOutfitSheet: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: DS.Spacing.xs) {
+        // Open flat on the Duo the page sheet is centred on the fold, so a centred title sat on the seam: there
+        // it goes beside the close button instead.
+        let onFold = duo.foldRunsThrough(headerFrame)
+        return HStack(spacing: DS.Spacing.xs) {
             Button {
                 isPresented = false
             } label: {
@@ -186,7 +191,7 @@ struct TodayOutfitSheet: View {
             .accessibilityLabel("Close")
             .accessibilityIdentifier("outfit.close")
 
-            Spacer(minLength: 0)
+            if !onFold { Spacer(minLength: 0) }
 
             Group {
                 if homeVM.allOutfitsSeen || homeVM.outfitBatch.isEmpty {
@@ -195,7 +200,7 @@ struct TodayOutfitSheet: View {
                         .foregroundStyle(DS.Colors.textPrimary)
                         .accessibilityAddTraits(.isHeader)
                 } else {
-                    VStack(spacing: 5) {
+                    VStack(alignment: onFold ? .leading : .center, spacing: 5) {
                         Text(counterText)
                             .font(DS.Font.headline)
                             .foregroundStyle(DS.Colors.textPrimary)
@@ -212,11 +217,15 @@ struct TodayOutfitSheet: View {
             Spacer(minLength: 0)
 
             // Balances the close button so the title stays centred.
-            Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
+            if !onFold { Color.clear.frame(width: 44, height: 44).accessibilityHidden(true) }
         }
         .padding(.horizontal, DS.Spacing.md)
         .padding(.top, DS.Spacing.xs)
         .padding(.bottom, DS.Spacing.micro)
+        .onGeometryChange(for: CGRect.self) { proxy in
+            let r = proxy.frame(in: .global)
+            return CGRect(x: r.minX, y: 0, width: r.width, height: 1)   // x only: the fold runs top to bottom
+        } action: { headerFrame = $0 }
     }
 
     private var progressDots: some View {
