@@ -112,6 +112,15 @@ final class FaceReferenceViewModel: ObservableObject {
         let (assets, selfieIds) = LibraryFaceScanner.fetchCandidateAssets(limit: Self.scanLimit)
         totalToScan = assets.count
         dlog("[FindYou] Looking at \(assets.count) photos (limited=\(isLimitedAccess), anchors=\(anchors.count))")
+        #if DEBUG
+        let everything = PHFetchOptions()
+        everything.includeHiddenAssets = true
+        everything.includeAllBurstAssets = true
+        everything.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
+        dlog("[FindYou] PhotoKit: \(PHAsset.fetchAssets(with: .image, options: nil).count) images, "
+             + "\(PHAsset.fetchAssets(with: everything).count) assets incl. hidden/bursts, "
+             + "status \(PHPhotoLibrary.authorizationStatus(for: .readWrite).rawValue)")
+        #endif
         guard !assets.isEmpty else {
             phase = .emptyLibrary
             return

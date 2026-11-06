@@ -599,6 +599,8 @@ jobs:
           # the library settles (state columns per kind / visibility / completeness logged for diagnosis).
           STATE="SELECT ZKINDSUBTYPE, ZVISIBILITYSTATE, ZTRASHEDSTATE, ZCOMPLETE, ZHIDDEN, COUNT(*) FROM ZASSET GROUP BY 1,2,3,4,5;"
           sqlite3 "$DB" "$STATE" || true
+          sqlite3 "$DB" "SELECT ZSAVEDASSETTYPE, ZDUPLICATEASSETVISIBILITYSTATE, ZAVALANCHEPICKTYPE, ZSYNDICATIONSTATE, COUNT(*) FROM ZASSET GROUP BY 1,2,3,4;" || true
+          sqlite3 "$DB" "SELECT Z_PK, ZSAVEDASSETTYPE, ZKIND, ZBUNDLESCOPE, ZDIRECTORY, ZFILENAME FROM ZASSET ORDER BY Z_PK LIMIT 3;" || true
           xcrun simctl launch "$SIM" com.apple.mobileslideshow || true
           for i in $(seq 1 36); do
             n=$(sqlite3 "$DB" "SELECT COUNT(*) FROM ZASSET WHERE ZCOMPLETE = 1 AND ZTRASHEDSTATE = 0;" 2>/dev/null || echo x)
