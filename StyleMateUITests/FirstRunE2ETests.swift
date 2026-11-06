@@ -155,7 +155,10 @@ class FirstRunE2ETests: E2ETestCase {
         snap("profile")
         // The Account section: Sign Out and Delete Account (App Review 5.1.1(v)).
         let signOut = app.buttons.matching(NSPredicate(format: "identifier == 'profile.account.signOut' OR label == 'Sign Out'")).firstMatch
-        XCTAssertTrue(scrollUntilHittable(signOut, maxSwipes: 12), "No Sign Out in Profile")
+        // The Account section is Profile's last: at the bottom of the list it sits lower than
+        // scrollUntilHittable's "clear of the tab bar" line, so only ask for a hittable row.
+        _ = scrollUntilHittable(signOut, maxSwipes: 12)
+        XCTAssertTrue(signOut.exists && signOut.isHittable, "No Sign Out in Profile")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier == 'profile.account.delete' OR label == 'Delete Account'")).firstMatch.exists,
                       "No Delete Account in Profile")
         snap("profile-account")
