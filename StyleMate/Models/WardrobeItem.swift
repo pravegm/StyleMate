@@ -84,24 +84,8 @@ struct WardrobeItem: Identifiable, Equatable, Hashable {
     var croppedImage: UIImage? { croppedImagePath != nil ? WardrobeImageFileHelper.loadImage(at: croppedImagePath!) : nil }
     var thumbnailImage: UIImage? { thumbnailPath != nil ? WardrobeImageFileHelper.loadImage(at: thumbnailPath!) : nil }
     
-    var displayProduct: String {
-        let exceptions = [
-            "Jeans", "Shorts", "Trousers", "Sunglasses", "Eyeglasses",
-            "Chinos", "Capris", "Culottes", "Slides", "Flats", "Heels",
-            "Reading Glasses"
-        ]
-        if exceptions.contains(product) {
-            return product
-        }
-        // "Watches" → "Watch", "Dresses" → "Dress", "Boxes" → "Box"; plain "-s" otherwise.
-        for suffix in ["sses", "ches", "shes", "xes"] where product.hasSuffix(suffix) {
-            return String(product.dropLast(2))
-        }
-        if product.hasSuffix("s") && !product.hasSuffix("ss") {
-            return String(product.dropLast())
-        }
-        return product
-    }
+    /// One piece's product word: "Scarves" → "Scarf", "Jeans" stays (`ProductNoun`).
+    var displayProduct: String { ProductNoun.singular(product) }
     
     var name: String {
         var parts: [String] = []

@@ -255,7 +255,7 @@ struct MyWardrobeView: View {
 
     private func summaryHeader(all: [WardrobeItem]) -> some View {
         let shelves = ClosetEngine.counts(all).count
-        return Text("\(all.count) item\(all.count == 1 ? "" : "s") · \(shelves) \(shelves == 1 ? "shelf" : "shelves")")
+        return Text("\(all.count) \(all.count == 1 ? "piece" : "pieces") · \(shelves) \(shelves == 1 ? "shelf" : "shelves")")
             .font(DS.Font.subheadline)
             .foregroundStyle(DS.Colors.textSecondary)
             .monospacedDigit()

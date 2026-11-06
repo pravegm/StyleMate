@@ -179,7 +179,7 @@ enum DiagnosticsReport {
         line("Battery", facts.batteryText)
         line("Memory", "\(DiagFormat.bytes(facts.physicalMemoryBytes)) in the phone; app using \(DiagFormat.bytes(facts.appFootprintBytes))"
              + (facts.appAvailableMemoryBytes.map { "; \(DiagFormat.bytes($0)) more available to the app" } ?? ""))
-        line("Free storage", DiagFormat.bytes(facts.freeDiskBytes))
+        // Free storage stays on screen only: its privacy-manifest reason (85F4.1) forbids sending it off the phone.
         line("AI processors",facts.computeDevices.isEmpty ? "unknown" : facts.computeDevices.joined(separator: ", "))
         line("Neural Engine", facts.hasNeuralEngine ? "Yes" : "No")
 

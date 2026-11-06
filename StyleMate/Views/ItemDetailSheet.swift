@@ -284,7 +284,7 @@ struct ItemDetailView: View {
         Button(role: .destructive) {
             confirmRemove = true
         } label: {
-            Text("Remove from Wardrobe")
+            Text("Remove from wardrobe")
                 .font(DS.Font.body)
                 .foregroundStyle(DS.Colors.error)
                 .frame(maxWidth: .infinity, alignment: .leading)

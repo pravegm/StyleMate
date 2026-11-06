@@ -315,7 +315,7 @@ struct ClosetShelfHeader: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
-        .accessibilityLabel("\(title), \(count) item\(count == 1 ? "" : "s")")
+        .accessibilityLabel("\(title), \(count) \(count == 1 ? "piece" : "pieces")")
     }
 }
 

@@ -19,7 +19,9 @@ class StyleMateE2ETests: E2ETestCase {
         snap("home")
 
         openTab("Wardrobe")
-        let count = anyElement(NSPredicate(format: "label BEGINSWITH %@", "\(seededItemCount) items"))
+        // "26 pieces · 5 shelves" (older UI: "26 items · …").
+        let count = anyElement(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                           "\(seededItemCount) pieces", "\(seededItemCount) items"))
         XCTAssertTrue(count.waitForExistence(timeout: 20), "Closet doesn't report the \(seededItemCount) seeded items")
         let anyTee = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'closet.item.' OR label ENDSWITH 'T-Shirt'")).firstMatch
         XCTAssertTrue(anyTee.waitForExistence(timeout: 10), "Closet grid shows no seeded items")
@@ -243,7 +245,7 @@ class StyleMateE2ETests: E2ETestCase {
         }
 
         // Identity resolution -> (optional "which one is you?") -> on-device analysis.
-        let reviewTitle = anyElement(NSPredicate(format: "label == 'Review Items'"))
+        let reviewTitle = anyElement(NSPredicate(format: "label ==[c] 'Review items'"))
         let whichOne = anyElement(NSPredicate(format: "label == 'Which one is you?'"))
         let first = waitForAny([reviewTitle, whichOne], timeout: 120)
         if first == 1 {
@@ -269,8 +271,8 @@ class StyleMateE2ETests: E2ETestCase {
         XCTAssertTrue(addToWardrobe.waitForExistence(timeout: 5), "No 'Add N Items to Wardrobe' button")
         addToWardrobe.tap()
         XCTAssertTrue(waitToDisappear(reviewTitle, timeout: 30), "Review screen didn't close after adding")
-        // Closet summary: "29 items · 5 shelves".
-        let newCount = anyElement(NSPredicate(format: "label MATCHES %@", "[0-9]+ items?( · .*)?"))
+        // Closet summary: "29 pieces · 5 shelves" (older UI: "29 items · …").
+        let newCount = anyElement(NSPredicate(format: "label MATCHES %@", "[0-9]+ (items?|pieces?)( · .*)?"))
         if newCount.waitForExistence(timeout: 10) {
             let n = Int(newCount.label.split(separator: " ").first ?? "") ?? 0
             XCTAssertGreaterThan(n, seededItemCount, "Closet count didn't grow after adding extracted items")

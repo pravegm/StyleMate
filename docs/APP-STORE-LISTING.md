@@ -125,7 +125,7 @@ plan as StoreKit returns them, the per-month price of the annual plan and its sa
 out from the two real prices), the free trial only when the user is eligible, the amount billed
 after the trial as large as the trial itself ("1-week free trial, then £24.99 per year"), the
 auto-renew and cancellation terms, **Restore Purchases**, **Terms of Use** and **Privacy Policy**
-links, and a close button. Profile › StyleMate Premium has **Manage Subscription** (Apple's sheet)
+links, and a close button. Profile › StyleMate Premium has **Manage subscription** (Apple's sheet)
 and **Restore Purchases**.
 
 ### In-App Purchase review notes
