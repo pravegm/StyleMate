@@ -594,13 +594,11 @@ jobs:
           DB="$HOME/Library/Developer/CoreSimulator/Devices/$SIM/data/Media/PhotoData/Photos.sqlite"
           sqlite3 "$DB" "SELECT datetime(a.ZDATECREATED + 978307200, 'unixepoch'), b.ZORIGINALFILENAME FROM ZASSET a JOIN ZADDITIONALASSETATTRIBUTES b ON b.ZASSET = a.Z_PK ORDER BY a.ZDATECREATED DESC LIMIT 12;" || true
           sqlite3 "$DB" "SELECT COUNT(*) FROM ZASSET;" || true
-          # PhotoKit only lists an imported photo once Photos has finished processing it (run 42259283412: the
-          # app saw 1 of 267 photos a minute after addmedia). Open Photos to drive the import, then wait until
-          # the library settles (state columns per kind / visibility / completeness logged for diagnosis).
+          # Let Photos finish the import before the app looks (open it, wait until every asset is complete), and
+          # log the assets' kind / visibility / completeness. Note: Photos never makes the small previews for
+          # these imports (thumbnail requests answer PHPhotosError 3303), which the scan handles by decoding.
           STATE="SELECT ZKINDSUBTYPE, ZVISIBILITYSTATE, ZTRASHEDSTATE, ZCOMPLETE, ZHIDDEN, COUNT(*) FROM ZASSET GROUP BY 1,2,3,4,5;"
           sqlite3 "$DB" "$STATE" || true
-          sqlite3 "$DB" "SELECT ZSAVEDASSETTYPE, ZDUPLICATEASSETVISIBILITYSTATE, ZAVALANCHEPICKTYPE, ZSYNDICATIONSTATE, COUNT(*) FROM ZASSET GROUP BY 1,2,3,4;" || true
-          sqlite3 "$DB" "SELECT Z_PK, ZSAVEDASSETTYPE, ZKIND, ZBUNDLESCOPE, ZDIRECTORY, ZFILENAME FROM ZASSET ORDER BY Z_PK LIMIT 3;" || true
           xcrun simctl launch "$SIM" com.apple.mobileslideshow || true
           for i in $(seq 1 36); do
             n=$(sqlite3 "$DB" "SELECT COUNT(*) FROM ZASSET WHERE ZCOMPLETE = 1 AND ZTRASHEDSTATE = 0;" 2>/dev/null || echo x)
