@@ -98,7 +98,8 @@ jobs:
             case "$MSG" in *"[ui]"*|*"[full]"*) ui=true;; esac
             tests=$(printf '%s' "$MSG" | sed -n 's/.*\[tests:\([^]]*\)\].*/\1/p' | head -1)
             # `[ui-only: RealFirstRunE2ETests, FirstRunE2ETests]`: the UI job with only these classes.
-            uionly=$(printf '%s' "$MSG" | sed -n 's/.*\[ui-only:\([^]]*\)\].*/\1/p' | head -1)
+            # The last one counts (tags go at the end; the body may quote the syntax).
+            uionly=$(printf '%s' "$MSG" | sed -n 's/.*\[ui-only:\([^]]*\)\].*/\1/p' | tail -1)
             if [ -n "$uionly" ]; then ui=true; fi
           fi
           # Test identifiers only (StyleMateTests/Suite/test), so nothing else reaches xcodebuild.
