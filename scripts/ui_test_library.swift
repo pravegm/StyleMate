@@ -6,9 +6,9 @@
 //
 // What's in it (all derived from the CC0 fixtures in StyleMateTests/Fixtures/photos, see CREDITS.md, or
 // drawn here, so the licences stay clean):
-// - the user: 8 variants of casual_denim_jacket_hat.jpg (crops, scales, a mirror, darker, recompressed),
+// - the user: 8 variants of kurta_dhoti_turban.jpg (crops, scales, a mirror, darker, recompressed),
 //   the person whose face the DEBUG selfie hook (-uiTestSelfieFixture, StyleMate/Debug/DebugSelfieFeed.swift)
-//   uses, so "Find yourself" has a group of her faces and the scan has her outfit to extract;
+//   uses, so "Find yourself" has a group of his faces and the scan has his outfit to extract;
 // - strangers: every other fixture photo once;
 // - filler: photos with nobody in them (gradients and shapes), for volume.
 // Every photo gets its own capture date (EXIF DateTimeOriginal, newest first, a few hours apart over the
@@ -32,7 +32,7 @@ guard args.count >= 3 else {
 let fixtures = URL(fileURLWithPath: args[1])
 let out = URL(fileURLWithPath: args[2])
 let fillerCount = args.count > 3 ? Int(args[3]) ?? 240 : 240
-let userFixture = "casual_denim_jacket_hat.jpg"
+let userFixture = "kurta_dhoti_turban.jpg"   // a near-frontal face (casual_denim_jacket_hat is a strong profile)
 
 try? FileManager.default.removeItem(at: out)
 try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)

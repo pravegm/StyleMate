@@ -4,8 +4,8 @@ import UIKit
 /// DEBUG-only UI-test hook (never compiled into Release): `-uiTestSelfieFixture`.
 ///
 /// The CI simulator has no camera, so the selfie step can't see anyone. With this flag the selfie
-/// camera "captures" a face framed from a bundled CC0 sample photo instead (the woman in
-/// `sample_casual_denim_jacket_hat.jpg`, the same person the CI photo library is built around:
+/// camera "captures" a face framed from a bundled CC0 sample photo instead (the man in
+/// `sample_kurta_dhoti_turban.jpg`, looking almost straight at the camera; the same person the CI photo library is built around:
 /// `scripts/ui_test_library.swift`). Each frame then goes down the real path: `SelfieFrameChecker`
 /// (YuNet + SFace) and the three-step logic in `SelfieCameraService`, then "Use these photos" (tapped by
 /// the test) saves them with `SelfieReferenceStore` and rebuilds the identity. Only the camera and the
@@ -14,7 +14,7 @@ import UIKit
 enum DebugSelfieFeed {
     static let argument = "-uiTestSelfieFixture"
     /// The bundled sample whose face is the selfie.
-    static let sampleName = "sample_casual_denim_jacket_hat"
+    static let sampleName = "sample_kurta_dhoti_turban"
 
     static var isActive: Bool { ProcessInfo.processInfo.arguments.contains(argument) }
 
