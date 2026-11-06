@@ -183,6 +183,21 @@ struct DiagnosticsTests {
         #expect(!text.contains("Photos checked for your face"))   // no face events: no line
     }
 
+    @Test func scanTraceShowsTheStepItIsWaitingOn() {
+        let trace = ScanTrace()
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        let thumbs = trace.begin(.thumbnails, at: t0)
+        trace.end(thumbs, at: t0.addingTimeInterval(0.5))
+        trace.noteProgress(at: t0.addingTimeInterval(0.6))
+        _ = trace.begin(.fullPhoto, at: t0.addingTimeInterval(1))
+        let lines = ScanTrace.describe(trace.snapshot, now: t0.addingTimeInterval(361))
+        #expect(lines.contains("Now: Loading the full photo (may download from iCloud), for 6 min 0 s"))
+        #expect(lines.contains("Last photo finished: 6 min 0 s ago"))
+        #expect(lines.contains("Loading thumbnails: 1×, average 0.50 s, slowest 0.50 s, last 0.50 s"))
+        trace.end(thumbs)   // ending twice is a no-op
+        #expect(trace.snapshot.stats[.thumbnails]?.count == 1)
+    }
+
     @Test func reportWithNothingYet() {
         let text = DiagnosticsReport.make(facts: Self.sampleFacts(), benchmark: nil, live: PerfSnapshot(),
                                           hingeAvailable: false, hinge: [], liveHinge: nil)

@@ -223,9 +223,12 @@ class PhotoScanService: ObservableObject {
     /// Returns false if the scan was cancelled or superseded meanwhile.
     private func waitUntilRunnable(_ generation: Int) async -> Bool {
         var announced = false
+        var pausedSpan: ScanTrace.Span?
+        defer { if let pausedSpan { ScanTrace.shared.end(pausedSpan) } }
         while true {
             guard isCurrent(generation) else { return false }
             let reason = suspendedReason ?? currentPolicy().pauseReason
+            if (isPaused || reason != nil), pausedSpan == nil { pausedSpan = ScanTrace.shared.begin(.paused) }
             if !isPaused && reason == nil {
                 if systemPauseReason != nil {
                     systemPauseReason = nil
@@ -455,9 +458,11 @@ class PhotoScanService: ObservableObject {
 
         currentPhase = "Preparing your photo library..."
         let start = job.rangeStart, end = job.rangeEnd, extra = job.extraAssetIDs ?? []
+        let librarySpan = ScanTrace.shared.begin(.library)
         let library = await Task.detached(priority: .utility) {
             Self.fetchAssets(start: start, end: end, extraIDs: extra)
         }.value
+        ScanTrace.shared.end(librarySpan)
         guard isCurrent(generation) else { return }
 
         // Plan: drop what's done, skip what can't be an outfit photo, group bursts.
@@ -502,7 +507,9 @@ class PhotoScanService: ObservableObject {
         // First run: the best ~40 outfit photos of the last 90 days go first.
         var firstLookCount = 0
         if job.firstLook == true {
+            let rankSpan = ScanTrace.shared.begin(.ranking)
             let ranked = await rankFirstLook(units, assets: assetsByID, generation: generation)
+            ScanTrace.shared.end(rankSpan)
             guard isCurrent(generation) else { return }
             units = ranked.order.map { units[$0] }
             firstLookCount = ranked.priorityCount
@@ -566,6 +573,7 @@ class PhotoScanService: ObservableObject {
             let doneIDs = renderFailed ? [] : prepared.doneIDs
             let failedIDs = renderFailed ? prepared.memberIDs : prepared.failedIDs
             consumed += 1
+            ScanTrace.shared.noteProgress()
             photosExamined += prepared.memberIDs.count
             if firstLookCount > 0, consumed == firstLookCount {
                 updateProgress(forUser: userId) { $0.activeJob?.firstLook = nil }
@@ -669,7 +677,9 @@ class PhotoScanService: ObservableObject {
         guard !members.isEmpty, !Task.isCancelled else { return result }
 
         // 1. Thumbnails → person check (+ frame quality when there's a choice).
+        let thumbSpan = ScanTrace.shared.begin(.thumbnails)
         let thumbnails = await loadThumbnails(for: members)
+        ScanTrace.shared.end(thumbSpan)
         var thumbFailed: [String] = []
         var thumbCGs: [(String, CGImage)] = []
         for (asset, thumb) in zip(members, thumbnails) {
@@ -678,12 +688,14 @@ class PhotoScanService: ObservableObject {
         }
         let rankFrames = thumbCGs.count > 1
         let frames = thumbCGs
+        let personSpan = ScanTrace.shared.begin(.personCheck)
         let signals: [(id: String, signals: ThumbnailSignals)] = await Task.detached(priority: .utility) {
             frames.map { pair in
                 (id: pair.0, signals: rankFrames ? ThumbnailAnalyzer.signals(for: pair.1)
                                                  : ThumbnailSignals(hasPerson: ThumbnailAnalyzer.hasPerson(pair.1)))
             }
         }.value
+        ScanTrace.shared.end(personSpan)
         let ranked = BurstPicker.ranked(signals)
         guard !ranked.isEmpty else {
             result.failedIDs = thumbFailed
@@ -694,12 +706,19 @@ class PhotoScanService: ObservableObject {
         var loadFailed: [String] = []
         for id in ranked.prefix(Self.maxFramesPerGroup) {
             guard !Task.isCancelled else { result.failedIDs = result.memberIDs; return result }
-            guard let asset = assets[id], let full = await loadFullImage(for: asset), let cg = full.cgImage else {
+            guard let asset = assets[id] else { loadFailed.append(id); continue }
+            let fullSpan = ScanTrace.shared.begin(.fullPhoto)
+            let loaded = await loadFullImage(for: asset)
+            ScanTrace.shared.end(fullSpan)
+            guard let full = loaded, let cg = full.cgImage else {
                 // Usually an iCloud download that failed or timed out (offline).
                 loadFailed.append(id)
                 continue
             }
+            let waitSpan = ScanTrace.shared.begin(.faceWait)
             await identityGate.acquire()
+            ScanTrace.shared.end(waitSpan)
+            let faceSpan = ScanTrace.shared.begin(.faceCheck)
             let failuresBefore = CoreImageContext.failures
             let identity: ScanIdentity = await Task.detached(priority: .utility) {
                 autoreleasepool {
@@ -707,6 +726,7 @@ class PhotoScanService: ObservableObject {
                 }
             }.value
             let renderFailed = CoreImageContext.failures != failuresBefore
+            ScanTrace.shared.end(faceSpan)
             await identityGate.release()
 
             switch identity {
@@ -788,8 +808,12 @@ class PhotoScanService: ObservableObject {
     private func extractItems(from image: UIImage, userId: String, userGender: String?, holdUncertain: Bool = true,
                               gated: Bool = true,
                               wardrobeViewModel: WardrobeViewModel) async -> ExtractionOutcome {
+        let waitSpan = ScanTrace.shared.begin(.clothesWait)
         await ExtractionGate.shared.acquire()   // shared with manual add
+        ScanTrace.shared.end(waitSpan)
+        let clothesSpan = ScanTrace.shared.begin(.clothes)
         let results = await ImageAnalysisService.shared.analyzeAndSegment(image: image, userGender: userGender)
+        ScanTrace.shared.end(clothesSpan)
         await ExtractionGate.shared.release()
         var outcome = ExtractionOutcome()
         for seg in results {
@@ -844,7 +868,9 @@ class PhotoScanService: ObservableObject {
             }
 
             // Apple Intelligence devices: on-device details + visible brand.
+            let describeSpan = ScanTrace.shared.begin(.describing)
             let notes = doubt == nil ? await GarmentDescriber.describe(garmentImage, product: prod, colors: seg.colors) : nil
+            ScanTrace.shared.end(describeSpan)
             let wardrobeItem = WardrobeItem(
                 category: cat,
                 product: prod,
@@ -1279,6 +1305,12 @@ class PhotoScanService: ObservableObject {
         return options
     }()
 
+    /// How long one thumbnail may take. A thumbnail Photos has to fetch from iCloud can wait
+    /// behind the library's own download queue (a new phone still syncing), and without a limit
+    /// the scan sat on that photo indefinitely ("8 of 3,935 photos" on a real Duo). It's
+    /// retried on a later scan like any photo that failed to load.
+    nonisolated static let thumbnailTimeout: UInt64 = 20_000_000_000
+
     private func loadThumbnails(for assets: [PHAsset]) async -> [UIImage?] {
         let manager = thumbnailManager
         let options = Self.thumbnailOptions
@@ -1288,7 +1320,7 @@ class PhotoScanService: ObservableObject {
                 group.addTask { @Sendable in
                     await withCheckedContinuation { continuation in
                         let gate = ResumeGate()
-                        manager.requestImage(
+                        let requestID = manager.requestImage(
                             for: asset, targetSize: targetSize,
                             contentMode: .aspectFit, options: options
                         ) { image, _ in
@@ -1297,6 +1329,13 @@ class PhotoScanService: ObservableObject {
                             Self.offMain {
                                 let normalized = image.flatMap { Self.bakeOrientation($0, pixelScale: true) }   // 1x: no 3x screen-scale copies
                                 continuation.resume(returning: (index, normalized))
+                            }
+                        }
+                        Task {
+                            try? await Task.sleep(nanoseconds: Self.thumbnailTimeout)
+                            if gate.claim() {
+                                manager.cancelImageRequest(requestID)
+                                continuation.resume(returning: (index, nil))
                             }
                         }
                     }

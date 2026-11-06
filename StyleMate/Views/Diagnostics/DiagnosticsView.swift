@@ -15,6 +15,7 @@ struct DiagnosticsView: View {
 
     @State private var facts: DeviceFacts?
     @State private var live = PerfSnapshot()
+    @State private var scan = ScanTrace.Snapshot()
     @State private var hinge = RawHinge()
     @State private var includeStudio = true
     @State private var confirmOnBattery = false
@@ -34,6 +35,7 @@ struct DiagnosticsView: View {
                 phoneCard
                 benchmarkCard
             } trailing: {
+                scanCard
                 liveCard
                 if hingeAvailable { hingeCard }
                 shareCard
@@ -53,6 +55,7 @@ struct DiagnosticsView: View {
             while !Task.isCancelled {
                 facts = DeviceFacts.current()
                 live = PerfStore.shared.snapshot
+                scan = ScanTrace.shared.snapshot
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
@@ -173,6 +176,28 @@ struct DiagnosticsView: View {
         var options = DiagnosticsBenchmark.Options()
         options.studio = includeStudio
         benchmark.start(options: options, wardrobe: wardrobeViewModel)
+    }
+
+    // MARK: Photo scan
+
+    /// What the scan is doing now and how long each step took (ScanTrace): a scan stuck on one
+    /// photo shows the step it's waiting on.
+    private var scanCard: some View {
+        DiagCard(title: "Photo scan", icon: "photo.stack") {
+            if scan.isEmpty {
+                Text("The scan hasn't run since StyleMate opened.")
+                    .font(DS.Font.footnote)
+                    .foregroundStyle(DS.Colors.textSecondary)
+            } else {
+                ForEach(Array(ScanTrace.describe(scan).enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(DS.Font.footnote)
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .accessibilityIdentifier("diagnostics.scan")
     }
 
     // MARK: Live stats

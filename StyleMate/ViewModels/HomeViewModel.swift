@@ -121,6 +121,15 @@ class HomeViewModel: ObservableObject {
             .sink { [weak self] _ in self?.dropStaleHero() }
             .store(in: &cancellables)
 
+        // Back on screen without weather (a dropped location prompt, offline at launch): ask again.
+        NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, self.weather == nil, !self.isWeatherLoading else { return }
+                self.requestWeatherForCurrentLocation()
+            }
+            .store(in: &cancellables)
+
         // Show last-known weather immediately so a transient open-meteo outage
         // doesn't blank the home screen while a fresh fetch is attempted.
         if let data = UserDefaults.standard.data(forKey: Self.weatherCacheKey),
@@ -600,7 +609,20 @@ class HomeViewModel: ObservableObject {
         isWeatherLoading = true
         weatherError = nil
         locationService.requestLocation()
+        // Never spin forever. A location prompt the system dropped (asked while the photo-access
+        // alert was up, on a real Duo) left "Loading weather…" for good: status stays
+        // .notDetermined and no callback comes. After the timeout Home shows Retry, which asks again.
+        weatherTimeout?.cancel()
+        weatherTimeout = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.weatherTimeoutNanos)
+            guard let self, !Task.isCancelled, self.isWeatherLoading, !self.weatherFetchInFlight else { return }
+            self.isWeatherLoading = false
+            self.weatherError = "Couldn't get your location."
+        }
     }
+
+    private var weatherTimeout: Task<Void, Never>?
+    static let weatherTimeoutNanos: UInt64 = 20_000_000_000
 
     func toggleTemperatureUnit() {
         displayFahrenheit.toggle()

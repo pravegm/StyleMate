@@ -224,6 +224,10 @@ enum DiagnosticsReport {
             out.append("Not run yet (Diagnostics → Run benchmark).")
         }
 
+        header("Photo scan (since StyleMate opened)")
+        let scan = ScanTrace.shared.snapshot
+        if scan.isEmpty { out.append("Not run since StyleMate opened.") } else { out += ScanTrace.describe(scan, now: now) }
+
         header("Live stats from real use")
         if live.isEmpty {
             out.append("Nothing measured yet.")
