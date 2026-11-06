@@ -145,6 +145,26 @@ for app in mine:
         say(f"  - products the app expects but ASC lacks: {', '.join(missing)}")
 say()
 
+# Signing readiness: what the TestFlight export needs from the key. Prints no secret values.
+say("### Signing key")
+team = os.environ.get("APPLE_TEAM_ID", "").strip()
+prefixes = {b["attributes"].get("seedId") for b in bundles if b["attributes"].get("identifier") == EXPECTED_BUNDLE}
+say(f"- APPLE_TEAM_ID: {len(team)} characters, "
+    f"{'matches' if team in prefixes else 'does NOT match'} the App ID's team prefix")
+pem = os.environ["ASC_PRIVATE_KEY"].strip()
+say(f"- ASC_PRIVATE_KEY: BEGIN line {'present' if pem.startswith('-----BEGIN PRIVATE KEY-----') else 'MISSING'}, "
+    f"END line {'present' if pem.endswith('-----END PRIVATE KEY-----') else 'MISSING'}, {len(pem.splitlines())} lines")
+say(f"- ASC_KEY_ID: {len(os.environ['ASC_KEY_ID'].strip())} characters")
+for label, path in [("certificates (needs Admin)", "/v1/certificates"), ("profiles", "/v1/profiles"),
+                    ("users (Admin only)", "/v1/users")]:
+    req = urllib.request.Request(API + path + "?limit=1", headers={"Authorization": "Bearer " + TOKEN})
+    try:
+        with urllib.request.urlopen(req):
+            say(f"- read {label}: allowed")
+    except urllib.error.HTTPError as e:
+        say(f"- read {label}: HTTP {e.code}")
+say()
+
 summary = os.environ.get("GITHUB_STEP_SUMMARY")
 if summary:
     with open(summary, "a") as f:
