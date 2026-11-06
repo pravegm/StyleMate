@@ -117,8 +117,9 @@ Before App Store launch:
   merge, and a translucent sliver can appear beside slim pieces. With GarmentNet more of each first
   draft is repainted; only the polished (checked) image is ever shown.
 - **Accessory cutouts** (sunglasses, watch) can carry a little skin until the product photo replaces
-  them. A fix limited to eyewear and jewellery is on `feat/garment-cutouts`: it keeps product naming
-  and fragments level, but on its latest run one colour slipped below the bar, so it is not merged.
+  them. A fix limited to eyewear and jewellery is on `feat/garment-cutouts`: every quality number
+  matches main, but some sunglasses come out patchy (shaded skin isn't recognised), so it is held,
+  not merged. A real fix needs a finer mask than the model's quarter-resolution grid.
 - **Fragmented pieces**: a coat crossed by a bag or scarf can come out in parts. Sending heavily
   broken pieces to the product-photo studio would fix it, but changes what gets rendered; your call.
 - **Product photos follow the item's name and colour**, so a misnamed item gets the wrong style; heels
