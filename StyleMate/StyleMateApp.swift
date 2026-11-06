@@ -327,8 +327,10 @@ private struct AddSourceSheet: View {
         // Top-aligned without a Spacer, so a fitted sheet is exactly its rows.
         .frame(maxHeight: .infinity, alignment: .top)
         .background(DS.Colors.backgroundPrimary)
-        // The grabber is centred on the sheet, so on the fold when the sheet is (open flat on the Duo).
-        .presentationDragIndicator(isSplit ? .hidden : .visible)
+        // The grabber is centred on the sheet, so on the fold when the sheet is (open flat on the Duo). Hidden on
+        // the whole inner display, not just flat: switching it while folding left the half-open sheet short, its
+        // title cut off (Duo run 42134099208, 04-add-sheet-half). Tapping outside still dismisses it there.
+        .presentationDragIndicator(duo.isWideLayout ? .hidden : .visible)
         // x and width only (the fold runs top to bottom), so sliding up doesn't update it on every frame.
         .onGeometryChange(for: CGRect.self) { proxy in
             let r = proxy.frame(in: .global)
