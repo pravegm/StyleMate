@@ -96,16 +96,27 @@ final class WardrobeML {
         guard let map = segment(image) else { return nil }
         // Only confident body: the person channel's soft rim around a garment is not skin.
         var labels = [UInt8](repeating: 0, count: map.classes.count)
-        for (i, c) in map.classes.enumerated() {
-            labels[i] = c == GarmentMap.body && map.part(4, i) < 0.8 ? 0 : GarmentMap.parserRegion(c)
-        }
+        for (i, c) in map.classes.enumerated() { labels[i] = GarmentMap.parserRegion(c) }
         // A person or mannequin is a sizeable area (>= 5% of the grid); confident "body" cells on a plain
         // product (GarmentNet sees no garment in a flat colour swatch) are not one.
         let bodyCount = labels.reduce(0) { $0 + ($1 == 16 ? 1 : 0) }
         if bodyCount * 20 < labels.count {
             for i in 0..<labels.count where labels[i] == 16 { labels[i] = 0 }
         } else {
-            Self.splitBody(&labels, face: Self.faceBox(image))
+            let face = Self.faceBox(image)
+            // GarmentNet's 1/4-res collar line runs up the neck: under the face, a top is skin
+            // (the try-on otherwise "invents" a neck where it removes the old top).
+            if let f = face {
+                let fw = f.2 - f.0, fh = f.3 - f.1
+                let x0 = max(0, f.0 - fw / 6), x1 = min(gridW, f.2 + fw / 6)
+                let y1 = min(gridH, f.3 + fh * 45 / 100)
+                for y in max(0, f.1)..<y1 {
+                    for x in x0..<x1 where labels[y * gridW + x] == 3 || labels[y * gridW + x] == 4 {
+                        labels[y * gridW + x] = y < f.3 ? GarmentSegmenter.P.face.rawValue : GarmentSegmenter.P.torso.rawValue
+                    }
+                }
+            }
+            Self.splitBody(&labels, face: face)
         }
         return (labels, [Float](repeating: 1, count: labels.count))
     }
