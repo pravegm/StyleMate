@@ -1,0 +1,21 @@
+name: App Store Connect subscriptions
+
+# Creates (or completes) StyleMate Premium in App Store Connect: the "StyleMate Premium" group and
+# the annual and monthly plans the app's paywall loads (scripts/asc_subscriptions.py has the
+# details). Safe to re-run; it only adds what is missing. Uses the same secrets as testflight.yml.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  subscriptions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet "pyjwt[crypto]==2.9.0"
+      - run: python3 scripts/asc_subscriptions.py
