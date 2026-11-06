@@ -1318,7 +1318,12 @@ class PhotoScanService: ObservableObject {
         return await withTaskGroup(of: (Int, UIImage?).self) { group in
             for (index, asset) in assets.enumerated() {
                 group.addTask { @Sendable in
-                    await withCheckedContinuation { continuation in
+                    // The preview already on the phone first (Photos keeps one even with "Optimize
+                    // iPhone Storage"): no wait behind iCloud. Only a photo without one downloads.
+                    if let local = await Self.localThumbnail(asset, manager: manager, targetSize: targetSize) {
+                        return (index, local)
+                    }
+                    return await withCheckedContinuation { continuation in
                         let gate = ResumeGate()
                         let requestID = manager.requestImage(
                             for: asset, targetSize: targetSize,
@@ -1347,6 +1352,25 @@ class PhotoScanService: ObservableObject {
                 results[index] = image
             }
             return results
+        }
+    }
+
+    /// The scan thumbnail from what's on the phone only (nil when Photos would have to download it).
+    private nonisolated static func localThumbnail(_ asset: PHAsset, manager: PHImageManager,
+                                                   targetSize: CGSize) async -> UIImage? {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .fastFormat
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = false
+        options.isSynchronous = false
+        let gate = ResumeGate()
+        return await withCheckedContinuation { continuation in
+            manager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { image, _ in
+                guard gate.claim() else { return }
+                Self.offMain {
+                    continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true) })
+                }
+            }
         }
     }
 
