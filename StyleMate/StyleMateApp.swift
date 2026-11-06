@@ -113,7 +113,10 @@ struct RootView: View {
             .presentationDetents([.medium])
             // Regular width (Duo inner display): a sheet sized to its rows.
             .presentationSizing(.fitted)
-            .presentationDragIndicator(.visible)
+            // No grabber (one detent; swipe down or tap outside to dismiss). On the Duo it was centred on the fold
+            // when flat, and switching it with the display or the pose froze the fitted sheet at its old size:
+            // cover-wide and cut off on the inner display (Duo runs 42134099208, 42146510318, 04-add-sheet).
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $pickerItems, maxSelectionCount: 15, matching: .images)
@@ -340,6 +343,13 @@ private struct AddSourceSheet: View {
     let showAutoScan: Bool
 
     @State private var appeared = false
+    @Environment(\.duoLayout) private var duo
+    @State private var frame: CGRect = .zero
+
+    /// The rows are in two columns either side of the fold (the FoldAwareSplit below, `requiresFold`).
+    private var isSplit: Bool {
+        duo.isWideLayout && duo.foldRunsThrough(frame)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -351,38 +361,13 @@ private struct AddSourceSheet: View {
                 .padding(.top, DS.Spacing.md)
                 .padding(.bottom, DS.Spacing.lg)
 
-            VStack(spacing: DS.Spacing.sm) {
-                addOptionRow(
-                    icon: "photo.on.rectangle.angled",
-                    iconColor: DS.Colors.accent,
-                    title: "Choose from Gallery",
-                    subtitle: "Pick photos of your clothes",
-                    delay: 0,
-                    action: onGallery
-                )
-                .accessibilityIdentifier("addSource.gallery")
-
-                addOptionRow(
-                    icon: "camera.fill",
-                    iconColor: DS.Colors.accent,
-                    title: "Take a Photo",
-                    subtitle: "Snap a picture of what you're wearing",
-                    delay: 1,
-                    action: onCamera
-                )
-                .accessibilityIdentifier("addSource.camera")
-
-                if showAutoScan {
-                    addOptionRow(
-                        icon: "sparkles.rectangle.stack.fill",
-                        iconColor: DS.Colors.accent,
-                        title: "Auto-Scan Photos",
-                        subtitle: "Finds your outfits in your photos, on your iPhone",
-                        delay: 2,
-                        action: onAutoScan
-                    )
-                    .accessibilityIdentifier("addSource.autoScan")
-                }
+            // One column of rows. Open flat on the Duo the sheet is centred on the fold, so the rows go in two
+            // columns either side of it (half-open the sheet sits on one half and stays one column).
+            FoldAwareSplit(gutter: DS.Spacing.lg, stackedSpacing: DS.Spacing.sm, minimumWidth: 0, requiresFold: true) {
+                galleryRow
+                if showAutoScan { cameraRow }
+            } trailing: {
+                if showAutoScan { autoScanRow } else { cameraRow }
             }
             .padding(.horizontal, DS.Spacing.lg)
             .padding(.bottom, DS.Spacing.lg)
@@ -390,11 +375,52 @@ private struct AddSourceSheet: View {
         // Top-aligned without a Spacer, so a fitted sheet is exactly its rows.
         .frame(maxHeight: .infinity, alignment: .top)
         .background(DS.Colors.backgroundPrimary)
+        // x and width only (the fold runs top to bottom), so sliding up doesn't update it on every frame.
+        .onGeometryChange(for: CGRect.self) { proxy in
+            let r = proxy.frame(in: .global)
+            return CGRect(x: r.minX, y: 0, width: r.width, height: 1)
+        } action: { frame = $0 }
         .onAppear {
             withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
                 appeared = true
             }
         }
+    }
+
+    private var galleryRow: some View {
+        addOptionRow(
+            icon: "photo.on.rectangle.angled",
+            iconColor: DS.Colors.accent,
+            title: "Choose from Gallery",
+            subtitle: "Pick photos of your clothes",
+            delay: 0,
+            action: onGallery
+        )
+        .accessibilityIdentifier("addSource.gallery")
+    }
+
+    private var cameraRow: some View {
+        addOptionRow(
+            icon: "camera.fill",
+            iconColor: DS.Colors.accent,
+            title: "Take a Photo",
+            subtitle: "Snap a picture of what you're wearing",
+            delay: 1,
+            action: onCamera
+        )
+        .accessibilityIdentifier("addSource.camera")
+    }
+
+    private var autoScanRow: some View {
+        addOptionRow(
+            icon: "sparkles.rectangle.stack.fill",
+            iconColor: DS.Colors.accent,
+            title: "Auto-Scan Photos",
+            subtitle: "Finds your outfits in your photos, on your iPhone",
+            delay: 2,
+            action: onAutoScan
+        )
+        .accessibilityIdentifier("addSource.autoScan")
     }
 
     @ViewBuilder
@@ -410,7 +436,11 @@ private struct AddSourceSheet: View {
             Haptics.medium()
             action()
         }) {
-            HStack(spacing: DS.Spacing.md) {
+            // A row (icon, text, chevron); a tile (icon above the text) in the narrow columns either side of
+            // the fold, where a row's title wrapped ("Choose / from Gallery").
+            let layout = isSplit ? AnyLayout(VStackLayout(alignment: .leading, spacing: DS.Spacing.sm))
+                                 : AnyLayout(HStackLayout(spacing: DS.Spacing.md))
+            layout {
                 Image(systemName: icon)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundColor(iconColor)
@@ -425,16 +455,21 @@ private struct AddSourceSheet: View {
                     Text(subtitle)
                         .font(DS.Font.caption1)
                         .foregroundColor(DS.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .multilineTextAlignment(.leading)
 
-                Spacer()
+                if !isSplit {
+                    Spacer()
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(DS.Colors.textTertiary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DS.Spacing.md)
-            .padding(.vertical, DS.Spacing.sm)
+            .padding(.vertical, isSplit ? DS.Spacing.md : DS.Spacing.sm)
             .background(DS.Colors.backgroundCard)
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
             .dsCardShadow()

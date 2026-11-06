@@ -77,6 +77,13 @@ enum TryOnCompositor {
         let protected = body.protectSoft.map { $0 >= 0.99 }
         var exposed = [Bool](repeating: false, count: n)
         for i in 0..<n where TryOnLabel.clothing.contains(labels[i]) && cover[i] <= 0.4 && body.protectSoft[i] < 0.5 { exposed[i] = true }
+        // The parser's grid is coarse (~3 px per cell at working size): the old garment's real edge sits a
+        // few pixels outside its label and showed as a ghost outline. Grow the exposed area into a thin
+        // band around the old clothing, wherever the new outfit and the protected pixels aren't.
+        let ring = max(2, body.height / 200)
+        let grown = TryOnPlane(width: W, height: H, v: labels.map { TryOnLabel.clothing.contains($0) ? 1 : 0 }).morph(ring)
+        for i in 0..<n where !exposed[i] && grown.v[i] > 0 && cover[i] <= 0.4 && body.protectSoft[i] < 0.5
+            && !TryOnLabel.skin.contains(labels[i]) { exposed[i] = true }
         let limbs = limbMask(body)
         var skin = [Bool](repeating: false, count: n), bg = [Bool](repeating: false, count: n)
         for i in 0..<n where exposed[i] { if limbs[i] { skin[i] = true } else { bg[i] = true } }

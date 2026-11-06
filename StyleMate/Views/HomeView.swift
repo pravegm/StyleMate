@@ -92,7 +92,19 @@ struct HomeView: View {
         if showsTodayLook {
             entrance(todaysOutfitHero.coachAnchor(CoachAnchor.todayOutfit), delay: 0.1)
                 .padding(.top, DS.Spacing.lg)
+        } else if let status = almostReadyStatus {
+            // Not enough for a whole outfit yet: say what's missing instead of an empty card.
+            entrance(AlmostReadyCard(status: status), delay: 0.1)
+                .padding(.top, DS.Spacing.lg)
         }
+    }
+
+    /// What the closet still needs for a whole outfit (nil when ready, or empty: that has its own card).
+    private var almostReadyStatus: OutfitReadiness.Status? {
+        let items = wardrobeViewModel.items
+        guard !items.isEmpty else { return nil }
+        let status = OutfitReadiness.status(of: items)
+        return status.isReady ? nil : status
     }
 
     private var styleMeBlock: some View {
@@ -435,6 +447,7 @@ struct HomeView: View {
             outfitsVM.addOutfit(date: Calendar.current.startOfDay(for: Date()), items: items,
                                 source: MyOutfitsViewModel.Source.stylist)
         }
+        homeVM.noteWore(items, user: authService.user)   // taste learning
     }
 
     /// Re-picks today's look when the wardrobe loses one of its pieces or the
@@ -539,7 +552,8 @@ struct HomeView: View {
     private var wardrobeSection: some View {
         if !wardrobeViewModel.items.isEmpty {
             VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                sectionHeader("Your Wardrobe", trailing: "\(wardrobeViewModel.items.count) items")
+                let pieces = wardrobeViewModel.items.count
+                sectionHeader("Your Wardrobe", trailing: "\(pieces) piece\(pieces == 1 ? "" : "s")")
 
                 let categoryCounts = Dictionary(grouping: wardrobeViewModel.items, by: { $0.category })
                     .map { (category: $0.key, items: $0.value, count: $0.value.count) }
@@ -577,6 +591,10 @@ struct HomeView: View {
                     .padding(.vertical, DS.Spacing.micro)
                 }
                 .scrollClipDisabled()
+                // Wide: the row is a pane beside the fold, so cut it at the pane's sides (not above and below,
+                // where the cards' shadows show). Unclipped, the cards ran under the floating tab bar and,
+                // scrolled, back across the fold.
+                .clipShape(SideClip(isActive: duo.isWideLayout))
             }
         } else {
             VStack(spacing: DS.Spacing.md) {
@@ -621,6 +639,16 @@ struct HomeView: View {
     }
 }
 
+/// Clips a horizontal row at its leading and trailing edges only, so shadows and the press bounce still show
+/// above and below. Inactive, it clips nothing.
+private struct SideClip: Shape {
+    var isActive: Bool
+
+    func path(in rect: CGRect) -> Path {
+        Path(isActive ? rect.insetBy(dx: 0, dy: -60) : rect.insetBy(dx: -10_000, dy: -10_000))
+    }
+}
+
 // MARK: - Wardrobe Category Card
 
 private struct WardrobeCategoryCard: View {
@@ -651,7 +679,7 @@ private struct WardrobeCategoryCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
 
-            Text("\(count) item\(count == 1 ? "" : "s")")
+            Text("\(count) piece\(count == 1 ? "" : "s")")
                 .font(DS.Font.footnote)
                 .foregroundStyle(DS.Colors.textSecondary)
         }

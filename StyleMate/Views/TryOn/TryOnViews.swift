@@ -451,12 +451,21 @@ struct TryOnCachedImage<Fallback: View>: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                // Head to toe, fitted inside the cell on the studio backdrop. (A fill-sized portrait grew
+                // past the square cell and covered the header above it: duo-crease, Nov 2026.)
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay {
+                        Image(uiImage: image)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: max(4, cornerRadius - 4), style: .continuous))
+                            .padding(4)
+                    }
+                    .studioIsland()
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .clipped()
                     .accessibilityIdentifier("tryon.calendar")
             } else {
                 fallback()

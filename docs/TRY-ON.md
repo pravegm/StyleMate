@@ -21,6 +21,12 @@ user has selected On you. `TryOnAvailability` stays the one switch. Quality work
 - **Crossed legs** merge into one wide trouser block (legs are mapped per joint chain, not separated).
 - **CI arms come from the parser estimate**, not Vision: the simulator has no Vision body pose, so CI
   sheets show arms assumed by the sides; on a device Vision supplies the joints (to be checked there).
+- A **translucent sliver** beside the shoulder and hip of a slim piece (the dress look): the old outfit's
+  edge, half repainted by the diffusion pass.
+- *Fixed on feat/tryon-quality (merged 8eca4e0, runs 42128045859 / 42156002782)*: garment and fill now cross-fade on a soft coverage weight
+  (seam); a thin band around the old clothing's coarse outline is filled too (ghosts); the prompt says
+  "bare arms / bare legs" and the negative prompt "sleeves / leggings" when the new pieces leave them bare
+  (leftover sleeves).
 - Plus: garments are mapped, not draped; shoes are recoloured, not reshaped; bags, hats and jewelry are
   not drawn on the body.
 

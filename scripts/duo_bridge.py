@@ -8,6 +8,11 @@ where XCUITest taps are reliable) and calls this server at each screen. It owns 
                         and captures <n>-flat.png (inner), folds to HALF_ANGLE (110) and captures <n>-half.png
                         (inner, half-open), closes to 0 and answers "ok". Each shot keeps both raw panels in raw/
                         and picks the lit one (a panel that is off captures black).
+  GET /pose?name=<n>&to=cover|flat|half|closed
+                        the same sequence one step at a time, so the test can check the inner display between
+                        shots: moves the hinge (0 / FLAT_ANGLE / HALF_ANGLE / 0), captures <n>-<to>.png (not for
+                        closed) and answers "ok fold=x,y,w,h window=WxH posture=p", the app's own latest DuoLayout
+                        reading (DEBUG Documents/duo-log.txt; "fold=none" without one). The phone stays there.
   GET /hinge?angle=<a>  moves the hinge there (used to start closed).
   GET /ping
 
@@ -19,10 +24,12 @@ crash-loops SpringBoard on the Duo). Display names differ between sources (LCD /
 probed once.
 
 Env: UDID (required), OUT (duo-screens), PORT (8765), FLAT_ANGLE (180), HALF_ANGLE (110), SETTLE (2.5),
-     SECS_PER_30 (1.5, sweep speed). Writes OUT/logs/bridge.txt, OUT/logs/posture.txt and OUT/MANIFEST.txt.
+     SECS_PER_30 (1.5, sweep speed), BUNDLE (com.stylemates.StyleMate). Writes OUT/logs/bridge.txt,
+     OUT/logs/posture.txt and OUT/MANIFEST.txt.
 """
 import http.server
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -37,6 +44,7 @@ FLAT = int(os.environ.get("FLAT_ANGLE", "180"))
 HALF = int(os.environ.get("HALF_ANGLE", "110"))
 SETTLE = float(os.environ.get("SETTLE", "2.5"))
 SECS_PER_30 = float(os.environ.get("SECS_PER_30", "1.5"))
+BUNDLE = os.environ.get("BUNDLE", "com.stylemates.StyleMate")
 
 os.makedirs(os.path.join(OUT, "logs"), exist_ok=True)
 os.makedirs(os.path.join(OUT, "raw"), exist_ok=True)
@@ -205,6 +213,42 @@ def shoot_sequence(name):
     move(0)  # back on the cover for the test's next taps
 
 
+# /pose steps: hinge angle and the panel to capture (None: no shot).
+POSES = {"cover": (0, "cover"), "flat": (FLAT, "inner"), "half": (HALF, "inner"), "closed": (0, None)}
+
+# DuoLayout's DEBUG line: "posture=flat hinge=fullyOpen angle=180 crease=456,0 40x669 active=0 window=951x669 wide=1"
+LAYOUT_LINE = re.compile(r"posture=(\w+) .*?crease=(none|(-?\d+),(-?\d+) (\d+)x(\d+)) active=\d window=(\d+)x(\d+)")
+
+
+def app_layout():
+    """The app's latest DuoLayout reading from its Documents/duo-log.txt, as "fold=x,y,w,h window=WxH posture=p"."""
+    rc, out = run(["xcrun", "simctl", "get_app_container", UDID, BUNDLE, "data"], 30)
+    path = os.path.join(out.splitlines()[-1].strip() if rc == 0 and out else "", "Documents", "duo-log.txt")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError as e:
+        log("WARN no app duo log (%s)" % e)
+        return "fold=none window=0x0 posture=unknown"
+    for line in reversed(lines):
+        m = LAYOUT_LINE.search(line)
+        if m:
+            fold = "none" if m.group(2) == "none" else "%s,%s,%s,%s" % m.group(3, 4, 5, 6)
+            return "fold=%s window=%sx%s posture=%s" % (fold, m.group(7), m.group(8), m.group(1))
+    return "fold=none window=0x0 posture=unknown"
+
+
+def pose(name, to):
+    angle, expect = POSES[to]
+    if STATE["angle"] != angle:
+        move(angle)
+    if expect:
+        shot("%s-%s" % (name, to), expect)
+    reading = app_layout()
+    log("pose %s %s: app %s" % (name, to, reading))
+    return reading
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         LOG.write("http " + (fmt % args) + "\n")
@@ -234,6 +278,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     shoot_sequence(name)
                     bad = STATE["failures"] - before
                     return self.reply(200, "ok" if bad == 0 else "ok with %d warning(s)" % bad)
+                if url.path == "/pose":
+                    name = "".join(ch for ch in q.get("name", "shot") if ch.isalnum() or ch in "-_.")
+                    to = q.get("to", "")
+                    if to not in POSES:
+                        return self.reply(400, "to must be one of %s" % ", ".join(POSES))
+                    before = STATE["failures"]
+                    if to == "cover":
+                        log("=== shoot %s" % name)
+                    reading = pose(name, to)
+                    bad = STATE["failures"] - before
+                    return self.reply(200, ("ok " if bad == 0 else "ok with %d warning(s) " % bad) + reading)
                 return self.reply(404, "unknown")
             except Exception as e:  # keep serving; the test reports the failure
                 log("ERROR %s: %r" % (self.path, e))
