@@ -18,7 +18,8 @@ private struct SplitMix64: RandomNumberGenerator {
     }
 }
 
-/// 512-d synthetic face embeddings. A face of an identity is `normalize(center + noise · u)` with
+/// 512-d synthetic face embeddings (the clustering is dimension-agnostic; the real embedder is
+/// 128-d SFace). A face of an identity is `normalize(center + noise · u)` with
 /// u a random unit vector, so two faces of one identity score about 1/(1+noise²) — noise 0.8 ≈
 /// 0.61 (similar shots), noise 1.0 ≈ 0.5 (different pose/light) — and different identities ≈ 0.
 private struct Synth {
@@ -251,7 +252,9 @@ private func labelsOf(_ c: FaceCluster, in lib: Library) -> Set<String> { Set(c.
         var s = Synth(seed: 11)
         var lib = Library()
         let user = s.unit()
-        let otherLook = s.at(similarity: 0.46, to: user)   // below the link bar, above the also-you bar
+        // Below the link bar, above the also-you bar (whatever the active face model's bars are).
+        let gap = (FaceClustering.linkThreshold + FaceClustering.alsoYouClusterThreshold) / 2
+        let otherLook = s.at(similarity: gap, to: user)
         let stranger = s.unit()
         for _ in 0..<25 { lib.add(s.face(of: user, noise: 0.8), label: "main") }
         for _ in 0..<12 { lib.add(s.face(of: otherLook, noise: 0.5), label: "other") }
@@ -449,7 +452,7 @@ private func labelsOf(_ c: FaceCluster, in lib: Library) -> Set<String> { Set(c.
 
 // MARK: - Real models
 
-/// "Find yourself" with the real SCRFD + AdaFace models on the CC0 fixtures. These are part of
+/// "Find yourself" with the real face models (YuNet + SFace) on the CC0 fixtures. These are part of
 /// the serialized FaceMatchingTests suite because both drive the shared FaceMatchingService.
 extension FaceMatchingTests {
     private func findYouFixture(_ name: String) throws -> UIImage {
@@ -526,7 +529,7 @@ extension FaceMatchingTests {
     @Test func selfieFrameCheckMeasuresARealFace() throws {
         let photo = try findYouFixture("street_coat_cap.jpg")
         let cg = try #require(photo.cgImage)
-        let face = try #require(SCRFDDetector.shared.detect(in: cg).max { $0.boxPixels.width < $1.boxPixels.width })
+        let face = try #require(FaceDetector.shared.detect(in: cg).max { $0.boxPixels.width < $1.boxPixels.width })
         // A selfie-like crop: the face fills about half the frame.
         let rect = FaceSampleExtractor.paddedSquare(around: face.boxPixels,
                                                     imageSize: CGSize(width: cg.width, height: cg.height), factor: 2.0)

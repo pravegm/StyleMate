@@ -1,0 +1,93 @@
+[
+ {
+  "file": "studio_white_sneakers.png",
+  "kind": "footwear",
+  "shard": 0,
+  "note": "white leather sneakers (pair, worn)",
+  "source": "Men's Fall Fashion (Unsplash), offline FASHN cutout"
+ },
+ {
+  "file": "studio_black_sneakers.png",
+  "kind": "footwear",
+  "shard": 0,
+  "note": "black knit sneakers, white soles (pair, worn)",
+  "source": "street_coat_backpack.jpg, app cutout (CI run 41971150297)"
+ },
+ {
+  "file": "studio_patent_boots.png",
+  "kind": "footwear",
+  "shard": 0,
+  "note": "black patent lace-up boots (pair, worn)",
+  "source": "street_coat_boots.jpg, app cutout (CI run 41971150297)"
+ },
+ {
+  "file": "studio_oxfords.png",
+  "kind": "footwear",
+  "shard": 0,
+  "note": "brown leather oxford / derby shoes (pair, worn)",
+  "source": "Baggy trousers (Unsplash), offline FASHN cutout"
+ },
+ {
+  "file": "studio_boat_shoes.png",
+  "kind": "footwear",
+  "shard": 1,
+  "note": "tan suede boat shoes / loafers (pair, worn)",
+  "source": "Boat shoes and jeans (Unsplash), offline FASHN cutout"
+ },
+ {
+  "file": "studio_black_cap.png",
+  "kind": "headwear",
+  "shard": 1,
+  "note": "black baseball cap",
+  "source": "street_coat_cap.jpg, app cutout (CI run 41971150297)"
+ },
+ {
+  "file": "studio_sun_hat.png",
+  "kind": "headwear",
+  "shard": 1,
+  "note": "tan felt wide-brim hat",
+  "source": "casual_denim_jacket_hat.jpg, app cutout (CI run 41971150297)"
+ },
+ {
+  "file": "studio_grey_coat.png",
+  "kind": "outerLayer",
+  "shard": 1,
+  "note": "light-grey wool coat (back view, sunlit)",
+  "source": "street_coat_boots.jpg, app cutout (CI run 41971150297)"
+ },
+ {
+  "file": "studio_chinos.png",
+  "kind": "lower",
+  "shard": 2,
+  "note": "khaki chinos, full length",
+  "source": "Men's Fall Fashion (Unsplash), offline FASHN cutout"
+ },
+ {
+  "file": "studio_black_trousers.png",
+  "kind": "lower",
+  "shard": 2,
+  "note": "black slim trousers, mid-stride",
+  "source": "Man carrying skateboard (Unsplash), offline FASHN cutout"
+ },
+ {
+  "file": "studio_leather_leggings.png",
+  "kind": "lower",
+  "shard": 2,
+  "note": "black faux-leather leggings, hem hidden by the coat",
+  "source": "street_coat_boots.jpg, app cutout (CI run 41971150297)"
+ },
+ {
+  "file": "studio_joggers.png",
+  "kind": "lower",
+  "shard": 2,
+  "note": "black faux-leather joggers, cuffed",
+  "source": "street_coat_backpack.jpg, app cutout (CI run 41971150297)"
+ },
+ {
+  "file": "studio_skinny_jeans.png",
+  "kind": "lower",
+  "shard": 2,
+  "note": "light-blue skinny jeans",
+  "source": "jeans_white_shirt_halfbody.jpg, app cutout (CI run 41971150297)"
+ }
+]

@@ -60,10 +60,8 @@ jobs:
       - name: Restore face models
         uses: actions/cache/restore@v4
         with:
-          path: |
-            MobileFaceNet.mlpackage
-            SCRFD10G.mlpackage
-          key: face-models-v1-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_adaface.py', 'scripts/convert_scrfd.py', 'scripts/adaface_net.py') }}
+          path: StyleMate/FaceModels
+          key: face-models-v2-${{ hashFiles('scripts/build_face_models.sh', 'scripts/convert_face_models.py') }}
           fail-on-cache-miss: true
       - name: Restore wardrobe models
         uses: actions/cache/restore@v4
@@ -130,7 +128,8 @@ jobs:
           BUILT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")
           [ "$BUILT" = "${{ github.run_number }}" ] || { echo "::error::CFBundleVersion is $BUILT, not ${{ github.run_number }}"; exit 1; }
           # Every on-device model must be inside the app.
-          for m in MobileFaceNet.mlmodelc SCRFD10G.mlmodelc GarmentNet.mlmodelc FashionEncoder.mlmodelc FashionVocabulary.json; do
+          bash scripts/check_face_models.sh "$APP"
+          for m in GarmentNet.mlmodelc FashionEncoder.mlmodelc FashionVocabulary.json; do
             test -e "$APP/$m" || { echo "::error::$m missing from the app"; exit 1; }
           done
           # The non-commercial FASHN / Fashionpedia-SegFormer garment models must not ship.

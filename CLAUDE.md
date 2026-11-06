@@ -16,9 +16,13 @@
 - **The Mac runners are shared by every branch, so spend them deliberately.** A
   feature-branch push runs unit tests + the Release compile only (~45 min). Commit
   message tags: `[tests: StyleMateTests/TryOnTests, ...]` runs only those unit tests
-  (minutes, not 45); `[ui]` or `[full]` adds the UI tests + `e2e-screens`; `[skip ci]`
-  runs nothing. Docs-only pushes don't run. Each push cancels the branch's running
-  CI, so batch commits and push when you want a result, not after every commit.
+  (minutes, not 45); `[ui]` or `[full]` adds the UI tests + `e2e-screens`; `[studio]`
+  (or `[full]`) adds the three studio-coverage render shards (3 Macs, ~45 min);
+  `[skip ci]` runs nothing. Docs-only pushes don't run — nor does a push that is only
+  an empty commit (e.g. a bare `[full]` tag commit): for that, dispatch instead with
+  `gh workflow run ci.yml --ref <branch> -f ui_tests=true [-f studio=true]`. Each push
+  cancels the branch's running CI, so batch commits and push when you want a result,
+  not after every commit.
   Run `duo.yml` once per branch, right before asking for a merge. Merge `origin/main`
   into a branch once, just before that final full run — not after every main merge.
 
@@ -48,22 +52,34 @@
 - Acknowledgement text: `StyleMate/Resources/Acknowledgements/ACK-14-garmentnet.md`.
 
 ## Face recognition (the app's USP — must be error-less)
-- Embedding model: **AdaFace IR-101 (WebFace12M)**, Core ML fp16 (~125 MB),
-  bundled as `MobileFaceNet.mlpackage` (filename kept for history). Regenerate via
-  `scripts/convert_adaface.py`. The `.mlpackage` is git-ignored.
-- **AdaFace input is BGR** (cv2 convention), `(px-127.5)/127.5`, 112×112 — NOT RGB.
-  `createInputMultiArray` feeds B→plane0, R→plane2. A model swap back to an
-  InsightFace/ArcFace model must restore RGB.
-- **Face detection + 5-point landmarks come from bundled InsightFace SCRFD-10G**
-  (`SCRFDDetector`, `SCRFD10G.mlpackage`), NOT Apple Vision — Vision's landmarks
-  were too imprecise and collapsed same-person similarity (proven: SCRFD→0.988 vs
-  Vision→~0.2). SCRFD input is **RGB**, `(px-127.5)/128`, 640×640 letterboxed
-  top-left. It outputs 5 points in canonical ArcFace order, fed to `warpAligned`.
-  Regenerate via `scripts/convert_scrfd.py`. Don't reintroduce Vision landmarks.
+- **Models (Nov 2026): YuNet 2023mar (MIT) detector + 5 landmarks and SFace 2021dec
+  (Apache-2.0) 128-d embedder, both OpenCV Zoo**, Core ML, bundled from the git-ignored
+  `StyleMate/FaceModels/` (`FaceDetectYuNet` / `FaceEmbedSFace`). Built by
+  `scripts/build_face_models.sh` → `convert_face_models.py` (pinned commit, SHA-256, parity vs
+  onnxruntime). **Never bundle InsightFace (SCRFD, buffalo_*) or AdaFace weights**: they are
+  non-commercial; `scripts/check_face_models.sh` fails CI/TestFlight if any is in the app.
+  The old scripts live in `scripts/face_legacy/` (research / licensed-only). docs/MODEL-LICENSING.md.
+- **Everything model-specific lives in `FaceModelProfile`** (I/O contract and every similarity
+  bar: matching, clustering, selfie checks, learning, dedupe). Never hard-code a similarity
+  threshold elsewhere: a bar tuned for one embedder is meaningless for another. buffalo_l is a
+  ready second profile (`.insightFaceBuffaloL` + `SCRFDDetector`), usable only with a signed
+  InsightFace licence (MODEL-LICENSING §7).
+- **YuNet input is BGR raw 0–255**, 640×640 letterboxed top-left; landmarks come out in ArcFace
+  order (image-left eye first). It is trained for 10–300 px faces, so a frame-filling selfie
+  face needs the pad retry (image shrunk into 352 / 224 px of the input). "Find yourself" reads
+  960 px thumbnails (one 640 detector pass; photos ≥ 1100 px also get the small-face tile pass). **SFace input is RGB
+  raw 0–255** (it normalizes inside the graph). Embeddings are flip-averaged (face + mirror),
+  which is why there is no separate mirror selfie anchor any more.
+- Always use `FaceDetector.shared` (never a concrete detector) and warp with the detector's
+  5 landmarks to the ArcFace template. Don't reintroduce Apple Vision landmarks: they
+  collapsed same-person similarity (0.988 → ~0.2) in the AdaFace days.
 - Embeddings are model-specific. Persisted galleries are tagged with
-  `FaceMatchingService.modelVersion`; a mismatch auto-discards and rebuilds from
-  the selfie. Bump that constant on any model swap.
-- Matching is cosine similarity with tiered confidence + runner-up margin.
+  `FaceModelProfile.modelVersion` (via `FaceMatchingService.modelVersion`); a mismatch
+  auto-discards and rebuilds from the selfie. Every profile has its own version.
+- Matching is cosine similarity with tiered confidence + runner-up margin. Auto-add
+  (`.high`, multi-person, self-learning) uses the gallery *consensus* (mean of the 2 best
+  gallery matches): a plain max over a 60-entry gallery lets strangers through far more
+  often (LFW, MODEL-LICENSING §8). Review (`.borderline`) uses the single best match.
   Auto-scan identity resolution is strict (high confidence + clean margin) and
   isolates the user's garments via a person-instance mask so other people's
   clothes are never extracted. Keep upload / camera / auto-scan consistent.

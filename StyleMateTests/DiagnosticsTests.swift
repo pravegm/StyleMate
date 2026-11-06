@@ -237,7 +237,7 @@ struct DiagnosticsTests {
     @Test(.timeLimit(.minutes(10)))
     func tinyBenchmarkOnOneSamplePhoto() async throws {
         let models = ModelPlacementProbe.bundledModels().map(\.name)
-        #expect(models.contains("SCRFD10G"), "bundled models: \(models)")
+        #expect(models.contains(FaceModelProfile.active.detectorResource), "bundled models: \(models)")
 
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("bench-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
@@ -247,7 +247,7 @@ struct DiagnosticsTests {
         options.photoLimit = 1
         options.extraction = false
         options.studio = false
-        options.placementFilter = { $0 == "SCRFD10G" }
+        options.placementFilter = { $0 == FaceModelProfile.active.detectorResource }
         let result = await bench.run(options: options)
 
         #expect(result.completed)
@@ -267,9 +267,9 @@ struct DiagnosticsTests {
         let report = DiagnosticsReport.make(facts: DeviceFacts.current(), benchmark: result, live: PerfStore.shared.snapshot,
                                             hingeAvailable: false, hinge: [], liveHinge: nil)
         #expect(report.contains("Face check, first photo (cold start): "))
-        #expect(report.contains("  - SCRFD10G: "))
+        #expect(report.contains("  - \(FaceModelProfile.active.detectorResource): "))
         Self.save(report, "report.txt")
-        print("[Report] diagnostics: SCRFD10G \(placement.summary); face cold \(DiagFormat.seconds(result.faceColdSeconds)), warm \(DiagFormat.seconds(result.faceWarmMedian))")
+        print("[Report] diagnostics: \(FaceModelProfile.active.detectorResource) \(placement.summary); face cold \(DiagFormat.seconds(result.faceColdSeconds)), warm \(DiagFormat.seconds(result.faceWarmMedian))")
     }
 
     private static func save(_ text: String, _ name: String) {

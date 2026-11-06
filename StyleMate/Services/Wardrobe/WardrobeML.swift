@@ -1,6 +1,7 @@
 import CoreML
 import CoreGraphics
 import Foundation
+import Vision
 
 /// Loads the bundled on-device wardrobe models once and hands out raw outputs.
 ///
@@ -103,8 +104,64 @@ final class WardrobeML {
         let bodyCount = labels.reduce(0) { $0 + ($1 == 16 ? 1 : 0) }
         if bodyCount * 20 < labels.count {
             for i in 0..<labels.count where labels[i] == 16 { labels[i] = 0 }
+        } else {
+            Self.splitBody(&labels, face: Self.faceBox(image))
         }
         return (labels, [Float](repeating: 1, count: labels.count))
+    }
+
+    /// GarmentNet has one "body" class; callers of the FASHN-style labels (try-on) also want face,
+    /// hair, arms, hands and legs. Split body pixels by where they sit relative to the garments:
+    /// above the upper garments = head (face inside Vision's face box, else hair); beside the
+    /// upper garment = arms, their lowest part (near the hem) hands; below the upper garment =
+    /// legs (beside the bottoms' top half: hands); the rest torso.
+    static func splitBody(_ labels: inout [UInt8], face: (Int, Int, Int, Int)?) {
+        typealias P = GarmentSegmenter.P
+        let w = gridW, h = gridH
+        var uTop = h, uBot = -1, lBot = -1
+        var uL = [Int](repeating: Int.max, count: h), uR = [Int](repeating: -1, count: h)
+        var lL = [Int](repeating: Int.max, count: h), lR = [Int](repeating: -1, count: h)
+        for y in 0..<h {
+            for x in 0..<w {
+                let l = labels[y * w + x]
+                if l == P.top.rawValue || l == P.dress.rawValue {
+                    uTop = min(uTop, y); uBot = max(uBot, y); uL[y] = min(uL[y], x); uR[y] = max(uR[y], x)
+                } else if l == P.pants.rawValue || l == P.skirt.rawValue {
+                    lBot = max(lBot, y); lL[y] = min(lL[y], x); lR[y] = max(lR[y], x)
+                }
+            }
+        }
+        let hasUpper = uBot >= 0
+        let uH = max(1, uBot - uTop)
+        var lTop = h
+        for y in 0..<h where lR[y] >= 0 { lTop = y; break }
+        for y in 0..<h {
+            for x in 0..<w where labels[y * w + x] == P.torso.rawValue {
+                let i = y * w + x
+                if !hasUpper || y < uTop {
+                    if let f = face, x >= f.0, x < f.2, y >= f.1, y < f.3 { labels[i] = P.face.rawValue }
+                    else if hasUpper { labels[i] = P.hair.rawValue }
+                    else { labels[i] = y < lTop ? P.hair.rawValue : P.legs.rawValue }
+                } else if y <= uBot {
+                    let inside = uR[y] >= 0 && x >= uL[y] && x <= uR[y]
+                    if !inside { labels[i] = y > uBot - uH / 6 ? P.hands.rawValue : P.arms.rawValue }
+                } else {
+                    let besideBottoms = lR[y] >= 0 && (x < lL[y] || x > lR[y])
+                    labels[i] = besideBottoms && y < lTop + (lBot - lTop) / 2 ? P.hands.rawValue : P.legs.rawValue
+                }
+            }
+        }
+    }
+
+    /// Vision's largest face box on the grid (x0, y0, x1, y1), or nil.
+    static func faceBox(_ image: CGImage) -> (Int, Int, Int, Int)? {
+        let request = VNDetectFaceRectanglesRequest()
+        guard (try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request])) != nil,
+              let face = request.results?.max(by: { $0.boundingBox.width < $1.boundingBox.width }) else { return nil }
+        let b = face.boundingBox   // normalised, bottom-left origin
+        let x0 = Int(b.minX * CGFloat(gridW)), x1 = Int(b.maxX * CGFloat(gridW))
+        let y0 = Int((1 - b.maxY) * CGFloat(gridH)), y1 = Int((1 - b.minY) * CGFloat(gridH))
+        return (max(0, x0), max(0, y0), min(gridW, x1), min(gridH, y1))
     }
 
     /// L2-normalized 768-d embedding of a 224x224 item image.

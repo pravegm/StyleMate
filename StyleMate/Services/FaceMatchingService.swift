@@ -28,55 +28,38 @@ enum ScanIdentity {
 
 /// On-device face identity matching for the photo-library auto-scan.
 ///
-/// The bundled model (resource name "MobileFaceNet" for historical reasons) is
-/// now **AdaFace IR-101 (WebFace12M)**, fp16 Core ML — chosen because AdaFace's
-/// quality-adaptive margin is designed for low-quality / varied faces (angles,
-/// distance, lighting), exactly the auto-scan's hard case, giving cleaner
-/// same-person/different-person separation than the prior InsightFace models.
-/// I/O: 112x112 **BGR** in (cv2 convention, NOT RGB), 512-dim out, (px-127.5)/127.5
-/// normalization. Like all ArcFace-family models its embeddings are ONLY
-/// meaningful when the input face is warped to the canonical 5-point template
-/// (eyes / nose / mouth-corners mapped to fixed 112x112 positions).
+/// Models (see `FaceModelProfile.active`, docs/MODEL-LICENSING.md): faces are detected and
+/// 5-point-landmarked by **YuNet** (`YuNetDetector`, MIT), warped to the canonical ArcFace
+/// 112x112 template, and embedded by **SFace** (Apache-2.0, 128-d, RGB raw 0…255 in; it
+/// normalizes inside the graph) with flip test-time augmentation. Like every ArcFace-family
+/// model, its embeddings are ONLY meaningful when the face is warped to that template, so the
+/// landmarks must come from the detector, never from Apple Vision (Vision's landmarks collapsed
+/// same-person similarity from 0.988 to ~0.2 in Nov 2026).
 ///
-/// Face detection + the 5 landmarks come from the bundled **InsightFace SCRFD-10G**
-/// detector (`SCRFDDetector`), NOT Apple Vision. This is load-bearing: Apple
-/// Vision's landmarks were too imprecise, and ArcFace alignment is brutally
-/// sensitive — offline, proper SCRFD landmarks gave same-person 0.988 vs ~0.2 with
-/// Vision. SCRFD outputs the 5 points already in the canonical ArcFace order, fed
-/// straight to `warpAligned`.
-///
-/// Identity is represented by a *gallery* of embeddings (the onboarding selfie
-/// plus any library photos the user later confirms are them), persisted to disk.
-/// A candidate face's score is its best cosine similarity against the gallery,
-/// turned into a confidence tier rather than a single hard cutoff.
+/// Identity is represented by a *gallery* of embeddings (the onboarding selfie frames plus any
+/// library photos the user later confirms are them), persisted to disk. A candidate face's
+/// score is its best cosine similarity against the gallery, turned into a confidence tier rather
+/// than a single hard cutoff. Every bar comes from the profile, because similarity scales are
+/// model-specific.
 class FaceMatchingService {
     static let shared = FaceMatchingService()
     private init() {}
 
     // MARK: - Tunable Thresholds
     //
-    // Cosine of L2-normalized AdaFace IR-101 embeddings, now fed faces aligned by
-    // the SCRFD detector (not Apple Vision). Offline with proper SCRFD alignment:
-    // same-person ~0.6–0.99, impostors ~0.03 (max ~0.18). So the genuine cluster
-    // and the impostor cloud are now cleanly separated and the bar can sit safely
-    // in the gap. Starting points below; calibrate from the first [FaceRef]/
-    // [FaceMatch] device logs (watch galleryIdx for a polluted reference).
-    // Device data across runs: the user's OWN matches (solo and group) are all
-    // >=0.64, while a partner who slipped into the gallery as a borderline
-    // reference matches her own photos at <=0.515 — a clean gap. The bar sits in
-    // that gap, and it applies to SOLO photos too: a solo shot of the partner at
-    // 0.514 was getting through the old 0.40 solo bar. (borderline = "review" tier.)
-    static var highConfidenceThreshold: Float = 0.55   // auto-add (solo photos)
-    static var borderlineThreshold: Float = 0.30        // send to review
-    // Multi-person photos need an even higher bar: a borderline match plus an
-    // imperfect person-instance mask can extract the wrong body. Kept above the
-    // partner's max (~0.515) with margin, below the user's group matches (>=0.64).
-    static var multiPersonThreshold: Float = 0.58
-    private static let minFaceQuality: Float = 0.30     // skip blurry / poorly-captured faces
+    // Cosine of L2-normalized embeddings of the active model (`FaceModelProfile.active`). The
+    // values, and how they were calibrated (equal false-accept rate to the AdaFace bars they
+    // replaced, measured on LFW), are documented on the profile and in docs/MODEL-LICENSING.md.
+    // `var` so tests can probe edge cases; production never changes them.
+    static var highConfidenceThreshold: Float = FaceModelProfile.active.highConfidence   // auto-add (solo photos)
+    static var borderlineThreshold: Float = FaceModelProfile.active.borderline           // send to review
+    // Multi-person photos need a higher bar: a borderline match plus an imperfect
+    // person-instance mask can extract the wrong body (a partner standing next to the user).
+    static var multiPersonThreshold: Float = FaceModelProfile.active.multiPerson
     // In a multi-person photo, the best match must beat the next-best face by at
     // least this much to auto-isolate silently. Otherwise two people score too
     // close to be sure, so we ask "which one is you?" instead of guessing.
-    static var ambiguityMargin: Float = 0.08
+    static var ambiguityMargin: Float = FaceModelProfile.active.ambiguityMargin
 
     // InsightFace canonical 5-point destination for 112x112 alignment.
     // Source: insightface/utils/face_align.py `arcface_dst`
@@ -127,13 +110,17 @@ class FaceMatchingService {
         let confidence: Confidence
         let matchedFaceBox: CGRect?    // normalized, bottom-left — for person isolation
         let faceCount: Int
+        /// The matched face's gallery score: the mean of its `galleryConsensus` best gallery
+        /// similarities (the single one while the gallery has fewer entries). Decides `.high`.
         let similarity: Float?
-        /// Best similarity of any OTHER face in the photo. Used to detect the
+        /// Best score of any OTHER face in the photo (same measure). Used to detect the
         /// "two people score close together" case where the pick is uncertain.
         var runnerUpSimilarity: Float? = nil
         /// The matched face's embedding — used to grow the gallery from confident
         /// scan matches and from faces the user confirms in review.
         var matchedEmbedding: [Float]? = nil
+        /// The matched face's single best gallery similarity. Decides `.borderline` (review).
+        var bestSingleSimilarity: Float? = nil
 
         /// True when the photo should enter the pipeline at all (high or borderline).
         var isMatch: Bool { confidence == .high || confidence == .borderline }
@@ -154,23 +141,8 @@ class FaceMatchingService {
     private func ensureModelLoadedLocked() -> MLModel? {
         if let mlModel { return mlModel }
 
-        guard let url = Bundle.main.url(forResource: "MobileFaceNet", withExtension: "mlmodelc")
-                ?? Bundle.main.url(forResource: "MobileFaceNet", withExtension: "mlpackage") else {
-            dlog("[FaceMatch] ERROR: MobileFaceNet model not found in bundle")
-            return nil
-        }
-
-        do {
-            let config = MLModelConfiguration()
-            config.computeUnits = .cpuAndNeuralEngine   // no GPU: iOS forbids GPU work in the background (overnight scan)
-            let model = try MLModel(contentsOf: url, configuration: config)
-            mlModel = model
-            dlog("[FaceMatch] Model loaded successfully")
-            return model
-        } catch {
-            dlog("[FaceMatch] ERROR: Failed to load model: \(error)")
-            return nil
-        }
+        mlModel = FaceDetectorSupport.loadModel(Self.profile.embedderResource, tag: "FaceMatch")
+        return mlModel
     }
 
     // MARK: - Reference Gallery (persisted)
@@ -201,11 +173,15 @@ class FaceMatchingService {
         var embeddings: [[Float]]?      // v1
     }
 
-    /// Identifies which face model produced the persisted embeddings. Embeddings
-    /// are model-specific (an R50 vector is meaningless to compare against an mbf
-    /// vector), so a gallery tagged with a different version is discarded and
-    /// rebuilt from the selfie when the model changes.
-    private static let modelVersion = "adaface_ir101_upright"
+    /// The active face models (detector + embedder + every bar tuned to them).
+    static let profile = FaceModelProfile.active
+
+    /// Identifies which face models produced the persisted embeddings. Embeddings
+    /// are model-specific (an SFace vector is meaningless against an AdaFace one), so
+    /// a gallery tagged with a different version is discarded and rebuilt from the
+    /// selfie when the models change. Was "adaface_ir101_upright" (SCRFD + AdaFace)
+    /// until Nov 2026.
+    static let modelVersion = profile.modelVersion
 
     private static func galleryURL(forUser userId: String) -> URL {
         LocalStore.directory("FaceReference").appendingPathComponent("faceReference_\(userId).json")
@@ -317,7 +293,7 @@ class FaceMatchingService {
         var entries = anchors.map { GalleryEntry(embedding: $0, source: .selfie, addedAt: now) }
         var dropped = 0
         for (i, e) in rest.enumerated() {
-            if anchors.contains(where: { dotProduct($0, e) > 0.95 }) { continue }   // an old anchor
+            if anchors.contains(where: { dotProduct($0, e) > Self.profile.galleryDuplicate }) { continue }   // an old anchor
             let selfieSim = anchors.map { dotProduct($0, e) }.max() ?? -1
             guard selfieSim >= Self.borderlineThreshold else { dropped += 1; continue }
             // Keep their order: older entries get earlier timestamps.
@@ -349,7 +325,8 @@ class FaceMatchingService {
         }
         var anchors: [[Float]] = []
         if let e = generateEmbeddingFromPhoto(cgImage, label: "selfie") { anchors.append(e) }
-        if let flipped = horizontallyFlipped(cgImage),
+        // Flip-averaged embeddings are already mirror-invariant: the mirror anchor would be a copy.
+        if !Self.profile.flipAverage, let flipped = horizontallyFlipped(cgImage),
            let m = generateEmbeddingFromPhoto(flipped, label: "selfie-mirror") { anchors.append(m) }
         guard !anchors.isEmpty else { return nil }
         // The onboarding head-turn frames (`selfieTurnFrames_<userId>`) are selfie anchors
@@ -358,10 +335,11 @@ class FaceMatchingService {
         let frontCount = anchors.count
         for (i, frame) in SelfieReferenceStore.turnFrames(userId: userId).enumerated() {
             guard let cg = renderUpOrientation(frame).cgImage else { continue }
-            for e in [generateEmbeddingFromPhoto(cg, label: "selfie-turn\(i + 1)"),
-                      horizontallyFlipped(cg).flatMap { generateEmbeddingFromPhoto($0, label: "selfie-turn\(i + 1)-mirror") }]
+            let mirror: [Float]? = Self.profile.flipAverage ? nil
+                : horizontallyFlipped(cg).flatMap { generateEmbeddingFromPhoto($0, label: "selfie-turn\(i + 1)-mirror") }
+            for e in [generateEmbeddingFromPhoto(cg, label: "selfie-turn\(i + 1)"), mirror]
                 .compactMap({ $0 })
-            where !anchors.contains(where: { dotProduct($0, e) > 0.95 }) {
+            where !anchors.contains(where: { dotProduct($0, e) > Self.profile.galleryDuplicate }) {
                 anchors.append(e)
             }
         }
@@ -400,7 +378,7 @@ class FaceMatchingService {
     /// similarity to the current gallery (for ranking; 0 if the gallery is empty).
     func evaluateFaceForReference(in cgImage: CGImage) -> (displayCrop: CGImage, embedding: [Float], similarity: Float)? {
         // Candidate crops can be frame-filling faces, so the padded retry stays on here.
-        let faces = SCRFDDetector.shared.detect(in: cgImage, padRetry: true)
+        let faces = FaceDetector.shared.detect(in: cgImage, padRetry: true)
         guard !faces.isEmpty else { return nil }
         let imgW = cgImage.width, imgH = cgImage.height
         let refs = referenceEmbeddings
@@ -449,7 +427,7 @@ class FaceMatchingService {
             for emb in embeddings {
                 let protectedCount = gallery.filter { $0.source != .learned }.count
                 guard protectedCount < Self.galleryCap else { break }
-                if gallery.contains(where: { dotProduct($0.embedding, emb) > 0.95 }) { continue }
+                if gallery.contains(where: { dotProduct($0.embedding, emb) > Self.profile.galleryDuplicate }) { continue }
                 gallery.append(GalleryEntry(embedding: emb, source: .confirmed, addedAt: now))
                 added += 1
             }
@@ -501,10 +479,9 @@ class FaceMatchingService {
     //   a learned or wrongly confirmed face can't vouch for the next one, AND
     // - in a group photo it beats every other face by a clear margin (`autoLearnMargin`).
     // Learned entries are capped (`maxLearnedShare`) and evicted oldest-first.
-    static var autoLearnThreshold: Float = 0.62
-    /// Impostors score <= ~0.18 against the selfie; the user's clear photos >= ~0.5.
-    static var autoLearnSelfieThreshold: Float = 0.50
-    static var autoLearnMargin: Float = 0.15
+    static var autoLearnThreshold: Float = FaceModelProfile.active.autoLearn
+    static var autoLearnSelfieThreshold: Float = FaceModelProfile.active.autoLearnSelfie
+    static var autoLearnMargin: Float = FaceModelProfile.active.autoLearnMargin
 
     /// Adds a confidently-matched face from the scan. Skips near-duplicates.
     /// `margin` is the match's lead over the next-best face in the photo (solo: infinite).
@@ -522,7 +499,7 @@ class FaceMatchingService {
                 dlog("[FaceMatch] Not learning: selfie sim \(String(format: "%.3f", selfieSim)) < \(Self.autoLearnSelfieThreshold)")
                 return false
             }
-            if gallery.contains(where: { dotProduct($0.embedding, embedding) > 0.90 }) { return false }
+            if gallery.contains(where: { dotProduct($0.embedding, embedding) > Self.profile.learnedDuplicate }) { return false }
             let entry = GalleryEntry(embedding: embedding, source: .learned, addedAt: Date())
             gallery.append(entry)
             Self.enforceCaps(&gallery)
@@ -570,11 +547,12 @@ class FaceMatchingService {
             return .noFaces
         }
 
-        let faces = SCRFDDetector.shared.detect(in: cgImage, padRetry: padRetry)
+        let faces = FaceDetector.shared.detect(in: cgImage, padRetry: padRetry)
         if faces.isEmpty { return .noFaces }
 
         var bestBox: CGRect?
         var bestSimilarity: Float = -.infinity
+        var bestSingle: Float = -.infinity
         var secondSimilarity: Float = -.infinity
         var bestRefIndex = -1
         var bestEmbedding: [Float]?
@@ -590,12 +568,13 @@ class FaceMatchingService {
                 continue
             }
 
-            let (similarity, refIdx) = Self.bestMatch(of: embedding, in: refs)
+            let (similarity, single, refIdx) = Self.bestMatch(of: embedding, in: refs)
             allScores.append(similarity)
 
             if similarity > bestSimilarity {
                 secondSimilarity = bestSimilarity
                 bestSimilarity = similarity
+                bestSingle = single
                 bestBox = face.normalizedBox(imageWidth: imgW, imageHeight: imgH)
                 bestRefIndex = refIdx
                 bestEmbedding = embedding
@@ -604,16 +583,20 @@ class FaceMatchingService {
             }
         }
 
+        // Auto-add needs the gallery's consensus (two entries agree); review needs one entry.
+        // With a big gallery a single-entry max admits strangers far more often: on LFW with a
+        // 10-photo gallery, TAR at FAR 1e-5 was 87% for the max and 99% for the top-2 mean
+        // (docs/MODEL-LICENSING.md §8).
         let confidence: Confidence
         if bestSimilarity >= Self.highConfidenceThreshold {
             confidence = .high
-        } else if bestSimilarity >= Self.borderlineThreshold {
+        } else if bestSingle >= Self.borderlineThreshold {
             confidence = .borderline
         } else {
             confidence = .none
         }
 
-        dlog("[FaceMatch] \(confidence) best=\(String(format: "%.3f", bestSimilarity)) galleryIdx=\(bestRefIndex) all=[\(allScores.map { String(format: "%.3f", $0) }.joined(separator: ", "))] faces=\(faces.count) gallery=\(refs.count)")
+        dlog("[FaceMatch] \(confidence) best=\(String(format: "%.3f", bestSimilarity)) single=\(String(format: "%.3f", bestSingle)) galleryIdx=\(bestRefIndex) all=[\(allScores.map { String(format: "%.3f", $0) }.joined(separator: ", "))] faces=\(faces.count) gallery=\(refs.count)")
 
         return MatchResult(
             confidence: confidence,
@@ -621,21 +604,31 @@ class FaceMatchingService {
             faceCount: faces.count,
             similarity: bestSimilarity.isFinite ? bestSimilarity : nil,
             runnerUpSimilarity: secondSimilarity.isFinite ? secondSimilarity : nil,
-            matchedEmbedding: bestEmbedding
+            matchedEmbedding: bestEmbedding,
+            bestSingleSimilarity: bestSingle.isFinite ? bestSingle : nil
         )
     }
 
-    /// Best cosine similarity AND which gallery slot produced it. The index lets
-    /// us spot a polluted reference: if the same slot keeps winning matches for
-    /// different people, that slot is probably not the user.
-    private static func bestMatch(of embedding: [Float], in refs: [[Float]]) -> (sim: Float, index: Int) {
-        var best: Float = -.infinity
+    /// A face's gallery score (`sim`: the mean of its `galleryConsensus` best similarities, or
+    /// fewer while the gallery is smaller), its single best similarity, and which gallery slot
+    /// produced that. The index lets us spot a polluted reference: if the same slot keeps winning
+    /// matches for different people, that slot is probably not the user.
+    static func bestMatch(of embedding: [Float], in refs: [[Float]]) -> (sim: Float, single: Float, index: Int) {
+        let k = max(1, profile.galleryConsensus)
+        var top = [Float](repeating: -.infinity, count: k)   // descending
         var idx = -1
         for (i, ref) in refs.enumerated() {
             let s = dot(ref, embedding)
-            if s > best { best = s; idx = i }
+            if s > top[0] { idx = i }
+            if s > top[k - 1] {
+                var j = k - 1
+                while j > 0 && top[j - 1] < s { top[j] = top[j - 1]; j -= 1 }
+                top[j] = s
+            }
         }
-        return (best, idx)
+        let used = top.filter { $0.isFinite }
+        guard !used.isEmpty else { return (-.infinity, -.infinity, -1) }
+        return (used.reduce(0, +) / Float(used.count), used[0], idx)
     }
 
     private static func dot(_ a: [Float], _ b: [Float]) -> Float {
@@ -673,7 +666,7 @@ class FaceMatchingService {
         }
         _ = loadReference(forUser: userId)
 
-        let faces = SCRFDDetector.shared.detect(in: cg, padRetry: false)   // library-style photo
+        let faces = FaceDetector.shared.detect(in: cg, padRetry: false)   // library-style photo
         let bodies = countPeople(in: cg)
         let peopleCount = max(faces.count, bodies)
         dlog("[Identity] faces=\(faces.count) bodies=\(bodies) gallery=\(referenceCount)")
@@ -915,8 +908,11 @@ class FaceMatchingService {
                 croppedToInstancesExtent: true
             )
             let maskedCI = CIImage(cvPixelBuffer: maskedBuffer)
-            let ctx = CIContext()
-            guard let maskedCG = ctx.createCGImage(maskedCI, from: maskedCI.extent) else { return nil }
+            // One shared context, software when the app isn't active (background scan: no GPU).
+            guard let maskedCG = CoreImageContext.current.createCGImage(maskedCI, from: maskedCI.extent) else {
+                CoreImageContext.noteFailure("person isolation")
+                return nil
+            }
             dlog("[FaceMatch] Person isolated: \(maskedCG.width)x\(maskedCG.height)")
             return UIImage(cgImage: maskedCG)
         } catch {
@@ -925,61 +921,10 @@ class FaceMatchingService {
         }
     }
 
-    // MARK: - Face Detection (with landmarks, required for alignment)
-
-    func detectFacesWithLandmarks(in cgImage: CGImage) -> [VNFaceObservation] {
-        let request = VNDetectFaceLandmarksRequest()
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([request])
-        return (request.results ?? [])
-            .filter { $0.confidence > 0.5 }
-            .sorted { $0.confidence > $1.confidence }
-    }
-
-    /// Rectangles-only detection (no landmarks) — used where alignment isn't needed.
-    func detectFaces(in cgImage: CGImage) -> [VNFaceObservation] {
-        let request = VNDetectFaceRectanglesRequest()
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([request])
-        return (request.results ?? [])
-            .filter { $0.confidence > 0.5 }
-            .sorted { $0.confidence > $1.confidence }
-    }
-
-    // MARK: - Face Quality
-
-    private func detectFaceQualities(in cgImage: CGImage) -> [CGRect: Float] {
-        let request = VNDetectFaceCaptureQualityRequest()
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([request])
-
-        var map: [CGRect: Float] = [:]
-        for obs in request.results ?? [] {
-            map[obs.boundingBox] = obs.faceCaptureQuality ?? 0
-        }
-        return map
-    }
-
-    private func qualityForFace(_ face: VNFaceObservation, qualityMap: [CGRect: Float]) -> Float {
-        if let q = qualityMap[face.boundingBox] { return q }
-        // Find closest match by IoU
-        var bestQ: Float = 1.0
-        var bestIoU: CGFloat = 0
-        for (rect, q) in qualityMap {
-            let intersection = face.boundingBox.intersection(rect)
-            if !intersection.isNull {
-                let iou = (intersection.width * intersection.height) /
-                    (face.boundingBox.width * face.boundingBox.height + rect.width * rect.height - intersection.width * intersection.height)
-                if iou > bestIoU { bestIoU = iou; bestQ = q }
-            }
-        }
-        return bestIoU > 0.5 ? bestQ : 1.0
-    }
-
     // MARK: - Embedding from a Full Photo (detect + align + embed best face)
 
     private func generateEmbeddingFromPhoto(_ cgImage: CGImage, label: String) -> [Float]? {
-        let faces = SCRFDDetector.shared.detect(in: cgImage, padRetry: true)   // selfie / confirm crops can fill the frame
+        let faces = FaceDetector.shared.detect(in: cgImage, padRetry: true)   // selfie / confirm crops can fill the frame
         dlog("[FaceMatch] [\(label)] Detected \(faces.count) face(s)")
 
         // Largest (most prominent) face — for a selfie/confirm crop there's one.
@@ -999,101 +944,6 @@ class FaceMatchingService {
     }
 
     // MARK: - Aligned Face Crop (ArcFace 5-point → 112x112)
-
-    /// Produces an aligned 112x112 face crop. Uses ArcFace 5-point alignment when
-    /// landmarks are available, falling back to a padded bbox crop otherwise.
-    private func alignedFaceCrop(from cgImage: CGImage, observation: VNFaceObservation,
-                                  imageWidth: Int, imageHeight: Int) -> CGImage? {
-        if let landmarks = observation.landmarks,
-           let src = extractFiveKeypoints(landmarks: landmarks,
-                                          boundingBox: observation.boundingBox,
-                                          imageWidth: imageWidth, imageHeight: imageHeight),
-           let aligned = warpAligned(image: cgImage, srcPoints: src) {
-            return aligned
-        }
-        dlog("[FaceMatch] Alignment unavailable, falling back to bbox crop")
-        return bboxCrop(from: cgImage, bbox: observation.boundingBox,
-                        imageWidth: imageWidth, imageHeight: imageHeight)
-    }
-
-    /// Extracts the 5 ArcFace keypoints (eye centers, nose tip, mouth corners) in
-    /// image pixel coordinates (top-left origin) using Vision landmarks.
-    private func extractFiveKeypoints(
-        landmarks: VNFaceLandmarks2D,
-        boundingBox: CGRect,
-        imageWidth: Int,
-        imageHeight: Int
-    ) -> [SIMD2<Float>]? {
-        guard let leftEye = landmarks.leftEye, leftEye.pointCount >= 1,
-              let rightEye = landmarks.rightEye, rightEye.pointCount >= 1,
-              let nose = landmarks.nose, nose.pointCount >= 1 else {
-            dlog("[FaceMatch] Missing required landmarks (eyes or nose)")
-            return nil
-        }
-
-        // Convert a normalized landmark point to image pixel coords (top-left origin).
-        func convertPoint(_ normPt: CGPoint) -> SIMD2<Float> {
-            let imgPt = VNImagePointForFaceLandmarkPoint(
-                vector_float2(Float(normPt.x), Float(normPt.y)),
-                boundingBox, imageWidth, imageHeight
-            )
-            // VNImagePointForFaceLandmarkPoint returns bottom-left origin; flip Y.
-            return SIMD2<Float>(Float(imgPt.x), Float(imageHeight) - Float(imgPt.y))
-        }
-
-        func center(of region: VNFaceLandmarkRegion2D) -> CGPoint {
-            let pts = region.normalizedPoints
-            let n = CGFloat(pts.count)
-            return CGPoint(x: pts.reduce(0) { $0 + $1.x } / n,
-                           y: pts.reduce(0) { $0 + $1.y } / n)
-        }
-
-        // The ArcFace template (arcfaceDst) is laid out GEOMETRICALLY: index 0 is
-        // the image-LEFT eye, index 1 the image-RIGHT eye. Vision's leftEye/rightEye
-        // are ANATOMICAL (the subject's left eye sits on the RIGHT of the image), so
-        // mapping center(of: leftEye) -> index 0 swapped the eyes relative to the
-        // geometrically-extracted mouth corners below. A similarity transform can't
-        // reflect, so swapped-eyes + correct-mouth forced a distorted/rotated fit on
-        // EVERY face — the root cause of chronically low same-person similarity
-        // across all embedding models. Assign eyes by x position, like the mouth.
-        let eyeCenterA = convertPoint(center(of: leftEye))
-        let eyeCenterB = convertPoint(center(of: rightEye))
-        let imageLeftEye = eyeCenterA.x <= eyeCenterB.x ? eyeCenterA : eyeCenterB
-        let imageRightEye = eyeCenterA.x <= eyeCenterB.x ? eyeCenterB : eyeCenterA
-
-        let nosePts = nose.normalizedPoints
-        let noseTip = convertPoint(nosePts[nosePts.count - 1])
-
-        // Mouth corners: geometric leftmost / rightmost lip points (image-left /
-        // image-right), matching the template layout.
-        var leftMouth: SIMD2<Float>
-        var rightMouth: SIMD2<Float>
-        let lipRegion = landmarks.outerLips ?? landmarks.innerLips
-        if let lips = lipRegion, lips.pointCount >= 2 {
-            let pts = lips.normalizedPoints
-            let leftMostNorm = pts.min { $0.x < $1.x }!
-            let rightMostNorm = pts.max { $0.x < $1.x }!
-            leftMouth = convertPoint(leftMostNorm)
-            rightMouth = convertPoint(rightMostNorm)
-        } else {
-            let eyeMidX = (imageLeftEye.x + imageRightEye.x) / 2
-            let eyeSpan = imageRightEye.x - imageLeftEye.x
-            let mouthY = noseTip.y + (noseTip.y - (imageLeftEye.y + imageRightEye.y) / 2) * 0.6
-            leftMouth = SIMD2<Float>(eyeMidX - eyeSpan * 0.35, mouthY)
-            rightMouth = SIMD2<Float>(eyeMidX + eyeSpan * 0.35, mouthY)
-            dlog("[FaceMatch] Estimated mouth corners from eye/nose positions")
-        }
-
-        let result = [imageLeftEye, imageRightEye, noseTip, leftMouth, rightMouth]
-
-        for (i, pt) in result.enumerated() {
-            if pt.x < -50 || pt.y < -50 || pt.x > Float(imageWidth + 50) || pt.y > Float(imageHeight + 50) {
-                dlog("[FaceMatch] Keypoint \(i) out of bounds: (\(pt.x), \(pt.y))")
-                return nil
-            }
-        }
-        return result
-    }
 
     /// Computes a similarity transform mapping srcPoints → arcfaceDst and warps the
     /// source image into a 112x112 aligned face via bilinear inverse sampling.
@@ -1138,7 +988,7 @@ class FaceMatchingService {
             return nil
         }
 
-        let outSize = 112
+        let outSize = Self.profile.embedderInputSize
         let bpp = 4
         let outBytesPerRow = outSize * bpp
         var outPixels = [UInt8](repeating: 0, count: outSize * outBytesPerRow)
@@ -1209,37 +1059,21 @@ class FaceMatchingService {
         )
     }
 
-    // MARK: - Fallback: BBox Crop + Resize
-
-    private func bboxCrop(from cgImage: CGImage, bbox: CGRect,
-                           imageWidth: Int, imageHeight: Int) -> CGImage? {
-        let imgW = CGFloat(imageWidth), imgH = CGFloat(imageHeight)
-        let x = bbox.origin.x * imgW
-        let y = (1 - bbox.origin.y - bbox.height) * imgH
-        let w = bbox.width * imgW, h = bbox.height * imgH
-
-        let padding: CGFloat = 0.3
-        let padX = w * padding, padY = h * padding
-        let cropX = max(0, x - padX), cropY = max(0, y - padY)
-        let cropW = min(imgW - cropX, w + 2 * padX), cropH = min(imgH - cropY, h + 2 * padY)
-        guard cropW > 10, cropH > 10,
-              let cropped = cgImage.cropping(to: CGRect(x: cropX, y: cropY, width: cropW, height: cropH)) else { return nil }
-
-        let size = CGSize(width: 112, height: 112)
-        return ImageDownsampler.render(size: size) { _ in   // scale 1: really 112x112 px
-            UIImage(cgImage: cropped).draw(in: CGRect(origin: .zero, size: size))
-        }.cgImage
-    }
-
     // MARK: - Embedding Generation
 
-    /// Embeds an aligned 112x112 face: one forward pass, then L2-normalize so the
-    /// dot product is cosine similarity. (Flip test-time augmentation was tried and
-    /// measurably DEGRADED same-person similarity for this model — it's removed.)
-    /// Gallery-building and matching both go through here, so reference and query
-    /// embeddings stay consistent.
+    /// Embeds an aligned face, L2-normalized so the dot product is cosine similarity.
+    /// With `flipAverage` (SFace) the face and its mirror image are embedded and summed: on LFW
+    /// this raised TAR at a fixed false-accept rate (docs/MODEL-LICENSING.md §8) and makes the
+    /// embedding mirror-invariant, so mirrored front-camera selfies match unmirrored photos.
+    /// Gallery-building and matching both go through here, so reference and query embeddings
+    /// stay consistent.
     private func generateEmbedding(for faceCrop: CGImage) -> [Float]? {
         guard var embedding = rawEmbedding(for: faceCrop) else { return nil }
+        if Self.profile.flipAverage {
+            guard let mirror = horizontallyFlipped(faceCrop), let m = rawEmbedding(for: mirror),
+                  m.count == embedding.count else { return nil }
+            vDSP_vadd(embedding, 1, m, 1, &embedding, 1, vDSP_Length(embedding.count))
+        }
         var norm: Float = 0
         vDSP_svesq(embedding, 1, &norm, vDSP_Length(embedding.count))
         norm = sqrt(norm)
@@ -1275,18 +1109,13 @@ class FaceMatchingService {
                 dlog("[FaceMatch] No MLMultiArray in model output")
                 return nil
             }
-
-            let count = multiArray.count
-            guard count >= 128 else {
-                dlog("[FaceMatch] Unexpected embedding dimension: \(count)")
+            let dim = Self.profile.embeddingDimension
+            guard multiArray.count >= dim else {
+                dlog("[FaceMatch] Unexpected embedding dimension: \(multiArray.count) (want \(dim))")
                 return nil
             }
-
-            let embeddingSize = min(count, 512)
-            var embedding = [Float](repeating: 0, count: embeddingSize)
-            let ptr = multiArray.dataPointer.bindMemory(to: Float.self, capacity: embeddingSize)
-            for i in 0..<embeddingSize { embedding[i] = ptr[i] }
-            return embedding
+            // Element accessor: correct for Float16 / strided ML-program outputs too.
+            return Array(FaceDetectorSupport.floats(multiArray).prefix(dim))
         } catch {
             dlog("[FaceMatch] Model prediction failed: \(error)")
             return nil
@@ -1303,12 +1132,13 @@ class FaceMatchingService {
         return nil
     }
 
-    /// Converts a 112x112 CGImage to a [1, 3, 112, 112] Float32 MLMultiArray.
-    /// Normalization: (pixel / 127.5) - 1.0 (mean 0.5, std 0.5), **BGR** channel
-    /// order — AdaFace's convention (cv2-style), NOT InsightFace's RGB. The pixel
-    /// buffer is RGBA, so B goes to plane 0 and R to plane 2.
+    /// Converts the aligned face to the embedder's [1, 3, S, S] Float32 input:
+    /// value = (px - inputMean) * inputScale, in the profile's channel order. SFace takes RGB raw
+    /// 0…255 (it normalizes inside the graph); the buffalo_l R50 takes RGB (px-127.5)/127.5. The
+    /// pixel buffer is RGBA, so BGR models get B in plane 0 and R in plane 2.
     private func createInputMultiArray(from cgImage: CGImage) -> MLMultiArray? {
-        let size = 112
+        let p = Self.profile
+        let size = p.embedderInputSize
         guard let pixels = imageToPixelBuffer(cgImage) else { return nil }
         let actualW = cgImage.width, actualH = cgImage.height
 
@@ -1321,20 +1151,18 @@ class FaceMatchingService {
         let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: 3 * channelSize)
         let bpp = 4
         let srcBytesPerRow = actualW * bpp
+        let (rPlane, bPlane) = p.channelOrder == .rgb ? (0, 2) : (2, 0)
+        let mean = p.inputMean, scale = p.inputScale
 
         for y in 0..<size {
             for x in 0..<size {
                 let srcX = min(x * actualW / size, actualW - 1)
                 let srcY = min(y * actualH / size, actualH - 1)
                 let offset = srcY * srcBytesPerRow + srcX * bpp
-                let r = Float(pixels[offset]) / 127.5 - 1.0
-                let g = Float(pixels[offset + 1]) / 127.5 - 1.0
-                let b = Float(pixels[offset + 2]) / 127.5 - 1.0
                 let pixelIndex = y * size + x
-                // BGR order for AdaFace: plane 0 = B, plane 1 = G, plane 2 = R.
-                ptr[pixelIndex] = b
-                ptr[channelSize + pixelIndex] = g
-                ptr[2 * channelSize + pixelIndex] = r
+                ptr[rPlane * channelSize + pixelIndex] = (Float(pixels[offset]) - mean) * scale
+                ptr[channelSize + pixelIndex] = (Float(pixels[offset + 1]) - mean) * scale
+                ptr[bPlane * channelSize + pixelIndex] = (Float(pixels[offset + 2]) - mean) * scale
             }
         }
         return array
@@ -1426,7 +1254,7 @@ class FaceMatchingService {
                 try? FileManager.default.removeItem(at: Self.galleryURL(forUser: target))
             }
         }
-        // Free the embedder (~125 MB). Waits for a running prediction to finish.
+        // Free the embedder. Waits for a running prediction to finish.
         modelLock.lock()
         mlModel = nil
         modelLock.unlock()
@@ -1436,7 +1264,7 @@ class FaceMatchingService {
 // MARK: - Batch face embedding (one detector pass)
 
 /// A detected face (box in image pixels, 5 ArcFace keypoints, detector score)
-/// with its aligned AdaFace embedding and a padded display crop.
+/// with its aligned face embedding and a padded display crop.
 struct EmbeddedFace {
     let face: DetectedFace
     let embedding: [Float]
@@ -1447,9 +1275,9 @@ extension FaceMatchingService {
     /// Every face in the image, detected once and embedded from the full image
     /// (keypoint-aligned, so no per-face crop and no second detector pass —
     /// `evaluateFaceForReference` re-detects internally). Largest first.
-    /// `padRetry: false` for library photos (see `SCRFDDetector.detect`).
+    /// `padRetry: false` for library photos (see `FaceDetecting.detect`).
     func embedFaces(in cgImage: CGImage, padRetry: Bool = true, maxFaces: Int = .max) -> [EmbeddedFace] {
-        let faces = SCRFDDetector.shared.detect(in: cgImage, padRetry: padRetry)
+        let faces = FaceDetector.shared.detect(in: cgImage, padRetry: padRetry)
             .sorted { $0.boxPixels.width * $0.boxPixels.height > $1.boxPixels.width * $1.boxPixels.height }
         return embed(faces: Array(faces.prefix(maxFaces)), in: cgImage)
     }

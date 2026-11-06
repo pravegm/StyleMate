@@ -22,6 +22,8 @@ struct StyleMateApp: App {
         BackgroundScanCoordinator.shared.configure(auth: auth, wardrobe: wardrobe)
         // Morning outfit notification: refresh task + the tap router (a tap can cold-launch the app).
         if !AppRuntime.isUnitTestHost { MorningLookScheduler.shared.configure(auth: auth, wardrobe: wardrobe) }
+        // StyleMate Premium (StoreKit 2): Transaction.updates listener + entitlement refresh.
+        PremiumStore.shared.start()
     }
 
     var body: some Scene {
@@ -83,8 +85,17 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSourcePicker) {
             AddSourceSheet(
-                onGallery: { showSourcePicker = false; showPhotoPicker = true },
-                onCamera: { showSourcePicker = false; showCamera = true },
+                // Free wardrobe full (50 pieces): the paywall instead of the picker / camera.
+                onGallery: {
+                    showSourcePicker = false
+                    if PremiumGate.isAtLimit(wardrobeVM) { PaywallCenter.shared.present(.atLimit, after: 0.5) }
+                    else { showPhotoPicker = true }
+                },
+                onCamera: {
+                    showSourcePicker = false
+                    if PremiumGate.isAtLimit(wardrobeVM) { PaywallCenter.shared.present(.atLimit, after: 0.5) }
+                    else { showCamera = true }
+                },
                 onAutoScan: {
                     showSourcePicker = false
                     showScanRangePicker = true
@@ -146,6 +157,8 @@ struct RootView: View {
                 OutfitLoadingOverlay(progress: 0.5, message: "Loading images…")
             }
         }
+        // Paywall host, entitlement refresh, unlocking pieces that waited for Premium.
+        .premiumSupport(userId: authService.user?.id ?? "")
         .sheet(isPresented: $showScanRangePicker) {
             ScanRangePickerView(
                 isPresented: $showScanRangePicker,
@@ -174,6 +187,9 @@ struct RootView: View {
         .onAppear {
             hasPhotoAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite).allowsScan
             if let id = authService.user?.id { activateProfile(id) }
+            #if DEBUG
+            TryOnDebugSeed.applyIfNeeded()   // UI tests only (-uiTestSeedTryOn)
+            #endif
         }
         // Studio renders: whenever items arrive (scan, manual add, restore),
         // turn their cutouts into lifelike catalog images in the background.

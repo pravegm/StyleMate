@@ -65,6 +65,13 @@ struct GarmentInstance {
 /// bottom halves look like a top over trousers (by the low-res probabilities) is two
 /// garments.
 enum GarmentSegmenter {
+    /// The FASHN-parser label codes `WardrobeML.parse()` returns for callers that read body parts
+    /// (try-on, studio QC). GarmentNet itself has no face / hair / hand classes; `parse()` derives
+    /// them from its single body class (WardrobeML.splitBody).
+    enum P: UInt8 {
+        case background = 0, face, hair, top, dress, skirt, pants, belt, bag, hat, scarf, glasses, arms, hands, legs, feet, torso, jewelry
+    }
+
     /// Coarse region of a Fashionpedia class (what the FASHN parser used to supply).
     enum Region: CaseIterable {
         case top, dress, skirt, pants, feet, bag, hat, scarf, glasses, belt, jewelry

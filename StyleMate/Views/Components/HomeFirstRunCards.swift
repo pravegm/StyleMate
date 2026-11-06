@@ -19,6 +19,7 @@ struct HomeFirstRunCards: View {
     @EnvironmentObject private var auth: AuthService
     @ObservedObject private var scan = PhotoScanService.shared
     @ObservedObject private var held = UncertainItemsStore.shared
+    @ObservedObject private var locked = LockedItemsStore.shared
     @ObservedObject private var wearLog = WearLogSuggestions.shared
     @ObservedObject private var morning = MorningLookScheduler.shared
     @ObservedObject private var router = NotificationRouter.shared
@@ -50,6 +51,9 @@ struct HomeFirstRunCards: View {
                     SampleLibrary.start(userId: userId, wardrobe: wardrobe)
                 }
             }
+
+            // Pieces past the free tier's 50, waiting for Premium (Views/Subscription).
+            LockedItemsCard()
 
             if !held.items.isEmpty {
                 UncertainItemsCard(items: held.items) { showHeld = true }
@@ -102,7 +106,7 @@ struct HomeFirstRunCards: View {
     }
 
     private var hasAnyCard: Bool {
-        sampleCount > 0 || !held.items.isEmpty || wearLog.next(loggedDays: loggedDays) != nil
+        sampleCount > 0 || !held.items.isEmpty || locked.count > 0 || wearLog.next(loggedDays: loggedDays) != nil
             || (hasLoggedOutfit && morning.shouldOffer)
             || showSampleOffer
     }
@@ -235,8 +239,12 @@ struct WearLogPromptCard: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(DS.Colors.textTertiary)
-                            .frame(width: 28, height: 28)
+                            .frame(width: 44, height: 44)   // the minimum tap target
+                            .contentShape(Rectangle())
                     }
+                    // The glyph stays where the 28 pt button had it.
+                    .padding(.top, -8)
+                    .padding(.trailing, -8)
                     .accessibilityLabel("Not this time")
                 }
                 HStack(spacing: DS.Spacing.xs) {
@@ -350,7 +358,15 @@ struct UncertainItemsSheet: View {
             }
             Spacer(minLength: DS.Spacing.xs)
             VStack(spacing: DS.Spacing.xs) {
-                Button("Add") { Haptics.success(); withAnimation { held.add(entry, to: wardrobe) } }
+                Button("Add") {
+                    // Free wardrobe full: offer Premium (the item stays here until there's room).
+                    if PremiumGate.isAtLimit(wardrobe) {
+                        isPresented = false
+                        PaywallCenter.shared.present(.atLimit, after: 0.6)
+                        return
+                    }
+                    Haptics.success(); withAnimation { held.add(entry, to: wardrobe) }
+                }
                     .font(DS.Font.subheadline.weight(.semibold))
                     .foregroundStyle(DS.Colors.onAccent)
                     .padding(.horizontal, DS.Spacing.md)

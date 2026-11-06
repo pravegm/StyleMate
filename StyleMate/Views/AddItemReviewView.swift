@@ -127,7 +127,7 @@ struct AddItemReviewView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: expandedImage != nil)
-            .navigationTitle("Review Items")
+            .navigationTitle("Review items")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -263,12 +263,21 @@ struct AddItemReviewView: View {
         let disabled = selectedCount == 0 || photoSections.allSatisfy(\.isLoading)
         return VStack(spacing: 0) {
             Divider()
+            if let note = allowanceNote, !disabled {
+                Label(note, systemImage: "sparkles")
+                    .font(DS.Font.footnote)
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, DS.Spacing.screenH)
+                    .padding(.top, DS.Spacing.sm)
+                    .accessibilityIdentifier("review.allowanceNote")
+            }
             Button(action: addSelectedItems) {
                 HStack(spacing: DS.Spacing.xs) {
                     Image(systemName: "plus.circle.fill")
                     Text(selectedCount == 0 && photoSections.contains(where: { $0.isLoading })
                          ? "Finding clothes…"
-                         : "Add \(selectedCount) Item\(selectedCount == 1 ? "" : "s") to Wardrobe")
+                         : "Add \(selectedCount) \(selectedCount == 1 ? "piece" : "pieces") to wardrobe")
                 }
             }
             .buttonStyle(DSPrimaryButton(isDisabled: disabled))
@@ -520,6 +529,7 @@ struct AddItemReviewView: View {
 
         Haptics.success()
 
+        var batch: [(item: WardrobeItem, embedding: [Float]?, quality: Float, truncated: Bool)] = []
         for item in selected {
             let fullImage = item.garmentImage ?? images[item.sourceImageIndex]
             let imagePath = WardrobeImageFileHelper.saveImageAsPNG(fullImage) ?? WardrobeImageFileHelper.saveImage(fullImage) ?? ""
@@ -542,14 +552,27 @@ struct AddItemReviewView: View {
                 garmentLength: item.garmentLength,
                 details: item.details.isEmpty ? nil : item.details
             )
-            if let fp = item.featurePrint {
-                ItemEmbeddingStore.shared.set(fp, quality: item.quality, truncated: item.truncated, for: wardrobeItem.id)
-            }
-            wardrobeViewModel.items.append(wardrobeItem)
-            wardrobeViewModel.syncItemToCloud(wardrobeItem)
+            batch.append((wardrobeItem, item.featurePrint, item.quality, item.truncated))
         }
 
+        // Free tier: what fits joins the wardrobe, the rest waits (locked) for Premium and the
+        // paywall is offered for it once this screen has closed.
+        let locked = PremiumGate.admit(batch, to: wardrobeViewModel)
         isPresented = false
+        if locked > 0 {
+            PaywallCenter.shared.present(.batchOverflow(locked), after: 0.6)
+        }
+    }
+
+    /// "5 fit in your free wardrobe. The other 3 wait for Premium." (nil when everything fits).
+    private var allowanceNote: String? {
+        let slots = PremiumGate.freeSlots(in: wardrobeViewModel)
+        guard selectedCount > slots else { return nil }
+        let waiting = selectedCount - slots
+        if slots == 0 {
+            return "Your free wardrobe is full (\(WardrobeAllowance.freeItemLimit) pieces). These \(selectedCount) will be saved for Premium."
+        }
+        return "\(slots) fit in your free wardrobe. The other \(waiting) will be saved for Premium."
     }
 }
 
