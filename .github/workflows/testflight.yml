@@ -126,7 +126,11 @@ jobs:
             2>&1 | tee archive.log | grep -E "error:|\*\* ARCHIVE" || true
           grep -q "\*\* ARCHIVE SUCCEEDED \*\*" archive.log
           APP="$RUNNER_TEMP/StyleMate.xcarchive/Products/Applications/StyleMate.app"
-          codesign --force --sign - --timestamp=none --entitlements StyleMate/StyleMate.entitlements "$APP"
+          # Expand $(CFBundleIdentifier) the way Xcode would; the raw file would leave the iCloud
+          # container as "iCloud.$(CFBundleIdentifier)", which no profile matches.
+          sed 's/\$(CFBundleIdentifier)/com.stylemates.StyleMate/g' StyleMate/StyleMate.entitlements > "$RUNNER_TEMP/StyleMate.entitlements"
+          grep -q 'iCloud.com.stylemates.StyleMate' "$RUNNER_TEMP/StyleMate.entitlements"
+          codesign --force --sign - --timestamp=none --entitlements "$RUNNER_TEMP/StyleMate.entitlements" "$APP"
           du -sh "$APP"
 
       - name: Check the build
