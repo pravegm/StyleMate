@@ -180,6 +180,8 @@ jobs:
                 N=$(grep -n -m1 -iE "Authentication failed|status code 40" "$V" | cut -d: -f1 || true)
                 [ -n "$N" ] && sed -n "$(( N > 60 ? N - 60 : 1 )),$(( N + 10 ))p" "$V" | cut -c1-300 | grep -viE "bearer|authorization:" || true
               fi
+              for c in "$LOGS"/*critical*; do echo "== $c"; cut -c1-400 "$c" | grep -viE "bearer|authorization:" || true; done
+              grep -rhE -B2 -A6 "xcbuild/v1/" "$LOGS" | cut -c1-300 | grep -viE "bearer|authorization:" | head -150 || true
               grep -rhiE "https://[a-z0-9.]*apple\.com/[^ ]*" "$LOGS" | grep -oE "(GET|POST|PATCH|DELETE)?[^\"]{0,40}https://[a-z0-9.]*apple\.com/[^ ?\"]*" | sort | uniq -c | head -40 || true
             fi
             exit 1
