@@ -31,6 +31,8 @@ enum FashionClassifier {
         /// Neckwear the segmenter confirmed as a tie (narrow strip below the collar);
         /// otherwise "Ties" / "Bowties" are not on offer.
         var allowTie = true
+        /// GarmentNet's Fashionpedia class for the item (5 jacket, 10 coat...), 0 if unknown.
+        var segmenterClass = 0
         static let none = Context()
     }
 
@@ -83,6 +85,10 @@ enum FashionClassifier {
                 }
             }
             for (l, p) in priors where scored[l] != nil { scored[l]! += p }
+            // GarmentNet saw a jacket / coat / cape: a soft knit one is still outerwear, not a cardigan.
+            if [5, 10, 13].contains(context.segmenterClass) {
+                for l in scored.keys where l.hasPrefix("Outerwear|") { scored[l]! += 0.015 }
+            }
             if let best = scored.max(by: { $0.value < $1.value }) { resolvedKind = owner[best.key] ?? kind }
         } else if let group = kind.vocabularyGroup {
             scored = vocab.scores(in: group, for: emb)

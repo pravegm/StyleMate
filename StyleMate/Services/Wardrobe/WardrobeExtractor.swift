@@ -92,13 +92,10 @@ enum WardrobeExtractor {
                   }) else { continue }
             WardrobeML.shared.record("cutout", Date().timeIntervalSince(tc))
             let tk = Date()
-            // Colours from the confident interior only (edge bleed, skin, wall).
-            let core = use.map.flatMap { GarmentSegmenter.interior(inst, map: $0) }.flatMap {
-                GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: $0,
-                                     photoInGrid: use.crop.photoInGrid, fill: false)?.image.cgImage
-            }
-            guard let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context,
-                                                         colourSource: core),
+            // Colours are measured on the whole cutout: sampling only the eroded interior was tried
+            // (run 42128612821) and lost the shaded edges that make a light-grey coat read grey.
+            context.segmenterClass = inst.labelerClass
+            guard let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context),
                   !blockedProducts.contains(attrs.product) else { continue }
             WardrobeML.shared.record("classify", Date().timeIntervalSince(tk))
             // Too few source-photo pixels to make a decent wardrobe image

@@ -227,7 +227,7 @@ enum GarmentSegmenter {
 
         // Small accessories: only the pixels GarmentNet is fairly sure of, so sunglasses don't
         // take the eyebrows and a watch doesn't take the wrist (their boxes were too big).
-        for k in merged.indices where [.eyewear, .jewelry].contains(merged[k].kind) {
+        for k in merged.indices where [.eyewear, .jewelry, .belt].contains(merged[k].kind) {
             let sure = merged[k].pixels.filter { map.prob(merged[k].cls, $0) >= 0.4 }
             if sure.count * 3 >= merged[k].pixels.count { merged[k].pixels = sure }
         }
