@@ -267,8 +267,10 @@ struct TodayOutfitSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DS.Spacing.md) {
                         if onBody {
+                            // Compact, so the Keep / Swap list starts on screen above the action bar
+                            // (duo-crease: at 0.42 the list began hidden behind "Wear today").
                             boardCard(look, inlineControls: false, forcePieces: true)
-                                .frame(height: max(220, size.height * 0.42))
+                                .frame(height: max(180, size.height * 0.28))
                         }
                         noteCard(look, lineLimit: 4)
                         piecesList(look)
@@ -279,6 +281,14 @@ struct TodayOutfitSheet: View {
                 }
                 .scrollIndicators(.visible)
                 .scrollBounceBehavior(.basedOnSize)
+                // The last rows fade out above the pinned bar, so a cut-off row reads as "scroll for more".
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 28)
+                    }
+                }
                 // Pinned, so "Wear today" is never scrolled away or clipped.
                 stackedActionBar
             }
