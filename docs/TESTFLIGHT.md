@@ -18,8 +18,10 @@ https://github.com/pravegm/StyleMate/actions/workflows/asc-check.yml.
 
 ## One-time setup
 
-### 1. Check the iCloud container (developer.apple.com, 2 minutes)
-Apple's API can't show which iCloud container the App ID uses, so check it by hand:
+### 1. Check the iCloud container (developer.apple.com, 2 minutes, required)
+Apple's API can't show which iCloud container the App ID uses, so check it by hand. Apple doesn't let
+the GitHub key create or attach iCloud containers, so without this step the TestFlight workflow
+stops at signing with "Authentication failed" and "No profiles for 'com.stylemates.StyleMate'".
 1. Go to https://developer.apple.com/account/resources/identifiers/list and open
    **com.stylemates.StyleMate**.
 2. Next to **iCloud**, press **Edit** (or **Configure**). Make sure `iCloud.com.stylemates.StyleMate`
