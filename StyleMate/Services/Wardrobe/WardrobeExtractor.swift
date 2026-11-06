@@ -92,10 +92,16 @@ enum WardrobeExtractor {
                   }) else { continue }
             WardrobeML.shared.record("cutout", Date().timeIntervalSince(tc))
             let tk = Date()
-            // Colours are measured on the whole cutout: sampling only the eroded interior was tried
-            // (run 42128612821) and lost the shaded edges that make a light-grey coat read grey.
+            // Colours: garments are measured on the whole cutout (sampling only the eroded interior,
+            // run 42128612821, lost the shaded edges that make a light-grey coat read grey); shoes on
+            // their confident interior, where a 1-px rim of pavement turned black sneakers Charcoal.
             context.segmenterClass = inst.labelerClass
-            guard let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context),
+            let core = inst.kind != .footwear ? nil : use.map.flatMap { GarmentSegmenter.interior(inst, map: $0) }.flatMap {
+                GarmentCutout.render(crop: use.crop.image, cropPixels: use.pixels, instance: $0,
+                                     photoInGrid: use.crop.photoInGrid, fill: false)?.image.cgImage
+            }
+            guard let attrs = FashionClassifier.classify(cut.image, kind: inst.kind, scene: scene, context: context,
+                                                         colourSource: core),
                   !blockedProducts.contains(attrs.product) else { continue }
             WardrobeML.shared.record("classify", Date().timeIntervalSince(tk))
             // Too few source-photo pixels to make a decent wardrobe image
