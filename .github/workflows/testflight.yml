@@ -4,6 +4,9 @@ name: TestFlight
 # on the iPhone Duo) and uploads it to App Store Connect, where it appears in TestFlight. Nobody on the
 # team has a Mac that can run Xcode 27, so this is how builds reach the founder's iPhone 17 Pro and Duo.
 #
+# Signing is manual: scripts/asc_signing.py makes a certificate and App Store profile per run and
+# revokes the certificate at the end (automatic signing can't list iCloud containers with an API key).
+#
 # One-time setup (founder) — docs/TESTFLIGHT.md:
 #   - App Store Connect app record for bundle id com.stylemates.StyleMate
 #   - Repository secrets (Settings > Secrets and variables > Actions), the same values the Duo games use:
@@ -145,6 +148,16 @@ jobs:
           # DEBUG-only test hooks must not ship.
           if strings "$APP/StyleMate" | grep -qE "uiTestSeedWardrobe|uiTestFakeAppleSignIn|Continue as test user"; then echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1; fi
 
+      - name: Make this run's certificate and App Store profile
+        # Manual signing: Xcode's automatic signing lists the team's iCloud containers, which Apple
+        # refuses to an API key (401 NOT_AUTHORIZED), so it can't sign an iCloud app from CI. The
+        # certificate is revoked again in the last step. See scripts/asc_signing.py.
+        if: ${{ !inputs.archive_only }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "pyjwt[crypto]==2.9.0"
+          "$RUNNER_TEMP/venv/bin/python" scripts/asc_signing.py create
+
       - name: Export locally and check the App Store signature
         if: ${{ !inputs.archive_only }}
         run: |
@@ -158,14 +171,14 @@ jobs:
             <key>destination</key><string>export</string>
             <key>manageAppVersionAndBuildNumber</key><false/>
             <key>teamID</key><string>${APPLE_TEAM_ID}</string>
-            <key>signingStyle</key><string>automatic</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict><key>com.stylemates.StyleMate</key><string>${PROFILE_NAME}</string></dict>
           </dict>
           </plist>
           EOF
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/StyleMate.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportLocal.plist" -exportPath "$RUNNER_TEMP/local" \
-            -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             2>&1 | tee export-local.log | grep -E "error:|EXPORT" || true
           if ! grep -q "\*\* EXPORT SUCCEEDED \*\*" export-local.log; then
             # Show why signing failed: the tail of xcodebuild's output and the errors in Xcode's
@@ -208,7 +221,9 @@ jobs:
             <key>destination</key><string>upload</string>
             <key>manageAppVersionAndBuildNumber</key><false/>
             <key>teamID</key><string>${APPLE_TEAM_ID}</string>
-            <key>signingStyle</key><string>automatic</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict><key>com.stylemates.StyleMate</key><string>${PROFILE_NAME}</string></dict>
             <key>uploadSymbols</key><true/>
           </dict>
           </plist>
@@ -217,7 +232,6 @@ jobs:
             -archivePath "$RUNNER_TEMP/StyleMate.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
             -exportPath "$RUNNER_TEMP/export" \
-            -allowProvisioningUpdates \
             -authenticationKeyPath "$KEY_PATH" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
@@ -237,6 +251,12 @@ jobs:
               echo "**What to test:** $NOTES"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Revoke this run's certificate and delete its profile
+        if: always() && env.CERT_ID != ''
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" scripts/asc_signing.py cleanup
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
 
       - name: Remove the key
         if: always()
