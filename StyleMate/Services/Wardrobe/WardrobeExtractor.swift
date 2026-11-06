@@ -64,7 +64,7 @@ enum WardrobeExtractor {
         // 3 + 4.
         var items: [Item] = []
         for use in uses {
-            var inst = use.inst
+            let inst = use.inst
             // A small accessory GarmentNet is unsure of is the commonest phantom item (eyeglasses on
             // a face, clogs at a hem): skip it; a clearer photo will find it.
             // Shoes cut off by the bottom of the photo, and a sliver of trousers at the bottom edge,
@@ -79,11 +79,6 @@ enum WardrobeExtractor {
             if [.eyewear, .jewelry, .belt, .headwear, .bag, .footwear].contains(inst.kind), inst.confidence < 0.4 {
                 log("drop unsure \(inst.kind.rawValue) (p=\(String(format: "%.2f", inst.confidence)))")
                 continue
-            }
-            // Glasses sit across the eyes: GarmentNet's coarse outline also takes the hair at the temples,
-            // which no colour test tells from dark lenses. Keep the band Vision's face box allows.
-            if inst.kind == .eyewear, let face = WardrobeML.faceBox(use.crop.image) {
-                inst = Self.eyeBand(inst, face: face)
             }
             let truncated = isTruncated(inst, crop: use.crop)
             var context = FashionClassifier.Context()
@@ -155,27 +150,6 @@ enum WardrobeExtractor {
         log("extracted \(items.count) items in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s: " +
             items.map { "\($0.attributes.product)(\(String(format: "%.2f", $0.quality)))" }.joined(separator: ", "))
         return items
-    }
-
-    /// Eyewear limited to the eye band of the face box `f` (grid x0, y0, x1, y1): the box's width plus
-    /// 12% each side for the temples, from 10% above its top to 65% of its height. Unchanged when the
-    /// band would keep under half the mask (the glasses are elsewhere: pushed up, another face).
-    static func eyeBand(_ inst: GarmentInstance, face f: (Int, Int, Int, Int)) -> GarmentInstance {
-        let w = WardrobeML.gridW
-        let fw = f.2 - f.0, fh = f.3 - f.1
-        guard fw > 4, fh > 4 else { return inst }
-        let x0 = f.0 - fw * 12 / 100, x1 = f.2 + fw * 12 / 100
-        let y0 = f.1 - fh / 10, y1 = f.1 + fh * 65 / 100
-        var m = inst.mask, kept = 0, all = 0
-        for i in 0..<m.count where m[i] != 0 {
-            all += 1
-            let x = i % w, y = i / w
-            if x >= x0, x < x1, y >= y0, y < y1 { kept += 1 } else { m[i] = 0 }
-        }
-        guard kept * 2 >= all, kept > 0 else { return inst }
-        var out = inst
-        out.mask = m
-        return out
     }
 
     /// An instance with the crop (and its pixels) it was segmented in.

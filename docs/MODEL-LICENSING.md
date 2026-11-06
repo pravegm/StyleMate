@@ -159,7 +159,7 @@ outputs a per-pixel class on the 384x576 analysis grid (0 scene, 1–26 Fashionp
 | Head | ~0.9 M parameters: PCA projection of the two layers (fit on Fashionpedia training images), a token-grid context block, a 4x4 RGB patch stem and a two-step decoder (`scripts/garment/head.py`). **Trained from scratch** (no third-party segmentation checkpoint) | StyleMate's own work |
 | Training data: garments | **Fashionpedia** 2020 train set (16,000 images used, plus val 1,158 for model selection): whole-garment masks of the 26 worn classes (umbrella excluded) and the hood / collar / lapel / sleeve part masks, rasterised into person crops and small-item close-ups shaped like the app's (`scripts/garment/fashionpedia.py`). Data from https://github.com/cvdfoundation/fashionpedia (S3 bucket `ifashionist-dataset`) | Annotations **CC BY 4.0** ("The annotations ... are licensed under a Creative Commons Attribution 4.0 License", https://fashionpedia.github.io/home/data_license.html). Images: "Fashionpedia does not own the copyright of the images" — Flickr / Unsplash / Pexels / ... terms of use; used only to compute training features, never redistributed (same caveat as section 3, lower risk). |
 | Training data: people | **COCO 2017** train person masks (5,000 images with a large person) teach the person channel (Fashionpedia has no skin / body masks); people's clothes are ignored in the garment loss | Annotations **CC BY 4.0** ("The annotations in this dataset ... are licensed under a Creative Commons Attribution 4.0 License", https://cocodataset.org/#termsofuse). Images under the Flickr terms; training only, never redistributed. |
-| Apple Vision | Only `VNDetectFaceRectanglesRequest` (`WardrobeML.faceBox`): the face box for the try-on parse and the eyewear band (below). Tried 5 Nov: `VNGeneratePersonSegmentationRequest` as an outer bound never returned inside the CI test host (a 120 s watchdog fired on every attempt), so GarmentNet's own person channel defines body. The upstream multi-person isolation (`FaceMatchingService`, person-instance mask) is unchanged | Apple platform API |
+| Apple Vision | Only `VNDetectFaceRectanglesRequest` (`WardrobeML.faceBox`): the face box for the try-on parse (below). Tried 5 Nov: `VNGeneratePersonSegmentationRequest` as an outer bound never returned inside the CI test host (a 120 s watchdog fired on every attempt), so GarmentNet's own person channel defines body. The upstream multi-person isolation (`FaceMatchingService`, person-instance mask) is unchanged | Apple platform API |
 | Not used | DeepFashion2, ModaNet, LIP, ATR, CIHP, any SegFormer / Mask2Former / FASHN weights, or distillation from the old non-commercial models | — |
 | Tooling | PyTorch (BSD-3), timm (Apache-2.0), pycocotools (BSD-2), OpenCV (Apache-2.0), coremltools (BSD-3). None of it ships in the app. | — |
 
@@ -200,8 +200,8 @@ outputs a per-pixel class on the 384x576 analysis grid (0 scene, 1–26 Fashionp
   extraction tests never returned, so no Vision mask request is used by the garment pipeline itself.
 - **Face rectangles:** Apple Vision's `VNDetectFaceRectanglesRequest` (part of iOS, no extra licence) gives one face box
   per image (`WardrobeML.faceBox`). Try-on's parse uses it to label the neck under the face as skin rather than the old
-  top, and to split the body class into face and hair. The wardrobe cutout keeps eyewear to the box's eye band, so hair
-  at the temples is not cut out with sunglasses. Without a box, both fall back to the grid alone.
+  top, and to split the body class into face and hair. Without a box, it falls back to the grid alone. The wardrobe
+  pipeline does not use it.
 
 ## 3. A caveat that applies to every "permissive" face model
 

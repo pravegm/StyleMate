@@ -100,8 +100,7 @@ enum GarmentCutout {
     /// the shed ankle / face left ragged cutouts that were named and counted worse (product 0.855,
     /// fragments 0.071 vs 0.909 / 0.036).
     private static let skinGuard: [GarmentKind: Float] = [.eyewear: 0.6, .jewelry: 0.6]
-    /// Pieces an accessory may show after shedding (two lenses; one watch): the islands skin
-    /// removal leaves beyond these are dropped.
+    /// Pieces an accessory may show after shedding (two lenses; one watch), as the benchmark allows.
     private static let skinPieces: [GarmentKind: Int] = [.eyewear: 2, .jewelry: 1]
 
     /// BT.601 Y, Cb, Cr of an 8-bit RGB pixel.
@@ -142,9 +141,8 @@ enum GarmentCutout {
 
     /// Clears the item's pixels that are skin-like and within a small chroma distance of this
     /// wearer's skin (soft between 8 and 13 Cb/Cr units), unless that would remove more than
-    /// `maxShare` of the item (then it is the item's own colour, not skin). The result keeps its
-    /// `pieces` largest solid parts (specks of strap or frame between shed skin would read as a
-    /// fragmented item); if that leaves too little, the cutout is left as it was.
+    /// `maxShare` of the item (then it is the item's own colour, not skin), or would split it into
+    /// more than `pieces` parts (then the cutout is left as it was).
     private static func skinRejection(_ buf: inout [Float], ref: (cb: Float, cr: Float), maxShare: Float, pieces: Int,
                                       rgba: [UInt8], cw: Int, x0: Int, y0: Int, w: Int, h: Int) {
         var keep = [Float](repeating: 1, count: w * h)
@@ -165,11 +163,16 @@ enum GarmentCutout {
             }
         }
         guard total > 0, removed > 0, removed <= total * maxShare else { return }
-        // Solid parts after shedding; drop all but the largest `pieces`.
+        // Solid parts after shedding. Only a clean result is used: at most `pieces` parts (>= 4% of the
+        // largest, as the benchmark counts them); specks below that are dropped. When shedding splits
+        // the item (sunglasses whose hair stays at the temples while the skin between goes: 4 parts in
+        // run 42186932046; keeping the largest dropped the lenses in 42188638453), it is left as it was.
         var solid = [UInt8](repeating: 0, count: w * h)
         for bi in 0..<(w * h) where buf[bi * 4 + 3] * keep[bi] > 0.5 { solid[bi] = 1 }
         let (comp, sizes) = GarmentSegmenter.components(solid, w: w, h: h)
-        let kept = Set(sizes.enumerated().sorted { $0.element > $1.element }.prefix(pieces).map { $0.offset + 1 })
+        guard let largest = sizes.max(), largest > 0 else { return }
+        let kept = Set(sizes.enumerated().filter { $0.element * 25 >= largest }.map { $0.offset + 1 })
+        guard kept.count <= pieces else { return }
         var left: Float = 0
         for bi in 0..<(w * h) {
             if solid[bi] != 0, !kept.contains(comp[bi]) { keep[bi] = 0 }
