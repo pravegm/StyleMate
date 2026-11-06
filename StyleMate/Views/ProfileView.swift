@@ -398,7 +398,7 @@ struct ProfileView: View {
                 } header: {
                     Text("Privacy")
                 } footer: {
-                    Text("There's no account and no StyleMate server. Finding you in your photos, cutting out your clothes and suggesting outfits all run on this device. The photo scan keeps going in the background and overnight while your phone charges. Your wardrobe is backed up only to your own iCloud.")
+                    Text("There's no StyleMate server: you sign in with Apple, and finding you in your photos, cutting out your clothes and suggesting outfits all run on this device. The photo scan keeps going in the background and overnight while your phone charges. Your wardrobe is backed up only to your own iCloud.")
                         .font(DS.Font.caption2)
                 }
 
