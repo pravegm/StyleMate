@@ -1182,39 +1182,11 @@ class PhotoScanService: ObservableObject {
     /// A small (~320 px) local thumbnail for ranking. No network: an iCloud-only
     /// photo without a local preview just isn't ranked (it's still scanned later).
     private nonisolated static func rankingThumbnail(_ asset: PHAsset, manager: PHImageManager) async -> CGImage? {
-        let fault = debugFault(asset, .local)
-        if fault == .empty { return nil }
-        let options = PHImageRequestOptions()
-        options.deliveryMode = .fastFormat
-        options.resizeMode = .fast
-        options.isNetworkAccessAllowed = false
-        options.isSynchronous = false
-        let gate = ResumeGate()
-        return await withCheckedContinuation { continuation in
-            let requestID: PHImageRequestID
-            if fault == .stall {
-                requestID = PHInvalidImageRequestID
-            } else {
-                requestID = manager.requestImage(for: asset, targetSize: CGSize(width: 320, height: 320),
-                                                 contentMode: .aspectFit, options: options) { image, info in
-                    if Self.morePending(image, info) { return }
-                    guard gate.claim() else { return }
-                    Self.noteEmpty(image, info, "ranking")
-                    Self.offMain {
-                        continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true).cgImage })
-                    }
-                }
-            }
-            // One unanswered request would hold the whole ranking batch (and the scan behind it).
-            Task {
-                try? await Task.sleep(nanoseconds: Self.localImageTimeout)
-                if gate.claim() {
-                    if requestID != PHInvalidImageRequestID { manager.cancelImageRequest(requestID) }
-                    ScanTrace.shared.noteTimeout(.ranking)
-                    continuation.resume(returning: nil)
-                }
-            }
+        let size = CGSize(width: 320, height: 320)
+        if let fast = await localThumbnail(asset, manager: manager, targetSize: size, highQuality: false, step: .ranking) {
+            return fast.cgImage
         }
+        return await localThumbnail(asset, manager: manager, targetSize: size, highQuality: true, step: .ranking)?.cgImage
     }
 
     // MARK: - Sample photos
@@ -1338,9 +1310,14 @@ class PhotoScanService: ObservableObject {
             for (index, asset) in assets.enumerated() {
                 group.addTask { @Sendable in
                     // The preview already on the phone first (Photos keeps one even with "Optimize
-                    // iPhone Storage"): no wait behind iCloud. Only a photo without one downloads.
-                    if let local = await Self.localThumbnail(asset, manager: manager, targetSize: targetSize) {
+                    // iPhone Storage"): no wait behind iCloud. Then the original on the phone, scaled
+                    // down: Photos may not have made the preview yet (a library still being restored or
+                    // imported answers "missing resource", PHPhotosError 3303). Only then a download.
+                    if let local = await Self.localThumbnail(asset, manager: manager, targetSize: targetSize, highQuality: false) {
                         return (index, local)
+                    }
+                    if let decoded = await Self.localThumbnail(asset, manager: manager, targetSize: targetSize, highQuality: true) {
+                        return (index, decoded)
                     }
                     let fault = Self.debugFault(asset, .downloadThumbnail)
                     return await withCheckedContinuation { continuation in
@@ -1383,37 +1360,42 @@ class PhotoScanService: ObservableObject {
         }
     }
 
-    /// The scan thumbnail from what's on the phone only (nil when Photos would have to download it).
-    private nonisolated static func localThumbnail(_ asset: PHAsset, manager: PHImageManager,
-                                                   targetSize: CGSize) async -> UIImage? {
+    /// A thumbnail from what's on the phone only (nil when Photos would have to download it).
+    /// `highQuality: false` = Photos' ready-made preview (instant); `true` = decoded from the original on
+    /// the phone (slower; for when there's no preview yet). `step` is where a time-out is counted.
+    private nonisolated static func localThumbnail(_ asset: PHAsset, manager: PHImageManager, targetSize: CGSize,
+                                                   highQuality: Bool, step: ScanTrace.Step = .thumbnails) async -> UIImage? {
         let fault = debugFault(asset, .local)
         if fault == .empty { return nil }
         let options = PHImageRequestOptions()
-        options.deliveryMode = .fastFormat
+        options.deliveryMode = highQuality ? .highQualityFormat : .fastFormat
         options.resizeMode = .fast
         options.isNetworkAccessAllowed = false
         options.isSynchronous = false
         let gate = ResumeGate()
+        let what = highQuality ? "local decode" : "local preview"
         return await withCheckedContinuation { continuation in
             let requestID: PHImageRequestID
             if fault == .stall {
                 requestID = PHInvalidImageRequestID
             } else {
                 requestID = manager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { image, info in
+                    // High quality may first hand over a degraded copy: wait for the real one.
+                    if highQuality, (info?[PHImageResultIsDegradedKey] as? Bool) == true { return }
                     if Self.morePending(image, info) { return }
                     guard gate.claim() else { return }
-                    Self.noteEmpty(image, info, "local thumbnail")
+                    Self.noteEmpty(image, info, what)
                     Self.offMain {
                         continuation.resume(returning: image.flatMap { Self.bakeOrientation($0, pixelScale: true) })
                     }
                 }
             }
-            // Network off answers at once from the phone; a limit anyway, so no PhotoKit request is waited on forever.
+            // Network off answers from the phone; a limit anyway, so no PhotoKit request is waited on forever.
             Task {
                 try? await Task.sleep(nanoseconds: Self.localImageTimeout)
                 if gate.claim() {
                     if requestID != PHInvalidImageRequestID { manager.cancelImageRequest(requestID) }
-                    ScanTrace.shared.noteTimeout(.thumbnails)
+                    ScanTrace.shared.noteTimeout(step)
                     continuation.resume(returning: nil)
                 }
             }
