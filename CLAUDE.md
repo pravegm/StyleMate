@@ -20,7 +20,7 @@
   with `RealFirstRunE2ETests`, ~15 min: nothing pre-granted, the selfie from a fixture face,
   a ~260-photo library to scan with a few stuck "iCloud" photos; keep it green, it is the
   only test of the real first run); `[ui-only: RealFirstRunE2ETests, FirstRunE2ETests]`
-  runs the UI job with only those classes (iterate on one UI test without the ~70 min
+  runs the UI job with only those classes (iterate on one UI test without the ~85 min
   suite); `UserFlowsE2ETests`, `ProfileFlowsE2ETests`, `AccountFlowsE2ETests` and
   `PremiumFlowsE2ETests` cover every other user flow and assert outcomes (often after a
   relaunch): when you change a flow, change its test, and fix the app (not the test) when
