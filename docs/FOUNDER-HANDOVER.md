@@ -1,8 +1,42 @@
 # StyleMate: where things stand (founder handover)
 
-Plain-language summary as of 6 Nov 2026, after the overnight run. Technical detail lives in
+Plain-language summary as of 7 Nov 2026. Technical detail lives in
 `docs/PROJECT-LOG.md`, reviews in `docs/reviews/`, launch and legal detail in
 `docs/LAUNCH-READINESS.md` and `docs/MODEL-LICENSING.md`, and the setup steps in `docs/TESTFLIGHT.md`.
+
+## Latest (7 Nov): TestFlight build 114
+
+**What changed since build 112 (the one that stuck on your Duo)**
+- The scan no longer waits forever on photos that iCloud hasn't delivered: it uses the preview already on
+  the phone, gives up on a slow download after 20 s and tries that photo again later. Weather never spins
+  forever: after 20 s it shows Retry, and asks again when you come back to the app.
+- Find yourself looks at your whole recent library (it saw 1 photo in 267 before); a failed person check
+  no longer counts as "nobody in this photo".
+- Diagnostics › **Photo scan** shows what the scan is doing right now and how long each step takes.
+- From the every-flow tests: "Take a Photo" no longer crashes without a camera; "Is this you?" photos are
+  reachable from Home; Empty my wardrobe clears Today's look; the paywall's close button works after a big
+  gallery add; Profile no longer shows a previous account's name; Location denied says "Location required".
+- Premium is live in TestFlight: both plans are Ready to Submit with prices, the annual trial and review
+  screenshots. Purchases in TestFlight are free.
+
+**How it was checked:** every user flow now has an end-to-end test on the simulator that does what a user
+does and checks the result (often after quitting the app): the real first run with nothing pre-granted,
+selfie, Find yourself, a 260-photo library with photos that never load, closet edit/delete/search, the
+outfit deck (keep, swap, skip, wear), calendar, Premium purchase/restore/limit, profile, sign out, delete
+account, dark mode, landscape and the Duo screens. The test of the first run fails on build 112's code with
+your exact symptom. Main CI 42344238439 is green.
+
+**What the simulator can't check (please try on the Duo):** real iCloud downloads and Neural Engine speed,
+real Sign in with Apple, the camera, notifications arriving, the overnight scan, iCloud backup/restore.
+
+**To test on your Duo:** delete StyleMate, install build 114 from TestFlight, go through the first run
+(selfie, Find yourself) and let the scan run on Wi-Fi with the app open. If it stalls, open Profile › About ›
+Diagnostics, Share report, and send it: the Photo scan section says exactly where it waits.
+
+**Two small decisions for you:** the "Not my style / Not today" prompt closes itself after 6 s (longer with
+VoiceOver): keep or lengthen? Without a camera "Take a Photo" opens the photo library: keep, or hide the row?
+Also still yours: turn on GitHub Pages (privacy policy, needed for the App Store listing) and the CloudKit
+token for iCloud backup (`docs/TESTFLIGHT.md` step 5).
 
 ## What the app does now
 
