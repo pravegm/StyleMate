@@ -349,6 +349,15 @@ enum StudioPipeline {
         #if targetEnvironment(simulator)
         return nil   // Vision's foreground masks need the Neural Engine
         #else
+        // Never longer than 20 s: a Vision request can block for good on a device (the Duo's did).
+        return HangGuard.run("foreground mask (Vision)", seconds: 20) { visionMaskUnguarded(image) }
+        #endif
+    }
+
+    private static func visionMaskUnguarded(_ image: CGImage) -> [UInt8]? {
+        #if targetEnvironment(simulator)
+        return nil
+        #else
         let request = VNGenerateForegroundInstanceMaskRequest()
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         guard (try? handler.perform([request])) != nil, let obs = request.results?.first,

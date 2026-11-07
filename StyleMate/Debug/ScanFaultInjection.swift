@@ -41,6 +41,17 @@ enum ScanFaultInjection {
 
     static let isActive = ProcessInfo.processInfo.arguments.contains(argument)
 
+    /// `-uiTestFreezeVision`: one first-look measurement and every person-isolation request block
+    /// forever, as Vision did on the founder's Duo (TestFlight 113/114 sat at "Picking the best outfit
+    /// photos"). The scan's time limits must carry it past them.
+    static let freezeArgument = "-uiTestFreezeVision"
+    static let freezesVision = ProcessInfo.processInfo.arguments.contains(freezeArgument)
+
+    /// Never returns (a request that blocked for good).
+    static func blockForever() async {
+        await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+    }
+
     static func outcome(for asset: PHAsset, _ request: Request) -> Outcome {
         guard isActive else { return .normal }
         switch (marker(for: asset), request) {

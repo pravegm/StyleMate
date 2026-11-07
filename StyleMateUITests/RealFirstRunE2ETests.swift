@@ -21,6 +21,10 @@ import XCTest
 ///   library's sync: their PhotoKit requests never call back. The scan must get past them on its own.
 ///   (Before 11ac3dc / 8e881a1 the thumbnail request had no time limit: this test sat at the first such
 ///   photo, the counter froze and the 3-minute rule below failed it, the founder's exact screen.)
+/// - Vision: `-uiTestFreezeVision` makes one "best outfit photos" measurement and every person-isolation
+///   request block for good, as Vision's body detector did on the founder's Duo (TestFlight 113/114 sat
+///   at "Picking the best outfit photos", counter at 8). The ranking's time limit and `HangGuard` must
+///   carry the scan past them.
 class RealFirstRunE2ETests: E2ETestCase {
 
     @MainActor private var springboard: XCUIApplication { XCUIApplication(bundleIdentifier: "com.apple.springboard") }
@@ -34,7 +38,7 @@ class RealFirstRunE2ETests: E2ETestCase {
 
     @MainActor
     func test01_RealFirstRunFindsYouAndFillsTheCloset() throws {
-        launchFresh(extra: ["-uiTestSelfieFixture", "-uiTestStallSomePhotos"])
+        launchFresh(extra: ["-uiTestSelfieFixture", "-uiTestStallSomePhotos", "-uiTestFreezeVision"])
         getStartedAndSignIn()
         takeSelfie()
 

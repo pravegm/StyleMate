@@ -816,6 +816,17 @@ class FaceMatchingService {
     /// VNGeneratePersonInstanceMaskRequest. Returns a UIImage with only the
     /// matched person visible (transparent background), cropped to their extent.
     func isolateMatchedPerson(from cgImage: CGImage, matchResult: MatchResult) -> UIImage? {
+        // Vision requests can block for good on a device (the Duo's body detector did): past 15 s the
+        // callers use the whole photo, as they do when the mask fails.
+        HangGuard.run("person mask (Vision)", seconds: 15) {
+            self.isolateMatchedPersonUnguarded(from: cgImage, matchResult: matchResult)
+        }
+    }
+
+    private func isolateMatchedPersonUnguarded(from cgImage: CGImage, matchResult: MatchResult) -> UIImage? {
+        #if DEBUG
+        if ScanFaultInjection.freezesVision { DispatchSemaphore(value: 0).wait() }
+        #endif
         guard let faceBox = matchResult.matchedFaceBox else { return nil }
 
         let ciImage = CIImage(cgImage: cgImage)

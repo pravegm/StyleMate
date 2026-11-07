@@ -735,7 +735,7 @@ jobs:
         run: |
           BIN=$(find "$RUNNER_TEMP/dd-release/Build/Products" -path "*Release-iphoneos/StyleMate.app/StyleMate" -type f | head -1)
           [ -n "$BIN" ] || { echo "::error::Release binary not found"; exit 1; }
-          if strings "$BIN" | grep -E "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestDemoUser|uiTestSelfieFixture|uiTestStallSomePhotos|uiTestLogToFile|uiTestSeedHabits|uiTestSeedFaceReview|Continue as test user"; then
+          if strings "$BIN" | grep -E "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestDemoUser|uiTestSelfieFixture|uiTestStallSomePhotos|uiTestFreezeVision|uiTestLogToFile|uiTestSeedHabits|uiTestSeedFaceReview|Continue as test user"; then
             echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1
           fi
           echo "No test hooks in $BIN"

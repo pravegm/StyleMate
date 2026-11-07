@@ -1164,16 +1164,27 @@ class PhotoScanService: ObservableObject {
                 guard let asset = assets[unit[unit.count / 2].id] else { return nil }
                 return (idx, asset)
             }
-            let measured: [(Int, Double?)] = await withTaskGroup(of: (Int, Double?).self) { group in
-                for (idx, asset) in picks {
-                    group.addTask {
-                        guard let cg = await Self.rankingThumbnail(asset, manager: manager) else { return (idx, nil) }
-                        return (idx, FirstLook.score(ThumbnailAnalyzer.firstLookSignals(for: cg)))
-                    }
+            // The budget holds even when a measurement never returns: the batch races the time left.
+            // Before, the deadline was only checked between batches, so one blocked request (Vision's
+            // body detector on the founder's Duo) kept the scan at "Picking the best outfit photos"
+            // with the counter at 8 of 3,935 for good.
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { break }
+            let measured: [(Int, Double?)]? = await withCheckedContinuation { cont in
+                let gate = ResumeGate()
+                Task {
+                    let r = await Self.measureFirstLook(picks, manager: manager)
+                    if gate.claim() { cont.resume(returning: r) }
                 }
-                var out: [(Int, Double?)] = []
-                for await r in group { out.append(r) }
-                return out
+                Task {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                    if gate.claim() { cont.resume(returning: nil) }
+                }
+            }
+            guard let measured else {
+                print("[StyleMate] Auto-scan: first look ran out of time on a batch; scanning anyway")
+                ScanTrace.shared.setNote("First look", "stopped at its time limit, scanning anyway")
+                break
             }
             for (idx, score) in measured { if let score { scores[idx] = score } }
         }
@@ -1181,6 +1192,26 @@ class PhotoScanService: ObservableObject {
         print("[StyleMate] Auto-scan: first look ranked \(scores.count) outfit photos in the last \(FirstLook.windowDays) days, " +
               "\(result.priorityCount) go first")
         return result
+    }
+
+    /// First-look scores for one batch (nil where a photo has no local thumbnail).
+    private nonisolated static func measureFirstLook(_ picks: [(Int, PHAsset)],
+                                                     manager: PHImageManager) async -> [(Int, Double?)] {
+        await withTaskGroup(of: (Int, Double?).self) { group in
+            for (n, (idx, asset)) in picks.enumerated() {
+                group.addTask {
+                    #if DEBUG
+                    // -uiTestFreezeVision: one measurement never returns, as Vision did on the Duo.
+                    if ScanFaultInjection.freezesVision, n == 0 { await ScanFaultInjection.blockForever() }
+                    #endif
+                    guard let cg = await Self.rankingThumbnail(asset, manager: manager) else { return (idx, nil) }
+                    return (idx, FirstLook.score(ThumbnailAnalyzer.firstLookSignals(for: cg)))
+                }
+            }
+            var out: [(Int, Double?)] = []
+            for await r in group { out.append(r) }
+            return out
+        }
     }
 
     /// A small (~320 px) local thumbnail for ranking. No network: an iCloud-only

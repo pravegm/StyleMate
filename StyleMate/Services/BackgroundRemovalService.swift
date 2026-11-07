@@ -71,46 +71,43 @@ class BackgroundRemovalService {
             : ImageDownsampler.downsample(image: image, maxPixels: max(px.width, px.height))
         guard let cgImage = image.cgImage else { return nil }
 
-        return await withCheckedContinuation { continuation in
-            let request = VNGenerateForegroundInstanceMaskRequest()
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-
-            do {
-                try handler.perform([request])
-
-                guard let result = request.results?.first else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-
-                let mask = try result.generateScaledMaskForImage(
-                    forInstances: result.allInstances,
-                    from: handler
-                )
-
-                let maskCIImage = CIImage(cvPixelBuffer: mask)
-                let originalCIImage = CIImage(cgImage: cgImage)
-
-                let background = CIImage(color: onWhite ? .white : .clear)
-                    .cropped(to: originalCIImage.extent)
-
-                let filter = CIFilter.blendWithMask()
-                filter.inputImage = originalCIImage
-                filter.maskImage = maskCIImage
-                filter.backgroundImage = background
-
-                guard let outputCIImage = filter.outputImage,
-                      let outputCGImage = CoreImageContext.current.createCGImage(outputCIImage, from: outputCIImage.extent) else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-
-                let finalImage = UIImage(cgImage: outputCGImage, scale: image.scale, orientation: image.imageOrientation)
-                continuation.resume(returning: finalImage)
-            } catch {
-                print("[StyleMate] Background removal failed: \(error.localizedDescription)")
-                continuation.resume(returning: nil)
+        // Off the caller's thread, and never longer than 20 s: a Vision request can block for good on a
+        // device (the Duo's body detector did), which left the add screen spinning.
+        let scale = image.scale, orientation = image.imageOrientation
+        return await Task.detached(priority: .userInitiated) {
+            HangGuard.run("foreground mask (Vision)", seconds: 20) {
+                Self.cutOut(cgImage, onWhite: onWhite, scale: scale, orientation: orientation)
             }
+        }.value
+    }
+
+    private static func cutOut(_ cgImage: CGImage, onWhite: Bool, scale: CGFloat,
+                               orientation: UIImage.Orientation) -> UIImage? {
+        let request = VNGenerateForegroundInstanceMaskRequest()
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        do {
+            try handler.perform([request])
+            guard let result = request.results?.first else { return nil }
+            let mask = try result.generateScaledMaskForImage(forInstances: result.allInstances, from: handler)
+
+            let maskCIImage = CIImage(cvPixelBuffer: mask)
+            let originalCIImage = CIImage(cgImage: cgImage)
+            let background = CIImage(color: onWhite ? .white : .clear)
+                .cropped(to: originalCIImage.extent)
+
+            let filter = CIFilter.blendWithMask()
+            filter.inputImage = originalCIImage
+            filter.maskImage = maskCIImage
+            filter.backgroundImage = background
+
+            guard let outputCIImage = filter.outputImage,
+                  let outputCGImage = CoreImageContext.current.createCGImage(outputCIImage, from: outputCIImage.extent) else {
+                return nil
+            }
+            return UIImage(cgImage: outputCGImage, scale: scale, orientation: orientation)
+        } catch {
+            print("[StyleMate] Background removal failed: \(error.localizedDescription)")
+            return nil
         }
     }
 

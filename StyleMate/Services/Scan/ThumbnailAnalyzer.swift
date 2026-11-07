@@ -40,26 +40,18 @@ enum ThumbnailAnalyzer {
 
     // MARK: - People
 
-    /// People Vision found (confidence > 0.5), or nil when its request couldn't run at all.
+    /// Always nil: the person check is the app's own face detector (YuNet), on devices too.
     ///
-    /// The request can fail (a device short of memory or with the Neural Engine busy). Before, `try?`
-    /// turned that into "nobody in this photo" for every photo: the scan then looked at thousands of
-    /// photos, ran not one face check and added nothing ("Live stats: Nothing measured yet"). Callers fall
-    /// back to the face detector. In the iOS simulator Vision's body detector isn't usable at all (its
-    /// pixel buffers fail with -6680 and the request never returns: RealFirstRunE2ETests hung on it), so
-    /// there the face detector is the person check; Diagnostics › Photo scan says which one ran.
+    /// Vision's body detector (`VNDetectHumanRectanglesRequest`) can block and never return: in the
+    /// simulator always (-6680 pixel buffers, RealFirstRunE2ETests hung on it), and on the founder's
+    /// iPhone Duo the first-run ranking sat at "Picking the best outfit photos" with "Person check:
+    /// Vision" and the scan never got past 8 of 3,935 photos (TestFlight 113 and 114). Nothing can
+    /// interrupt a blocked synchronous request, so the scan doesn't make it any more. A photo without a
+    /// visible face can't be matched to the user anyway, so the face detector loses the scan nothing.
+    /// Callers keep their nil path (`fallbackFaces`); Diagnostics › Photo scan says which check ran.
     static func people(in image: CGImage) -> [VNHumanObservation]? {
-        #if targetEnvironment(simulator)
-        notePersonCheck("face detector (simulator)")
+        notePersonCheck("face detector")
         return nil
-        #else
-        guard let found = visionPeople(in: image) else {
-            notePersonCheck("face detector (Vision's body detector failed)")
-            return nil
-        }
-        notePersonCheck("Vision")
-        return found
-        #endif
     }
 
     private static let noteLock = NSLock()
@@ -72,19 +64,6 @@ enum ThumbnailAnalyzer {
         lastNote = how
         noteLock.unlock()
         if changed { ScanTrace.shared.setNote("Person check", how) }
-    }
-
-    private static func visionPeople(in image: CGImage) -> [VNHumanObservation]? {
-        let humans = VNDetectHumanRectanglesRequest()
-        humans.upperBodyOnly = false
-        do {
-            try VNImageRequestHandler(cgImage: image, options: [:]).perform([humans])
-        } catch {
-            noteVisionFailure(error)
-            return nil
-        }
-        guard let results = humans.results else { return nil }
-        return results.filter { $0.confidence > 0.5 }
     }
 
     /// Largest Vision face area as a fraction of the frame (0 when none or the request failed).

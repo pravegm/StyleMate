@@ -152,6 +152,11 @@ enum TryOnBodyAnalyzer {
     }
 
     static func detectPose(_ image: CGImage) -> RawPose? {
+        // Never longer than 15 s: a Vision request can block for good on a device (the Duo's did).
+        HangGuard.run("body pose (Vision)", seconds: 15) { detectPoseUnguarded(image) }
+    }
+
+    private static func detectPoseUnguarded(_ image: CGImage) -> RawPose? {
         let req = VNDetectHumanBodyPoseRequest()
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         guard (try? handler.perform([req])) != nil, let results = req.results, !results.isEmpty else { return nil }

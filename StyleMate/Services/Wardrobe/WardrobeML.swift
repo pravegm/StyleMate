@@ -167,6 +167,11 @@ final class WardrobeML {
 
     /// Vision's largest face box on the grid (x0, y0, x1, y1), or nil.
     static func faceBox(_ image: CGImage) -> (Int, Int, Int, Int)? {
+        // Never longer than 10 s: a Vision request can block for good on a device (the Duo's did).
+        HangGuard.run("face box (Vision)", seconds: 10) { faceBoxUnguarded(image) }
+    }
+
+    private static func faceBoxUnguarded(_ image: CGImage) -> (Int, Int, Int, Int)? {
         let request = VNDetectFaceRectanglesRequest()
         guard (try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request])) != nil,
               let face = request.results?.max(by: { $0.boundingBox.width < $1.boundingBox.width }) else { return nil }
