@@ -143,8 +143,11 @@ class E2ETestCase: XCTestCase {
         field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
         if !((field.value(forKey: "hasKeyboardFocus") as? Bool) ?? false) { field.tap() }
         let current = (field.value as? String) ?? ""
-        let typed = current == field.placeholderValue ? 0 : current.count
-        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed + 2) + value + (submit ? "\n" : ""))
+        let typed = (current == field.placeholderValue ? 0 : current.count) + 2
+        // Both ways: the tap can leave the cursor at either end of a right-aligned field.
+        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed)
+                     + String(repeating: XCUIKeyboardKey.forwardDelete.rawValue, count: typed)
+                     + value + (submit ? "\n" : ""))
     }
 
     /// The newest photo in the system photo picker, by the date in its accessibility label

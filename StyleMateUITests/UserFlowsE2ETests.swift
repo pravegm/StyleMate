@@ -247,8 +247,8 @@ final class UserFlowsE2ETests: E2ETestCase {
         if pickedYesterday { dayButton.tap() } else { note("log-another-day", "Yesterday isn't on this month's picker; logging today") }
         snap("log-another-day")
         app.buttons.matching(NSPredicate(format: "label == 'Log'")).firstMatch.tap()
-        XCTAssertTrue(anyElement(NSPredicate(format: "identifier == 'outfit.toast' OR label BEGINSWITH 'Logged for'")).waitForExistence(timeout: 8),
-                      "'Log another day' didn't confirm")
+        // Logged, the deck moves on (the toast lasts about a second; the calendar check below is the proof).
+        XCTAssertTrue(counter(4).waitForExistence(timeout: 10), "'Log another day' didn't log and move on to option 4")
 
         app.buttons["outfit.close"].tap()
         XCTAssertTrue(text("Today you're wearing").waitForExistence(timeout: 10), "Home doesn't show today's logged look")
@@ -334,11 +334,15 @@ final class UserFlowsE2ETests: E2ETestCase {
         let notes = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Add any notes' OR label BEGINSWITH 'Add any notes'")).firstMatch
         _ = notes.waitForExistence(timeout: 3)
         for _ in 0..<3 where notes.exists && !notes.isHittable { app.swipeUp() }
-        let typedNote = notes.exists && notes.isHittable
-        if typedNote {
+        var typedNote = false
+        if notes.exists && notes.isHittable {
             notes.tap()
-            app.typeText("Rainy commute\n")   // the focused field (the query re-resolves as it gains focus)
-        } else {
+            if app.keyboards.firstMatch.waitForExistence(timeout: 3) {
+                app.typeText("Rainy commute\n")   // the focused field (the query re-resolves as it gains focus)
+                typedNote = true
+            }
+        }
+        if !typedNote {
             note("composer-notes", "The notes field wasn't reachable; the note isn't checked")
         }
         snap("composer-edit")

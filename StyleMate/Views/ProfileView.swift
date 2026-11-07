@@ -72,6 +72,14 @@ struct ProfileView: View {
         }
     }
 
+    private func seedFields() {
+        guard let user = authService.user else { return }
+        editName = user.name
+        editGender = user.gender ?? ""
+        editAge = user.age.map(String.init) ?? ""
+        didSeedFields = true
+    }
+
     private func commitProfileEdits() {
         guard didSeedFields, var user = authService.user else { return }
         let trimmed = editName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -463,11 +471,15 @@ struct ProfileView: View {
             }
             .onAppear {
                 tasteEvents = TasteStore.shared.events(forUser: authService.user?.id)
-                guard !didSeedFields, let user = authService.user else { return }
-                editName = user.name
-                editGender = user.gender ?? ""
-                editAge = user.age.map(String.init) ?? ""
-                didSeedFields = true
+                guard !didSeedFields else { return }
+                seedFields()
+            }
+            // Another session (sign out / Delete Account, then sign in): the fields kept the old account's name,
+            // and leaving Profile would have saved it into the new one.
+            .onChange(of: authService.isAuthenticated) { signedIn in
+                profileSaveTask?.cancel()
+                didSeedFields = false
+                if signedIn { seedFields() }
             }
             .onDisappear {
                 profileSaveTask?.cancel()

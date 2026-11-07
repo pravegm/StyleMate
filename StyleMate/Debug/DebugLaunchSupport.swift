@@ -146,8 +146,9 @@ enum DebugLaunchSupport {
         let fm = FileManager.default
         try? fm.removeItem(at: WardrobeImageFileHelper.folderURL)
         if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            // Scan checkpoints + held "not sure" items, item embeddings.
-            for dir in ["ScanProgress", "WardrobeEmbeddings", "Premium"] {
+            // Scan checkpoints + held "not sure" items, item embeddings, and the selfie + face gallery (a
+            // gallery left by an earlier test let the next "fresh" demo user scan without a selfie).
+            for dir in ["ScanProgress", "WardrobeEmbeddings", "Premium", "Selfie", "FaceReference"] {
                 try? fm.removeItem(at: support.appendingPathComponent(dir))
             }
         }
