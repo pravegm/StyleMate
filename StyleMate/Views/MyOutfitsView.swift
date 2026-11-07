@@ -624,7 +624,8 @@ struct AddOutfitSheet: View {
                         .transition(.scale.combined(with: .opacity))
                 }
             }
-            .navigationTitle("Add Outfit")
+            // Editing a logged outfit said "Add Outfit".
+            .navigationTitle(initialItems == nil ? "Add Outfit" : "Edit Outfit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

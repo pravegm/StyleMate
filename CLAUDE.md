@@ -20,8 +20,11 @@
   with `RealFirstRunE2ETests`, ~15 min: nothing pre-granted, the selfie from a fixture face,
   a ~260-photo library to scan with a few stuck "iCloud" photos; keep it green, it is the
   only test of the real first run); `[ui-only: RealFirstRunE2ETests, FirstRunE2ETests]`
-  runs the UI job with only those classes (iterate on one UI test without the ~27 min
-  suite); `[studio]`
+  runs the UI job with only those classes (iterate on one UI test without the ~70 min
+  suite); `UserFlowsE2ETests`, `ProfileFlowsE2ETests`, `AccountFlowsE2ETests` and
+  `PremiumFlowsE2ETests` cover every other user flow and assert outcomes (often after a
+  relaunch): when you change a flow, change its test, and fix the app (not the test) when
+  a test finds a dead end; `[studio]`
   (or `[full]`) adds the three studio-coverage render shards (3 Macs, ~45 min);
   `[skip ci]` runs nothing. Docs-only pushes don't run — nor does a push that is only
   an empty commit (e.g. a bare `[full]` tag commit): for that, dispatch instead with

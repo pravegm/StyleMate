@@ -1,6 +1,7 @@
 #if DEBUG
 import UIKit
 import CoreData
+import Photos
 
 /// DEBUG-only launch hooks for the XCUITest end-to-end suite (StyleMateUITests).
 ///
@@ -21,6 +22,13 @@ import CoreData
 ///                            simulator has no camera): `DebugSelfieFeed`.
 /// - `-uiTestStallSomePhotos` photos named `…_stallthumb…` / `…_stallfull…` behave like iCloud
 ///                            downloads that never finish: `ScanFaultInjection`.
+/// - `-uiTestSeedHabits`      Home's habit cards: two items the scan "wasn't sure" about, and a
+///                            "Wore this yesterday?" from a (pretend) photo of three closet pieces.
+/// - `-uiTestSeedFaceReview`  one "Is this you?" photo waiting: the library's street photo
+///                            (`street_coat_boots.jpg`, which CI adds), so confirming it extracts for real.
+///
+/// Without `-uiTestResetState` a relaunch keeps everything the previous launch stored, the demo
+/// user's profile included (Profile edits persist as on a phone).
 ///
 /// The demo user is a fake signed-in account (no Apple credential check, nothing in the Keychain).
 ///
@@ -43,6 +51,8 @@ enum DebugLaunchSupport {
         static let seedTaste = "-uiTestSeedTaste"
         /// `-uiTestLogToFile`: the app's console also goes to Library/Caches/uitest-console.log (CI collects it).
         static let logToFile = "-uiTestLogToFile"
+        static let seedHabits = "-uiTestSeedHabits"
+        static let seedFaceReview = "-uiTestSeedFaceReview"
     }
 
     /// The fake Apple user ids (any string works: Apple's are opaque).
@@ -85,7 +95,9 @@ enum DebugLaunchSupport {
         if args.contains(Argument.resetState) { resetState() }
         guard args.contains(Argument.demoUser) else { return nil }
 
-        let user = User(
+        var profiles = AuthService.loadUserProfiles()
+        // A relaunch without the reset keeps the profile the last launch saved (name, styles, age).
+        let user = profiles[demoUserID] ?? User(
             id: demoUserID,
             email: nil,
             name: "Alex Demo",
@@ -95,13 +107,15 @@ enum DebugLaunchSupport {
             gender: "Female",
             age: 29
         )
-        var profiles = AuthService.loadUserProfiles()
         profiles[user.id] = user
         AuthService.saveUserProfiles(profiles)
 
         if args.contains(Argument.skipOnboarding) { markOnboardingComplete(userId: user.id) }
-        if args.contains(Argument.seedWardrobe) { seedWardrobeIfEmpty(userId: user.id) }
+        var closet: [WardrobeItem] = []
+        if args.contains(Argument.seedWardrobe) { closet = seedWardrobeIfEmpty(userId: user.id) }
         if args.contains(Argument.seedTaste) { seedTaste(userId: user.id) }
+        if args.contains(Argument.seedHabits) { seedHabits(userId: user.id, closet: closet) }
+        if args.contains(Argument.seedFaceReview) { seedFaceReview(userId: user.id) }
         print("[UITest] Demo user ready (reset=\(args.contains(Argument.resetState)), seed=\(args.contains(Argument.seedWardrobe)))")
         let account = Account(appleUserID: demoAppleUserID, profileID: user.id, isTestAccount: true)
         UserDefaults.standard.set(user.id, forKey: AuthService.profileKey(for: account.uuid))
@@ -169,10 +183,12 @@ enum DebugLaunchSupport {
 
     // MARK: - Wardrobe seed
 
-    private static func seedWardrobeIfEmpty(userId: String) {
+    /// The closet after seeding (what was there already, if it wasn't empty).
+    @discardableResult
+    private static func seedWardrobeIfEmpty(userId: String) -> [WardrobeItem] {
         let vm = WardrobeViewModel()
         vm.load(forUser: userId)
-        guard vm.items.isEmpty else { return }
+        guard vm.items.isEmpty else { return vm.items }
 
         let catalog = SeedCatalog.items
         let count = intArgument(Argument.seedCount) ?? catalog.count
@@ -200,6 +216,59 @@ enum DebugLaunchSupport {
             vm.lockedItems = locked
             print("[UITest] Seeded \(locked.count) locked items")
         }
+        return items
+    }
+
+    // MARK: - Habit cards seed
+
+    /// "We weren't sure about 2 items — tap to add" and "Wore this yesterday?" on Home.
+    private static func seedHabits(userId: String, closet: [WardrobeItem]) {
+        let unsure: [(SeedGarment, ItemTrust.Doubt)] = [
+            (SeedGarment(category: .accessories, product: "Watches", colors: ["Silver"], material: "Steel",
+                         details: "Round steel watch", shape: .watch, fill: 0xB8BCC2, accent: 0x2B2B2B), .unsureAccessory),
+            (SeedGarment(category: .accessories, product: "Baseball Caps", colors: ["Red"], material: "Cotton",
+                         details: "Faded red cap", shape: .cap, fill: 0xA3312E), .lowQuality),
+        ]
+        for (spec, doubt) in unsure {
+            guard let item = seedItem(spec) else { continue }
+            UncertainItemsStore.shared.hold(item, embedding: nil, quality: 0.3, doubt: doubt, forUser: userId)
+        }
+        UncertainItemsStore.flushWrites()
+
+        // A whole outfit seen in yesterday's (pretend) photo: a tee, jeans and sneakers from the closet.
+        let picks = ["T-Shirts", "Jeans", "Sneakers"].compactMap { product in closet.first { $0.product == product } }
+        let cal = Calendar.current
+        if picks.count == 3, let yesterday = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: Date())) {
+            WearLogSuggestions.shared.consider(photoID: "uitest-photo-yesterday", date: yesterday.addingTimeInterval(13 * 3600),
+                                               itemIDs: picks.map(\.id), wardrobe: closet, userId: userId)
+        }
+        print("[UITest] Seeded \(UncertainItemsStore.shared.items.count) held items, \(WearLogSuggestions.shared.pending.count) wear-log suggestions")
+    }
+
+    // MARK: - "Is this you?" seed
+
+    /// Queues the library's street photo (CI adds `street_coat_boots.jpg`) as a probable "you".
+    private static func seedFaceReview(userId: String) {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else {
+            print("[UITest] No photo access: no review seeded"); return
+        }
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        let assets = PHAsset.fetchAssets(with: .image, options: options)
+        var pick: PHAsset?
+        assets.enumerateObjects { asset, _, stop in
+            let names = PHAssetResource.assetResources(for: asset).map(\.originalFilename)
+            if names.contains(where: { $0.hasPrefix("street_coat_boots") }) { pick = asset; stop.pointee = true }
+        }
+        guard let asset = pick ?? assets.firstObject else { print("[UITest] Empty library: no review seeded"); return }
+        // The embedding only joins the gallery when confirmed; the demo user has no other faces to compare it with.
+        let dim = 128
+        let review = PendingFaceReview(assetId: asset.localIdentifier, similarity: 0.42,
+                                       embedding: [Float](repeating: 1 / Float(dim).squareRoot(), count: dim),
+                                       faceBox: [0.38, 0.72, 0.24, 0.16], faceCount: 1)
+        PhotoScanService.shared.debugQueueReview(review, forUser: userId)
+        print("[UITest] Seeded an \"Is this you?\" review (\(pick == nil ? "newest photo" : "street_coat_boots"))")
     }
 
     // MARK: - Taste seed

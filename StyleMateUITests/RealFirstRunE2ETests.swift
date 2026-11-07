@@ -456,11 +456,6 @@ class RealFirstRunE2ETests: E2ETestCase {
     // MARK: - Helpers
 
     @MainActor
-    private func pause(_ seconds: TimeInterval) {
-        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "pause")], timeout: seconds)
-    }
-
-    @MainActor
     private func visibleTexts() -> String {
         guard let snapshot = try? app.snapshot() else { return "(no snapshot)" }
         return Self.labels(in: snapshot, types: [.staticText, .button]).joined(separator: "\n")

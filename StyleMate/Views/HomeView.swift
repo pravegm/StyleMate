@@ -57,7 +57,9 @@ struct HomeView: View {
             entrance(heroGreetingSection, delay: 0)
                 .padding(.top, DS.Spacing.lg)
 
-            if photoScanService.scanState != .idle {
+            // Idle with "Is this you?" photos waiting is the banner's review state; hiding it whenever no scan
+            // ran left those photos with no way in.
+            if photoScanService.scanState != .idle || photoScanService.pendingReviewCount > 0 {
                 ScanProgressBanner(
                     scanService: photoScanService,
                     showReview: $showScanReview
@@ -240,6 +242,11 @@ struct HomeView: View {
                 }
                 refreshHeroIfNeeded()
                 withAnimation { appeared = true }
+            }
+            // The waiting "Is this you?" count, read here too: the banner that used to read it is only shown once it's known.
+            .task(id: wardrobeViewModel.currentUserEmail) {
+                guard !wardrobeViewModel.currentUserEmail.isEmpty else { return }
+                _ = photoScanService.pendingReviews(forUser: wardrobeViewModel.currentUserEmail)
             }
             .onChange(of: homeVM.weather?.temperature2m) { _ in refreshHeroIfNeeded() }
             .onChange(of: homeVM.weatherError) { _ in refreshHeroIfNeeded() }

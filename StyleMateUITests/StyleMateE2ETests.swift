@@ -367,14 +367,4 @@ class StyleMateE2ETests: E2ETestCase {
         guard let region = cg.cropping(to: crop) else { return Data() }
         return UIImage(cgImage: region).pngData() ?? Data()
     }
-
-    @MainActor
-    private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if condition() { return true }
-            _ = XCTWaiter.wait(for: [XCTestExpectation(description: "poll")], timeout: 0.5)
-        } while Date() < deadline
-        return false
-    }
 }

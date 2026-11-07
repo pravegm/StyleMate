@@ -471,7 +471,8 @@ jobs:
     needs: [plan, models]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.models.result != 'failure' && github.event_name != 'schedule' && needs.plan.outputs.ui == 'true' }}
     runs-on: xcode-27
-    timeout-minutes: 90
+    # 90 -> 150: the user-flow classes (UserFlows / ProfileFlows / AccountFlows / PremiumFlows) add ~45 min.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - name: Restore face models
@@ -734,7 +735,7 @@ jobs:
         run: |
           BIN=$(find "$RUNNER_TEMP/dd-release/Build/Products" -path "*Release-iphoneos/StyleMate.app/StyleMate" -type f | head -1)
           [ -n "$BIN" ] || { echo "::error::Release binary not found"; exit 1; }
-          if strings "$BIN" | grep -E "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestDemoUser|uiTestSelfieFixture|uiTestStallSomePhotos|uiTestLogToFile|Continue as test user"; then
+          if strings "$BIN" | grep -E "uiTestSeedWardrobe|uiTestFakeAppleSignIn|uiTestDemoUser|uiTestSelfieFixture|uiTestStallSomePhotos|uiTestLogToFile|uiTestSeedHabits|uiTestSeedFaceReview|Continue as test user"; then
             echo "::error::DEBUG UI-test hooks found in the Release binary"; exit 1
           fi
           echo "No test hooks in $BIN"

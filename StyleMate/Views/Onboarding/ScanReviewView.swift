@@ -132,9 +132,8 @@ struct ScanReviewView: View {
         .background(DS.Colors.backgroundCard)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         .dsCardShadow()
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(item.product), \(item.category.rawValue)")
-        .accessibilityHint("Double tap the remove button to remove this item")
+        // Contain, not combine: the combined card swallowed its own Remove button (VoiceOver couldn't reach it).
+        .accessibilityElement(children: .contain)
     }
 
     private func colorDots(for colors: [String]) -> some View {
@@ -201,21 +200,17 @@ struct ScanReviewView: View {
     // MARK: - Remove Item
 
     private func removeItem(_ item: WardrobeItem) {
+        // The closet's own removal (files, iCloud, studio records, embedding): this one left the embedding and
+        // studio records behind.
         withAnimation(.easeInOut(duration: 0.25)) {
-            wardrobeViewModel.items.removeAll { $0.id == item.id }
+            ClosetActions.remove([item], from: wardrobeViewModel)
         }
-
-        WardrobeImageFileHelper.deleteImage(at: item.imagePath)
-        WardrobeImageFileHelper.deleteImage(at: item.croppedImagePath)
-        WardrobeImageFileHelper.deleteImage(at: item.thumbnailPath)
 
         scanService.scanAddedItemIDs.removeAll { $0 == item.id }
 
         if let userId = currentUserId {
             scanService.removeFromLastScanIDs(item.id, forUser: userId)
         }
-
-        wardrobeViewModel.deleteItemFromCloud(item)
 
         print("[StyleMate] Removed scan item: \(item.product)")
     }

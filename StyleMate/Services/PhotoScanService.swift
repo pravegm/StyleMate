@@ -1556,3 +1556,17 @@ extension Notification.Name {
     /// queue) should cancel on it.
     static let styleMateProfileWillReset = Notification.Name("StyleMate.profileWillReset")
 }
+
+#if DEBUG
+extension PhotoScanService {
+    /// UI tests only (`-uiTestSeedFaceReview`, DebugLaunchSupport): queues an "Is this you?" question,
+    /// as a scan does for a photo that is probably the user.
+    func debugQueueReview(_ review: PendingFaceReview, forUser userId: String) {
+        updateProgress(forUser: userId) { p in
+            p.pendingReviews = (p.pendingReviews ?? []).filter { $0.assetId != review.assetId } + [review]
+        }
+        flushProgress()
+        pendingReviewCount = loadProgress(forUser: userId).pendingReviews?.count ?? 0
+    }
+}
+#endif

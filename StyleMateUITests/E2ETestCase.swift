@@ -82,6 +82,77 @@ class E2ETestCase: XCTestCase {
         dismissSpringboardAlertIfPresent()
     }
 
+    /// Launches with the demo user and the seeded closet plus `extra` hooks, and waits for the tabs.
+    @MainActor
+    func launchToHome(extra: [String]) {
+        app = makeApp()
+        app.launchArguments += extra
+        app.launch()
+        dismissSpringboardAlertIfPresent()
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 60) || tabButton("Home").exists,
+                      "The main tab UI never appeared")
+        dismissSpringboardAlertIfPresent()
+    }
+
+    /// Quits the app and opens it again the way a person does: same demo user, nothing reset or
+    /// seeded, so whatever the app stored before is all there is.
+    @MainActor
+    func relaunchKeepingData(extra: [String] = [], file: StaticString = #filePath, line: UInt = #line) {
+        pause(2)   // the wardrobe and outfit log are written off the main thread
+        app.terminate()
+        let again = XCUIApplication()
+        again.launchArguments = ["-uiTestDemoUser", "-uiTestSkipOnboarding",
+                                 "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + darkModeArguments + extra
+        app = again
+        again.launch()
+        XCTAssertTrue(again.tabBars.firstMatch.waitForExistence(timeout: 60) || tabButton("Home").exists,
+                      "The app didn't come back after a relaunch", file: file, line: line)
+        dismissSpringboardAlertIfPresent()
+    }
+
+    @MainActor
+    func pause(_ seconds: TimeInterval) {
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "pause")], timeout: seconds)
+    }
+
+    /// Polls `condition` until it holds or `timeout` passes.
+    @MainActor
+    func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if condition() { return true }
+            pause(0.5)
+        } while Date() < deadline
+        return condition()
+    }
+
+    /// "26 pieces · 5 shelves" on the Wardrobe tab → 26 (nil when the closet is empty or not shown).
+    @MainActor
+    func closetPieceCount() -> Int? {
+        let summary = app.staticTexts["closet.summary"]
+        guard summary.waitForExistence(timeout: 15) else { return nil }
+        return Int(summary.label.split(separator: " ").first ?? "")
+    }
+
+    /// A text field by its title, placeholder or identifier.
+    @MainActor
+    func field(_ title: String) -> XCUIElement {
+        app.textFields.matching(NSPredicate(format: "identifier == %@ OR label == %@ OR placeholderValue == %@",
+                                            title, title, title)).firstMatch
+    }
+
+    /// The closet's item tiles (lazy: only what's on screen exists).
+    @MainActor
+    func closetTiles() -> XCUIElementQuery {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'closet.item.'"))
+    }
+
+    /// The first closet tile whose name contains `text`.
+    @MainActor
+    func closetTile(containing text: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'closet.item.' AND label CONTAINS %@", text)).firstMatch
+    }
+
     /// Location / photos permission prompts belong to SpringBoard, not the app. CI pre-grants
     /// them with `simctl privacy`; this is the safety net.
     @MainActor
