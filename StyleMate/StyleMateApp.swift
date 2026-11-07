@@ -158,6 +158,7 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showReview, onDismiss: {
             capturedCameraImage = nil
             reviewImages = []
+            PaywallCenter.shared.presentQueued()   // a batch that crossed the free limit
         }) {
             AddItemFlowView(images: reviewImages, isPresented: $showReview)
                 .environmentObject(wardrobeVM)

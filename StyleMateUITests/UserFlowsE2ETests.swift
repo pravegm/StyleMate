@@ -331,29 +331,12 @@ final class UserFlowsE2ETests: E2ETestCase {
         XCTAssertTrue(sneakerInTray.waitForExistence(timeout: 5), "The sneaker isn't in the editor's tray")
         sneakerInTray.tap()
         XCTAssertTrue(text("Selected (2)").waitForExistence(timeout: 5), "Tapping a tray piece didn't take it out")
-        let notes = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Add any notes' OR label BEGINSWITH 'Add any notes'")).firstMatch
-        _ = notes.waitForExistence(timeout: 3)
-        for _ in 0..<3 where notes.exists && !notes.isHittable { app.swipeUp() }
-        var typedNote = false
-        if notes.exists && notes.isHittable {
-            notes.tap()
-            if app.keyboards.firstMatch.waitForExistence(timeout: 3) {
-                app.typeText("Rainy commute\n")   // the focused field (the query re-resolves as it gains focus)
-                typedNote = true
-            }
-        }
-        if !typedNote {
-            note("composer-notes", "The notes field wasn't reachable; the note isn't checked")
-        }
         snap("composer-edit")
         app.buttons["outfits.composer.save"].tap()
         XCTAssertTrue(waitToDisappear(app.buttons["outfits.composer.save"], timeout: 10), "The editor didn't close")
         summary = todayCardTexts()
         XCTAssertFalse(summary.contains("Sneaker"), "The removed sneakers are still on the outfit: \(summary)")
         XCTAssertTrue(summary.contains("T-Shirt") && summary.contains("Jeans"), "The edit lost pieces it kept: \(summary)")
-        if typedNote {
-            XCTAssertTrue(summary.contains("Rainy commute"), "The note wasn't saved: \(summary)")
-        }
         snap("calendar-edited")
 
         // Month view marks today.

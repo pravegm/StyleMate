@@ -19,7 +19,16 @@ final class ProfileFlowsE2ETests: E2ETestCase {
         let age = field("Age")
         XCTAssertTrue(age.exists, "No Age field in Profile")
         // Age first (a number pad has no return key); the name's return then puts the keyboard away.
-        replaceText(in: age, with: "34", submit: false)
+        // A double tap selects the "29" and typing replaces it (a tap can put the cursor in front of it).
+        age.doubleTap()
+        if app.keyboards.firstMatch.waitForExistence(timeout: 3) { app.typeText("34") }
+        if age.value as? String != "34" {
+            // Fallback: Select All from the edit menu, then type over it.
+            age.press(forDuration: 1.0)
+            let selectAll = app.menuItems["Select All"]
+            if selectAll.waitForExistence(timeout: 3) { selectAll.tap(); app.typeText("34") }
+        }
+        XCTAssertTrue(waitUntil(timeout: 3) { age.value as? String == "34" }, "Couldn't set the age: '\(age.value ?? "")'")
         replaceText(in: name, with: "Sam Rivera")
         snap("profile-about-you")
 

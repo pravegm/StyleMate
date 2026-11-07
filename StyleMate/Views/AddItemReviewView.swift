@@ -560,7 +560,7 @@ struct AddItemReviewView: View {
         let locked = PremiumGate.admit(batch, to: wardrobeViewModel)
         isPresented = false
         if locked > 0 {
-            PaywallCenter.shared.present(.batchOverflow(locked), after: 0.6)
+            PaywallCenter.shared.queue(.batchOverflow(locked))   // opened by RootView once this cover has closed
         }
     }
 

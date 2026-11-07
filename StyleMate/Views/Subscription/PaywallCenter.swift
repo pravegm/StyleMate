@@ -36,6 +36,19 @@ final class PaywallCenter: ObservableObject {
     }
 
     func dismiss() { request = nil }
+
+    /// A paywall to open once the full-screen cover asking for it has closed (`presentQueued()` from its
+    /// onDismiss). Opened on a timer while that cover was still animating away, it came up without safe-area
+    /// insets: its close button sat under the status bar and couldn't be tapped.
+    private var queued: PaywallReason?
+
+    func queue(_ reason: PaywallReason) { queued = reason }
+
+    func presentQueued() {
+        guard let reason = queued else { return }
+        queued = nil
+        present(reason, after: 0.1)
+    }
 }
 
 extension View {
