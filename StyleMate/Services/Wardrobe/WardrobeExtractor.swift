@@ -67,9 +67,11 @@ enum WardrobeExtractor {
             var inst = use.inst
             // Under a turban or a deep hat GarmentNet's head region runs down over the face, and the
             // closet showed a face in every such cutout (UI run 42344238439): keep the hat above the brows.
+            var trimmedHeadwear = false
             if inst.kind == .headwear, let face = WardrobeML.faceBox(use.crop.image),
                let trimmed = trimmedAboveFace(inst, face: face) {
                 inst = trimmed
+                trimmedHeadwear = true
             }
             // A small accessory GarmentNet is unsure of is the commonest phantom item (eyeglasses on
             // a face, clogs at a hem): skip it; a clearer photo will find it.
@@ -110,6 +112,12 @@ enum WardrobeExtractor {
                                                          colourSource: core),
                   !blockedProducts.contains(attrs.product) else { continue }
             WardrobeML.shared.record("classify", Date().timeIntervalSince(tk))
+            // What's left of a "hat" once the face is cut away, and no longer looks like headwear, was
+            // hair (benchmark street_coat_boots: a beanie that was hair came back as a second scarf).
+            if trimmedHeadwear, attrs.kind != .headwear {
+                log("drop trimmed headwear that reads as \(attrs.product)")
+                continue
+            }
             // Too few source-photo pixels to make a decent wardrobe image
             // (sunglasses 40 px wide in a group shot): skip — a closer photo will catch it.
             let photoSide = cut.sourceSide / Float(use.crop.scale)
