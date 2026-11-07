@@ -7,6 +7,37 @@ import UIKit
 /// singulariser, and the smaller reliability fixes that a unit test can prove.
 struct HardeningTests {
 
+    // MARK: - Headwear cutouts keep the face out
+
+    /// A turban mask that runs down over the face loses everything below the brows across the face;
+    /// a mask with nothing on the face, or one that would mostly vanish, is left alone.
+    @Test func headwearIsTrimmedAboveTheFace() throws {
+        let gw = WardrobeML.gridW, gh = WardrobeML.gridH
+        func instance(rows: Range<Int>, cols: Range<Int>) -> GarmentInstance {
+            var mask = [UInt8](repeating: 0, count: gw * gh)
+            for y in rows { for x in cols { mask[y * gw + x] = 1 } }
+            return GarmentInstance(kind: .headwear, labelerClass: 15, mask: mask, holes: [UInt8](repeating: 0, count: gw * gh),
+                                   pixelCount: rows.count * cols.count, holeCount: 0,
+                                   box: (cols.lowerBound, rows.lowerBound, cols.upperBound, rows.upperBound),
+                                   touchesEdge: (false, false, false, false))
+        }
+        // Face x 40..<80, y 60..<110: trimmed below y 70, across x 30..<90 (a quarter of its width either side).
+        let face = (40, 60, 80, 110)
+        let turban = instance(rows: 20..<100, cols: 20..<100)
+        let trimmed = try #require(WardrobeExtractor.trimmedAboveFace(turban, face: face))
+        #expect(trimmed.box.1 == 20)
+        #expect(trimmed.box.3 == 100)                   // the brim beyond the face's sides stays
+        #expect(trimmed.mask[75 * gw + 60] == 0)        // the middle of the face is gone
+        #expect(trimmed.mask[90 * gw + 85] == 0)        // and the cheek beside it
+        #expect(trimmed.mask[65 * gw + 60] == 1)        // the hat above the brows stays
+        #expect(trimmed.mask[90 * gw + 25] == 1)        // so does the brim out past the face
+        #expect(trimmed.pixelCount == 80 * 80 - 30 * 60)
+        // A cap above the face: nothing to trim.
+        #expect(WardrobeExtractor.trimmedAboveFace(instance(rows: 20..<60, cols: 40..<80), face: face) == nil)
+        // A "hat" that is mostly face: left as it is.
+        #expect(WardrobeExtractor.trimmedAboveFace(instance(rows: 68..<110, cols: 40..<80), face: face) == nil)
+    }
+
     // MARK: - Wardrobe storage (P1-5)
 
     private static func entry(id: UUID = UUID(), category: String = "Tops", product: String = "T-Shirts",

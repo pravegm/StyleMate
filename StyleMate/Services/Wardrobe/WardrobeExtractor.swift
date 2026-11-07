@@ -64,7 +64,13 @@ enum WardrobeExtractor {
         // 3 + 4.
         var items: [Item] = []
         for use in uses {
-            let inst = use.inst
+            var inst = use.inst
+            // Under a turban or a deep hat GarmentNet's head region runs down over the face, and the
+            // closet showed a face in every such cutout (UI run 42344238439): keep the hat above the brows.
+            if inst.kind == .headwear, let face = WardrobeML.faceBox(use.crop.image),
+               let trimmed = trimmedAboveFace(inst, face: face) {
+                inst = trimmed
+            }
             // A small accessory GarmentNet is unsure of is the commonest phantom item (eyeglasses on
             // a face, clogs at a hem): skip it; a clearer photo will find it.
             // Shoes cut off by the bottom of the photo, and a sliver of trousers at the bottom edge,
@@ -465,6 +471,42 @@ enum WardrobeExtractor {
         func py(_ gy: Int) -> CGFloat { (crop.rect.minY + CGFloat(gy) / gh * crop.rect.height) / H }
         let r = CGRect(x: px(x0), y: py(y0), width: px(x1) - px(x0), height: py(y1) - py(y0))
         return r.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
+    /// `inst` without what lies on the face: below the brow line (a fifth of the way down Vision's
+    /// face box), across the face and a quarter of its width either side (cheeks, ears, beard).
+    /// A brim wider than that stays. Nil when nothing is on the face, or when trimming would leave
+    /// under a quarter of the item (then it's not a hat over a face, and the original stands).
+    static func trimmedAboveFace(_ inst: GarmentInstance, face: (Int, Int, Int, Int)) -> GarmentInstance? {
+        let gw = WardrobeML.gridW, gh = WardrobeML.gridH
+        let fw = face.2 - face.0, fh = face.3 - face.1
+        guard fw > 0, fh > 0 else { return nil }
+        let brow = max(0, face.1 + fh / 5)
+        let x0 = max(0, face.0 - fw / 4), x1 = min(gw, face.2 + fw / 4)
+        var mask = inst.mask, holes = inst.holes
+        var removed = 0
+        for y in brow..<gh {
+            for x in x0..<x1 {
+                let i = y * gw + x
+                if mask[i] != 0 { mask[i] = 0; removed += 1 }
+                if i < holes.count { holes[i] = 0 }
+            }
+        }
+        guard removed > 0 else { return nil }
+        let kept = inst.pixelCount - removed
+        guard kept * 4 >= inst.pixelCount else { return nil }
+        var bx0 = gw, by0 = gh, bx1 = 0, by1 = 0
+        for y in 0..<gh {
+            for x in 0..<gw where mask[y * gw + x] != 0 {
+                bx0 = min(bx0, x); by0 = min(by0, y); bx1 = max(bx1, x + 1); by1 = max(by1, y + 1)
+            }
+        }
+        guard bx1 > bx0, by1 > by0 else { return nil }
+        let holeCount = holes.reduce(0) { $0 + Int($1) }
+        return GarmentInstance(kind: inst.kind, labelerClass: inst.labelerClass, mask: mask, holes: holes,
+                               pixelCount: kept, holeCount: holeCount, box: (bx0, by0, bx1, by1),
+                               touchesEdge: inst.touchesEdge, parts: inst.parts, partShares: inst.partShares,
+                               confidence: inst.confidence)
     }
 
     private static func isTruncated(_ inst: GarmentInstance, crop: Crop) -> Bool {
