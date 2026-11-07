@@ -4,9 +4,24 @@ Plain-language summary as of 7 Nov 2026. Technical detail lives in
 `docs/PROJECT-LOG.md`, reviews in `docs/reviews/`, launch and legal detail in
 `docs/LAUNCH-READINESS.md` and `docs/MODEL-LICENSING.md`, and the setup steps in `docs/TESTFLIGHT.md`.
 
-## Latest (7 Nov): TestFlight build 114
+## Latest (7 Nov, afternoon): TestFlight build 115
 
-**What changed since build 112 (the one that stuck on your Duo)**
+**Why 113 and 114 still stuck on your Duo, and what 115 changes.** Your Diagnostics showed "Now: Picking the
+best outfit photos" with "Person check: Vision": Apple's Vision body detector blocked and never returned
+during the first-run ranking, and the ranking only checked its 20 s budget between batches, so the scan
+stayed at 8 photos. Build 115:
+- uses the app's own face detector (the one Find yourself already uses on your Duo) as the person check,
+  with no Vision body detector in the scan at all;
+- enforces the ranking's 20 s limit even if a check never returns, then scans anyway;
+- runs every remaining Vision call (multi-person photos, manual add, studio, try-on) with a 10–20 s limit
+  and a fallback.
+The real-first-run test now freezes Vision on purpose: without the fix it fails with "stood still at 0 of
+261 photos" (your symptom), with it the closet fills (CI 42361035610, 42361076929; main 42365113583).
+- Hats and turbans: the cutout no longer includes the face under them.
+- AI catalogue photos: on phones with room for both (your Duo, the 17 Pro) the studio redraws pieces as
+  product photos *while* the first scan runs, instead of only after it finished (hours on a big library).
+
+**What changed since build 112 (113/114, still in 115)**
 - The scan no longer waits forever on photos that iCloud hasn't delivered: it uses the preview already on
   the phone, gives up on a slow download after 20 s and tries that photo again later. Weather never spins
   forever: after 20 s it shows Retry, and asks again when you come back to the app.
@@ -29,7 +44,7 @@ your exact symptom. Main CI 42344238439 is green.
 **What the simulator can't check (please try on the Duo):** real iCloud downloads and Neural Engine speed,
 real Sign in with Apple, the camera, notifications arriving, the overnight scan, iCloud backup/restore.
 
-**To test on your Duo:** delete StyleMate, install build 114 from TestFlight, go through the first run
+**To test on your Duo:** delete StyleMate, install build 115 from TestFlight, go through the first run
 (selfie, Find yourself) and let the scan run on Wi-Fi with the app open. If it stalls, open Profile › About ›
 Diagnostics, Share report, and send it: the Photo scan section says exactly where it waits.
 
