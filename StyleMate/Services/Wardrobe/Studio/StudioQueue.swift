@@ -168,6 +168,9 @@ final class StudioQueue: ObservableObject {
 
     /// Below this much free memory (bytes) a render could get the app killed.
     static let minFreeMemory: UInt64 = 1_300_000_000
+    /// Free memory (bytes) above which a render may run alongside the photo scan (its ~0.5 GB plus a
+    /// render's ~1.5 GB peak, with room to spare).
+    static let scanAndRenderMemory: UInt64 = 3_500_000_000
 
     /// Holds until rendering is reasonable; false = give up this batch (cancelled).
     private func waitForGoodConditions(batchSize: Int) async -> Bool {
@@ -190,7 +193,16 @@ final class StudioQueue: ObservableObject {
 
     /// Why rendering should wait right now (nil = go).
     static func holdReason(batchSize: Int, scanning: Bool) -> String? {
-        if scanning { return "a photo scan is running" }
+        if scanning {
+            #if targetEnvironment(simulator)
+            return "a photo scan is running"
+            #else
+            // A phone with room for both (iPhone 17 Pro, iPhone Duo) renders while the first scan runs: a
+            // 4,000-photo library scans for hours, and until now the closet stayed all cutouts until it
+            // finished. Below this headroom the scan goes first, as before.
+            if UInt64(os_proc_available_memory()) < scanAndRenderMemory { return "a photo scan is running" }
+            #endif
+        }
         let info = ProcessInfo.processInfo
         if info.thermalState == .serious || info.thermalState == .critical { return "device is hot" }
         if info.isLowPowerModeEnabled { return "Low Power Mode" }
