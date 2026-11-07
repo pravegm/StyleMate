@@ -38,7 +38,13 @@ class TasteInsightsE2ETests: E2ETestCase {
         XCTAssertTrue(notMyStyle.waitForExistence(timeout: 5), "No 'Not my style' choice after a skip")
         XCTAssertTrue(app.buttons["outfit.skipReason.notToday"].exists, "No 'Not today' choice after a skip")
         snap("skip-reason-prompt")
-        notMyStyle.tap()
+        // Unanswered, the prompt settles by itself after 6 s, which a slow runner's queries + screenshot can
+        // use up (main run 42337618641): tap it from a snapshot, and if it had gone, skip again and answer at once.
+        if !tapIfPresent(notMyStyle) {
+            skip()
+            XCTAssertTrue(notMyStyle.waitForExistence(timeout: 5), "No 'Not my style' choice after another skip")
+            XCTAssertTrue(tapIfPresent(notMyStyle), "The skip prompt went before it could be answered")
+        }
         XCTAssertTrue(waitToDisappear(notMyStyle, timeout: 5), "The skip prompt didn't go away when answered")
         snap("skip-reason-answered")
     }
@@ -114,6 +120,14 @@ class TasteInsightsE2ETests: E2ETestCase {
         XCTAssertTrue(skip.waitForExistence(timeout: 8), "No Skip button")
         skip.tap()
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "next card")], timeout: 0.8)
+    }
+
+    /// Taps `element` at its snapshot's frame (no failure if it went meanwhile); false when it's gone.
+    @MainActor
+    private func tapIfPresent(_ element: XCUIElement) -> Bool {
+        guard let frame = try? element.snapshot().frame, !frame.isEmpty else { return false }
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+        return true
     }
 
     @MainActor
