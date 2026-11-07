@@ -328,36 +328,6 @@ class StyleMateE2ETests: E2ETestCase {
                       "Today's outfit card isn't marked '\(expectedSourceLabel)'", file: file, line: line)
     }
 
-    /// The newest photo in the picker, by the date in its accessibility label
-    /// ("Photo, March 30, 2018, 7:14 PM"; this year's photos omit the year: "Photo, November 04, 1:52 PM").
-    @MainActor
-    private func newestPhoto(in photos: XCUIElementQuery) -> XCUIElement {
-        let all = photos.allElementsBoundByIndex
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        let thisYear = Calendar.current.component(.year, from: Date())
-        let withYear = ["MMMM d, yyyy, h:mm a", "MMM d, yyyy, h:mm a", "MMMM d, yyyy 'at' h:mm a", "d MMMM yyyy, HH:mm"]
-        let withoutYear = ["MMMM d, h:mm a", "MMM d, h:mm a", "MMMM d 'at' h:mm a", "d MMMM, HH:mm"]
-        func date(of element: XCUIElement) -> Date? {
-            let label = element.label
-                .replacingOccurrences(of: "\u{202F}", with: " ")
-                .replacingOccurrences(of: "Photo, ", with: "")
-            if label.hasPrefix("Today") { return Date() }
-            for format in withYear {
-                formatter.dateFormat = format
-                if let d = formatter.date(from: label) { return d }
-            }
-            for format in withoutYear {
-                formatter.dateFormat = "yyyy " + format
-                if let d = formatter.date(from: "\(thisYear) " + label) { return d }
-            }
-            return nil
-        }
-        let dated = all.compactMap { element in date(of: element).map { (element, $0) } }
-        if let newest = dated.max(by: { $0.1 < $1.1 }) { return newest.0 }
-        return all.last ?? photos.firstMatch
-    }
-
     /// A cheap fingerprint of the outfit card's pixels, to prove a swap changed the look.
     @MainActor
     private func lookFingerprint() -> Data {

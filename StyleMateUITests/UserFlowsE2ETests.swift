@@ -39,8 +39,7 @@ final class UserFlowsE2ETests: E2ETestCase {
         app.buttons.matching(NSPredicate(format: "label == 'Clear filters'")).firstMatch.tap()
         XCTAssertTrue(waitToDisappear(noMatches, timeout: 10), "'Clear filters' didn't clear the search")
         XCTAssertFalse(anyElement(NSPredicate(format: "label BEGINSWITH 'Showing'")).exists, "A filter is still on after 'Clear filters'")
-        let cancel = app.buttons.matching(NSPredicate(format: "label == 'Cancel'")).firstMatch
-        if cancel.exists { cancel.tap() }
+        if app.keyboards.firstMatch.exists { app.typeText("\n") }   // put the keyboard away (the search stays, empty)
 
         // A colour swatch: the burgundy sweater is the only burgundy piece. The swatches scroll sideways.
         let sortMenu = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Sort, currently'")).firstMatch
@@ -48,7 +47,9 @@ final class UserFlowsE2ETests: E2ETestCase {
         let burgundy = app.buttons.matching(NSPredicate(format: "label == 'Burgundy' AND NOT (identifier BEGINSWITH 'closet.item.')")).firstMatch
         XCTAssertTrue(burgundy.waitForExistence(timeout: 10), "No Burgundy swatch in the closet's filter bar")
         let rowY = sortMenu.frame.midY
-        for _ in 0..<6 where !(burgundy.isHittable && burgundy.frame.maxX < app.frame.maxX) {
+        // Off-screen swatches have no hit point (isHittable throws): go by the frame.
+        func onScreen(_ e: XCUIElement) -> Bool { e.frame.minX >= 0 && e.frame.maxX <= app.frame.maxX - 4 }
+        for _ in 0..<6 where !onScreen(burgundy) {
             app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: app.frame.width * 0.8, dy: rowY))
                 .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: app.frame.width * 0.2, dy: rowY)))
@@ -65,7 +66,7 @@ final class UserFlowsE2ETests: E2ETestCase {
                       "The colour filter didn't clear")
 
         // Sort: Oldest puts a different piece first than Newest.
-        for _ in 0..<6 where !sortMenu.isHittable {
+        for _ in 0..<6 where !onScreen(sortMenu) {
             app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: app.frame.width * 0.2, dy: rowY))
                 .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: app.frame.width * 0.8, dy: rowY)))
@@ -223,16 +224,16 @@ final class UserFlowsE2ETests: E2ETestCase {
         XCTAssertTrue(waitToDisappear(notMyStyle, timeout: 5), "The skip question stayed up")
         XCTAssertTrue(counter(3).waitForExistence(timeout: 10), "Skip didn't move on to option 3")
 
-        // Add a piece from the ⋯ menu: a tote joins the look (or the stylist says why not).
+        // Add a piece from the ⋯ menu: a blouse (the list's first product) joins the look, or the stylist says why not.
         app.buttons["outfit.more"].tap()
         tapMenuItem("Add a piece")
-        let tote = app.buttons.matching(NSPredicate(format: "label == 'Tote Bag'")).firstMatch
-        XCTAssertTrue(tote.waitForExistence(timeout: 10), "'Add a piece' doesn't list the closet's tote")
-        tote.tap()
+        let blouse = app.buttons.matching(NSPredicate(format: "label == 'Blouse'")).firstMatch
+        XCTAssertTrue(blouse.waitForExistence(timeout: 10), "'Add a piece' doesn't list the closet's blouse")
+        blouse.tap()
         waitForStyling()
-        let hasTote = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label ENDSWITH 'Tote Bag'", piecePrefix)).firstMatch
-        XCTAssertTrue(hasTote.waitForExistence(timeout: 10) || anyElement(NSPredicate(format: "label BEGINSWITH \"Couldn't find a\"")).exists,
-                      "Adding the tote did nothing and said nothing")
+        let hasBlouse = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label ENDSWITH 'Blouse'", piecePrefix)).firstMatch
+        XCTAssertTrue(hasBlouse.waitForExistence(timeout: 10) || anyElement(NSPredicate(format: "label BEGINSWITH \"Couldn't find a\"")).exists,
+                      "Adding the blouse did nothing and said nothing")
         snap("deck-added-piece")
 
         // Log another day: yesterday.
@@ -336,7 +337,7 @@ final class UserFlowsE2ETests: E2ETestCase {
         let typedNote = notes.exists && notes.isHittable
         if typedNote {
             notes.tap()
-            notes.typeText("Rainy commute")
+            app.typeText("Rainy commute\n")   // the focused field (the query re-resolves as it gains focus)
         } else {
             note("composer-notes", "The notes field wasn't reachable; the note isn't checked")
         }
@@ -423,12 +424,13 @@ final class UserFlowsE2ETests: E2ETestCase {
         snap("is-this-you-picked")
         confirm.tap()
 
-        let added = anyElement(NSPredicate(format: "label BEGINSWITH 'Added ' AND label CONTAINS 'to your wardrobe'"))
+        // "Added N items" shows for under 2 s before the sheet closes itself: wait for the close, then count.
         let none = text("All set")
-        let outcome = waitForAny([added, none], timeout: 480)
+        let reviewing = text("Tap every photo of you")
+        let closed = waitUntil(timeout: 480) { !reviewing.exists && !self.app.navigationBars["Is this you?"].exists }
         snap("is-this-you-done")
-        XCTAssertEqual(outcome, 0, "Confirming the street photo added nothing from it (0 = added, 1 = 'All set', nil = still working)")
-        XCTAssertTrue(waitToDisappear(text("Tap every photo of you"), timeout: 15), "'Is this you?' didn't close")
+        XCTAssertTrue(closed, "'Is this you?' was still working 8 minutes after confirming")
+        XCTAssertFalse(none.exists, "Confirming the street photo said 'All set' and added nothing")
         XCTAssertFalse(banner.waitForExistence(timeout: 3), "The answered photo is still waiting on Home")
 
         openTab("Wardrobe")
@@ -473,6 +475,96 @@ final class UserFlowsE2ETests: E2ETestCase {
         XCTAssertTrue(review.waitForExistence(timeout: 60), "The picked photo didn't go on to the review")
         snap("camera-fallback-review")
         app.buttons.matching(NSPredicate(format: "label == 'Cancel'")).firstMatch.tap()
+    }
+
+    // MARK: - Replace an item's photo
+
+    /// Edit → Replace photo → the street photo from the gallery: the coat is cut out of it on the
+    /// phone, and after Save the item page shows the new picture, also after a relaunch.
+    @MainActor
+    func test10_ReplacePhotoCutsTheItemOutOfTheNewPhoto() throws {
+        launchToHome()
+        openTab("Wardrobe")
+        let coat = closetTile(containing: "Coat")
+        XCTAssertTrue(scrollUntilHittable(coat, maxSwipes: 6), "No coat in the closet")
+        coat.tap()
+        XCTAssertTrue(itemPage().waitForExistence(timeout: 15), "The coat's page didn't open")
+        let hero = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Photo of'")).firstMatch
+        XCTAssertTrue(hero.waitForExistence(timeout: 10), "The item page has no picture")
+        pause(1.5)
+        let before = hero.screenshot().pngRepresentation
+
+        app.buttons["itemDetail.more"].tap()
+        app.buttons.matching(NSPredicate(format: "identifier == 'itemDetail.edit' OR label == 'Edit details'")).firstMatch.tap()
+        let replace = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Replace photo'")).firstMatch
+        XCTAssertTrue(replace.waitForExistence(timeout: 10), "The editor has no Replace photo")
+        replace.tap()
+        tapMenuItem("Choose from gallery")
+        guard pickNewestPhoto() else { return }
+
+        let different = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Choose a different photo'")).firstMatch
+        let failed = app.alerts["Couldn't use that photo"]
+        let outcome = waitForAny([different, failed], timeout: 420)
+        snap("replace-photo-cut-out")
+        XCTAssertEqual(outcome, 0, "The new photo wasn't cut out (0 = done, 1 = 'Couldn't use that photo', nil = still working)")
+        app.buttons.matching(NSPredicate(format: "label == 'Save'")).firstMatch.tap()
+        XCTAssertTrue(waitToDisappear(anyElement(NSPredicate(format: "label == 'Edit piece'")), timeout: 10), "The editor didn't close on Save")
+        XCTAssertTrue(waitUntil(timeout: 15) { hero.exists && hero.screenshot().pngRepresentation != before },
+                      "The item page still shows the old picture")
+        snap("item-page-new-photo")
+
+        relaunchKeepingData()
+        openTab("Wardrobe")
+        let again = closetTile(containing: "Coat")
+        XCTAssertTrue(scrollUntilHittable(again, maxSwipes: 6), "The coat is gone after a relaunch")
+        again.tap()
+        let heroAgain = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Photo of'")).firstMatch
+        XCTAssertTrue(heroAgain.waitForExistence(timeout: 15))
+        XCTAssertTrue(waitUntil(timeout: 15) { heroAgain.screenshot().pngRepresentation != before },
+                      "After a relaunch the coat shows its old picture again")
+    }
+
+    // MARK: - Auto-scan from the add sheet, without a selfie
+
+    /// Wardrobe + → Auto-Scan Photos → All photos with no selfie on file: the banner asks for one
+    /// (instead of spinning), the selfie is taken, and the scan runs to the end on its own.
+    @MainActor
+    func test11_AutoScanWithoutASelfieAsksForOneThenFinishes() throws {
+        launchToHome(extra: ["-uiTestSelfieFixture"])
+        openTab("Wardrobe")
+        app.buttons["closet.add"].tap()
+        let autoScan = button(id: "addSource.autoScan", label: "Auto-Scan Photos")
+        XCTAssertTrue(autoScan.waitForExistence(timeout: 10), "The add sheet has no Auto-Scan (photo access is granted on CI)")
+        autoScan.tap()
+        XCTAssertTrue(text("Scan photos for clothing").waitForExistence(timeout: 10), "The scan range sheet didn't open")
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'All photos'")).firstMatch.tap()
+        let start = app.buttons.matching(NSPredicate(format: "label == 'Start scanning'")).firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout: 5) && start.isEnabled, "No enabled Start scanning")
+        snap("scan-range")
+        start.tap()
+
+        openTab("Home")
+        let takeSelfie = app.buttons["scan.takeSelfie"]
+        XCTAssertTrue(takeSelfie.waitForExistence(timeout: 20), "A scan without a selfie doesn't ask for one")
+        snap("scan-needs-selfie")
+        takeSelfie.tap()
+        let use = app.buttons.matching(NSPredicate(format: "label == 'Use these selfie photos' OR label == 'Use these photos'")).firstMatch
+        XCTAssertTrue(use.waitForExistence(timeout: 120), "The selfie never kept three frames of the fixture face")
+        use.tap()
+        XCTAssertTrue(waitToDisappear(takeSelfie, timeout: 30), "The scan still asks for a selfie after taking one")
+
+        let completed = anyElement(NSPredicate(format: "identifier == 'scanBanner.completed' OR identifier == 'scanBanner.completedEmpty'"))
+        let progress = anyElement(NSPredicate(format: "identifier == 'scanBanner.progress'"))
+        let errorBanner = anyElement(NSPredicate(format: "label BEGINSWITH 'Scan paused. Double tap to retry'"))
+        var sawProgress = false
+        let outcome = waitUntil(timeout: 360) {
+            if progress.exists { sawProgress = true }
+            return completed.exists || errorBanner.exists || takeSelfie.exists || (sawProgress && !progress.exists)
+        }
+        snap("scan-after-selfie")
+        XCTAssertTrue(outcome, "The scan was still running 6 minutes after the selfie")
+        XCTAssertFalse(errorBanner.exists, "The scan stopped with an error")
+        XCTAssertFalse(takeSelfie.exists, "The scan still says there's no selfie after taking one")
     }
 
     // MARK: - Steps

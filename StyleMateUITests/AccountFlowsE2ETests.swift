@@ -143,10 +143,4 @@ final class AccountFlowsE2ETests: E2ETestCase {
                       "Signing out didn't return to the welcome screen")
     }
 
-    @MainActor
-    private func replaceText(in field: XCUIElement, with value: String) {
-        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
-        let current = (field.value as? String) ?? ""
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count + 2) + value)
-    }
 }

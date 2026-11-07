@@ -130,8 +130,73 @@ class E2ETestCase: XCTestCase {
     @MainActor
     func closetPieceCount() -> Int? {
         let summary = app.staticTexts["closet.summary"]
-        guard summary.waitForExistence(timeout: 15) else { return nil }
+        // The summary sits above the shelves in a lazy stack: scrolled down, it isn't in the tree.
+        for _ in 0..<4 where !summary.waitForExistence(timeout: 3) { app.swipeDown() }
+        guard summary.waitForExistence(timeout: 10) else { return nil }
         return Int(summary.label.split(separator: " ").first ?? "")
+    }
+
+    /// Clears a text field (cursor at the end), types `value`, and with `submit` presses return,
+    /// which also puts the keyboard away (a keyboard left up covers the tab bar).
+    @MainActor
+    func replaceText(in field: XCUIElement, with value: String, submit: Bool = true) {
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        if !((field.value(forKey: "hasKeyboardFocus") as? Bool) ?? false) { field.tap() }
+        let current = (field.value as? String) ?? ""
+        let typed = current == field.placeholderValue ? 0 : current.count
+        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed + 2) + value + (submit ? "\n" : ""))
+    }
+
+    /// The newest photo in the system photo picker, by the date in its accessibility label
+    /// ("Photo, March 30, 2018, 7:14 PM"; this year's photos omit the year: "Photo, November 04, 1:52 PM").
+    /// On CI that is `street_coat_boots.jpg`, which the UI job adds to the library.
+    @MainActor
+    func newestPhoto(in photos: XCUIElementQuery) -> XCUIElement {
+        let all = photos.allElementsBoundByIndex
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let thisYear = Calendar.current.component(.year, from: Date())
+        let withYear = ["MMMM d, yyyy, h:mm a", "MMM d, yyyy, h:mm a", "MMMM d, yyyy 'at' h:mm a", "d MMMM yyyy, HH:mm"]
+        let withoutYear = ["MMMM d, h:mm a", "MMM d, h:mm a", "MMMM d 'at' h:mm a", "d MMMM, HH:mm"]
+        func date(of element: XCUIElement) -> Date? {
+            let label = element.label
+                .replacingOccurrences(of: "\u{202F}", with: " ")
+                .replacingOccurrences(of: "Photo, ", with: "")
+            if label.hasPrefix("Today") { return Date() }
+            for format in withYear {
+                formatter.dateFormat = format
+                if let d = formatter.date(from: label) { return d }
+            }
+            for format in withoutYear {
+                formatter.dateFormat = "yyyy " + format
+                if let d = formatter.date(from: "\(thisYear) " + label) { return d }
+            }
+            return nil
+        }
+        let dated = all.compactMap { element in date(of: element).map { (element, $0) } }
+        if let newest = dated.max(by: { $0.1 < $1.1 }) { return newest.0 }
+        return all.last ?? photos.firstMatch
+    }
+
+    /// Picks the newest photo in the system photo picker and confirms it (multi-select pickers
+    /// need their Add / Done; single-select ones return on the tap). Returns false when it shows none.
+    @MainActor
+    @discardableResult
+    func pickNewestPhoto(file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        let photos = app.images.matching(NSPredicate(format: "label BEGINSWITH 'Photo'"))
+        guard photos.firstMatch.waitForExistence(timeout: 30) else {
+            note("photo-picker-tree", app.debugDescription)
+            XCTFail("The photo picker showed no photos", file: file, line: line)
+            return false
+        }
+        newestPhoto(in: photos).tap()
+        // The picker's checkmark is identifier 'Add' / label 'Done'; the closet's own (+) is identifier 'plus'.
+        let confirm = app.buttons.matching(NSPredicate(format:
+            "(identifier == 'Add' OR label == 'Done' OR label == 'Add') AND identifier != 'plus'")).firstMatch
+        if confirm.waitForExistence(timeout: 3) {
+            if confirm.isHittable { confirm.tap() } else { confirm.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+        }
+        return true
     }
 
     /// A text field by its title, placeholder or identifier.

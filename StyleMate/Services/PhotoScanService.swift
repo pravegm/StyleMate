@@ -426,6 +426,10 @@ class PhotoScanService: ObservableObject {
         dlog("[StyleMate] Auto-scan starting for user: \(userId)\(quiet ? " (automatic)" : "")")
 
         currentPhase = "Loading face reference..."
+        // A selfie just taken is still being saved (IdentityBuild): the scan banner's "Take a selfie" retries the
+        // scan as its sheet closes, which found no selfie yet and asked for one again.
+        await IdentityBuild.waitUntilIdle()
+        guard isCurrent(generation) else { return }
         // Off the main actor: after a face-model change this rebuilds the gallery from the
         // selfie (several Core ML passes), which froze the UI.
         let hasFaceRef = await Task.detached(priority: .userInitiated) {

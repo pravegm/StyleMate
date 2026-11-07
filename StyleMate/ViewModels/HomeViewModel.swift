@@ -378,8 +378,10 @@ class HomeViewModel: ObservableObject {
 
     /// Force a fresh pick of the day (e.g. a "regenerate" tap).
     func generateHero(wardrobe: [WardrobeItem], user: User?) {
-        guard !isGeneratingHero, wardrobe.count >= Self.minItemsForHero else { return }
-        guard OutfitReadiness.isReady(wardrobe) else { heroOutfit = nil; return }
+        guard !isGeneratingHero else { return }
+        // Too few pieces left (e.g. "Empty my wardrobe"): no look. Returning early kept the old one, removed
+        // pieces and a working "Wear today" included, under "Your closet is empty".
+        guard wardrobe.count >= Self.minItemsForHero, OutfitReadiness.isReady(wardrobe) else { heroOutfit = nil; return }
         isGeneratingHero = true
         let type = selectedOutfitType ?? user?.preferredStyles.first ?? .everyday
         let context = makeContext(user: user, occasion: type, description: nil, mood: nil)

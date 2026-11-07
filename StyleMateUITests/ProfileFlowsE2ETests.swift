@@ -16,10 +16,11 @@ final class ProfileFlowsE2ETests: E2ETestCase {
         openTab("Profile")
         let name = field("Name")
         XCTAssertTrue(name.waitForExistence(timeout: 10), "No Name field in Profile")
-        replaceText(in: name, with: "Sam Rivera")
         let age = field("Age")
         XCTAssertTrue(age.exists, "No Age field in Profile")
-        replaceText(in: age, with: "34")
+        // Age first (a number pad has no return key); the name's return then puts the keyboard away.
+        replaceText(in: age, with: "34", submit: false)
+        replaceText(in: name, with: "Sam Rivera")
         snap("profile-about-you")
 
         // Preferences: swap Sports / Active for Streetwear (exactly six are kept).
@@ -141,7 +142,7 @@ final class ProfileFlowsE2ETests: E2ETestCase {
     func test05_PrivacyPolicyOpensInSafari() throws {
         launchToHome()
         openTab("Profile")
-        let link = app.buttons["profile.privacyPolicy"]
+        let link = app.descendants(matching: .any).matching(identifier: "profile.privacyPolicy").firstMatch
         XCTAssertTrue(scrollUntilHittable(link, maxSwipes: 10), "No Privacy Policy link in Profile")
         link.tap()
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
@@ -208,12 +209,4 @@ final class ProfileFlowsE2ETests: E2ETestCase {
     }
 
     // MARK: - Helpers
-
-    /// Clears a text field (cursor at the end) and types `value`.
-    @MainActor
-    private func replaceText(in field: XCUIElement, with value: String) {
-        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
-        let current = (field.value as? String) ?? ""
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count + 2) + value)
-    }
 }

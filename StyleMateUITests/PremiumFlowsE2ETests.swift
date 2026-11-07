@@ -183,7 +183,7 @@ final class PremiumFlowsE2ETests: E2ETestCase {
         waitForPlans()
 
         // Terms of Use opens Apple's EULA in Safari; coming back finds the paywall as it was.
-        let terms = app.buttons["paywall.terms"]
+        let terms = app.descendants(matching: .any).matching(identifier: "paywall.terms").firstMatch
         XCTAssertTrue(terms.exists, "No Terms of Use on the paywall")
         terms.tap()
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
@@ -207,5 +207,47 @@ final class PremiumFlowsE2ETests: E2ETestCase {
         XCTAssertTrue(held.waitForExistence(timeout: 10) && held.label.contains("2 items"), "The held piece was lost: \(held.exists ? held.label : "no card")")
         openTab("Wardrobe")
         XCTAssertEqual(closetPieceCount(), 50, "The closet went past 50 without Premium")
+    }
+
+    // MARK: - A gallery batch that crosses 50
+
+    /// At 49 pieces, a photo with several garments: what fits is added, the rest is saved as waiting,
+    /// and the paywall says how many wait.
+    @MainActor
+    func test06_GalleryBatchCrossingTheLimitAddsWhatFitsAndSavesTheRest() throws {
+        launch(pieces: 49, locked: 0)
+        openTab("Wardrobe")
+        XCTAssertEqual(closetPieceCount(), 49)
+        app.buttons["closet.add"].tap()
+        let gallery = button(id: "addSource.gallery", label: "Choose from Gallery")
+        XCTAssertTrue(gallery.waitForExistence(timeout: 10))
+        gallery.tap()
+        guard pickNewestPhoto() else { return }
+
+        let reviewTitle = anyElement(NSPredicate(format: "label ==[c] 'Review items'"))
+        let whichOne = anyElement(NSPredicate(format: "label == 'Which one is you?'"))
+        if waitForAny([reviewTitle, whichOne], timeout: 120) == 1 { button(label: "use the whole photo").tap() }
+        XCTAssertTrue(reviewTitle.waitForExistence(timeout: 60), "The review never appeared")
+        let found = anyElement(NSPredicate(format: "label MATCHES %@", "(.*, )?[1-9][0-9]* items? (found|detected)"))
+        XCTAssertTrue(found.waitForExistence(timeout: 420), "On-device extraction found nothing in the street photo")
+        let add = app.buttons["review.add"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10), "No 'Add N Items to Wardrobe'")
+        let adding = Int(add.label.components(separatedBy: " ").dropFirst().first ?? "") ?? 0
+        note("review-add", "\(add.label) | \(found.label)")
+        guard adding >= 2 else { throw XCTSkip("The photo gave \(adding) item(s): nothing to carry past the 50th piece") }
+        XCTAssertTrue(app.descendants(matching: .any)["review.allowanceNote"].exists, "The review doesn't warn that only one more piece fits")
+        snap("review-at-49")
+        add.tap()
+
+        let waiting = adding - 1
+        let headline = "\(waiting) piece\(waiting == 1 ? " is" : "s are") saved and waiting"
+        XCTAssertTrue(anyElement(NSPredicate(format: "label == %@", headline)).waitForExistence(timeout: 20),
+                      "After the batch the paywall doesn't say '\(headline)'")
+        snap("paywall-batch-overflow")
+        closePaywall()
+        openTab("Wardrobe")
+        XCTAssertEqual(closetPieceCount(), 50, "The batch should fill the closet to exactly 50")
+        XCTAssertTrue(lockedCard().waitForExistence(timeout: 10) && lockedCard().label.contains("\(waiting) more piece"),
+                      "The rest of the batch isn't waiting for Premium (card: \(lockedCard().exists ? lockedCard().label : "none"))")
     }
 }
