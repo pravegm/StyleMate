@@ -149,10 +149,11 @@ final class TryOnQueue: ObservableObject {
     }
 
     /// Why background work should wait (nil = go). The studio queue's rules, plus: never alongside a
-    /// studio render (two ~1 GB UNets).
+    /// studio render (two ~1 GB UNets), and never during a photo scan (only the studio takes turns with it).
     static func holdReason() -> String? {
         if StudioQueue.shared.isRunning { return "a studio render is running" }
-        return StudioQueue.holdReason(batchSize: 1, scanning: PhotoScanService.shared.isWorking)
+        return StudioQueue.holdReason(StudioQueue.currentConditions(scanning: PhotoScanService.shared.isWorking,
+                                                                    rendersDuringScan: false))
     }
 
     /// Whether the diffusion pass may run right now (a user request runs the composite regardless).

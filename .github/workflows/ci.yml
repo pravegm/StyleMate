@@ -451,6 +451,7 @@ jobs:
             -destination "id=$SIM" \
             -derivedDataPath "$RUNNER_TEMP/dd" \
             -only-testing:StyleMateTests/StudioCoverageTests \
+            -only-testing:StyleMateTests/StudioQueueTests \
             -resultBundlePath "$RUNNER_TEMP/studio.xcresult" \
             2>&1 | tee studio.log | grep -E "✔|✘|Test .*(passed|failed)|error:|\[Report\]|\[Studio\]|\*\* TEST" || true
           grep -qE "\*\* TEST (EXECUTE )?SUCCEEDED \*\*" studio.log
