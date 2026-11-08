@@ -442,7 +442,7 @@ final class StudioQueue: ObservableObject {
     }
 
     /// The extraction kind for a stored item (nil = don't render, e.g. innerwear).
-    static func kind(for item: WardrobeItem) -> GarmentKind? {
+    nonisolated static func kind(for item: WardrobeItem) -> GarmentKind? {
         let p = item.product
         switch item.category {
         case .outerwear: return .outerLayer

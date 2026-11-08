@@ -6,6 +6,7 @@ import UIKit
 /// When the studio queue renders. Build 115 waited for the whole photo scan (hours on a 4,000-photo
 /// library) and for 60% battery off the charger, so a real Duo never got a single product photo.
 @Suite(.serialized)
+@MainActor
 struct StudioQueueTests {
     @Test func scanningNoLongerHoldsRendersOnAPhone() {
         var c = StudioQueue.Conditions(scanning: true, rendersDuringScan: true, freeMemory: 2_000_000_000)
