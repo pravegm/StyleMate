@@ -12,7 +12,12 @@ final class StudioStore {
         /// The cutout from the user's photo it was made from (kept on disk).
         var cutoutPath: String
         var version: Int
+        /// Rounds that ended with no convincing render (nil in files from before Nov 2026 = 1).
+        var rejections: Int? = nil
     }
+
+    /// A rejected item gets this many rounds, each with fresh seeds, before its cutout stays.
+    static let maxRejections = 2
 
     /// Bump to re-render every item after a pipeline change.
     /// 2: stricter render gate, new prompts, UUID seeds (Nov 2026).
@@ -85,8 +90,16 @@ final class StudioStore {
     func needsRender(_ item: WardrobeItem) -> Bool {
         guard let e = entry(for: item.id) else { return true }
         if e.version < Self.version { return true }
-        if e.studioPath.isEmpty { return e.cutoutPath != item.imagePath }   // failed before; retry only on a new cutout
+        if e.studioPath.isEmpty {
+            // Rejected before: retry with new seeds a limited number of times, or on a new cutout.
+            return e.cutoutPath != item.imagePath || (e.rejections ?? 1) < Self.maxRejections
+        }
         return e.studioPath != item.imagePath
+    }
+
+    /// Items still waiting for their first studio round (for the closet's progress line).
+    func pendingCount(_ items: [WardrobeItem]) -> Int {
+        items.filter { StudioQueue.kind(for: $0) != nil && entry(for: $0.id) == nil }.count
     }
 }
 
@@ -94,17 +107,44 @@ final class StudioStore {
 /// with a lifelike on-device studio render (see `StudioPipeline`). Items show
 /// their clean cutout immediately; the studio image swaps in when it's ready.
 ///
-/// Renders are heavy (~1 GB UNet on the Neural Engine), so the queue waits
-/// while a photo scan is running (its models are resident), while the phone is
-/// hot, in Low Power Mode, low on battery (big batches need power), or short of
-/// memory; it cancels and unloads when the app goes to the background and picks
-/// up again when it returns.
+/// Renders are heavy (~1 GB UNet on the Neural Engine). While a photo scan runs the
+/// two take turns: the scan parks at its next photo (`holdsScan`), one item renders,
+/// then the scan runs for at least as long before the next render. (Until build 115
+/// the queue waited for the whole scan, so a 4,000-photo library stayed all cutouts
+/// for hours on a real Duo.) The queue also waits while the phone is hot, in Low Power
+/// Mode, below 20% battery off the charger, or short of memory; it cancels and
+/// unloads when the app goes to the background and picks up again when it returns.
 @MainActor
 final class StudioQueue: ObservableObject {
     static let shared = StudioQueue()
 
     @Published private(set) var isRunning = false
     @Published private(set) var remaining = 0
+    /// Why the queue is waiting right now (nil = rendering or idle), for the closet and Diagnostics.
+    @Published private(set) var holdReason: String?
+    /// The item being drawn right now.
+    @Published private(set) var currentProduct: String?
+    /// True while a render has the phone to itself: the photo scan parks at its next photo.
+    @Published private(set) var holdsScan = false
+    /// This launch: renders accepted, items left as cutouts, renders that failed.
+    @Published private(set) var renderedCount = 0
+    @Published private(set) var rejectedCount = 0
+    @Published private(set) var failedCount = 0
+    @Published private(set) var lastRenderSeconds: Double?
+
+    /// The scan the queue takes turns with; tests swap in their own.
+    var scanIsWorking: () -> Bool = { PhotoScanService.shared.isWorking }
+    var scanIsParked: () -> Bool = { PhotoScanService.shared.isParked }
+    var scanInFirstLook: () -> Bool = { PhotoScanService.shared.isFirstLookPass }
+    /// Renders take turns with a running scan. Off in the simulator, whose CPU render takes
+    /// minutes and would stall the scan in the UI tests; tests turn it on.
+    var rendersDuringScan: Bool = {
+        #if targetEnvironment(simulator)
+        false
+        #else
+        true
+        #endif
+    }()
 
     private var task: Task<Void, Never>?
     private weak var wardrobe: WardrobeViewModel?
@@ -143,13 +183,25 @@ final class StudioQueue: ObservableObject {
         task = Task { [weak self] in
             for item in todo {
                 guard let self, !Task.isCancelled else { break }
-                guard await self.waitForGoodConditions(batchSize: self.remaining) else { break }
                 // The item may have been edited / deleted while we waited.
+                guard wardrobe.items.contains(where: { $0.id == item.id }) else { self.remaining -= 1; continue }
+                guard await self.waitForTurn() else { break }
+                let shared = self.holdsScan
                 guard let current = wardrobe.items.first(where: { $0.id == item.id }),
-                      StudioStore.shared.needsRender(current) else { self.remaining -= 1; continue }
+                      StudioStore.shared.needsRender(current) else { self.holdsScan = false; self.remaining -= 1; continue }
+                let start = Date()
+                self.currentProduct = current.product
                 await self.render(current, wardrobe: wardrobe)
+                self.currentProduct = nil
+                self.lastRenderSeconds = Date().timeIntervalSince(start)
+                self.holdsScan = false
                 self.remaining -= 1
+                // Then the scan gets the phone for at least as long.
+                if shared { await self.giveScanItsTurn(seconds: max(20, Date().timeIntervalSince(start))) }
             }
+            self?.holdsScan = false
+            self?.currentProduct = nil
+            self?.holdReason = nil
             StudioPipeline.generator?.unload()
             self?.isRunning = false
             self?.task = nil
@@ -162,62 +214,127 @@ final class StudioQueue: ObservableObject {
     /// models are released. Called when the app goes to the background.
     func cancel() {
         task?.cancel()
+        holdsScan = false
         StudioPipeline.generator?.cancelRenders()
         StudioPipeline.generator?.unload()
     }
 
-    /// Below this much free memory (bytes) a render could get the app killed.
-    static let minFreeMemory: UInt64 = 1_300_000_000
-    /// Free memory (bytes) above which a render may run alongside the photo scan (its ~0.5 GB plus a
-    /// render's ~1.5 GB peak, with room to spare).
-    static let scanAndRenderMemory: UInt64 = 3_500_000_000
+    /// Below this much free memory (bytes) a render could get the app killed. Measured with the
+    /// scan parked, its models still loaded.
+    nonisolated static let minFreeMemory: UInt64 = 1_300_000_000
+    /// Off the charger, renders wait below this battery level.
+    nonisolated static let minBattery: Float = 0.2
+    /// How long a render waits for the scan to finish its current photo and park.
+    static let parkTimeout: TimeInterval = 120
 
-    /// Holds until rendering is reasonable; false = give up this batch (cancelled).
-    private func waitForGoodConditions(batchSize: Int) async -> Bool {
+    /// Holds until rendering is reasonable and, during a scan, the scan has parked (`holdsScan`
+    /// stays true for the render). Free memory is measured with the scan parked; when it's short
+    /// the scan is let go again while the queue waits. False = cancelled.
+    private func waitForTurn() async -> Bool {
         UIDevice.current.isBatteryMonitoringEnabled = true
         var unloaded = false
         while !Task.isCancelled {
-            if let reason = Self.holdReason(batchSize: batchSize, scanning: PhotoScanService.shared.isWorking) {
-                if !unloaded {
-                    print("[Studio] holding: \(reason)")
-                    StudioPipeline.generator?.unload()
-                    unloaded = true
-                }
-                try? await Task.sleep(nanoseconds: 20_000_000_000)
-                continue
+            var c = conditions()
+            var reason = Self.holdReason(c, checkMemory: false)
+            if reason == nil {
+                if c.scanning { guard await parkScan() else { break } }
+                c = conditions()
+                reason = Self.holdReason(c)
             }
-            return true
+            guard let reason else { holdReason = nil; return true }
+            holdsScan = false
+            if holdReason != reason { print("[Studio] holding: \(reason)") }
+            holdReason = reason
+            if !unloaded {
+                StudioPipeline.generator?.unload()
+                unloaded = true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
         }
+        holdsScan = false
         return false
     }
 
-    /// Why rendering should wait right now (nil = go).
-    static func holdReason(batchSize: Int, scanning: Bool) -> String? {
-        if scanning {
-            #if targetEnvironment(simulator)
-            return "a photo scan is running"
-            #else
-            // A phone with room for both (iPhone 17 Pro, iPhone Duo) renders while the first scan runs: a
-            // 4,000-photo library scans for hours, and until now the closet stayed all cutouts until it
-            // finished. Below this headroom the scan goes first, as before.
-            if UInt64(os_proc_available_memory()) < scanAndRenderMemory { return "a photo scan is running" }
-            #endif
+    /// Asks the scan to park at its next photo and waits until it has (or the timeout: a photo that
+    /// takes that long is stuck, and the memory check still guards the render); false = cancelled.
+    private func parkScan() async -> Bool {
+        holdsScan = true
+        let deadline = Date().addingTimeInterval(Self.parkTimeout)
+        while !Task.isCancelled, scanIsWorking(), !scanIsParked(), Date() < deadline {
+            try? await Task.sleep(nanoseconds: 250_000_000)
         }
-        let info = ProcessInfo.processInfo
-        if info.thermalState == .serious || info.thermalState == .critical { return "device is hot" }
-        if info.isLowPowerModeEnabled { return "Low Power Mode" }
-        let device = UIDevice.current
-        let powered = device.batteryState == .charging || device.batteryState == .full
-        let level = device.batteryLevel   // -1 when unknown (simulator)
-        if !powered && level >= 0 {
-            let needed: Float = batchSize > 8 ? 0.6 : 0.3
-            if level < needed { return "battery \(Int(level * 100))% and not charging" }
+        return !Task.isCancelled
+    }
+
+    /// Lets the scan run (the next render waits) for `seconds`, or until it ends.
+    private func giveScanItsTurn(seconds: TimeInterval) async {
+        let until = Date().addingTimeInterval(seconds)
+        while !Task.isCancelled, scanIsWorking(), Date() < until {
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
+    }
+
+    private func conditions() -> Conditions {
+        var c = Self.currentConditions(scanning: scanIsWorking(), rendersDuringScan: rendersDuringScan)
+        c.firstLook = c.scanning && scanInFirstLook()
+        return c
+    }
+
+    /// Everything `holdReason` looks at, measured now.
+    struct Conditions: Sendable {
+        var scanning = false
+        var rendersDuringScan = true
+        /// The first run is still on its best outfit photos (the closet fills first).
+        var firstLook = false
+        var thermal: ProcessInfo.ThermalState = .nominal
+        var lowPower = false
+        var powered = true
+        /// 0...1, or -1 when unknown (simulator).
+        var battery: Float = -1
+        /// nil = not measured (simulator).
+        var freeMemory: UInt64? = nil
+    }
+
+    static func currentConditions(scanning: Bool, rendersDuringScan: Bool) -> Conditions {
+        let info = ProcessInfo.processInfo, device = UIDevice.current
+        var c = Conditions(scanning: scanning, rendersDuringScan: rendersDuringScan, thermal: info.thermalState,
+                           lowPower: info.isLowPowerModeEnabled,
+                           powered: device.batteryState == .charging || device.batteryState == .full,
+                           battery: device.batteryLevel)
         #if !targetEnvironment(simulator)
-        let free = UInt64(os_proc_available_memory())
-        if free < minFreeMemory { return "low memory (\(free / 1_000_000) MB free)" }
+        c.freeMemory = UInt64(os_proc_available_memory())
         #endif
+        return c
+    }
+
+    /// Why rendering should wait right now (nil = go), in words for the closet.
+    nonisolated static func holdReason(_ c: Conditions, checkMemory: Bool = true) -> String? {
+        if c.scanning && !c.rendersDuringScan { return "Waiting for the photo scan to finish" }
+        if c.scanning && c.firstLook { return "Starting once your best photos are scanned" }
+        if c.thermal == .serious || c.thermal == .critical { return "Paused while your iPhone cools down" }
+        if c.lowPower { return "Paused for Low Power Mode" }
+        if !c.powered && c.battery >= 0 && c.battery < minBattery {
+            return "Paused at \(Int(c.battery * 100))% battery: plug in to continue"
+        }
+        if checkMemory, let free = c.freeMemory, free < minFreeMemory { return "Waiting for memory (\(free / 1_000_000) MB free)" }
         return nil
+    }
+
+    /// Plain-language state for Diagnostics and the shared report.
+    func describe(items: [WardrobeItem]) -> [String] {
+        guard StudioPipeline.generator?.isAvailable == true else { return ["The product-photo models are missing from this build."] }
+        var out: [String] = []
+        let store = StudioStore.shared
+        let eligible = items.filter { Self.kind(for: $0) != nil }
+        let done = eligible.filter { item in store.entry(for: item.id).map { !$0.studioPath.isEmpty && $0.studioPath == item.imagePath } ?? false }.count
+        let kept = eligible.filter { store.entry(for: $0.id).map { $0.studioPath.isEmpty } ?? false }.count
+        out.append("Product photos: \(done) of \(eligible.count) pieces; \(kept) kept their cutout; \(store.pendingCount(items)) not tried yet")
+        if let p = currentProduct { out.append("Now: drawing \(p)") }
+        else if let r = holdReason { out.append("Now: waiting. \(r)") }
+        else { out.append(isRunning ? "Now: between pieces" : "Now: idle") }
+        out.append("Since StyleMate opened: \(renderedCount) made, \(rejectedCount) not convincing, \(failedCount) failed")
+        if let s = lastRenderSeconds { out.append("Last piece took \(DiagFormat.seconds(s))") }
+        return out
     }
 
     /// A stable per-item seed (FNV-1a over the UUID's bytes). `hashValue` is
@@ -259,7 +376,9 @@ final class StudioQueue: ObservableObject {
                                    truncated: embeddingStore.truncated(for: item.id) ?? false, cutout: cutout.cgImage,
                                    embedding: embeddingStore.embedding(for: item.id), fit: item.fit)
         let embedding: [Float]? = embeddingStore.embedding(for: item.id)
-        let seed = Self.seed(for: item.id)
+        // A retry after a rejected round draws new candidates.
+        let rejections = entry.flatMap { $0.studioPath.isEmpty && $0.cutoutPath == sourcePath ? ($0.rejections ?? 1) : nil } ?? 0
+        let seed = Self.seed(for: item.id) &+ UInt32(rejections) &* 104_729
         let perf = PerfLog.begin(.studioRender)
         // A render blocks its thread for 40–60 s (the renderer's queue.sync), so it runs on a
         // GCD thread, not a Swift-concurrency one: holding a cooperative-pool thread that long
@@ -275,16 +394,19 @@ final class StudioQueue: ObservableObject {
 
         switch outcome {
         case .failed:
-            if !Task.isCancelled { transientFailures[item.id, default: 0] += 1 }
+            if !Task.isCancelled { transientFailures[item.id, default: 0] += 1; failedCount += 1 }
         case .rejected:
+            rejectedCount += 1
             // No convincing render: the clean cutout is the item's image (an
             // older pipeline's render, if any, goes).
             if showsStudio {
                 apply(imagePath: sourcePath, thumbnail: WardrobeImageFileHelper.saveThumbnail(cutout),
                       to: item.id, expecting: startPath, cutoutPath: sourcePath, wardrobe: wardrobe)
             }
-            store.set(.init(studioPath: "", cutoutPath: sourcePath, version: StudioStore.version), for: item.id)
+            store.set(.init(studioPath: "", cutoutPath: sourcePath, version: StudioStore.version, rejections: rejections + 1),
+                      for: item.id)
         case .rendered(let result):
+            renderedCount += 1
             guard let path = WardrobeImageFileHelper.saveImageAsPNG(result.image) else {
                 transientFailures[item.id, default: 0] += 1
                 return
@@ -320,7 +442,7 @@ final class StudioQueue: ObservableObject {
     }
 
     /// The extraction kind for a stored item (nil = don't render, e.g. innerwear).
-    static func kind(for item: WardrobeItem) -> GarmentKind? {
+    nonisolated static func kind(for item: WardrobeItem) -> GarmentKind? {
         let p = item.product
         switch item.category {
         case .outerwear: return .outerLayer

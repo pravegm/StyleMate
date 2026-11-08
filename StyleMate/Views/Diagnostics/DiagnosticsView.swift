@@ -12,6 +12,7 @@ struct DiagnosticsView: View {
     @Environment(\.duoLayout) private var duo
     @ObservedObject private var benchmark = DiagnosticsBenchmark.shared
     @StateObject private var hingeCheck = HingeCheckStore()
+    @ObservedObject private var studio = StudioQueue.shared
 
     @State private var facts: DeviceFacts?
     @State private var live = PerfSnapshot()
@@ -36,6 +37,7 @@ struct DiagnosticsView: View {
                 benchmarkCard
             } trailing: {
                 scanCard
+                studioCard
                 liveCard
                 if hingeAvailable { hingeCard }
                 shareCard
@@ -200,6 +202,21 @@ struct DiagnosticsView: View {
         .accessibilityIdentifier("diagnostics.scan")
     }
 
+    // MARK: Product photos
+
+    /// The studio queue: how many pieces have their product photo, and what it's doing or waiting for.
+    private var studioCard: some View {
+        DiagCard(title: "Product photos", icon: "sparkles") {
+            ForEach(Array(studio.describe(items: wardrobeViewModel.items).enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(DS.Font.footnote)
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityIdentifier("diagnostics.studio")
+    }
+
     // MARK: Live stats
 
     private var liveCard: some View {
@@ -280,7 +297,8 @@ struct DiagnosticsView: View {
     private var reportText: String {
         DiagnosticsReport.make(facts: facts ?? DeviceFacts.current(), benchmark: benchmark.last, live: live,
                                hingeAvailable: hingeAvailable, hinge: hingeCheck.ordered,
-                               liveHinge: hingeAvailable ? currentReading : nil)
+                               liveHinge: hingeAvailable ? currentReading : nil,
+                               studio: studio.describe(items: wardrobeViewModel.items))
     }
 
     private var shareCard: some View {

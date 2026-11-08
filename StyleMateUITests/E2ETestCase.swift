@@ -136,6 +136,20 @@ class E2ETestCase: XCTestCase {
         return Int(summary.label.split(separator: " ").first ?? "")
     }
 
+    /// The closet count once it has held for 3 s: scanned pieces land one at a time.
+    @MainActor
+    func settledClosetPieceCount(timeout: TimeInterval = 30) -> Int? {
+        var last = closetPieceCount()
+        var heldSince = Date()
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline, Date().timeIntervalSince(heldSince) < 3 {
+            pause(1)
+            let now = closetPieceCount()
+            if now != last { last = now; heldSince = Date() }
+        }
+        return last
+    }
+
     /// Clears a text field (cursor at the end), types `value`, and with `submit` presses return,
     /// which also puts the keyboard away (a keyboard left up covers the tab bar).
     @MainActor

@@ -358,6 +358,47 @@ struct ClosetScanStatus: View {
     }
 }
 
+/// "Making product photos · 12 to go": the studio redrawing cutouts as catalogue photos,
+/// or why it's waiting. Hidden when every piece has had its turn.
+struct ClosetStudioStatus: View {
+    @ObservedObject private var studio = StudioQueue.shared
+    let items: [WardrobeItem]
+
+    var body: some View {
+        let left = max(studio.remaining, StudioStore.shared.pendingCount(items))
+        if StudioPipeline.generator?.isAvailable == true, studio.isRunning || left > 0 {
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(DS.Colors.accent)
+                    .symbolEffect(.pulse, isActive: studio.currentProduct != nil)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Making product photos")
+                        .font(DS.Font.subheadline.weight(.semibold))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Text(detail(left: left))
+                        .font(DS.Font.caption1)
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .monospacedDigit()
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(DS.Spacing.sm)
+            .background(DS.Colors.backgroundCard,
+                        in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("closet.studioStatus")
+        }
+    }
+
+    private func detail(left: Int) -> String {
+        let togo = left > 0 ? "\(left) to go" : "Almost done"
+        if let product = studio.currentProduct { return "Drawing your \(product.lowercased()) · \(togo)" }
+        if let reason = studio.holdReason { return "\(reason) · \(togo)" }
+        return "Each piece is redrawn on your iPhone, about a minute each · \(togo)"
+    }
+}
+
 /// True while a gallery scan runs (for the empty closet's loading state).
 struct ClosetScanGate<Scanning: View, Idle: View>: View {
     @ObservedObject private var scan = PhotoScanService.shared

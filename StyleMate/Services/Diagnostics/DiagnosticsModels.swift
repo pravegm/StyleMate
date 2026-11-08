@@ -162,7 +162,7 @@ enum DiagnosticsReport {
     /// The plain-text report the founder pastes to us. Labels are plain language; numbers keep units.
     static func make(facts: DeviceFacts, benchmark: BenchmarkResult?, live: PerfSnapshot,
                      hingeAvailable: Bool, hinge: [HingeCheckResult], liveHinge: HingeReading?,
-                     now: Date = Date()) -> String {
+                     studio: [String] = [], now: Date = Date()) -> String {
         var out: [String] = []
         func line(_ label: String, _ value: String) { out.append("\(label): \(value)") }
         func header(_ title: String) { out.append(""); out.append("== \(title) ==") }
@@ -227,6 +227,11 @@ enum DiagnosticsReport {
         header("Photo scan (since StyleMate opened)")
         let scan = ScanTrace.shared.snapshot
         if scan.isEmpty { out.append("Not run since StyleMate opened.") } else { out += ScanTrace.describe(scan, now: now) }
+
+        if !studio.isEmpty {
+            header("Product photos (studio)")
+            out += studio
+        }
 
         header("Live stats from real use")
         if live.isEmpty {

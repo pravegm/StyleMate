@@ -32,7 +32,9 @@ final class UserFlowsE2ETests: E2ETestCase {
         snap("closet-search-jeans")
 
         // Nothing matches: the empty state says so and clears the search.
-        search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5) + "xyzzy")
+        replaceText(in: search, with: "xyzzy", submit: false)
+        // The simulator now and then drops keystrokes (CI once left "jea"): type it again if so.
+        if (search.value as? String) != "xyzzy" { replaceText(in: search, with: "xyzzy", submit: false) }
         let noMatches = text("No matches")
         XCTAssertTrue(noMatches.waitForExistence(timeout: 10), "No 'No matches' for a search that finds nothing")
         snap("closet-no-matches")
@@ -421,7 +423,7 @@ final class UserFlowsE2ETests: E2ETestCase {
         XCTAssertFalse(banner.waitForExistence(timeout: 3), "The answered photo is still waiting on Home")
 
         openTab("Wardrobe")
-        let grown = closetPieceCount() ?? 0
+        let grown = settledClosetPieceCount() ?? 0
         XCTAssertGreaterThan(grown, seededItemCount, "The closet didn't grow after confirming the photo")
 
         // Home's "Review last scan results": take one of them out again.
@@ -437,7 +439,8 @@ final class UserFlowsE2ETests: E2ETestCase {
         let done = app.buttons.matching(NSPredicate(format: "label == 'Done reviewing scanned items'")).firstMatch
         if done.waitForExistence(timeout: 3) { done.tap() }   // (the last one closes the review by itself)
         openTab("Wardrobe")
-        XCTAssertTrue(waitUntil(timeout: 10) { self.closetPieceCount() == grown - 1 }, "Removing a scanned piece didn't take it out of the closet")
+        XCTAssertTrue(waitUntil(timeout: 10) { self.closetPieceCount() == grown - 1 },
+                      "Removing a scanned piece didn't take it out of the closet: \(grown) before, \(closetPieceCount() ?? -1) after")
     }
 
     // MARK: - "Take a Photo" without a camera
@@ -630,13 +633,17 @@ final class UserFlowsE2ETests: E2ETestCase {
         return f.string(from: date)
     }
 
-    @MainActor
-    private func dayCell(_ day: Date) -> XCUIElement {
+    static func dayCellID(_ day: Date) -> String {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
-        return app.buttons["outfits.day.\(f.string(from: day))"]
+        return "outfits.day.\(f.string(from: day))"
+    }
+
+    @MainActor
+    private func dayCell(_ day: Date) -> XCUIElement {
+        app.buttons[Self.dayCellID(day)]
     }
 
     /// `day`'s cell in the Outfits week strip, stepping a week back or forward when it's in another week.
@@ -644,7 +651,10 @@ final class UserFlowsE2ETests: E2ETestCase {
     private func visibleDayCell(_ day: Date) -> XCUIElement {
         let cell = dayCell(day)
         if !cell.waitForExistence(timeout: 5) {
-            let step = day < Date() ? "Previous week" : "Next week"
+            // Step from the week on screen, not from today: on a Sunday, yesterday is last week,
+            // and today is then one week forward. (yyyy-MM-dd ids sort by date.)
+            let shown = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'outfits.day.'")).firstMatch.identifier
+            let step = Self.dayCellID(day) < shown ? "Previous week" : "Next week"
             app.buttons.matching(NSPredicate(format: "label == %@", step)).firstMatch.tap()
         }
         XCTAssertTrue(cell.waitForExistence(timeout: 5), "The calendar can't show \(day)")

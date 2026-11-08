@@ -114,6 +114,12 @@ class PhotoScanService: ObservableObject {
     @Published private(set) var photosExamined: Int = 0
     /// True while the first run ranks the last 90 days for its best outfit photos.
     @Published private(set) var isRankingFirstLook = false
+    /// True while the first run works through its best outfit photos (the studio waits until then).
+    @Published private(set) var isFirstLookPass = false
+    /// True while the loop is parked between photos (paused, or giving a studio render its turn).
+    private(set) var isParked = false
+    /// What the scan shows while a studio render has its turn.
+    static let studioTurnReason = "Making a product photo"
 
     /// "1,204 of 5,310 photos · About 12 min left" — for the progress banner.
     var progressDetail: String {
@@ -224,10 +230,14 @@ class PhotoScanService: ObservableObject {
     private func waitUntilRunnable(_ generation: Int) async -> Bool {
         var announced = false
         var pausedSpan: ScanTrace.Span?
-        defer { if let pausedSpan { ScanTrace.shared.end(pausedSpan) } }
+        defer {
+            if let pausedSpan { ScanTrace.shared.end(pausedSpan) }
+            isParked = false
+        }
         while true {
             guard isCurrent(generation) else { return false }
             let reason = suspendedReason ?? currentPolicy().pauseReason
+                ?? (StudioQueue.shared.holdsScan ? Self.studioTurnReason : nil)
             if (isPaused || reason != nil), pausedSpan == nil { pausedSpan = ScanTrace.shared.begin(.paused) }
             if !isPaused && reason == nil {
                 if systemPauseReason != nil {
@@ -239,6 +249,7 @@ class PhotoScanService: ObservableObject {
             if systemPauseReason != reason { systemPauseReason = reason }
             if let reason, !isPaused, currentPhase != reason { currentPhase = reason }
             if !announced { flushProgress(); announced = true }
+            isParked = true
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
     }
@@ -520,6 +531,8 @@ class PhotoScanService: ObservableObject {
             if firstLookCount == 0 { updateProgress(forUser: userId) { $0.activeJob?.firstLook = nil } }
             currentPhase = "Scanning your photos..."
         }
+        isFirstLookPass = firstLookCount > 0
+        defer { isFirstLookPass = false }
 
         // A sliding window: the next 48 units are cached ahead, and units already scanned are
         // released (as `FaceReferenceViewModel` does) — before, every window stayed cached
@@ -580,6 +593,7 @@ class PhotoScanService: ObservableObject {
             ScanTrace.shared.noteProgress()
             photosExamined += prepared.memberIDs.count
             if firstLookCount > 0, consumed == firstLookCount {
+                isFirstLookPass = false
                 updateProgress(forUser: userId) { $0.activeJob?.firstLook = nil }
                 print("[StyleMate] Auto-scan: first-look pass done (\(itemsFound) items so far)")
             }
