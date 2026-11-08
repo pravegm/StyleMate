@@ -1,10 +1,36 @@
 # StyleMate: where things stand (founder handover)
 
-Plain-language summary as of 7 Nov 2026. Technical detail lives in
+Plain-language summary as of 8 Nov 2026. Technical detail lives in
 `docs/PROJECT-LOG.md`, reviews in `docs/reviews/`, launch and legal detail in
 `docs/LAUNCH-READINESS.md` and `docs/MODEL-LICENSING.md`, and the setup steps in `docs/TESTFLIGHT.md`.
 
-## Latest (7 Nov, afternoon): TestFlight build 115
+## Latest (8 Nov): TestFlight build 116, AI product photos on the phone
+
+**Why build 115 never drew a product photo on your Duo.** The studio (the on-device model that redraws a
+cutout as a catalogue photo) waited until the whole photo scan had finished unless the phone reported 3.5 GB
+of free memory, which it never does mid-scan; off the charger it also waited for 60% battery. With a
+4,000-photo library that meant no product photo, ever. (The note under build 115 below saying it draws
+"while the first scan runs" was wrong on a real phone.)
+
+**What 116 does instead.** The studio and the scan take turns: the scan pauses for one piece, the studio
+redraws it, then the scan gets at least as long again. Memory is checked with the scan paused (1.3 GB
+needed); it pauses only below 20% battery off the charger, in Low Power Mode, or when the phone is hot. A
+piece whose first drawing isn't convincing gets a second try with fresh settings. The Wardrobe tab shows
+"Making product photos" with what it's drawing and how many are left; Diagnostics › **Product photos** shows
+how many were made, why it's waiting, and how long the last piece took.
+
+**How it was checked:** a new test runs the app's own queue with the real model during a (simulated) scan:
+a denim jacket cut out of a street photo became a clean front-on product photo (first try rejected, second
+kept; 17 min on CI's simulator CPU, much faster on the phone's Neural Engine). One flaw: the model added a
+small sleeve badge the real jacket doesn't have. Branch CI 42503546429 (studio) and 42512024795 (all user
+flows) are green.
+
+**To test on your Duo:** delete StyleMate, install build 116, go through the first run and leave the app
+open on Wi-Fi (on the charger is best). Within a few minutes the Wardrobe should show "Making product
+photos" and pieces should start changing from cutouts to product photos. If not, share Diagnostics: the
+Product photos section says what it's waiting for.
+
+## Earlier (7 Nov, afternoon): TestFlight build 115
 
 **Why 113 and 114 still stuck on your Duo, and what 115 changes.** Your Diagnostics showed "Now: Picking the
 best outfit photos" with "Person check: Vision": Apple's Vision body detector blocked and never returned
